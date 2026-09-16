@@ -528,6 +528,17 @@ model ChargingSession {
   minChargeAdjustmentCents Int?
   totalCostCents           Int?
 
+  // --- Painel "ao vivo" (retaguarda, 2026-09-16) ---
+  // Preenchidas a cada MeterValues/StatusNotification enquanto a sessão está
+  // em andamento — não são congeladas como o resto da sessão, são
+  // sobrescritas a cada amostra. Nulas para sessões já encerradas antigas
+  // (não fazemos backfill). Hoje (antes da Fase 4 real) só o
+  // `seed-demo.ts` preenche, simulando o que o gateway OCPP vai manter
+  // atualizado depois.
+  lastSampleAt DateTime? @db.Timestamptz(3)
+  lastPowerW   Int?
+  lastSoc      Int? // 0-100, percentual de carga da bateria (OCPP SoC) — CHECK na migration
+
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
@@ -540,6 +551,14 @@ model ChargingSession {
   @@index([userId, startedAt])
   @@index([chargePointId, startedAt])
   @@index([connectorId])
+  // Índices de relatório (retaguarda, 2026-09-16) — as 7 rotas de agregação
+  // do Vega sempre filtram por status junto com o período; os índices acima
+  // (sem status) continuam servindo consultas "todas as sessões do
+  // operador/site no período" (ex.: contagem de tentativas/erros). Ver
+  // memória do Cronos: reavaliar depois de medir se algum dos dois vira
+  // redundante.
+  @@index([operatorId, status, startedAt])
+  @@index([siteId, status, startedAt])
 }
 
 // ------------------------------------------------------------
@@ -690,6 +709,11 @@ model PaymentIntent {
   @@index([userId])
   @@index([status])
   @@index([chargingSessionId])
+  // Índices de relatório (retaguarda, 2026-09-16) — /reports/payments e
+  // /reports/revenue agregam por operador/propósito+status dentro de um
+  // período de captura.
+  @@index([operatorId, status, capturedAt])
+  @@index([purpose, status, capturedAt])
 }
 
 // Carteira pré-paga (Pix). Saldo = SOMA das entradas — nunca
@@ -730,6 +754,9 @@ model WalletEntry {
   createdBy String? // userId do admin, se for ajuste manual
 
   @@index([walletId, createdAt])
+  // Relatório de financeiro (retaguarda, 2026-09-16) — soma débitos de
+  // carteira por tipo (CHARGE_DEBIT) num período, sem depender de walletId.
+  @@index([type, createdAt])
 }
 
 // Captura que falhou vira dívida e bloqueia NOVA sessão (checagem no
@@ -762,6 +789,10 @@ model Debt {
 
   @@index([userId, status])
   @@index([operatorId])
+  // Relatório de financeiro (retaguarda, 2026-09-16) — dívida aberta por
+  // operador num período entra na identidade de conciliação (faturamento =
+  // capturas + débitos de carteira + dívida aberta).
+  @@index([operatorId, status, createdAt])
 }
 
 // Idempotência dos webhooks da Cielo: retries reenviam o mesmo
