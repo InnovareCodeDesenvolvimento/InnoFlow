@@ -26,6 +26,12 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
+# seed.ts/seed-demo.ts rodam via `tsx` direto do código-fonte, não do build
+# compilado (dist/) — e seed-demo.ts importa de src/core/tarifacao/. Sem
+# copiar src/, "tsx prisma/seed-demo.ts" falha em produção com
+# MODULE_NOT_FOUND (erro real visto em produção, 16/09/2026), mesmo com
+# tudo compilado certo em dist/.
+COPY --from=builder /app/src ./src
 
 # Sobrescrito por `command:` em cada serviço do docker-compose.yml
 # (start:api / start:ocpp / start:worker).
