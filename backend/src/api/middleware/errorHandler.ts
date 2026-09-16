@@ -22,6 +22,18 @@ export class AppError extends Error {
 }
 
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
+  // Resposta já começou (rotas de exportação CSV fazem streaming — ver
+  // csvExport.ts) — não dá para reescrever status/corpo a esta altura.
+  // Tentar `res.status().json()` de novo lançaria "Cannot set headers after
+  // they are sent". Só loga (estruturado, sem corpo de request) e encerra a
+  // conexão; o cliente recebe um CSV truncado, não um JSON de erro solto no
+  // meio do arquivo.
+  if (res.headersSent) {
+    logger.error({ err, method: req.method, path: req.originalUrl, requestId: (req as { id?: string }).id }, '[api] erro após resposta iniciada (stream) — conexão encerrada sem corpo de erro')
+    res.end()
+    return
+  }
+
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       error: err.message,

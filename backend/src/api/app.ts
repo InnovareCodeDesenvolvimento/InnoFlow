@@ -15,6 +15,9 @@ import adminChargePointsRoutes from './routes/chargePoints.routes'
 import adminConnectorsRoutes from './routes/connectors.routes'
 import adminTariffsRoutes from './routes/tariffs.routes'
 import adminAuthTokensRoutes from './routes/authTokens.routes'
+import adminDashboardRoutes from './routes/dashboard.routes'
+import adminReportsRoutes from './routes/reports.routes'
+import adminOperatorsRoutes from './routes/operators.routes'
 
 /**
  * Monta o app Express da API — auth JWT, isolamento multi-tenant e os CRUDs
@@ -62,6 +65,9 @@ export function createApp(): Express {
   app.use('/api/admin/connectors', adminRateLimit, adminConnectorsRoutes)
   app.use('/api/admin/tariffs', adminRateLimit, adminTariffsRoutes)
   app.use('/api/admin/auth-tokens', adminRateLimit, adminAuthTokensRoutes)
+  app.use('/api/admin/dashboard', adminRateLimit, adminDashboardRoutes)
+  app.use('/api/admin/reports', adminRateLimit, adminReportsRoutes)
+  app.use('/api/admin/operators', adminRateLimit, adminOperatorsRoutes)
 
   // 404 — nenhuma rota bateu.
   app.use((_req, res) => {

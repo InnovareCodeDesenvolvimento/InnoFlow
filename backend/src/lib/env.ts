@@ -29,6 +29,13 @@ const envSchema = z.object({
   // por processo — só precisa ser estável se algum dia quisermos afinidade
   // determinística entre réplicas (não é o caso agora).
   OCPP_NODE_ID: z.string().optional(),
+
+  // Fuso padrão dos relatórios/dashboard administrativo (módulo de
+  // retaguarda) quando o cliente não manda `?tz=` e a query não é escopada a
+  // um único site (relatório "por eletroposto" usa Site.timezone). Tem
+  // default de propósito — campo novo obrigatório sem default derrubaria os
+  // 3 entrypoints no boot (ver bug-env-eager-todos-entrypoints.md).
+  REPORTING_TIMEZONE: z.string().trim().min(1).default('America/Sao_Paulo'),
 })
 
 export type Env = z.infer<typeof envSchema>
