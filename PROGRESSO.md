@@ -161,6 +161,17 @@ Levantadas pela Nova durante a arquitetura — nenhuma foi decidida sozinha.
   (comparação não removia as aspas que `tableoid::regclass::text` retorna
   para tabelas com maiúscula) — corrigido; o particionamento em si sempre
   esteve correto.
-- **Frontend (Lyra) em andamento:** shell real (login, listagem pública de
-  eletropostos, telas admin) substituindo a `HelloPage` placeholder,
-  consumindo os contratos documentados por Vega.
+- **Frontend (Lyra) entregue:** shell real substituindo a `HelloPage`
+  placeholder — layout (padrão visual do ParquedasFeiras, paleta própria
+  azul elétrico/verde energia), autenticação, listagem pública de
+  eletropostos (cards com disponibilidade por tipo/potência de conector),
+  CRUD admin completo (sites/charge-points/connectors/tariffs/auth-tokens)
+  com o escopo multi-tenant refletido na UI (OPERATOR só vê os próprios
+  sites, menu de tokens some para ele), comandos remotos fire-and-forget
+  (sem feedback em tempo real, SSE não existe ainda). Validado com
+  Playwright contra mocks MSW fiéis ao contrato — typecheck/lint/testes/
+  build limpos, mas **ainda não testado contra a API real** (sem
+  Docker/Postgres no ambiente da Lyra, mesma limitação recorrente).
+  **Pendência de produto:** não existe endpoint `/api/admin/operators` —
+  o campo `operatorId` no formulário de site/tarifa é texto livre para o
+  ADMIN, ruim de usar; decidir se vale criar a rota de listagem.
