@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../../src/api/middleware/errorHandler'
-import { deltaPct, resolvePeriodWindow, zonedStartOfDayToUtc } from '../../src/api/lib/reportingWindow'
+import { deltaPct, resolveEffectivePeriod, resolvePeriodWindow, zonedStartOfDayToUtc } from '../../src/api/lib/reportingWindow'
 
 const TZ = 'America/Sao_Paulo' // UTC-3, sem DST desde 2019 — fuso alvo do MVP.
 
@@ -90,5 +90,27 @@ describe('lib/reportingWindow — deltaPct', () => {
 
   it('zero atual com anterior positivo dá -100%, não null', () => {
     expect(deltaPct(0, 100)).toBe(-100)
+  })
+})
+
+describe('lib/reportingWindow — resolveEffectivePeriod', () => {
+  // O frontend nunca manda `period` — só `from`/`to` já resolvidos (ver
+  // `frontend/src/lib/period.ts`). Sem este ajuste, `period` fica no default
+  // Zod ('30d') e `from`/`to` explícitos são silenciosamente ignorados.
+  it('from e to presentes força custom, mesmo com period default (30d)', () => {
+    expect(resolveEffectivePeriod('30d', '2026-09-01', '2026-09-10')).toBe('custom')
+  })
+
+  it('sem from/to mantém o period pedido (ex.: preset "today" de uma chamada manual/curl)', () => {
+    expect(resolveEffectivePeriod('today', undefined, undefined)).toBe('today')
+  })
+
+  it('só from OU só to (nunca os dois) não força custom', () => {
+    expect(resolveEffectivePeriod('30d', '2026-09-01', undefined)).toBe('30d')
+    expect(resolveEffectivePeriod('30d', undefined, '2026-09-10')).toBe('30d')
+  })
+
+  it('period=custom explícito com from/to continua custom (idempotente)', () => {
+    expect(resolveEffectivePeriod('custom', '2026-09-01', '2026-09-10')).toBe('custom')
   })
 })

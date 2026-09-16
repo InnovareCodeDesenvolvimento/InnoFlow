@@ -140,6 +140,72 @@ async function fetchTopSites(scope: ReportingScope, from: Date, to: Date): Promi
   return rows.map((r) => ({ ...r, revenueCents: Math.round(toNumber(r.revenueCents)), sessions: toNumber(r.sessions) }))
 }
 
+export interface TopOperatorRow {
+  operatorId: string
+  operatorName: string
+  revenueCents: number
+  sessions: number
+}
+
+/**
+ * Mesmo padrão de `fetchTopSites`, agrupado por operador em vez de site —
+ * só faz sentido para ADMIN (`getDashboardSummary` só chama quando
+ * `isAdmin`). Usa `cs."operatorId"` (coluna desnormalizada por trigger, já
+ * existe na sessão — não precisa de join extra além de `Operator` para o
+ * nome).
+ */
+async function fetchTopOperators(scope: ReportingScope, from: Date, to: Date): Promise<TopOperatorRow[]> {
+  const where = whereSql([Prisma.sql`cs.status = 'STOPPED'`, ...tenantConditions(scope, 'cs'), ...periodConditions('cs', from, to)])
+  const rows = await prisma.$queryRaw<TopOperatorRow[]>(Prisma.sql`
+    SELECT cs."operatorId" AS "operatorId", o.name AS "operatorName",
+      COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents",
+      COUNT(*)::int AS "sessions"
+    FROM "ChargingSession" cs
+    JOIN "Operator" o ON o.id = cs."operatorId"
+    WHERE ${where}
+    GROUP BY cs."operatorId", o.name
+    ORDER BY "revenueCents" DESC
+    LIMIT 5
+  `)
+  return rows.map((r) => ({ ...r, revenueCents: Math.round(toNumber(r.revenueCents)), sessions: toNumber(r.sessions) }))
+}
+
+export interface TodayMovementRow {
+  siteId: string
+  siteName: string
+  sessions: number
+  energyWh: number
+  revenueCents: number
+}
+
+/**
+ * "Movimento de hoje" (item explícito da Nova, nunca implementado na 1ª
+ * entrega) — SEMPRE o dia de hoje NO FUSO DE CADA SITE, independente do
+ * período (`period`/`from`/`to`) escolhido no resto do dashboard. Um único
+ * `operatorId`/escopo pode ter sites em fusos diferentes; em vez de resolver
+ * um fuso só para a página inteira (como o resto das rotas fazem), aqui
+ * comparamos `cs."startedAt" AT TIME ZONE s.timezone` (por linha) contra
+ * `now() AT TIME ZONE s.timezone` (mesma expressão, mesmo fuso da própria
+ * linha) — cada site "vê" seu próprio dia corrente corretamente, num único
+ * GROUP BY, sem N+1 de query por site.
+ */
+async function fetchTodayMovement(scope: ReportingScope): Promise<TodayMovementRow[]> {
+  const where = whereSql(tenantConditions(scope, 'cs'))
+  const rows = await prisma.$queryRaw<TodayMovementRow[]>(Prisma.sql`
+    SELECT cs."siteId" AS "siteId", s.name AS "siteName",
+      COUNT(*)::int AS "sessions",
+      COALESCE(SUM(cs."energyDeliveredWh") FILTER (WHERE cs.status = 'STOPPED'), 0)::float8 AS "energyWh",
+      COALESCE(SUM(cs."totalCostCents") FILTER (WHERE cs.status = 'STOPPED'), 0)::float8 AS "revenueCents"
+    FROM "ChargingSession" cs
+    JOIN "Site" s ON s.id = cs."siteId"
+    WHERE ${where}
+      AND (cs."startedAt" AT TIME ZONE s.timezone)::date = (now() AT TIME ZONE s.timezone)::date
+    GROUP BY cs."siteId", s.name
+    ORDER BY "revenueCents" DESC
+  `)
+  return rows.map((r) => ({ ...r, sessions: toNumber(r.sessions), energyWh: Math.round(toNumber(r.energyWh)), revenueCents: Math.round(toNumber(r.revenueCents)) }))
+}
+
 interface PeriodMetrics {
   revenueCents: number
   sessions: number
@@ -147,9 +213,6 @@ interface PeriodMetrics {
   avgTicketCents: number
   successRatePct: number
   utilizationPct: number
-  revenuePerKwhCents: number
-  idleFeeCents: number
-  idleMinutes: number
 }
 
 function computeMetrics(agg: SessionAggregateRow, connectorCapacity: number, windowMs: number): PeriodMetrics {
@@ -162,9 +225,6 @@ function computeMetrics(agg: SessionAggregateRow, connectorCapacity: number, win
   const successRatePct = terminalSessions > 0 ? round2((agg.completedSessions / terminalSessions) * 100) : 0
   const capacitySeconds = connectorCapacity * (windowMs / 1000)
   const utilizationPct = capacitySeconds > 0 ? round2(Math.min(100, (agg.chargingSeconds / capacitySeconds) * 100)) : 0
-  const kwh = agg.energyWh / 1000
-  const revenuePerKwhCents = kwh > 0 ? round2(agg.revenueCents / kwh) : 0
-  const idleMinutes = Math.round(agg.idleSeconds / 60)
 
   return {
     revenueCents: agg.revenueCents,
@@ -173,9 +233,6 @@ function computeMetrics(agg: SessionAggregateRow, connectorCapacity: number, win
     avgTicketCents,
     successRatePct,
     utilizationPct,
-    revenuePerKwhCents,
-    idleFeeCents: agg.idleFeeCents,
-    idleMinutes,
   }
 }
 
@@ -183,22 +240,31 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100
 }
 
-export interface DashboardSummary {
-  period: PeriodMetrics & { deltaPct: Record<keyof PeriodMetrics, number | null> }
-  previousPeriod: PeriodMetrics
-  paymentSplit: { cardCents: number; walletCents: number }
-  revenueByDay: RevenueByDayPoint[]
-  topSites: TopSiteRow[]
+export interface MetricWithDelta {
+  value: number
+  deltaPct: number | null
 }
 
-export async function getDashboardSummary(scope: ReportingScope, window: PeriodWindow): Promise<DashboardSummary> {
-  const [currentAgg, previousAgg, connectorCapacity, paymentSplit, revenueByDay, topSites] = await Promise.all([
+export interface DashboardSummary {
+  period: { from: string; to: string; previousFrom: string; previousTo: string }
+  metrics: Record<keyof PeriodMetrics, MetricWithDelta>
+  revenueByDay: RevenueByDayPoint[]
+  paymentSplit: { cardCents: number; walletCents: number }
+  topSites: TopSiteRow[]
+  topOperators?: TopOperatorRow[]
+  todayMovement: TodayMovementRow[]
+}
+
+export async function getDashboardSummary(scope: ReportingScope, window: PeriodWindow, isAdmin: boolean): Promise<DashboardSummary> {
+  const [currentAgg, previousAgg, connectorCapacity, paymentSplit, revenueByDay, topSites, todayMovement, topOperators] = await Promise.all([
     fetchSessionAggregate(scope, window.from, window.to),
     fetchSessionAggregate(scope, window.previousFrom, window.previousTo),
     fetchConnectorCapacity(scope),
     fetchPaymentSplit(scope, window.from, window.to),
     fetchRevenueByDay(scope, window.from, window.to, window.tz),
     fetchTopSites(scope, window.from, window.to),
+    fetchTodayMovement(scope),
+    isAdmin ? fetchTopOperators(scope, window.from, window.to) : Promise.resolve(undefined),
   ])
 
   const windowMs = window.to.getTime() - window.from.getTime()
@@ -207,16 +273,18 @@ export async function getDashboardSummary(scope: ReportingScope, window: PeriodW
   const current = computeMetrics(currentAgg, connectorCapacity, windowMs)
   const previous = computeMetrics(previousAgg, connectorCapacity, previousWindowMs)
 
-  const deltas = Object.fromEntries(
-    (Object.keys(current) as (keyof PeriodMetrics)[]).map((key) => [key, deltaPct(current[key], previous[key])]),
-  ) as Record<keyof PeriodMetrics, number | null>
+  const metrics = Object.fromEntries(
+    (Object.keys(current) as (keyof PeriodMetrics)[]).map((key) => [key, { value: current[key], deltaPct: deltaPct(current[key], previous[key]) }]),
+  ) as Record<keyof PeriodMetrics, MetricWithDelta>
 
   return {
-    period: { ...current, deltaPct: deltas },
-    previousPeriod: previous,
-    paymentSplit,
+    period: { from: window.from.toISOString(), to: window.to.toISOString(), previousFrom: window.previousFrom.toISOString(), previousTo: window.previousTo.toISOString() },
+    metrics,
     revenueByDay,
+    paymentSplit,
     topSites,
+    ...(isAdmin ? { topOperators } : {}),
+    todayMovement,
   }
 }
 
@@ -226,32 +294,42 @@ export async function getDashboardSummary(scope: ReportingScope, window: PeriodW
 
 export interface LiveSession {
   id: string
-  chargePointId: string
-  chargePointIdentity: string
   siteId: string
   siteName: string
+  chargePointId: string
+  ocppIdentity: string
+  connectorId: number
+  driverName: string
   status: string
   startedAt: Date
-  meterStartWh: number
-  lastPowerW: number | null
-  lastSoc: number | null
+  energyDeliveredWh: number
 }
 
 export interface DashboardLive {
   activeSessions: LiveSession[]
-  chargePoints: { online: number; offline: number; faulted: number }
+  chargePoints: { online: number; offline: number; faulted: number; total: number }
+  generatedAt: string
 }
 
 const LIVE_SESSIONS_LIMIT = 200
 
 /**
- * `lastPowerW`/`lastSoc` são colunas que o Cronos está adicionando em
- * `ChargingSession` em paralelo (painel ao vivo) — NÃO existem ainda no
- * `schema.prisma` nem no client gerado nesta sessão. Por isso esta query usa
- * `$queryRaw` (não `prisma.chargingSession.findMany`): não depende de
- * regeneração do client para tipar, só precisa que a coluna exista no
- * Postgres em runtime. Ver PARA O PRÓXIMO no handoff — nomes exatos que o
- * Cronos precisa criar.
+ * `energyDeliveredWh` de uma sessão ainda ativa vem da amostra MAIS RECENTE
+ * de `MeterSample` (measurand `Energy.Active.Import.Register`, valor
+ * absoluto do medidor em Wh — mesma escala de `meterStartWh`, confirmado no
+ * `seed-demo.ts`) menos `meterStartWh`; 0 se a sessão ainda não tem nenhuma
+ * amostra (acabou de iniciar). É a ÚNICA rota do módulo de retaguarda que lê
+ * `MeterSample` — aceitável porque é limitada a `LIVE_SESSIONS_LIMIT` sessões
+ * ATIVAS (não uma agregação sobre um período arbitrário) e o
+ * `LATERAL ... ORDER BY ts DESC LIMIT 1` usa o índice `(sessionId, ts)` já
+ * existente.
+ *
+ * `driverName` vem direto de `ChargingSession.userId -> User.name` — não
+ * precisa passar por `AuthToken` (que tem `userId` opcional): `userId` em
+ * `ChargingSession` é NOT NULL por regra de negócio (Authorize sempre
+ * resolve um pagador antes de a sessão existir), então todo User é real e
+ * tem nome. Mais simples do que o caminho original sugerido e correto para
+ * o schema atual.
  */
 export async function getDashboardLive(scope: ReportingScope): Promise<DashboardLive> {
   const sessionWhere = whereSql([Prisma.sql`cs.status IN ('STARTED', 'CHARGING', 'FINISHING')`, ...tenantConditions(scope, 'cs')])
@@ -260,12 +338,23 @@ export async function getDashboardLive(scope: ReportingScope): Promise<Dashboard
 
   const [activeSessions, chargePointCounts] = await Promise.all([
     prisma.$queryRaw<LiveSession[]>(Prisma.sql`
-      SELECT cs.id AS "id", cs."chargePointId" AS "chargePointId", cp."ocppIdentity" AS "chargePointIdentity",
-        cs."siteId" AS "siteId", s.name AS "siteName", cs.status AS "status", cs."startedAt" AS "startedAt",
-        cs."meterStartWh" AS "meterStartWh", cs."lastPowerW" AS "lastPowerW", cs."lastSoc" AS "lastSoc"
+      SELECT cs.id AS "id", cs."siteId" AS "siteId", s.name AS "siteName",
+        cs."chargePointId" AS "chargePointId", cp."ocppIdentity" AS "ocppIdentity",
+        co."connectorId" AS "connectorId", u.name AS "driverName",
+        cs.status AS "status", cs."startedAt" AS "startedAt",
+        GREATEST(0, ROUND(COALESCE(latest_meter.value, cs."meterStartWh") - cs."meterStartWh"))::int AS "energyDeliveredWh"
       FROM "ChargingSession" cs
       JOIN "ChargePoint" cp ON cp.id = cs."chargePointId"
       JOIN "Site" s ON s.id = cs."siteId"
+      JOIN "Connector" co ON co.id = cs."connectorId"
+      JOIN "User" u ON u.id = cs."userId"
+      LEFT JOIN LATERAL (
+        SELECT ms.value
+        FROM "MeterSample" ms
+        WHERE ms."sessionId" = cs.id AND ms.measurand = 'Energy.Active.Import.Register'
+        ORDER BY ms.ts DESC
+        LIMIT 1
+      ) latest_meter ON true
       WHERE ${sessionWhere}
       ORDER BY cs."startedAt" DESC
       LIMIT ${LIVE_SESSIONS_LIMIT}
@@ -287,8 +376,12 @@ export async function getDashboardLive(scope: ReportingScope): Promise<Dashboard
   ])
 
   const counts = chargePointCounts[0] ?? { online: 0, offline: 0, faulted: 0 }
+  const online = toNumber(counts.online)
+  const offline = toNumber(counts.offline)
+  const faulted = toNumber(counts.faulted)
   return {
-    activeSessions,
-    chargePoints: { online: toNumber(counts.online), offline: toNumber(counts.offline), faulted: toNumber(counts.faulted) },
+    activeSessions: activeSessions.map((s) => ({ ...s, connectorId: toNumber(s.connectorId), energyDeliveredWh: toNumber(s.energyDeliveredWh) })),
+    chargePoints: { online, offline, faulted, total: online + offline + faulted },
+    generatedAt: new Date().toISOString(),
   }
 }

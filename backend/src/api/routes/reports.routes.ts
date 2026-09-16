@@ -2,10 +2,11 @@ import { Router } from 'express'
 import { env } from '../../lib/env'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { AppError } from '../middleware/errorHandler'
 import { requireOperatorOrAdmin } from '../middleware/tenantScope'
 import { validateQuery } from '../middleware/validate'
 import { resolveReportingScope, resolveReportingTimezone } from '../lib/reportingScope'
-import { resolvePeriodWindow } from '../lib/reportingWindow'
+import { resolveEffectivePeriod, resolvePeriodWindow } from '../lib/reportingWindow'
 import { CSV_MAX_ROWS, csvDecimal, csvEnergyKwh, csvMoney, csvPct, streamCsvReport, streamCsvSingleRow } from '../lib/csvExport'
 import { paginationMeta } from '../schemas/pagination.schema'
 import {
@@ -18,14 +19,14 @@ import {
   type RevenueReportQuery,
   type SessionsReportQuery,
 } from '../schemas/reporting.schema'
-import { fetchSessionsReportBatch, getDailyMovementReport, getRevenueReport, getSessionsReportPage, type DailyMovementRow, type RevenueBreakdownRow, type RevenueSeriesPoint } from '../services/reportsService'
-import { getPaymentsSummary } from '../services/paymentsService'
+import { fetchSessionsReportBatch, getDailyMovementReport, getRevenueReport, getSessionDetail, getSessionsReportPage, type DailyMovementRow } from '../services/reportsService'
+import { getPaymentsReconciliation, getPaymentsReportPage } from '../services/paymentsService'
 
 const router = Router()
 
 router.use(authenticate, requireOperatorOrAdmin)
 
-/** Fábrica de "buscar em lotes" a partir de um array já resolvido em memória — resultados destas 2 rotas são bounded (≤366 dias × sites do escopo), diferente de /reports/sessions (ver nota no handoff). Reaproveita o mesmo escritor CSV (BOM/`;`/corte 50k) das rotas de verdade paginadas no banco. */
+/** Fábrica de "buscar em lotes" a partir de um array já resolvido em memória — resultados desta rota são bounded (≤366 dias × sites do escopo), diferente de /reports/sessions (ver nota no handoff). Reaproveita o mesmo escritor CSV (BOM/`;`/corte 50k) das rotas de verdade paginadas no banco. */
 function batchFromArray<T>(items: T[]): (offset: number, limit: number) => Promise<T[]> {
   return async (offset: number, limit: number) => items.slice(offset, offset + limit)
 }
@@ -41,7 +42,7 @@ router.get(
     const query = req.query as unknown as DailyMovementQuery
     const scope = await resolveReportingScope(req, query)
     const tz = await resolveReportingTimezone(query.tz, scope, env.REPORTING_TIMEZONE)
-    const window = resolvePeriodWindow({ period: query.period, from: query.from, to: query.to, tz })
+    const window = resolvePeriodWindow({ period: resolveEffectivePeriod(query.period, query.from, query.to), from: query.from, to: query.to, tz })
     const rows = await getDailyMovementReport(scope, window, query.groupBy)
 
     if (query.format === 'csv') {
@@ -57,7 +58,17 @@ router.get(
       return
     }
 
-    res.json({ items: rows, meta: { window: { from: window.from, to: window.to, tz: window.tz }, groupBy: query.groupBy } })
+    // Os `rows` já vêm todos calculados em memória (bounded pela janela) —
+    // pagina a LISTA (não a query) antes de responder; `totals` soma TODOS
+    // os items, não só a página atual.
+    const totals = rows.reduce(
+      (acc, r) => ({ sessions: acc.sessions + r.sessions, energyWh: acc.energyWh + r.energyWh, revenueCents: acc.revenueCents + r.revenueCents }),
+      { sessions: 0, energyWh: 0, revenueCents: 0 },
+    )
+    const start = (query.page - 1) * query.pageSize
+    const items = rows.slice(start, start + query.pageSize)
+
+    res.json({ items, meta: paginationMeta(query.page, query.pageSize, rows.length), totals })
   }),
 )
 
@@ -72,7 +83,7 @@ router.get(
     const query = req.query as unknown as RevenueReportQuery
     const scope = await resolveReportingScope(req, query)
     const tz = await resolveReportingTimezone(query.tz, scope, env.REPORTING_TIMEZONE)
-    const window = resolvePeriodWindow({ period: query.period, from: query.from, to: query.to, tz })
+    const window = resolvePeriodWindow({ period: resolveEffectivePeriod(query.period, query.from, query.to), from: query.from, to: query.to, tz })
     const report = await getRevenueReport(scope, window, { granularity: query.granularity, breakdown: query.breakdown })
 
     if (query.format === 'csv') {
@@ -82,25 +93,26 @@ router.get(
       res.write('﻿')
       res.write(`Serie temporal (${query.granularity})\r\n`)
       res.write('Periodo;Faturamento (R$);Sessoes;Energia (kWh)\r\n')
-      for (const point of report.series.slice(0, CSV_MAX_ROWS) as RevenueSeriesPoint[]) {
+      for (const point of report.series.slice(0, CSV_MAX_ROWS)) {
         res.write(`${point.bucket};${csvMoney(point.revenueCents)};${point.sessions};${csvEnergyKwh(point.energyWh)}\r\n`)
       }
       res.write('\r\n')
       res.write(`Composicao por ${query.breakdown}\r\n`)
-      res.write('Chave;Faturamento (R$);Sessoes;Participacao (%)\r\n')
-      for (const row of report.breakdown.slice(0, CSV_MAX_ROWS) as RevenueBreakdownRow[]) {
-        res.write(`${row.label};${csvMoney(row.revenueCents)};${row.sessions};${csvPct(row.sharePct)}\r\n`)
+      res.write('Chave;Faturamento (R$);Energia (kWh);Sessoes\r\n')
+      for (const row of report.breakdownRows.slice(0, CSV_MAX_ROWS)) {
+        res.write(`${row.label};${csvMoney(row.revenueCents)};${csvEnergyKwh(row.energyWh)};${row.sessions}\r\n`)
       }
       res.end()
       return
     }
 
-    res.json({ ...report, meta: { window: { from: window.from, to: window.to, tz: window.tz }, granularity: query.granularity, breakdown: query.breakdown } })
+    res.json({ granularity: query.granularity, breakdown: query.breakdown, series: report.series, breakdownRows: report.breakdownRows, totals: report.totals })
   }),
 )
 
 // ------------------------------------------------------------
 // GET /api/admin/reports/sessions — paginado, mesmo envelope {items, meta} dos CRUDs.
+// GET /api/admin/reports/sessions/:id — drill-down de uma sessão.
 // ------------------------------------------------------------
 
 router.get(
@@ -110,21 +122,22 @@ router.get(
     const query = req.query as unknown as SessionsReportQuery
     const scope = await resolveReportingScope(req, query)
     const tz = await resolveReportingTimezone(query.tz, scope, env.REPORTING_TIMEZONE)
-    const window = resolvePeriodWindow({ period: query.period, from: query.from, to: query.to, tz })
-    const filters = { status: query.status, paymentMethod: query.paymentMethod, minCostCents: query.minCostCents }
+    const window = resolvePeriodWindow({ period: resolveEffectivePeriod(query.period, query.from, query.to), from: query.from, to: query.to, tz })
+    const filters = { status: query.status, paymentMethod: query.paymentMethod, minAmountCents: query.minAmountCents }
 
     if (query.format === 'csv') {
       await streamCsvReport(
         res,
         {
           filename: 'sessoes.csv',
-          headers: ['Site', 'Charge Point', 'Conector', 'Status', 'Inicio', 'Fim', 'Energia (kWh)', 'Valor total (R$)', 'Taxa de ociosidade (R$)', 'Tarifa', 'Forma de pagamento'],
+          headers: ['Site', 'Charge Point', 'Conector', 'Motorista', 'Status', 'Inicio', 'Fim', 'Energia (kWh)', 'Valor total (R$)', 'Taxa de ociosidade (R$)', 'Tarifa', 'Forma de pagamento', 'Status do pagamento'],
         },
         fetchSessionsReportBatch(scope, window, filters),
         (r) => [
           r.siteName,
-          r.chargePointIdentity,
-          r.connectorNumber,
+          r.ocppIdentity,
+          r.connectorId,
+          r.driverName,
           r.status,
           r.startedAt.toISOString(),
           r.stoppedAt?.toISOString() ?? '',
@@ -132,19 +145,30 @@ router.get(
           csvMoney(r.totalCostCents),
           csvMoney(r.idleFeeCents),
           r.tariffName,
-          r.paymentMethod,
+          r.paymentMethod ?? '',
+          r.paymentStatus ?? '',
         ],
       )
       return
     }
 
     const { items, total } = await getSessionsReportPage(scope, window, filters, query.page, query.pageSize)
-    res.json({ items, meta: { ...paginationMeta(query.page, query.pageSize, total), window: { from: window.from, to: window.to, tz: window.tz } } })
+    res.json({ items, meta: paginationMeta(query.page, query.pageSize, total) })
+  }),
+)
+
+router.get(
+  '/sessions/:id',
+  asyncHandler(async (req, res) => {
+    const scope = await resolveReportingScope(req, req.query as { siteId?: string; chargePointId?: string; operatorId?: string })
+    const detail = await getSessionDetail(scope, req.params.id, req.user!.role === 'ADMIN')
+    if (!detail) throw new AppError('Sessão não encontrada.', 404, 'NOT_FOUND')
+    res.json(detail)
   }),
 )
 
 // ------------------------------------------------------------
-// GET /api/admin/reports/payments — summary + reconciliation.
+// GET /api/admin/reports/payments — reconciliation + items paginados.
 // ------------------------------------------------------------
 
 router.get(
@@ -154,8 +178,14 @@ router.get(
     const query = req.query as unknown as PaymentsReportQuery
     const scope = await resolveReportingScope(req, query)
     const tz = await resolveReportingTimezone(query.tz, scope, env.REPORTING_TIMEZONE)
-    const window = resolvePeriodWindow({ period: query.period, from: query.from, to: query.to, tz })
-    const summary = await getPaymentsSummary(scope, window, req.user!.role === 'ADMIN')
+    const window = resolvePeriodWindow({ period: resolveEffectivePeriod(query.period, query.from, query.to), from: query.from, to: query.to, tz })
+    const isAdmin = req.user!.role === 'ADMIN'
+    const filters = { provider: query.provider, status: query.status }
+
+    const [reconciliation, page] = await Promise.all([
+      getPaymentsReconciliation(scope, window, isAdmin),
+      getPaymentsReportPage(scope, window, filters, query.page, query.pageSize),
+    ])
 
     if (query.format === 'csv') {
       streamCsvSingleRow(
@@ -167,31 +197,27 @@ router.get(
             'Capturado no cartao (R$)',
             'Debitado da carteira (R$)',
             'Divida aberta (R$)',
-            'Estornado (R$)',
-            'Capturas falhas',
-            'Autorizacoes negadas',
+            'Tentativas falhas (R$)',
             'Esperado (R$)',
             'Contabilizado (R$)',
             'Diferenca (R$)',
           ],
         },
         [
-          csvMoney(summary.revenueCents),
-          csvMoney(summary.cardCapturedCents),
-          csvMoney(summary.walletDebitedCents),
-          csvMoney(summary.openDebtCents),
-          csvMoney(summary.refundedCents),
-          summary.failedCaptureCount,
-          summary.deniedAuthCount,
-          csvMoney(summary.reconciliation.expectedCents),
-          csvMoney(summary.reconciliation.accountedCents),
-          csvDecimal(summary.reconciliation.differenceCents / 100),
+          csvMoney(reconciliation.revenueCents),
+          csvMoney(reconciliation.cardCapturedCents),
+          csvMoney(reconciliation.walletDebitCents),
+          csvMoney(reconciliation.openDebtCents),
+          csvMoney(reconciliation.failedAttemptsCents),
+          csvMoney(reconciliation.expectedCents),
+          csvMoney(reconciliation.accountedCents),
+          csvDecimal(reconciliation.differenceCents / 100),
         ],
       )
       return
     }
 
-    res.json({ ...summary, meta: { window: { from: window.from, to: window.to, tz: window.tz } } })
+    res.json({ reconciliation, items: page.items, meta: paginationMeta(query.page, query.pageSize, page.total) })
   }),
 )
 

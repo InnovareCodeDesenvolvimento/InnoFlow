@@ -164,8 +164,14 @@ export interface RevenueBreakdownRow {
   key: string
   label: string
   revenueCents: number
+  energyWh: number
   sessions: number
-  sharePct: number
+}
+
+export interface RevenueTotals {
+  revenueCents: number
+  energyWh: number
+  sessions: number
 }
 
 const GRANULARITY_TO_TRUNC: Record<RevenueReportQuery['granularity'], Prisma.Sql> = {
@@ -196,11 +202,14 @@ async function fetchRevenueSeries(scope: ReportingScope, window: PeriodWindow, g
 async function fetchRevenueBreakdown(scope: ReportingScope, window: PeriodWindow, breakdown: RevenueReportQuery['breakdown']): Promise<RevenueBreakdownRow[]> {
   const baseWhere = whereSql([Prisma.sql`cs.status = 'STOPPED'`, ...tenantConditions(scope, 'cs'), ...periodConditions('cs', window.from, window.to)])
 
-  let rows: { key: string; label: string; revenueCents: number; sessions: number }[]
+  let rows: { key: string; label: string; revenueCents: number; energyWh: number; sessions: number }[]
 
   if (breakdown === 'site') {
     rows = await prisma.$queryRaw(Prisma.sql`
-      SELECT cs."siteId" AS "key", s.name AS "label", COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents", COUNT(*)::int AS "sessions"
+      SELECT cs."siteId" AS "key", s.name AS "label",
+        COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents",
+        COALESCE(SUM(cs."energyDeliveredWh"), 0)::float8 AS "energyWh",
+        COUNT(*)::int AS "sessions"
       FROM "ChargingSession" cs JOIN "Site" s ON s.id = cs."siteId"
       WHERE ${baseWhere}
       GROUP BY cs."siteId", s.name
@@ -209,7 +218,9 @@ async function fetchRevenueBreakdown(scope: ReportingScope, window: PeriodWindow
   } else if (breakdown === 'chargePoint') {
     rows = await prisma.$queryRaw(Prisma.sql`
       SELECT cs."chargePointId" AS "key", COALESCE(cp."vendor" || ' ' || cp."model", cp."ocppIdentity") AS "label",
-        COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents", COUNT(*)::int AS "sessions"
+        COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents",
+        COALESCE(SUM(cs."energyDeliveredWh"), 0)::float8 AS "energyWh",
+        COUNT(*)::int AS "sessions"
       FROM "ChargingSession" cs JOIN "ChargePoint" cp ON cp.id = cs."chargePointId"
       WHERE ${baseWhere}
       GROUP BY cs."chargePointId", cp."vendor", cp."model", cp."ocppIdentity"
@@ -217,18 +228,23 @@ async function fetchRevenueBreakdown(scope: ReportingScope, window: PeriodWindow
     `)
   } else if (breakdown === 'tariff') {
     rows = await prisma.$queryRaw(Prisma.sql`
-      SELECT cs."tariffId" AS "key", t.name AS "label", COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents", COUNT(*)::int AS "sessions"
+      SELECT cs."tariffId" AS "key", t.name AS "label",
+        COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "revenueCents",
+        COALESCE(SUM(cs."energyDeliveredWh"), 0)::float8 AS "energyWh",
+        COUNT(*)::int AS "sessions"
       FROM "ChargingSession" cs JOIN "Tariff" t ON t.id = cs."tariffId"
       WHERE ${baseWhere}
       GROUP BY cs."tariffId", t.name
       ORDER BY "revenueCents" DESC
     `)
   } else {
-    // paymentMethod — não é uma coluna, é derivado da existência de captura de
-    // cartão (PaymentIntent) ou débito de carteira (WalletEntry) ligados à sessão.
+    // breakdown === 'method' — não é uma coluna, é derivado da existência de
+    // captura de cartão (PaymentIntent) ou débito de carteira (WalletEntry)
+    // ligados à sessão. Chave que o frontend usa é "method", não
+    // "paymentMethod" (ver RevenueBreakdownDimension em types/api.ts).
     rows = await prisma.$queryRaw(Prisma.sql`
       WITH scoped_sessions AS (
-        SELECT cs.id, cs."totalCostCents",
+        SELECT cs.id, cs."totalCostCents", cs."energyDeliveredWh",
           CASE
             WHEN EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status = 'CAPTURED') THEN 'CARD'
             WHEN EXISTS (SELECT 1 FROM "WalletEntry" we WHERE we."referenceType" = 'CHARGING_SESSION' AND we."referenceId" = cs.id AND we.type = 'CHARGE_DEBIT') THEN 'WALLET'
@@ -237,26 +253,43 @@ async function fetchRevenueBreakdown(scope: ReportingScope, window: PeriodWindow
         FROM "ChargingSession" cs
         WHERE ${baseWhere}
       )
-      SELECT payment_method AS "key", payment_method AS "label", COALESCE(SUM("totalCostCents"), 0)::float8 AS "revenueCents", COUNT(*)::int AS "sessions"
+      SELECT payment_method AS "key", payment_method AS "label",
+        COALESCE(SUM("totalCostCents"), 0)::float8 AS "revenueCents",
+        COALESCE(SUM("energyDeliveredWh"), 0)::float8 AS "energyWh",
+        COUNT(*)::int AS "sessions"
       FROM scoped_sessions
       GROUP BY payment_method
       ORDER BY "revenueCents" DESC
     `)
   }
 
-  const total = rows.reduce((sum, r) => sum + toNumber(r.revenueCents), 0)
-  return rows.map((r) => {
-    const revenueCents = Math.round(toNumber(r.revenueCents))
-    return { key: r.key, label: r.label, revenueCents, sessions: toNumber(r.sessions), sharePct: total > 0 ? round2((revenueCents / total) * 100) : 0 }
-  })
+  return rows.map((r) => ({
+    key: r.key,
+    label: r.label,
+    revenueCents: Math.round(toNumber(r.revenueCents)),
+    energyWh: Math.round(toNumber(r.energyWh)),
+    sessions: toNumber(r.sessions),
+  }))
 }
 
-export async function getRevenueReport(scope: ReportingScope, window: PeriodWindow, query: Pick<RevenueReportQuery, 'granularity' | 'breakdown'>) {
-  const [series, breakdown] = await Promise.all([
+export async function getRevenueReport(
+  scope: ReportingScope,
+  window: PeriodWindow,
+  query: Pick<RevenueReportQuery, 'granularity' | 'breakdown'>,
+): Promise<{ series: RevenueSeriesPoint[]; breakdownRows: RevenueBreakdownRow[]; totals: RevenueTotals }> {
+  const [series, breakdownRows] = await Promise.all([
     fetchRevenueSeries(scope, window, query.granularity),
     fetchRevenueBreakdown(scope, window, query.breakdown),
   ])
-  return { series, breakdown }
+  // Soma a partir da série temporal (não do breakdown) — ambas cobrem as
+  // mesmas sessões STOPPED do período inteiro, então batem; a série é a
+  // fonte mais direta (um grupo por bucket de tempo, sem depender de qual
+  // dimensão de breakdown foi pedida).
+  const totals = series.reduce<RevenueTotals>(
+    (acc, point) => ({ revenueCents: acc.revenueCents + point.revenueCents, energyWh: acc.energyWh + point.energyWh, sessions: acc.sessions + point.sessions }),
+    { revenueCents: 0, energyWh: 0, sessions: 0 },
+  )
+  return { series, breakdownRows, totals }
 }
 
 // ------------------------------------------------------------
@@ -265,12 +298,13 @@ export async function getRevenueReport(scope: ReportingScope, window: PeriodWind
 
 export interface SessionReportRow {
   id: string
+  ocppTransactionId: number
   siteId: string
   siteName: string
   chargePointId: string
-  chargePointIdentity: string
-  connectorId: string
-  connectorNumber: number
+  ocppIdentity: string
+  connectorId: number
+  driverName: string
   status: string
   startedAt: Date
   stoppedAt: Date | null
@@ -279,13 +313,14 @@ export interface SessionReportRow {
   idleFeeCents: number | null
   tariffId: string
   tariffName: string
-  paymentMethod: 'CARD' | 'WALLET' | 'UNPAID'
+  paymentMethod: 'CARD' | 'WALLET' | null
+  paymentStatus: 'CAPTURED' | 'PENDING' | 'FAILED' | 'OPEN_DEBT' | null
 }
 
-function sessionsFilterConditions(filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minCostCents'>): Prisma.Sql[] {
+function sessionsFilterConditions(filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minAmountCents'>): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = []
   if (filters.status) conditions.push(Prisma.sql`cs.status = ${filters.status}`)
-  if (filters.minCostCents !== undefined) conditions.push(Prisma.sql`cs."totalCostCents" >= ${filters.minCostCents}`)
+  if (filters.minAmountCents !== undefined) conditions.push(Prisma.sql`cs."totalCostCents" >= ${filters.minAmountCents}`)
   if (filters.paymentMethod === 'CARD') {
     conditions.push(Prisma.sql`EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status = 'CAPTURED')`)
   } else if (filters.paymentMethod === 'WALLET') {
@@ -297,18 +332,37 @@ function sessionsFilterConditions(filters: Pick<SessionsReportQuery, 'status' | 
   return conditions
 }
 
+// `paymentMethod` NULL = nenhum pagamento capturado ainda (nem cartão nem
+// carteira) — o frontend não tem mais o valor 'UNPAID' na resposta (só como
+// filtro de entrada em `sessionsFilterConditions`).
+//
+// `paymentStatus` é um campo novo derivado por prioridade: CAPTURED (já
+// entrou dinheiro, cartão ou carteira) > OPEN_DEBT (virou dívida aberta) >
+// FAILED (teve tentativa de cartão negada/falha/cancelada/expirada, sem
+// captura nem dívida) > PENDING (tem PaymentIntent de cartão ainda em voo:
+// criado/autorizado/captura pendente) > NULL (nenhuma tentativa de
+// pagamento ainda — típico de sessão em andamento).
 const SESSIONS_SELECT = Prisma.sql`
-  cs.id AS "id", cs."siteId" AS "siteId", s.name AS "siteName",
-  cs."chargePointId" AS "chargePointId", cp."ocppIdentity" AS "chargePointIdentity",
-  cs."connectorId" AS "connectorId", co."connectorId" AS "connectorNumber",
+  cs.id AS "id", cs."ocppTransactionId" AS "ocppTransactionId",
+  cs."siteId" AS "siteId", s.name AS "siteName",
+  cs."chargePointId" AS "chargePointId", cp."ocppIdentity" AS "ocppIdentity",
+  co."connectorId" AS "connectorId", u.name AS "driverName",
   cs.status AS "status", cs."startedAt" AS "startedAt", cs."stoppedAt" AS "stoppedAt",
   cs."energyDeliveredWh" AS "energyDeliveredWh", cs."totalCostCents" AS "totalCostCents", cs."idleFeeCents" AS "idleFeeCents",
   cs."tariffId" AS "tariffId", t.name AS "tariffName",
   CASE
     WHEN EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status = 'CAPTURED') THEN 'CARD'
     WHEN EXISTS (SELECT 1 FROM "WalletEntry" we WHERE we."referenceType" = 'CHARGING_SESSION' AND we."referenceId" = cs.id AND we.type = 'CHARGE_DEBIT') THEN 'WALLET'
-    ELSE 'UNPAID'
-  END AS "paymentMethod"
+    ELSE NULL
+  END AS "paymentMethod",
+  CASE
+    WHEN EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status = 'CAPTURED')
+      OR EXISTS (SELECT 1 FROM "WalletEntry" we WHERE we."referenceType" = 'CHARGING_SESSION' AND we."referenceId" = cs.id AND we.type = 'CHARGE_DEBIT') THEN 'CAPTURED'
+    WHEN EXISTS (SELECT 1 FROM "Debt" d WHERE d."chargingSessionId" = cs.id AND d.status = 'OPEN') THEN 'OPEN_DEBT'
+    WHEN EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status IN ('DENIED', 'FAILED', 'CANCELLED', 'VOIDED', 'EXPIRED')) THEN 'FAILED'
+    WHEN EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status IN ('CREATED', 'AUTHORIZED', 'CAPTURE_PENDING')) THEN 'PENDING'
+    ELSE NULL
+  END AS "paymentStatus"
 `
 
 const SESSIONS_FROM = Prisma.sql`
@@ -317,12 +371,13 @@ const SESSIONS_FROM = Prisma.sql`
   JOIN "ChargePoint" cp ON cp.id = cs."chargePointId"
   JOIN "Connector" co ON co.id = cs."connectorId"
   JOIN "Tariff" t ON t.id = cs."tariffId"
+  JOIN "User" u ON u.id = cs."userId"
 `
 
 export async function getSessionsReportPage(
   scope: ReportingScope,
   window: PeriodWindow,
-  filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minCostCents'>,
+  filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minAmountCents'>,
   page: number,
   pageSize: number,
 ): Promise<{ items: SessionReportRow[]; total: number }> {
@@ -342,11 +397,107 @@ export async function getSessionsReportPage(
 export function fetchSessionsReportBatch(
   scope: ReportingScope,
   window: PeriodWindow,
-  filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minCostCents'>,
+  filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minAmountCents'>,
 ): (offset: number, limit: number) => Promise<SessionReportRow[]> {
   const where = whereSql([...tenantConditions(scope, 'cs'), ...periodConditions('cs', window.from, window.to), ...sessionsFilterConditions(filters)])
   return (offset: number, limit: number) =>
     prisma.$queryRaw<SessionReportRow[]>(Prisma.sql`
       SELECT ${SESSIONS_SELECT} ${SESSIONS_FROM} WHERE ${where} ORDER BY cs."startedAt" DESC LIMIT ${limit} OFFSET ${offset}
     `)
+}
+
+// ------------------------------------------------------------
+// GET /api/admin/reports/sessions/:id — drill-down de uma sessão.
+// Não existia antes desta rodada (a tela de Sessões da Lyra depende dele
+// para o painel de detalhe). Usa o query builder do Prisma (não $queryRaw)
+// porque é uma busca por UMA linha via PK, sem agregação — não há ganho de
+// performance em SQL cru aqui, e o builder já tipa as relações.
+// ------------------------------------------------------------
+
+export interface SessionDetailResult {
+  id: string
+  ocppTransactionId: number
+  site: { id: string; name: string }
+  chargePoint: { id: string; ocppIdentity: string }
+  connectorId: number
+  /** `email` só preenchido quando `isAdmin` — regra de LGPD (OPERATOR não vê e-mail de motorista). */
+  driver: { name: string; email?: string }
+  status: string
+  startedAt: Date
+  chargingEndedAt: Date | null
+  stoppedAt: Date | null
+  stopReason: string | null
+  meterStartWh: number
+  meterStopWh: number | null
+  energyDeliveredWh: number | null
+  idleSeconds: number | null
+  tariffName: string
+  costs: {
+    energyCostCents: number | null
+    timeCostCents: number | null
+    idleFeeCents: number | null
+    sessionFeeCents: number | null
+    minChargeAdjustmentCents: number | null
+    totalCostCents: number | null
+  }
+  paymentIntents: Array<{
+    id: string
+    provider: string
+    status: string
+    amountRequestedCents: number
+    amountCapturedCents: number | null
+    createdAt: Date
+  }>
+}
+
+/** `null` = não encontrada OU pertence a outro tenant (rota devolve 404 nos dois casos — nunca 403, mesma regra de `resolveReportingScope`). */
+export async function getSessionDetail(scope: ReportingScope, id: string, isAdmin: boolean): Promise<SessionDetailResult | null> {
+  const session = await prisma.chargingSession.findFirst({
+    where: {
+      id,
+      ...(scope.operatorId ? { operatorId: scope.operatorId } : {}),
+      ...(scope.siteId ? { siteId: scope.siteId } : {}),
+      ...(scope.chargePointId ? { chargePointId: scope.chargePointId } : {}),
+    },
+    include: {
+      site: { select: { id: true, name: true } },
+      chargePoint: { select: { id: true, ocppIdentity: true } },
+      connector: { select: { connectorId: true } },
+      user: { select: { name: true, email: true } },
+      tariff: { select: { name: true } },
+      paymentIntents: {
+        select: { id: true, provider: true, status: true, amountRequestedCents: true, amountCapturedCents: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  })
+  if (!session) return null
+
+  return {
+    id: session.id,
+    ocppTransactionId: session.ocppTransactionId,
+    site: session.site,
+    chargePoint: session.chargePoint,
+    connectorId: session.connector.connectorId,
+    driver: { name: session.user.name, ...(isAdmin ? { email: session.user.email } : {}) },
+    status: session.status,
+    startedAt: session.startedAt,
+    chargingEndedAt: session.chargingEndedAt,
+    stoppedAt: session.stoppedAt,
+    stopReason: session.stopReason,
+    meterStartWh: session.meterStartWh,
+    meterStopWh: session.meterStopWh,
+    energyDeliveredWh: session.energyDeliveredWh,
+    idleSeconds: session.idleSeconds,
+    tariffName: session.tariff.name,
+    costs: {
+      energyCostCents: session.energyCostCents,
+      timeCostCents: session.timeCostCents,
+      idleFeeCents: session.idleFeeCents,
+      sessionFeeCents: session.sessionFeeCents,
+      minChargeAdjustmentCents: session.minChargeAdjustmentCents,
+      totalCostCents: session.totalCostCents,
+    },
+    paymentIntents: session.paymentIntents,
+  }
 }

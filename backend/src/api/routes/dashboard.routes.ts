@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/auth'
 import { requireOperatorOrAdmin } from '../middleware/tenantScope'
 import { validateQuery } from '../middleware/validate'
 import { resolveReportingScope, resolveReportingTimezone } from '../lib/reportingScope'
-import { resolvePeriodWindow } from '../lib/reportingWindow'
+import { resolveEffectivePeriod, resolvePeriodWindow } from '../lib/reportingWindow'
 import { dashboardLiveQuerySchema, dashboardSummaryQuerySchema, type DashboardLiveQuery, type DashboardSummaryQuery } from '../schemas/reporting.schema'
 import { getDashboardLive, getDashboardSummary } from '../services/dashboardService'
 
@@ -27,8 +27,8 @@ router.get(
     const query = req.query as unknown as DashboardSummaryQuery
     const scope = await resolveReportingScope(req, query)
     const tz = await resolveReportingTimezone(query.tz, scope, env.REPORTING_TIMEZONE)
-    const window = resolvePeriodWindow({ period: query.period, from: query.from, to: query.to, tz })
-    const summary = await getDashboardSummary(scope, window)
+    const window = resolvePeriodWindow({ period: resolveEffectivePeriod(query.period, query.from, query.to), from: query.from, to: query.to, tz })
+    const summary = await getDashboardSummary(scope, window, req.user!.role === 'ADMIN')
     res.json(summary)
   }),
 )

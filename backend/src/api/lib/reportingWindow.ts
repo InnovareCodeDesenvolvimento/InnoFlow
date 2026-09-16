@@ -169,6 +169,23 @@ export function resolvePeriodWindow(input: PeriodWindowInput, now: Date = new Da
   return { from, to, previousFrom, previousTo, tz }
 }
 
+/**
+ * O frontend NUNCA manda `period` — ele resolve o preset (`today`/`7d`/
+ * `30d`/`month`/`custom`) localmente em `{from, to}` já em `YYYY-MM-DD` e só
+ * manda essas duas datas (ver `frontend/src/lib/period.ts`: "o frontend só
+ * manda datas de calendário cruas"). Sem este ajuste, toda chamada real caía
+ * no default `period=30d` do schema Zod (que IGNORA `from`/`to` — só
+ * `period=custom` os lê) e a API sempre devolvia os últimos 30 dias,
+ * qualquer que fosse o preset escolhido na tela (7 dias, mês corrente, ou um
+ * intervalo customizado no seletor). Acionado em toda rota antes de chamar
+ * `resolvePeriodWindow` — nunca dentro dela, para não alterar o contrato já
+ * testado de `period=custom` explícito.
+ */
+export function resolveEffectivePeriod(period: ReportPeriod, from: string | undefined, to: string | undefined): ReportPeriod {
+  if (from && to) return 'custom'
+  return period
+}
+
 /** null se o anterior for zero — nunca ∞ (regra explícita do contrato). */
 export function deltaPct(current: number, previous: number): number | null {
   if (previous === 0) return null
