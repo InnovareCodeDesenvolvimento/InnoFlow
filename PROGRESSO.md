@@ -132,7 +132,17 @@ decisoes-retaguarda-relatorios.md`). Achados que mudam o desenho:
 - Bucket de dia sempre no **fuso do site** (`startedAt`, nunca `stoppedAt`),
   nunca UTC.
 
-**Rodando em paralelo agora (R1/R2/R3):**
+**✅ Vega (R2) entregou** as 7 rotas de agregação — código no `main`,
+lint/typecheck/build/testes limpos. Decisões de negócio que a Nova não
+fechou e o Vega tomou sozinho (documentadas, a confirmar): fórmula de
+`utilizationPct`, `successRatePct` só considera sessões terminais,
+`paymentMethod` é campo derivado (não é coluna), `walletTopupCents`/
+`walletFloatCents`/`expiredPixCount` viram ADMIN-only (somem da resposta
+para OPERATOR, não vêm `null`). **Ainda não validado contra Postgres
+real** — depende do seed do Cronos (R1, em andamento) e das colunas
+`lastPowerW`/`lastSoc`.
+
+**Rodando em paralelo agora (R1/R3):**
 - Cronos: `calcularCustoSessao()` (função pura, será reusada pelo Vega na
   Fase 4 real — dívida evitada de propósito), índices de relatório, 3
   colunas de painel ao vivo em `ChargingSession`, `seed-demo.ts`
