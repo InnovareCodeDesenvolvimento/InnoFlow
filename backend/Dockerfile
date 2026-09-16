@@ -2,6 +2,15 @@
 # worker) — mesmo código, mesmo package.json, 3 entrypoints diferentes. O
 # docker-compose.yml da raiz escolhe qual rodar via `command:` por serviço.
 FROM node:20-alpine AS builder
+# Alpine (node:20-alpine) nao vem com o binario `openssl` instalado. Sem ele,
+# a propria deteccao de versao do OpenSSL que o Prisma roda (tanto aqui no
+# `generate` quanto no runner abaixo, em runtime) falha silenciosamente e
+# assume por padrao "openssl-1.1.x" (legado) mesmo com binaryTargets
+# apontando linux-musl-openssl-3.0.x no schema.prisma — resultado: ele
+# carrega o engine ERRADO mesmo tendo gerado o certo. Doc oficial do Prisma
+# para Alpine: https://pris.ly/d/system-requirements (erro real visto em
+# producao, 16/09/2026, mesmo depois de fixar binaryTargets).
+RUN apk add --no-cache openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
@@ -10,6 +19,7 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-alpine AS runner
+RUN apk add --no-cache openssl
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
