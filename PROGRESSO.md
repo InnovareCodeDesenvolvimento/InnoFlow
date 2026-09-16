@@ -154,18 +154,28 @@ real** — mock por construção sempre fecha a conciliação em zero, então
 isso NÃO prova que a query real do Vega fecha; é o que a Íris precisa
 confirmar depois.
 
-**Rodando agora (R1, Cronos):**
-- Cronos: `calcularCustoSessao()` (função pura, será reusada pelo Vega na
-  Fase 4 real — dívida evitada de propósito), índices de relatório, 3
-  colunas de painel ao vivo em `ChargingSession`, `seed-demo.ts`
-  (determinístico, prefixo `demo-`, ~8-15 mil sessões sintéticas em 60
-  dias com variação realista).
-- Vega: as 7 rotas de agregação, escopo multi-tenant em `$queryRaw`
-  (operatorId como parâmetro obrigatório, nunca concatenado), exportação
-  CSV.
-- Lyra: 6 telas (Dashboard, Financeiro, Movimento Diário, Faturamento,
-  Sessões, Pagamentos) contra fixtures MSW fiéis ao contrato, prontas
-  para trocar por API real quando R1/R2 terminarem.
+**✅ Cronos (R1) entregou** — código no `main`, lint/typecheck/build/
+testes unitários limpos (36 testes, incluindo os 17 de tarifação).
+`calcularCustoSessao()` + `serializeTariffSnapshot()` prontas para
+reuso real na Fase 4. Migration com 3 colunas de painel ao vivo + 6
+índices via `CREATE INDEX CONCURRENTLY` (sem lock). `seed-demo.ts`
+validado com harness em memória: ~11 mil sessões, split de pagamento
+calibrado 55/45, saldo de carteira batendo exato, `meterStartWh`
+monotônico sem sobreposição.
+
+**⚠️ Achado real para a Fase 4 (não é bug de hoje, é lembrete):**
+`backend/src/ocpp/handlers/startTransaction.ts` grava o `tariffSnapshot`
+sem as `TariffWindow[]` (simplificação proposital da F3a, já documentada
+no próprio código) — quando a Fase 4 construir a sessão real, trocar
+para `serializeTariffSnapshot(tariff, windows)`, senão tarifa `HYBRID`
+nunca cobra o preço de ponta corretamente.
+
+**Todas as 3 frentes (R1/R2/R3) entregues e no GitHub.** Próximo passo
+real: reimplantar o backend no EasyPanel, rodar
+`npx prisma migrate deploy && npm run db:seed:demo`, e então apontar o
+frontend pra API real (trocar `VITE_USE_MOCKS`) — isso é o que finalmente
+prova (ou derruba) a identidade de conciliação financeira e o isolamento
+multi-tenant com dado de verdade, não mock.
 
 Portão de saída (R4, Íris+Órion): consultas <500ms em 60 dias de dado
 sintético; conciliação financeira fechando em zero; OPERATOR não vê um
