@@ -5,8 +5,12 @@ import { buttonVariants } from "@/components/ui/buttonVariants"
 export function Home() {
   return (
     <div>
-      <section className="border-b border-border-subtle bg-gradient-to-b from-primary-50 to-background">
-        <div className="container-app py-16 text-center sm:py-24">
+      <section className="relative overflow-hidden border-b border-border-subtle bg-gradient-to-b from-primary-50 to-background">
+        <div
+          className="pointer-events-none absolute -top-24 right-1/2 h-72 w-72 translate-x-1/2 rounded-full bg-accent-glow/20 blur-3xl sm:right-10 sm:translate-x-0"
+          aria-hidden="true"
+        />
+        <div className="container-app relative py-16 text-center sm:py-24">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary-700">
             <Zap className="h-3.5 w-3.5" aria-hidden="true" />
             Rede de recarga
@@ -16,7 +20,7 @@ export function Home() {
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-base text-ink-softer sm:text-lg">
             Consulte a disponibilidade dos conectores em tempo real, por tipo e potência, em todos os operadores da
-            plataforma InnoElektron.
+            plataforma InnoFlow.
           </p>
           <div className="mt-8 flex justify-center gap-3">
             <Link to="/eletropostos" className={buttonVariants({ size: "lg" })}>

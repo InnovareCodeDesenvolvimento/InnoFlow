@@ -46,10 +46,10 @@ export function Header() {
         </button>
 
         <Link to="/" className="flex items-center gap-2 font-black tracking-tight text-ink">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-brand-teal to-accent text-white">
             <Zap className="h-5 w-5" aria-hidden="true" />
           </span>
-          <span className="hidden sm:inline">InnoElektron</span>
+          <span className="hidden sm:inline">InnoFlow</span>
         </Link>
 
         <nav className="ml-2 hidden items-center gap-1 md:flex" aria-label="Navegação principal">

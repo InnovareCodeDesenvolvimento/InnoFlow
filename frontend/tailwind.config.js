@@ -64,6 +64,11 @@ export default {
           600: "rgb(var(--color-info-600) / <alpha-value>)",
           700: "rgb(var(--color-info-700) / <alpha-value>)",
         },
+        // Tokens de marca decorativos (gradiente do ícone da logo) — não são
+        // escalas completas de estado, só um valor cada. Ver comentário em
+        // src/index.css (:root) sobre uso moderado/não-textual.
+        "brand-teal": "rgb(var(--color-brand-teal) / <alpha-value>)",
+        "accent-glow": "rgb(var(--color-accent-glow) / <alpha-value>)",
         background: "rgb(var(--color-background) / <alpha-value>)",
         "background-warm": "rgb(var(--color-background-warm) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",

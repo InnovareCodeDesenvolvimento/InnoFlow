@@ -41,16 +41,19 @@ export function Login() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-sm">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2 font-black tracking-tight text-ink">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white">
+        <Link to="/" className="flex items-center justify-center gap-2 font-black tracking-tight text-ink">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-brand-teal to-accent text-white">
             <Zap className="h-5 w-5" aria-hidden="true" />
           </span>
-          InnoElektron
+          InnoFlow
         </Link>
+        <p className="mb-8 mt-1.5 text-center text-xs font-semibold uppercase tracking-wide text-accent-700">
+          Carregue um futuro melhor
+        </p>
 
         <div className="card-elevated p-6">
           <h1 className="text-xl font-bold text-ink">Entrar</h1>
-          <p className="mt-1 text-sm text-ink-softer">Acesse sua conta InnoElektron.</p>
+          <p className="mt-1 text-sm text-ink-softer">Acesse sua conta InnoFlow.</p>
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
             <Input

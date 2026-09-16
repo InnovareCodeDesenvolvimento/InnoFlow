@@ -2,9 +2,12 @@ import { formatCents } from "@/lib/utils"
 
 /**
  * Donut cartão × carteira — 2 categorias (identidade, não magnitude), cores
- * fixas por categoria (nunca por ranking): azul (`primary-600`) = cartão,
+ * fixas por categoria (nunca por ranking): azul (`primary-500`) = cartão,
  * verde (`accent-600`) = carteira — mesma dupla de marca do projeto.
- * Par validado no script da skill de dataviz (ΔE 30.3 deutan / 33.3 normal).
+ * Revalidado no rebranding InnoFlow (16/09/2026): `primary-600` sozinho
+ * falhava o piso de chroma do validador (lê como cinza), então o swatch
+ * de cartão subiu para `primary-500` (mais saturado). Par atual passa em
+ * todos os checks — ΔE 15.7 deutan / 17.0 normal.
  */
 export function PaymentSplitDonut({ cardCents, walletCents }: { cardCents: number; walletCents: number }) {
   const total = cardCents + walletCents
@@ -26,7 +29,7 @@ export function PaymentSplitDonut({ cardCents, walletCents }: { cardCents: numbe
           cy={18}
           r={radius}
           fill="none"
-          stroke="rgb(var(--color-primary-600))"
+          stroke="rgb(var(--color-primary-500))"
           strokeWidth={4}
           strokeDasharray={`${cardDash} ${circumference - cardDash}`}
           strokeDashoffset={circumference / 4}
@@ -42,7 +45,7 @@ export function PaymentSplitDonut({ cardCents, walletCents }: { cardCents: numbe
 
       <dl className="grid grid-cols-1 gap-2 text-sm">
         <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600" aria-hidden="true" />
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary-500" aria-hidden="true" />
           <dt className="font-medium text-ink-soft">Cartão</dt>
           <dd className="font-bold tabular-nums text-ink">{formatCents(cardCents)}</dd>
         </div>
