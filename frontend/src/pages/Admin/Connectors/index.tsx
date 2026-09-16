@@ -1,0 +1,147 @@
+import { useState } from "react"
+import { Pencil, Plug, Plus, Trash2 } from "lucide-react"
+import { toast } from "sonner"
+import { PageHeader } from "@/components/painel/PageHeader"
+import { Button } from "@/components/ui/Button"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
+import { EmptyState } from "@/components/ui/EmptyState"
+import { ErrorState } from "@/components/ui/ErrorState"
+import { TableSkeleton } from "@/components/ui/Skeleton"
+import { Pagination } from "@/components/ui/Pagination"
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { ConnectorStatusBadge } from "@/components/connectors/ConnectorStatusBadge"
+import { useConnectors, useDeleteConnector } from "@/hooks/useConnectors"
+import { getApiErrorMessage } from "@/services/api"
+import { CONNECTOR_TYPE_LABELS, formatPowerKw } from "@/lib/utils"
+import { ConnectorFormDialog } from "./ConnectorFormDialog"
+import type { Connector } from "@/types/api"
+
+const PAGE_SIZE = 20
+
+export default function ConnectorsPage() {
+  const [page, setPage] = useState(1)
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<Connector | null>(null)
+  const [deleting, setDeleting] = useState<Connector | null>(null)
+
+  const { data, isLoading, isError, error, refetch } = useConnectors({ page, pageSize: PAGE_SIZE })
+  const deleteConnector = useDeleteConnector()
+
+  const openCreate = () => {
+    setEditing(null)
+    setFormOpen(true)
+  }
+  const openEdit = (c: Connector) => {
+    setEditing(c)
+    setFormOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleting) return
+    try {
+      await deleteConnector.mutateAsync(deleting.id)
+      toast.success("Conector marcado como indisponível.")
+      setDeleting(null)
+    } catch (err) {
+      toast.error("Não foi possível remover.", { description: getApiErrorMessage(err) })
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Conectores"
+        description="Cada tomada de um ponto de recarga — tipo, potência e status."
+        icon={Plug}
+        actions={
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo conector
+          </Button>
+        }
+      />
+
+      {isLoading && <TableSkeleton cols={5} />}
+      {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os conectores.")} onRetry={() => refetch()} />}
+
+      {!isLoading && !isError && data && data.items.length === 0 && (
+        <EmptyState
+          icon={Plug}
+          title="Nenhum conector cadastrado"
+          description="Cadastre um ponto de recarga primeiro, depois adicione os conectores dele aqui."
+          action={
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo conector
+            </Button>
+          }
+        />
+      )}
+
+      {!isLoading && !isError && data && data.items.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nº</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Potência</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="font-semibold text-ink">#{c.connectorId}</TableCell>
+                  <TableCell>{CONNECTOR_TYPE_LABELS[c.type]}</TableCell>
+                  <TableCell>{formatPowerKw(c.maxPowerKw)}</TableCell>
+                  <TableCell>
+                    <ConnectorStatusBadge status={c.status} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" aria-label={`Editar conector ${c.connectorId}`} title="Editar" onClick={() => openEdit(c)}>
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remover conector ${c.connectorId}`}
+                        title="Marcar como indisponível"
+                        onClick={() => setDeleting(c)}
+                      >
+                        <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <Pagination
+            page={data.meta.page}
+            totalPages={data.meta.totalPages}
+            total={data.meta.total}
+            pageSize={data.meta.pageSize}
+            onPageChange={setPage}
+            label="conectores"
+          />
+        </>
+      )}
+
+      <ConnectorFormDialog open={formOpen} onOpenChange={setFormOpen} connector={editing} />
+
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Marcar conector #${deleting?.connectorId} como indisponível?`}
+        description="Conector não tem exclusão de verdade — fica com status UNAVAILABLE até ser reativado."
+        confirmLabel="Marcar indisponível"
+        loading={deleteConnector.isPending}
+        onConfirm={confirmDelete}
+      />
+    </div>
+  )
+}

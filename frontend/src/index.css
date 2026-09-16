@@ -1,16 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Placeholder neutro — a Lyra define a paleta real da marca InnoElektron.
-     Formato "R G B" (sem rgb()/vírgula) para casar com a sintaxe
-     rgb(var(--x) / <alpha-value>) usada em tailwind.config.js. */
-  --color-primary: 21 128 61; /* verde — remete a energia/sustentabilidade, provisório */
-  --color-primary-foreground: 255 255 255;
-  --color-background: 250 250 250;
-  --color-surface: 255 255 255;
-  --color-border: 228 228 231;
-  --color-muted: 244 244 245;
-  --color-muted-foreground: 113 113 122;
+@layer base {
+  /*
+   * Paleta InnoElektron como CSS variables (triplas "R G B", sem `#` e sem
+   * vírgula) — formato exigido por `rgb(var(--x) / <alpha-value>)`, usado em
+   * tailwind.config.js. Mesmo truque do ParquedasFeiras (referência de
+   * "forma" pedida pelo dono), paleta própria — nada de teal/coral de lá.
+   *
+   * Eletricidade/energia: azul elétrico como cor de marca (confiança,
+   * tecnologia) + verde como cor operacional (disponível/energizado — o
+   * verde já é o significado universal de "conector livre" em apps de
+   * recarga, então reaproveitamos como accent em vez de inventar outro tom
+   * para a mesma ideia).
+   */
+  :root {
+    /* ====== AZUL ELÉTRICO (primary) ====== */
+    --color-primary: 29 78 216;            /* #1D4ED8 */
+    --color-primary-50: 239 246 255;       /* #EFF6FF */
+    --color-primary-100: 219 234 254;      /* #DBEAFE */
+    --color-primary-200: 191 219 254;      /* #BFDBFE */
+    --color-primary-300: 147 197 253;      /* #93C5FD */
+    --color-primary-400: 96 165 250;       /* #60A5FA */
+    --color-primary-500: 59 130 246;       /* #3B82F6 */
+    --color-primary-600: 37 99 235;        /* #2563EB */
+    --color-primary-700: 29 78 216;        /* #1D4ED8 */
+    --color-primary-800: 30 64 175;        /* #1E40AF */
+    --color-primary-900: 30 58 138;        /* #1E3A8A */
+    --color-primary-950: 23 37 84;         /* #172554 */
+    --color-primary-foreground: 255 255 255; /* #FFFFFF */
+
+    /* ====== VERDE ENERGIA (accent — CTAs, "disponível") ====== */
+    --color-accent: 22 163 74;             /* #16A34A */
+    --color-accent-50: 240 253 244;        /* #F0FDF4 */
+    --color-accent-100: 220 252 231;       /* #DCFCE7 */
+    --color-accent-200: 187 247 208;       /* #BBF7D0 */
+    --color-accent-300: 134 239 172;       /* #86EFAC */
+    --color-accent-400: 74 222 128;        /* #4ADE80 */
+    --color-accent-500: 34 197 94;         /* #22C55E */
+    --color-accent-600: 22 163 74;         /* #16A34A */
+    --color-accent-700: 21 128 61;         /* #15803D */
+    --color-accent-foreground: 255 255 255; /* #FFFFFF */
+
+    /* ====== SEMÂNTICAS ====== */
+    --color-success: 22 163 74;            /* #16A34A */
+    --color-success-50: 240 253 244;       /* #F0FDF4 */
+    --color-success-100: 220 252 231;      /* #DCFCE7 */
+    --color-success-600: 22 163 74;        /* #16A34A */
+    --color-success-700: 21 128 61;        /* #15803D */
+    --color-warning: 217 119 6;            /* #D97706 */
+    --color-warning-50: 255 251 235;       /* #FFFBEB */
+    --color-warning-100: 254 243 199;      /* #FEF3C7 */
+    --color-warning-600: 217 119 6;        /* #D97706 */
+    --color-warning-700: 180 83 9;         /* #B45309 */
+    --color-danger: 220 38 38;             /* #DC2626 */
+    --color-danger-50: 254 242 242;        /* #FEF2F2 */
+    --color-danger-100: 254 226 226;       /* #FEE2E2 */
+    --color-danger-600: 220 38 38;         /* #DC2626 */
+    --color-danger-700: 185 28 28;         /* #B91C1C */
+    --color-info: 8 145 178;               /* #0891B2 */
+    --color-info-50: 236 254 255;          /* #ECFEFF */
+    --color-info-100: 207 250 254;         /* #CFFAFE */
+    --color-info-600: 8 145 178;           /* #0891B2 */
+    --color-info-700: 14 116 144;          /* #0E7490 */
+
+    /* ====== NEUTROS / SUPERFÍCIES ====== */
+    --color-background: 249 250 251;       /* #F9FAFB */
+    --color-background-warm: 250 250 249;  /* #FAFAF9 */
+    --color-surface: 255 255 255;          /* #FFFFFF */
+    --color-border: 228 231 235;           /* #E4E7EB */
+    --color-border-subtle: 241 243 245;    /* #F1F3F5 */
+    --color-border-strong: 209 213 219;    /* #D1D5DB */
+    --color-muted: 243 244 246;            /* #F3F4F6 */
+    --color-muted-foreground: 107 114 128; /* #6B7280 */
+    --color-ink: 17 24 39;                 /* #111827 */
+    --color-ink-soft: 55 65 81;            /* #374151 */
+    --color-ink-softer: 107 114 128;       /* #6B7280 */
+    --color-ink-subtle: 156 163 175;       /* #9CA3AF */
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-ink font-sans antialiased;
+  }
+
+  ::selection {
+    @apply bg-primary/20 text-primary-800;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-border-strong/60 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-primary/40; }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background rounded-md;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight text-ink;
+  }
+}
+
+@layer components {
+  .container-app {
+    @apply max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .card-elevated {
+    @apply bg-surface rounded-2xl shadow-card ring-1 ring-border-subtle;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-md bg-muted;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
