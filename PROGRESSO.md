@@ -225,6 +225,13 @@ Paleta foi lida visualmente pelo Atlas a partir da imagem colada no chat
 (sem arquivo da logo em mãos) — pendente: pedir ao dono o arquivo oficial
 (PNG/SVG) da logo para favicon/header de verdade, quando ele puder enviar.
 
+**✅ Lyra entregou o rebrand** (código no `main`, lint/typecheck/testes/
+build limpos): rampa de cores derivada por HSL com contraste WCAG AA
+calculado (não estimado), corrigiu de passagem um bug pré-existente onde
+o hover não tinha efeito visual (`DEFAULT` e o degrau de hover eram o
+mesmo valor). Marca "InnoFlow" + slogan visíveis em toda a UI. Favicon
+com placeholder genérico documentado até a logo oficial chegar.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
