@@ -130,3 +130,12 @@ Levantadas pela Nova durante a arquitetura — nenhuma foi decidida sozinha.
   mais fases em cima de uma base nunca testada de verdade.**
 - Lyra: shell do frontend (Fase 3c) — contratos da API já documentados por
   Vega, pode começar, mas ver nota acima.
+- **Repositório publicado:** https://github.com/InnovareCode/InnoElektron
+  (branch `main`), primeiro commit com tudo de F0/F1/F3a/F3b. Decisão do
+  dono: validar a base contra Postgres/Redis reais via deploy no
+  **EasyPanel** (servidor dedicado, deploy a partir do GitHub — não do
+  docker-compose local), em vez de exigir Docker num ambiente local.
+  Checklist completo em `docs/DEPLOY-EASYPANEL.md` (envs por serviço,
+  comandos de migration/seed/teste de partição, nota de proxy/WebSocket).
+  **Isso é o que finalmente fecha a pendência de validação** que se
+  arrastava desde F0.
