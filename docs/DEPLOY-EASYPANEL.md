@@ -32,6 +32,13 @@ muda é só o comando de start. Crie 3 Apps no EasyPanel, todos apontando para
 | `ocpp-gateway` | `node dist/entrypoints/ocpp.js` | 9000 | Sim, mas só para os carregadores (WebSocket) — ver nota de proxy abaixo |
 | `worker` | `node dist/entrypoints/worker.js` | — | Não, não escuta porta HTTP |
 
+⚠️ **Build Path obrigatório:** o Dockerfile fica em `backend/Dockerfile`,
+**não na raiz do repositório**. Na aba **Fonte** de cada um dos 3 Apps,
+defina o **Build Path** (diretório de build) como `backend` — sem isso o
+EasyPanel procura `Dockerfile` na raiz e o build falha com `failed to read
+dockerfile: open Dockerfile: no such file or directory` (erro real visto no
+primeiro deploy, 16/09/2026).
+
 ### Variáveis de ambiente (as 3 apps precisam de TODAS — `lib/env.ts`
 valida o schema inteiro em qualquer entrypoint, mesmo o que não usa direto):
 
