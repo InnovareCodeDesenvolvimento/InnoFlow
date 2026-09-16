@@ -28,7 +28,15 @@
 //    (ver prisma/migrations/) — Prisma não tem DSL para isso no schema.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" cobre dev local (Windows/macOS/Linux glibc). O runtime de
+  // produção (node:20-alpine no EasyPanel) precisa do target musl EXPLÍCITO
+  // com OpenSSL 3.0 — Alpine 3.18+ não tem mais libssl.so.1.1, que é o que
+  // o target genérico "linux-musl" (sem sufixo) assume. Sem isto o container
+  // sobe e quebra só na primeira query, com
+  // "Error loading shared library libssl.so.1.1: No such file or directory"
+  // (erro real visto em produção, 16/09/2026).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
