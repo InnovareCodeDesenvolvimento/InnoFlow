@@ -131,11 +131,22 @@ Levantadas pela Nova durante a arquitetura — nenhuma foi decidida sozinha.
 - Lyra: shell do frontend (Fase 3c) — contratos da API já documentados por
   Vega, pode começar, mas ver nota acima.
 - **Repositório publicado:** https://github.com/InnovareCode/InnoElektron
-  (branch `main`), primeiro commit com tudo de F0/F1/F3a/F3b. Decisão do
-  dono: validar a base contra Postgres/Redis reais via deploy no
-  **EasyPanel** (servidor dedicado, deploy a partir do GitHub — não do
-  docker-compose local), em vez de exigir Docker num ambiente local.
-  Checklist completo em `docs/DEPLOY-EASYPANEL.md` (envs por serviço,
-  comandos de migration/seed/teste de partição, nota de proxy/WebSocket).
-  **Isso é o que finalmente fecha a pendência de validação** que se
-  arrastava desde F0.
+  (branch `main`), deploy real no **EasyPanel** (servidor dedicado, a
+  partir do GitHub). Checklist em `docs/DEPLOY-EASYPANEL.md`.
+  **✅ Pendência de validação (desde F0) fechada em 2026-09-16**: os 3
+  serviços de backend + frontend subiram sem erro em produção. Dois bugs
+  reais só detectáveis em ambiente Alpine de verdade (nenhum agente tinha
+  Docker) foram encontrados e corrigidos nesse processo:
+  1. Dockerfile do frontend não existia (Vulcano deixou de fora de
+     propósito em F0) — criado (Vite→Nginx, proxy `/api` mesma origem,
+     SSE sem buffering).
+  2. `PrismaClientInitializationError` — `node:20-alpine` não tem mais
+     `libssl.so.1.1` (Alpine 3.18+) **e** não tem o binário `openssl`
+     instalado, que é o que o Prisma usa para detectar qual engine
+     carregar. Precisou dos dois fixes juntos: `binaryTargets =
+     ["native", "linux-musl-openssl-3.0.x"]` no `schema.prisma` **e**
+     `apk add --no-cache openssl` nos dois estágios do
+     `backend/Dockerfile`. Só o primeiro fix sozinho não resolveu — a
+     causa raiz era a detecção, não a falta do engine.
+  Também corrigido: Build Path do EasyPanel precisa apontar para
+  `backend`/`frontend` (Dockerfiles não estão na raiz do repo).
