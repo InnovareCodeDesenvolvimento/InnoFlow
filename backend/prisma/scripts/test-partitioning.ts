@@ -26,7 +26,12 @@ async function expectPartition(
   expectedPartition: string,
 ): Promise<boolean> {
   const rows = await query
-  const actual = rows[0]?.partition
+  // `tableoid::regclass::text` devolve o nome ENTRE ASPAS quando a tabela
+  // tem letras maiúsculas (caso de "MeterSample_2026_09" etc.) — comparação
+  // direta contra a string sem aspas falhava mesmo com a partição certa
+  // (visto em produção, 16/09/2026: as 4 linhas caíram no mês certo, só a
+  // verificação estava errada).
+  const actual = rows[0]?.partition?.replace(/^"|"$/g, '')
   const ok = actual === expectedPartition
   console.log(
     `[test-partitioning] ${ok ? 'PASS' : 'FAIL'} — ${label}: esperado "${expectedPartition}", veio "${actual ?? '(nada encontrado)'}"`,
