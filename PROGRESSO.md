@@ -200,6 +200,18 @@ sintético; conciliação financeira fechando em zero; OPERATOR não vê um
 centavo de outro operador em nenhuma das 7 rotas (nem forjando
 `operatorId`/`siteId` na query).
 
+## Identidade visual — decisão 2026-09-16
+
+Dono definiu a marca oficial: **"InnoFlow"**, slogan "Carregue um futuro
+melhor" — verde folha/energia em gradiente para teal, sobre azul-petróleo
+escuro. **Repositório GitHub e nome técnico continuam "InnoElektron"**
+(decisão explícita do dono, não mudar por enquanto) — só a marca visível
+na UI muda. Lyra acionada para trocar os tokens de cor (paleta provisória
+que ela escolheu sem referência de marca) e o nome exibido na interface.
+Paleta foi lida visualmente pelo Atlas a partir da imagem colada no chat
+(sem arquivo da logo em mãos) — pendente: pedir ao dono o arquivo oficial
+(PNG/SVG) da logo para favicon/header de verdade, quando ele puder enviar.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
