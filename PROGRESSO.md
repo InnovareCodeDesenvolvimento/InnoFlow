@@ -187,6 +187,19 @@ só de especificação em prosa precisa de passo de reconciliação depois —
 "os dois passaram nos próprios testes" não prova que são compatíveis
 entre si.
 
+**✅ Vega entregou a reconciliação** (código no `main`, 40 testes
+unitários, lint/typecheck/build limpos) — as 7 rotas conferidas campo a
+campo contra `frontend/src/types/api.ts`, sem lacuna de formato
+conhecida. No processo achou e corrigiu um bug adicional real:
+`resolveEffectivePeriod` ignorava `from`/`to` sempre que `period` ficava
+no valor default do Zod — como o frontend nunca manda `period`, todo
+preset diferente de "30 dias" devolvia sempre os últimos 30 dias,
+**silenciosamente, sem erro**. Também corrigidos dois erros de bugs em
+produção reportados pelo dono: migration falhando (`CREATE INDEX
+CONCURRENTLY` dentro de transação — Prisma envolve o arquivo inteiro
+numa transação, removido `CONCURRENTLY`) e `seed-demo.ts` com
+`MODULE_NOT_FOUND` (Dockerfile não copiava `src/` para a imagem final).
+
 **Todas as 3 frentes (R1/R2/R3) entregues e no GitHub — mas com o gap de
 contrato acima ainda sendo corrigido.** Próximo passo
 real: reimplantar o backend no EasyPanel, rodar
