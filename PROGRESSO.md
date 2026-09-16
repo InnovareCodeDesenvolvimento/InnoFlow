@@ -170,7 +170,25 @@ no próprio código) — quando a Fase 4 construir a sessão real, trocar
 para `serializeTariffSnapshot(tariff, windows)`, senão tarifa `HYBRID`
 nunca cobra o preço de ponta corretamente.
 
-**Todas as 3 frentes (R1/R2/R3) entregues e no GitHub.** Próximo passo
+**⚠️ Bug real encontrado ao testar em produção (2026-09-16):** Vega e Lyra
+formalizaram contratos TypeScript DIFERENTES para as 7 rotas, cada um a
+partir da mesma prosa da Nova — nenhum viu o do outro (trabalho paralelo).
+Causou 500 em `/dashboard/live` (migration do Cronos ainda não aplicada
+em produção — colunas `lastPowerW`/`lastSoc` não existiam) e crash no
+Dashboard (`data.metrics` undefined — backend devolvia `period`+`deltaPct`
+separado, frontend esperava `metrics.X.{value,deltaPct}`). Diagnóstico
+completo: divergência em praticamente todas as 7 rotas, incluindo uma
+funcionalidade inteira faltando (`/reports/payments` sem listagem
+paginada de `PaymentIntent`, só o resumo). **Vega acionado de novo** para
+conformar as 7 respostas ao contrato que já está em
+`frontend/src/types/api.ts` (fonte de verdade, já testado pela Lyra).
+Lição registrada em memória: trabalho paralelo backend/frontend a partir
+só de especificação em prosa precisa de passo de reconciliação depois —
+"os dois passaram nos próprios testes" não prova que são compatíveis
+entre si.
+
+**Todas as 3 frentes (R1/R2/R3) entregues e no GitHub — mas com o gap de
+contrato acima ainda sendo corrigido.** Próximo passo
 real: reimplantar o backend no EasyPanel, rodar
 `npx prisma migrate deploy && npm run db:seed:demo`, e então apontar o
 frontend pra API real (trocar `VITE_USE_MOCKS`) — isso é o que finalmente
