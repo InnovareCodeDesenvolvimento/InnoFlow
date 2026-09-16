@@ -150,3 +150,17 @@ Levantadas pela Nova durante a arquitetura — nenhuma foi decidida sozinha.
      causa raiz era a detecção, não a falta do engine.
   Também corrigido: Build Path do EasyPanel precisa apontar para
   `backend`/`frontend` (Dockerfiles não estão na raiz do repo).
+- **✅ Migration + seed rodaram em produção pela primeira vez** (Postgres
+  real, EasyPanel) — prova real de que o multi-tenant por trigger, o
+  particionamento mensal e a carteira append-only funcionam, não só
+  validação estática. Usuários de teste disponíveis: `admin@innoelektron.
+  example.com` (ADMIN), `staff@innoelektron-operacoes.example.com`
+  (OPERATOR), `motorista.teste@innoelektron.example.com` (DRIVER) — senhas
+  de dev no log do seed, nunca usar em produção real com dados de cliente.
+  `db:test-partitioning` acusou FALHOU por um bug na própria verificação
+  (comparação não removia as aspas que `tableoid::regclass::text` retorna
+  para tabelas com maiúscula) — corrigido; o particionamento em si sempre
+  esteve correto.
+- **Frontend (Lyra) em andamento:** shell real (login, listagem pública de
+  eletropostos, telas admin) substituindo a `HelloPage` placeholder,
+  consumindo os contratos documentados por Vega.
