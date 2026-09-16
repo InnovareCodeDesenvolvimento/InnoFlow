@@ -8,7 +8,32 @@ import {
   mockUsers,
   type MockUser,
 } from "./data"
-import type { AuthToken, ChargePoint, Connector, PaginatedResponse, Role, Site, Tariff } from "@/types/api"
+import {
+  buildDailyMovement,
+  buildDashboardLive,
+  buildDashboardSummary,
+  buildPaymentsReport,
+  buildRevenueReport,
+  buildSessionsReport,
+  findSessionDetail,
+  listOperators,
+  type Scope,
+} from "./reportsAggregate"
+import type {
+  AuthToken,
+  ChargePoint,
+  Connector,
+  DailyMovementRow,
+  PaginatedResponse,
+  PaymentListRow,
+  RevenueBreakdownDimension,
+  RevenueGranularity,
+  RevenueSeriesPoint,
+  Role,
+  SessionListRow,
+  Site,
+  Tariff,
+} from "@/types/api"
 
 /**
  * Handlers MSW espelhando o contrato real (`backend/src/api/routes/*.ts`):
@@ -65,6 +90,73 @@ function requireStaff(req: Request) {
 function scopedByOperator<T extends { operatorId: string }>(items: T[], user: { role: Role; operatorId: string | null }): T[] {
   if (user.role === "ADMIN") return items
   return items.filter((i) => i.operatorId === user.operatorId)
+}
+
+/** Mesma checagem de `requireStaff`, mas restrita a ADMIN — usada nas poucas rotas ADMIN-only (auth-tokens, operators). */
+function requireAdmin(req: Request) {
+  const user = currentUser(req)
+  if (!user) return { error: HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 }) }
+  if (user.role !== "ADMIN") return { error: HttpResponse.json(errorBody("Acesso restrito a administradores.", "FORBIDDEN"), { status: 403 }) }
+  return { user }
+}
+
+// ---- Retaguarda: dashboard/relatórios --------------------------------------
+// Contrato desenhado pela Nova (ver `.claude/agent-memory/nova/
+// decisoes-retaguarda-relatorios.md`) e ainda sem rota real do Vega — os
+// handlers abaixo consultam `reportsAggregate.ts`, que agrega as sessões
+// sintéticas de `reportsData.ts` com as MESMAS regras que a API real vai
+// seguir (revenue nunca soma topup Pix, bucket de dia por `startedAt`,
+// escopo por operador). Não é reimplementação de regra de negócio nova —
+// é só o suficiente para provar o contrato no navegador.
+
+function toScope(user: { role: Role; operatorId: string | null }): Scope {
+  return { role: user.role, operatorId: user.operatorId }
+}
+
+function todayISO(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+function daysAgoISO(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+/** `from`/`to` têm default de 30 dias — o mesmo default do preset "30d" da UI — para uma chamada sem query params nunca quebrar. */
+function parsePeriod(url: URL) {
+  return {
+    from: url.searchParams.get("from") ?? daysAgoISO(29),
+    to: url.searchParams.get("to") ?? todayISO(),
+    siteId: url.searchParams.get("siteId") ?? undefined,
+    operatorId: url.searchParams.get("operatorId") ?? undefined,
+  }
+}
+
+function parsePagination(url: URL, defaultPageSize = 20) {
+  return {
+    page: Number(url.searchParams.get("page") ?? "1"),
+    pageSize: Number(url.searchParams.get("pageSize") ?? String(defaultPageSize)),
+  }
+}
+
+/** CSV simples (RFC4180-ish: aspas duplicadas quando o valor tem vírgula/aspas/quebra de linha). */
+function toCsv<T>(rows: T[], columns: Array<{ key: keyof T; label: string }>): string {
+  const escape = (value: unknown): string => {
+    const s = value === null || value === undefined ? "" : String(value)
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const header = columns.map((c) => escape(c.label)).join(",")
+  const lines = rows.map((row) => columns.map((c) => escape(row[c.key])).join(","))
+  return [header, ...lines].join("\n")
+}
+
+function csvResponse(csv: string, filename: string) {
+  return new HttpResponse(csv, {
+    status: 200,
+    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"` },
+  })
 }
 
 export const handlers = [
@@ -382,5 +474,152 @@ export const handlers = [
     if (!token) return HttpResponse.json(errorBody("Token não encontrado.", "NOT_FOUND"), { status: 404 })
     token.status = "BLOCKED"
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  // ---- Operadores (ADMIN only) -------------------------------------------------
+  http.get("/api/admin/operators", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const items = listOperators()
+    return HttpResponse.json({ items, meta: { page: 1, pageSize: items.length, total: items.length, totalPages: 1 } })
+  }),
+
+  // ---- Dashboard ----------------------------------------------------------------
+  http.get("/api/admin/dashboard/summary", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    return HttpResponse.json(buildDashboardSummary(toScope(scope.user), period))
+  }),
+
+  // Polling de 15s (ver `useDashboardLive`) — sem SSE nesta fase.
+  http.get("/api/admin/dashboard/live", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    return HttpResponse.json(buildDashboardLive(toScope(scope.user), url.searchParams.get("operatorId") ?? undefined))
+  }),
+
+  // ---- Relatórios -----------------------------------------------------------------
+  http.get("/api/admin/reports/daily-movement", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    const pagination = parsePagination(url, 30)
+    const format = url.searchParams.get("format")
+
+    if (format === "csv") {
+      const full = buildDailyMovement(toScope(scope.user), { ...period, page: 1, pageSize: 100000 })
+      const csv = toCsv<DailyMovementRow>(full.items, [
+        { key: "date", label: "Data" },
+        { key: "siteName", label: "Eletroposto" },
+        { key: "sessions", label: "Sessões" },
+        { key: "energyWh", label: "Energia (Wh)" },
+        { key: "revenueCents", label: "Faturamento (centavos)" },
+        { key: "avgTicketCents", label: "Ticket médio (centavos)" },
+      ])
+      return csvResponse(csv, `movimento-diario_${period.from}_${period.to}.csv`)
+    }
+
+    return HttpResponse.json(buildDailyMovement(toScope(scope.user), { ...period, ...pagination }))
+  }),
+
+  http.get("/api/admin/reports/revenue", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    const granularity = (url.searchParams.get("granularity") as RevenueGranularity | null) ?? "day"
+    const breakdown = (url.searchParams.get("breakdown") as RevenueBreakdownDimension | null) ?? "site"
+    const format = url.searchParams.get("format")
+
+    const report = buildRevenueReport(toScope(scope.user), { ...period, granularity, breakdown })
+
+    if (format === "csv") {
+      const csv = toCsv<RevenueSeriesPoint>(report.series, [
+        { key: "bucket", label: "Período" },
+        { key: "revenueCents", label: "Faturamento (centavos)" },
+        { key: "energyWh", label: "Energia (Wh)" },
+        { key: "sessions", label: "Sessões" },
+      ])
+      return csvResponse(csv, `faturamento_${period.from}_${period.to}.csv`)
+    }
+
+    return HttpResponse.json(report)
+  }),
+
+  http.get("/api/admin/reports/sessions", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    const pagination = parsePagination(url, 20)
+    const format = url.searchParams.get("format")
+    const filters = {
+      status: url.searchParams.get("status") ?? undefined,
+      paymentMethod: url.searchParams.get("paymentMethod") ?? undefined,
+      minAmountCents: url.searchParams.get("minAmountCents") ? Number(url.searchParams.get("minAmountCents")) : undefined,
+    }
+
+    if (format === "csv") {
+      const full = buildSessionsReport(toScope(scope.user), { ...period, ...filters, page: 1, pageSize: 100000 })
+      const csv = toCsv<SessionListRow>(full.items, [
+        { key: "ocppTransactionId", label: "Transação" },
+        { key: "startedAt", label: "Início" },
+        { key: "stoppedAt", label: "Fim" },
+        { key: "siteName", label: "Eletroposto" },
+        { key: "ocppIdentity", label: "Carregador" },
+        { key: "connectorId", label: "Conector" },
+        { key: "driverName", label: "Motorista" },
+        { key: "status", label: "Status" },
+        { key: "energyDeliveredWh", label: "Energia (Wh)" },
+        { key: "totalCostCents", label: "Valor (centavos)" },
+        { key: "paymentMethod", label: "Método" },
+        { key: "paymentStatus", label: "Status do pagamento" },
+      ])
+      return csvResponse(csv, `sessoes_${period.from}_${period.to}.csv`)
+    }
+
+    return HttpResponse.json(buildSessionsReport(toScope(scope.user), { ...period, ...filters, ...pagination }))
+  }),
+
+  http.get("/api/admin/reports/sessions/:id", ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const detail = findSessionDetail(toScope(scope.user), String(params.id))
+    if (!detail) return HttpResponse.json(errorBody("Sessão não encontrada.", "NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(detail)
+  }),
+
+  http.get("/api/admin/reports/payments", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    const pagination = parsePagination(url, 20)
+    const format = url.searchParams.get("format")
+    const filters = {
+      provider: url.searchParams.get("provider") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+    }
+
+    if (format === "csv") {
+      const full = buildPaymentsReport(toScope(scope.user), { ...period, ...filters, page: 1, pageSize: 100000 })
+      const csv = toCsv<PaymentListRow>(full.items, [
+        { key: "createdAt", label: "Data" },
+        { key: "purpose", label: "Finalidade" },
+        { key: "provider", label: "Provedor" },
+        { key: "status", label: "Status" },
+        { key: "amountRequestedCents", label: "Valor solicitado (centavos)" },
+        { key: "amountCapturedCents", label: "Valor capturado (centavos)" },
+        { key: "userName", label: "Usuário" },
+        { key: "siteName", label: "Eletroposto" },
+      ])
+      return csvResponse(csv, `pagamentos_${period.from}_${period.to}.csv`)
+    }
+
+    return HttpResponse.json(buildPaymentsReport(toScope(scope.user), { ...period, ...filters, ...pagination }))
   }),
 ]

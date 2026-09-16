@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { centsToReais, formatCents, formatCurrency, formatDate, formatPowerKw, reaisToCents } from "./utils"
+import {
+  centsToReais,
+  formatCents,
+  formatCurrency,
+  formatDate,
+  formatDurationMinutes,
+  formatEnergyWh,
+  formatPercent,
+  formatPowerKw,
+  reaisToCents,
+} from "./utils"
 
 describe("formatCurrency", () => {
   it("formata um número em reais", () => {
@@ -56,5 +66,44 @@ describe("formatPowerKw", () => {
   it("formata a potência com a unidade kW", () => {
     expect(formatPowerKw(50)).toBe("50 kW")
     expect(formatPowerKw(7.4)).toBe("7.4 kW")
+  })
+})
+
+describe("formatEnergyWh (retaguarda)", () => {
+  it("converte Wh inteiros (contrato da API) para kWh", () => {
+    expect(formatEnergyWh(1000)).toBe("1,0 kWh")
+    expect(formatEnergyWh(43015)).toBe("43,02 kWh")
+  })
+
+  it("devolve travessão para energia ausente", () => {
+    expect(formatEnergyWh(null)).toBe("—")
+    expect(formatEnergyWh(undefined)).toBe("—")
+  })
+})
+
+describe("formatPercent (retaguarda)", () => {
+  it("formata com uma casa decimal por padrão", () => {
+    expect(formatPercent(96.73)).toBe("96.7%")
+  })
+
+  it("devolve travessão para valor ausente/NaN — nunca ∞ (regra do dashboard)", () => {
+    expect(formatPercent(null)).toBe("—")
+    expect(formatPercent(undefined)).toBe("—")
+    expect(formatPercent(Number.NaN)).toBe("—")
+  })
+})
+
+describe("formatDurationMinutes (retaguarda)", () => {
+  it("formata minutos menores que 1h só em minutos", () => {
+    expect(formatDurationMinutes(45)).toBe("45 min")
+  })
+
+  it("formata horas e minutos quando >= 60min", () => {
+    expect(formatDurationMinutes(125)).toBe("2h 5min")
+  })
+
+  it("devolve travessão para duração ausente ou negativa", () => {
+    expect(formatDurationMinutes(null)).toBe("—")
+    expect(formatDurationMinutes(-5)).toBe("—")
   })
 })

@@ -18,6 +18,12 @@ const AdminChargePoints = lazy(() => import("@/pages/Admin/ChargePoints"))
 const AdminConnectors = lazy(() => import("@/pages/Admin/Connectors"))
 const AdminTariffs = lazy(() => import("@/pages/Admin/Tariffs"))
 const AdminAuthTokens = lazy(() => import("@/pages/Admin/AuthTokens"))
+const AdminDashboard = lazy(() => import("@/pages/Admin/Dashboard"))
+const AdminFinanceiro = lazy(() => import("@/pages/Admin/Financeiro"))
+const AdminMovimentoDiario = lazy(() => import("@/pages/Admin/MovimentoDiario"))
+const AdminFaturamento = lazy(() => import("@/pages/Admin/Faturamento"))
+const AdminSessoes = lazy(() => import("@/pages/Admin/Sessoes"))
+const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
 
 function RouteFallback() {
   return (
@@ -39,7 +45,13 @@ export default function App() {
 
           {/* Painel admin (ADMIN/OPERATOR) */}
           <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<Navigate to="/admin/sites" replace />} />
+            <Route index element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="financeiro" element={<AdminFinanceiro />} />
+            <Route path="movimento-diario" element={<AdminMovimentoDiario />} />
+            <Route path="faturamento" element={<AdminFaturamento />} />
+            <Route path="sessoes" element={<AdminSessoes />} />
+            <Route path="pagamentos" element={<AdminPagamentos />} />
             <Route path="sites" element={<AdminSites />} />
             <Route path="charge-points" element={<AdminChargePoints />} />
             <Route path="connectors" element={<AdminConnectors />} />

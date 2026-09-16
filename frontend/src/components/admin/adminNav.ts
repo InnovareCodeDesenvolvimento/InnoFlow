@@ -1,4 +1,4 @@
-import { KeyRound, MapPin, Plug, Wallet, Zap } from "lucide-react"
+import { Activity, CalendarDays, CreditCard, KeyRound, LayoutDashboard, Landmark, MapPin, Plug, TrendingUp, Wallet, Zap } from "lucide-react"
 import type { NavGroup, NavItem } from "@/components/painel/navegacao"
 import { flattenNav, matchNavItem } from "@/components/painel/navegacao"
 import type { Role } from "@/types/api"
@@ -7,6 +7,17 @@ export type AdminNavItem = NavItem
 export type AdminNavGroup = NavGroup
 
 const BASE_NAV: NavGroup[] = [
+  {
+    title: "Retaguarda",
+    items: [
+      { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard, exact: true, hint: "Visão geral do faturamento e da operação" },
+      { label: "Financeiro", href: "/admin/financeiro", icon: Landmark, hint: "Faturamento, cartão, carteira e conciliação" },
+      { label: "Movimento diário", href: "/admin/movimento-diario", icon: CalendarDays, hint: "Sessões e faturamento por dia e eletroposto" },
+      { label: "Faturamento", href: "/admin/faturamento", icon: TrendingUp, hint: "Série temporal de receita, com detalhamento" },
+      { label: "Sessões", href: "/admin/sessoes", icon: Activity, hint: "Analítico de sessões, com filtros e detalhe" },
+      { label: "Pagamentos", href: "/admin/pagamentos", icon: CreditCard, hint: "Tentativas de cobrança — cartão, Pix e carteira" },
+    ],
+  },
   {
     title: "Infraestrutura",
     items: [

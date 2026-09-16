@@ -1,6 +1,13 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
-import type { ConnectorStatus, ConnectorType, Role } from "@/types/api"
+import type {
+  ChargingSessionStatus,
+  ConnectorStatus,
+  ConnectorType,
+  PaymentIntentStatus,
+  Role,
+  SessionPaymentStatus,
+} from "@/types/api"
 
 /** Combina classes Tailwind com o tailwind-merge resolvendo conflitos (última classe conflitante vence). */
 export function cn(...inputs: ClassValue[]) {
@@ -88,4 +95,99 @@ export function formatPowerKw(value: string | number | null | undefined): string
   const n = toNumber(value)
   if (n <= 0) return "—"
   return `${n % 1 === 0 ? n : n.toFixed(1)} kW`
+}
+
+// ---------------------------------------------------------------------------
+// Retaguarda: energia, percentuais e labels de domínio
+// ---------------------------------------------------------------------------
+
+/** Wh inteiros (contrato da API) → string em kWh. */
+export function formatEnergyWh(wh: number | null | undefined): string {
+  if (wh === null || wh === undefined) return "—"
+  return `${(wh / 1000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })} kWh`
+}
+
+export function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—"
+  return `${value.toFixed(digits)}%`
+}
+
+/** Duração em minutos → "Xh Ymin" (ou só "Ymin" quando < 1h). Travessão quando ausente. */
+export function formatDurationMinutes(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || minutes < 0) return "—"
+  const totalMinutes = Math.round(minutes)
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  if (h === 0) return `${m} min`
+  return `${h}h ${m}min`
+}
+
+export const CHARGING_SESSION_STATUS_LABELS: Record<ChargingSessionStatus, string> = {
+  STARTED: "Iniciada",
+  CHARGING: "Carregando",
+  FINISHING: "Finalizando",
+  STOPPED: "Encerrada",
+  FAULTED: "Com falha",
+}
+
+export const SESSION_PAYMENT_STATUS_LABELS: Record<SessionPaymentStatus, string> = {
+  CAPTURED: "Pago",
+  PENDING: "Pendente",
+  FAILED: "Falhou",
+  OPEN_DEBT: "Dívida em aberto",
+}
+
+export const PAYMENT_INTENT_STATUS_LABELS: Record<PaymentIntentStatus, string> = {
+  CREATED: "Criado",
+  AUTHORIZED: "Autorizado",
+  CAPTURE_PENDING: "Captura pendente",
+  CAPTURED: "Capturado",
+  CANCELLED: "Cancelado",
+  DENIED: "Negado",
+  VOIDED: "Estornado",
+  FAILED: "Falhou",
+  EXPIRED: "Expirado",
+}
+
+export const PAYMENT_METHOD_LABELS: Record<"CARD" | "WALLET", string> = {
+  CARD: "Cartão",
+  WALLET: "Carteira",
+}
+
+type BadgeVariant = "neutral" | "primary" | "success" | "warning" | "danger" | "info"
+
+export function sessionStatusBadgeVariant(status: ChargingSessionStatus): BadgeVariant {
+  switch (status) {
+    case "STOPPED":
+      return "success"
+    case "CHARGING":
+      return "info"
+    case "FAULTED":
+      return "danger"
+    case "STARTED":
+    case "FINISHING":
+      return "warning"
+  }
+}
+
+export function paymentStatusBadgeVariant(status: SessionPaymentStatus | PaymentIntentStatus): BadgeVariant {
+  switch (status) {
+    case "CAPTURED":
+      return "success"
+    case "PENDING":
+    case "CREATED":
+    case "AUTHORIZED":
+    case "CAPTURE_PENDING":
+      return "info"
+    case "OPEN_DEBT":
+    case "FAILED":
+    case "DENIED":
+      return "danger"
+    case "CANCELLED":
+    case "VOIDED":
+    case "EXPIRED":
+      return "neutral"
+    default:
+      return "neutral"
+  }
 }
