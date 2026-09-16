@@ -54,6 +54,33 @@ OCPP_PORT=9000
 
 `OCPP_NODE_ID` pode ficar vazio (cada processo gera um UUID próprio no boot).
 
+## 1.1 Frontend
+
+App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
+(mesmo problema do item acima — o Dockerfile é `frontend/Dockerfile`, não a
+raiz). Build multi-stage (Vite → Nginx), porta interna **80**, exposta
+publicamente.
+
+O Nginx dentro do container já resolve `/api/*` **na mesma origem**,
+proxiando pela rede interna do EasyPanel para o serviço da API — sem CORS,
+sem precisar de subdomínio para a API. Isso depende de uma env/build-arg:
+
+```
+API_UPSTREAM=http://<projeto>_<nome-do-servico-da-api>:3000
+```
+
+O `frontend/Dockerfile` já tem um valor padrão
+(`http://innovare-code_inno-elekton-beckend:3000`, baseado nos nomes de
+serviço vistos no seu painel) — **confira se bate com o nome real do
+serviço da API no seu projeto EasyPanel**; se divergir, sobrescreva a env
+`API_UPSTREAM` no serviço do frontend (não precisa rebuild, é lida em
+runtime pelo entrypoint do Nginx).
+
+A rota de sessão ao vivo (`/api/sessions/:id/stream`, SSE) já tem uma
+regra própria no `nginx.conf.template` com buffering desligado — sem isso o
+Nginx seguraria os eventos até fechar a conexão e o front nunca veria nada
+em tempo real.
+
 ## 2. Rodar a migration (uma vez, antes do primeiro boot valer a pena)
 
 No shell do App `api` (ou via "Run command" do EasyPanel), depois do primeiro
