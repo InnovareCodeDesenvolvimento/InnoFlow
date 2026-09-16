@@ -103,6 +103,53 @@ Levantadas pela Nova durante a arquitetura — nenhuma foi decidida sozinha.
    como o Cronos já modelou (`User`/`Wallet`/`AuthToken`/`PaymentMethod` do
    driver sem `operatorId`). Nenhuma mudança de schema necessária.
 
+## Módulo de retaguarda (dashboard/financeiro/relatórios) — decisão de rumo 2026-09-16
+
+Dono pausou o avanço na experiência do motorista (fluxo de recarga via QR)
+para priorizar a retaguarda administrativa: dashboard, financeiro,
+relatórios, "quanto cada eletroposto faturou". Decisão: construir AGORA
+com **dado sintético gerado no banco** (não mock de frontend) — endpoints e
+telas reais desde já, dado sintético só é substituído por produção
+verdadeira quando a Fase 4/5 (sessão + pagamento reais) existir.
+
+**Nova entregou o desenho completo** (`.claude/agent-memory/nova/
+decisoes-retaguarda-relatorios.md`). Achados que mudam o desenho:
+- Relatório **nunca agrega `MeterSample`** — `ChargingSession` já congela
+  `energyDeliveredWh`/`totalCostCents`. Por isso: **sem tabela de resumo
+  pré-calculada por ora** (`DailySiteSummary`), só índices. Gatilho medido
+  para reabrir: p95 > 800ms em relatório de 12 meses OU
+  `ChargingSession` > 1M linhas.
+- **Faturamento ≠ caixa**: recarga de carteira via Pix não é receita, é
+  passivo. Seção financeira expõe a identidade de conciliação
+  `faturamento = capturas cartão + débitos carteira + dívida aberta`
+  explicitamente na tela (diferença ≠ 0 aparece em vermelho, não escondida).
+- 14 métricas de dashboard (10 pedidas + taxa de sucesso, utilização,
+  R$/kWh médio, ociosidade).
+- 7 endpoints (`/api/admin/dashboard/summary`, `/dashboard/live`,
+  `/reports/daily-movement`, `/reports/revenue`, `/reports/sessions`,
+  `/reports/payments`, `/api/admin/operators` — este último fecha a
+  pendência que a Lyra deixou de "sem listagem de operadores").
+- Bucket de dia sempre no **fuso do site** (`startedAt`, nunca `stoppedAt`),
+  nunca UTC.
+
+**Rodando em paralelo agora (R1/R2/R3):**
+- Cronos: `calcularCustoSessao()` (função pura, será reusada pelo Vega na
+  Fase 4 real — dívida evitada de propósito), índices de relatório, 3
+  colunas de painel ao vivo em `ChargingSession`, `seed-demo.ts`
+  (determinístico, prefixo `demo-`, ~8-15 mil sessões sintéticas em 60
+  dias com variação realista).
+- Vega: as 7 rotas de agregação, escopo multi-tenant em `$queryRaw`
+  (operatorId como parâmetro obrigatório, nunca concatenado), exportação
+  CSV.
+- Lyra: 6 telas (Dashboard, Financeiro, Movimento Diário, Faturamento,
+  Sessões, Pagamentos) contra fixtures MSW fiéis ao contrato, prontas
+  para trocar por API real quando R1/R2 terminarem.
+
+Portão de saída (R4, Íris+Órion): consultas <500ms em 60 dias de dado
+sintético; conciliação financeira fechando em zero; OPERATOR não vê um
+centavo de outro operador em nenhuma das 7 rotas (nem forjando
+`operatorId`/`siteId` na query).
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
