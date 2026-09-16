@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+dist/
+build/
+coverage/
+*.log
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Estado de sessao do Atlas/Painel de Tarefas — nunca versionar
+.missao-atual
+.missoes-quadro.json
+
+# Memoria de trabalho dos agentes — interna, nao e codigo do projeto
+.claude/agent-memory/
+**/.claude/agent-memory/

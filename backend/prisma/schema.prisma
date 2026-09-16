@@ -1,0 +1,778 @@
+// ============================================================
+// InnoElektron — Prisma Schema
+// ============================================================
+// Fase 1 (modelagem de dados, Cronos) — a partir do desenho de alto nível da
+// Nova (§4 do handoff de arquitetura, ver PROGRESSO.md e
+// .claude/agent-memory/nova/) e das decisões do dono registradas ali.
+//
+// Convenções deste schema (documentadas para quem for ler/alterar):
+//
+// 1. MULTI-TENANT REAL: `Operator` é entidade de primeira classe. A FK
+//    "de origem" mora em `Site` (Site.operatorId, canônica) e desce por
+//    `ChargePoint.siteId`. Nas tabelas QUENTES de leitura/escrita do caminho
+//    OCPP e do dinheiro — ChargePoint, Connector, ChargingSession,
+//    MeterSample, OcppMessage, PaymentIntent — `operatorId` é DESNORMALIZADO
+//    (coluna própria + FK real para Operator) para o Vega filtrar por
+//    operador em uma coluna só, sem join. A consistência dessa coluna
+//    denormalizada NÃO depende do código da aplicação: é mantida por
+//    triggers `BEFORE INSERT/UPDATE` (ver migration.sql) que copiam
+//    operatorId do pai (Site/ChargePoint/Connector/ChargingSession) —
+//    e sobrescrevem qualquer valor divergente que a aplicação tente gravar.
+// 2. DINHEIRO: valores fechados (custos, taxas, saldo) em centavos inteiros
+//    (`Int`). Preço UNITÁRIO (por kWh, por minuto) em `Decimal(12,4)`,
+//    guardado em reais (não centavos) para manter precisão sub-centavo na
+//    multiplicação — nunca `Float`.
+// 3. Vários `@@index`/`@@unique` e TODAS as CHECK constraints, o gatilho de
+//    append-only da carteira e o particionamento
+//    mensal de MeterSample/OcppMessage vivem no `migration.sql` hand-escrito
+//    (ver prisma/migrations/) — Prisma não tem DSL para isso no schema.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------
+
+enum Role {
+  ADMIN // plataforma (o dono) — atravessa todos os operadores
+  OPERATOR // staff de um Operator — escopado a operatorId
+  DRIVER // motorista — identidade única na rede, roda por qualquer operador (B2C)
+}
+
+enum ConnectorType {
+  AC_TYPE2
+  DC_CCS2 // instalação real de lançamento — caso de teste/seed principal
+  DC_CHADEMO
+}
+
+enum ConnectorStatus {
+  AVAILABLE
+  PREPARING
+  CHARGING
+  SUSPENDED_EVSE
+  SUSPENDED_EV
+  FINISHING
+  RESERVED
+  UNAVAILABLE
+  FAULTED
+}
+
+enum ChargingSessionStatus {
+  STARTED
+  CHARGING
+  FINISHING // carro parou de puxar energia, ainda plugado — janela de ociosidade aberta
+  STOPPED
+  FAULTED
+}
+
+enum StopReason {
+  LOCAL
+  REMOTE
+  EV_DISCONNECTED
+  HARD_RESET
+  SOFT_RESET
+  POWER_LOSS
+  EMERGENCY_STOP
+  DEAUTHORIZED
+  UNLOCK_COMMAND
+  OTHER
+}
+
+enum AuthTokenType {
+  RFID
+  VIRTUAL // gerado por sessão iniciada pelo app, amarrado a um User
+  APP
+}
+
+enum AuthTokenStatus {
+  ACCEPTED
+  BLOCKED
+  EXPIRED
+  INVALID
+}
+
+enum TariffModel {
+  PER_KWH
+  PER_MINUTE
+  PER_SESSION
+  HYBRID
+}
+
+enum TariffScope {
+  CONNECTOR
+  CHARGE_POINT
+  SITE
+  OPERATOR
+}
+
+enum PaymentMethodType {
+  CREDIT_CARD
+}
+
+enum PaymentProvider {
+  CIELO_CARD
+  CIELO_PIX
+  WALLET
+}
+
+enum PaymentIntentPurpose {
+  SESSION_CARD_CAPTURE // pré-autorização + captura parcial no StopTransaction
+  WALLET_TOPUP_PIX // recarga de saldo pré-pago (carteira) via Pix
+}
+
+enum PaymentIntentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURE_PENDING
+  CAPTURED
+  CANCELLED
+  DENIED
+  VOIDED
+  FAILED
+  EXPIRED
+}
+
+enum WalletEntryType {
+  TOPUP_PIX
+  TOPUP_REFUND
+  CHARGE_DEBIT
+  ADJUSTMENT_CREDIT
+  ADJUSTMENT_DEBIT
+  REFUND
+}
+
+enum DebtStatus {
+  OPEN
+  SETTLED
+  WRITTEN_OFF
+}
+
+enum OcppDirection {
+  INBOUND // carregador -> CSMS
+  OUTBOUND // CSMS -> carregador
+}
+
+enum OcppMessageType {
+  CALL
+  CALL_RESULT
+  CALL_ERROR
+}
+
+// ------------------------------------------------------------
+// Multi-tenant: Operator / Site
+// ------------------------------------------------------------
+
+model Operator {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  cnpj      String?  @unique
+  email     String
+  phone     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  sites             Site[]
+  users             User[]
+  tariffs           Tariff[]
+  tariffAssignments TariffAssignment[]
+
+  // Tabelas quentes com operatorId desnormalizado (ver cabeçalho do arquivo).
+  chargePoints     ChargePoint[]
+  connectors       Connector[]
+  chargingSessions ChargingSession[]
+  meterSamples     MeterSample[]
+  ocppMessages     OcppMessage[]
+  paymentIntents   PaymentIntent[]
+  debts            Debt[]
+}
+
+model Site {
+  id         String   @id @default(cuid())
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  name         String
+  addressLine  String
+  city         String
+  state        String
+  postalCode   String
+  country      String  @default("BR")
+  latitude     Decimal @db.Decimal(9, 6)
+  longitude    Decimal @db.Decimal(9, 6)
+  timezone     String  @default("America/Sao_Paulo")
+  openingHours Json?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  chargePoints      ChargePoint[]
+  chargingSessions  ChargingSession[]
+  tariffAssignments TariffAssignment[]
+
+  @@index([operatorId])
+}
+
+// ------------------------------------------------------------
+// Topologia OCPP: ChargePoint / Connector
+// ------------------------------------------------------------
+
+model ChargePoint {
+  id     String @id @default(cuid())
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  siteId String
+
+  // Desnormalizado a partir de site.operatorId — mantido por trigger
+  // (ver migration.sql), não confiar em valor setado pela aplicação.
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  ocppIdentity        String  @unique // vem na URL do WebSocket (wss://.../ocpp/{ocppIdentity})
+  vendor              String?
+  model               String?
+  serialNumber        String?
+  firmwareVersion     String?
+  basicAuthSecretHash String // hash — NUNCA o segredo em claro
+  configSnapshot      Json?
+
+  lastBootAt DateTime? @db.Timestamptz(3)
+  lastSeenAt DateTime? @db.Timestamptz(3)
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  connectors        Connector[]
+  chargingSessions  ChargingSession[]
+  meterSamples      MeterSample[]
+  ocppMessages      OcppMessage[]
+  tariffAssignments TariffAssignment[]
+
+  @@index([siteId])
+  @@index([operatorId])
+}
+
+model Connector {
+  id            String      @id @default(cuid())
+  chargePointId String
+  chargePoint   ChargePoint @relation(fields: [chargePointId], references: [id], onDelete: Restrict)
+
+  // Desnormalizado a partir de chargePoint.operatorId — mantido por trigger.
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  // Número OCPP do conector dentro do charge point. connectorId = 0 no OCPP
+  // significa "o carregador inteiro" — NUNCA cria linha aqui para ele
+  // (reforçado por CHECK connector_id <> 0 na migration).
+  connectorId     Int
+  type            ConnectorType
+  maxPowerKw      Decimal?        @db.Decimal(6, 2)
+  status          ConnectorStatus @default(AVAILABLE)
+  statusUpdatedAt DateTime?       @db.Timestamptz(3)
+  errorCode       String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  chargingSessions  ChargingSession[]
+  tariffAssignments TariffAssignment[]
+
+  @@unique([chargePointId, connectorId])
+  @@index([operatorId])
+}
+
+// ------------------------------------------------------------
+// Identidade e autorização OCPP
+// ------------------------------------------------------------
+
+model User {
+  id   String @id @default(cuid())
+  role Role
+
+  // Preenchido e obrigatório SÓ quando role = OPERATOR (CHECK constraint na
+  // migration reforça isso). ADMIN e DRIVER ficam com operatorId nulo:
+  // ADMIN atravessa todos os operadores; DRIVER é identidade única na rede
+  // (B2C) e pode carregar em qualquer operador — não é "cliente" fechado
+  // de um operador só. Ver PENDÊNCIAS no handoff se o dono quiser mudar isso.
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  name         String
+  email        String  @unique
+  phone        String?
+  passwordHash String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  authTokens       AuthToken[]
+  chargingSessions ChargingSession[]
+  wallet           Wallet?
+  paymentMethods   PaymentMethod[]
+  paymentIntents   PaymentIntent[]
+  debts            Debt[]
+
+  @@index([operatorId])
+}
+
+model AuthToken {
+  id String @id @default(cuid())
+
+  // OCPP 1.6 limita idTag a 20 caracteres — vale para RFID físico e para o
+  // idTag virtual que a API gera por sessão iniciada pelo app.
+  idTag  String        @unique @db.VarChar(20)
+  type   AuthTokenType
+  userId String?
+  user   User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  status    AuthTokenStatus @default(ACCEPTED)
+  expiresAt DateTime?       @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  chargingSessions ChargingSession[]
+
+  @@index([userId])
+}
+
+// ------------------------------------------------------------
+// Tarifação
+// ------------------------------------------------------------
+
+model Tariff {
+  id         String   @id @default(cuid())
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  name  String
+  model TariffModel
+
+  // Preço unitário — Decimal(12,4), em reais (não centavos), nunca Float.
+  // Ex.: 0.7912 = R$ 0,7912/kWh. Vega multiplica por kWh/minuto e só
+  // arredonda para centavos no total gravado em ChargingSession.
+  pricePerKwh    Decimal? @db.Decimal(12, 4)
+  pricePerMinute Decimal? @db.Decimal(12, 4)
+
+  // Estes já são valores fechados (não por-unidade) — centavos inteiros.
+  sessionFeeCents Int?
+  minChargeCents  Int?
+
+  // Taxa de ociosidade: cobrada por minuto que o carro fica plugado sem
+  // consumir energia depois que a carga terminou. Centavos inteiros.
+  // idleGracePeriodSeconds é carência antes de começar a cobrar (default 0
+  // = cobra desde o primeiro segundo de ociosidade).
+  idleFeePerMinute       Int @default(0)
+  idleGracePeriodSeconds Int @default(0)
+
+  currency  String   @default("BRL") @db.Char(3)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  windows          TariffWindow[]
+  assignments      TariffAssignment[]
+  chargingSessions ChargingSession[]
+
+  @@index([operatorId])
+}
+
+// Janelas de ponta/fora-ponta — sobrepõem os preços base do Tariff quando
+// a sessão cai dentro da janela (mais prioridade = ganha em caso de overlap,
+// controlado por TariffAssignment.priority, não por TariffWindow).
+model TariffWindow {
+  id       String @id @default(cuid())
+  tariffId String
+  tariff   Tariff @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+
+  label       String // ex.: "PONTA", "FORA_PONTA", "INTERMEDIARIA"
+  daysOfWeek  Int[] // 0=domingo..6=sábado
+  startMinute Int // minutos desde 00:00 (0-1439)
+  endMinute   Int // minutos desde 00:00 (1-1440, exclusivo)
+
+  // Overrides opcionais — nulo usa o preço base do Tariff.
+  pricePerKwh      Decimal? @db.Decimal(12, 4)
+  pricePerMinute   Decimal? @db.Decimal(12, 4)
+  idleFeePerMinute Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([tariffId])
+}
+
+// Qual tarifa vale para qual conector/carregador/site/operador, com
+// prioridade e validade. Exatamente uma das FKs de escopo deve bater com
+// `scope` — reforçado por CHECK constraint na migration (não só por app).
+model TariffAssignment {
+  id       String @id @default(cuid())
+  tariffId String
+  tariff   Tariff @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  scope         TariffScope
+  connectorId   String?
+  connector     Connector?   @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  chargePointId String?
+  chargePoint   ChargePoint? @relation(fields: [chargePointId], references: [id], onDelete: Cascade)
+  siteId        String?
+  site          Site?        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  priority  Int       @default(0)
+  validFrom DateTime  @default(now()) @db.Timestamptz(3)
+  validTo   DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([operatorId])
+  @@index([connectorId])
+  @@index([chargePointId])
+  @@index([siteId])
+}
+
+// ------------------------------------------------------------
+// Sessão de recarga (o coração do domínio)
+// ------------------------------------------------------------
+
+model ChargingSession {
+  id String @id @default(cuid())
+
+  // INT32 atribuído por nós via SEQUENCE do Postgres — NUNCA UUID, NUNCA
+  // contador por carregador. Colisão aqui = cobrar a sessão errada no
+  // carregador errado. `autoincrement()` gera SERIAL/sequence real do
+  // Postgres (não é um contador em memória da aplicação nem por charge
+  // point) — é a mesma garantia que uma SEQUENCE nomeada à mão daria, só
+  // que gerenciada pelo Prisma.
+  ocppTransactionId Int @unique @default(autoincrement())
+
+  // Desnormalizado (trigger) a partir de connector.operatorId — é a coluna
+  // que o Vega usa para escopar toda query de sessão por operador, sem join.
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  // Desnormalizado (trigger) a partir de chargePoint.siteId — evita join
+  // para telas "sessões do site X".
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  chargePointId String
+  chargePoint   ChargePoint @relation(fields: [chargePointId], references: [id], onDelete: Restrict)
+
+  // FK para Connector.id (PK interna, cuid) — não confundir com
+  // Connector.connectorId (posição OCPP dentro do charge point).
+  connectorId String
+  connector   Connector @relation(fields: [connectorId], references: [id], onDelete: Restrict)
+
+  authTokenId String
+  authToken   AuthToken @relation(fields: [authTokenId], references: [id], onDelete: Restrict)
+
+  // Resolvido a partir do idTag no Authorize — uma sessão só existe se já
+  // houver um pagador identificado (regra de negócio no Authorize, não aqui).
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  status ChargingSessionStatus @default(STARTED)
+
+  meterStartWh      Int
+  meterStopWh       Int?
+  energyDeliveredWh Int? // = meterStopWh - meterStartWh, preenchido no StopTransaction
+
+  startedAt DateTime @db.Timestamptz(3) // timestamp do StartTransaction — sempre do payload, nunca now()
+
+  // --- Janela de ociosidade (idle fee) ---
+  // chargingEndedAt: quando o carro parou de fato de puxar energia
+  // (StatusNotification Finishing/SuspendedEV no conector, ou MeterValues
+  // com potência zerada) enquanto a transação OCPP ainda está aberta.
+  // stoppedAt: quando a transação efetivamente encerra (StopTransaction).
+  // idleSeconds: intervalo entre os dois já descontada a carência da
+  // tarifa (tariffSnapshot.idleGracePeriodSeconds) — calculado e congelado
+  // no StopTransaction, nunca recalculado depois.
+  chargingEndedAt DateTime?   @db.Timestamptz(3)
+  stoppedAt       DateTime?   @db.Timestamptz(3)
+  idleSeconds     Int?
+  stopReason      StopReason?
+
+  tariffId String
+  tariff   Tariff @relation(fields: [tariffId], references: [id], onDelete: Restrict)
+
+  // OBRIGATÓRIO — congela a tarifa (preços, janelas aplicáveis, idle fee,
+  // carência) vigente no início da sessão. Sessão antiga jamais recalcula
+  // com a tarifa de hoje.
+  tariffSnapshot Json
+
+  energyCostCents          Int?
+  timeCostCents            Int?
+  idleFeeCents             Int?
+  sessionFeeCents          Int?
+  minChargeAdjustmentCents Int?
+  totalCostCents           Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  meterSamples   MeterSample[]
+  paymentIntents PaymentIntent[]
+  debts          Debt[]
+
+  @@index([operatorId, startedAt])
+  @@index([siteId, startedAt])
+  @@index([userId, startedAt])
+  @@index([chargePointId, startedAt])
+  @@index([connectorId])
+}
+
+// ------------------------------------------------------------
+// Logs de alto volume — PARTICIONADOS POR MÊS (ver migration.sql)
+// ------------------------------------------------------------
+
+// Medições do medidor (OCPP MeterValues). ~500 mil linhas/dia na escala
+// alvo. PK composta (id, ts) porque Postgres exige que a chave de partição
+// esteja em qualquer PK/UNIQUE de tabela particionada.
+model MeterSample {
+  id String @default(cuid())
+
+  sessionId String?
+  session   ChargingSession? @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  chargePointId String
+  chargePoint   ChargePoint @relation(fields: [chargePointId], references: [id], onDelete: Restrict)
+
+  // Desnormalizado a partir de chargePoint.operatorId — mantido por trigger.
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  ts        DateTime @db.Timestamptz(3) // timestamp do payload (MeterValues.req) — chave de partição, nunca now()
+  measurand String // "Energy.Active.Import.Register", "Power.Active.Import", "SoC", ...
+  value     Decimal  @db.Decimal(14, 4)
+  unit      String?
+  context   String? // Sample.Periodic, Transaction.Begin, Transaction.End, ...
+  phase     String?
+  location  String?
+  raw       Json? // sampledValue original — prova em disputa de kWh
+
+  @@id([id, ts])
+  @@index([sessionId, ts])
+  @@index([chargePointId, ts])
+  @@index([operatorId, ts])
+}
+
+// Log bruto do protocolo OCPP — obrigatório neste domínio para disputa de
+// kWh (fonte de verdade além do MeterSample já processado). Particionado
+// por mês. PK composta (id, occurredAt) pela mesma razão do MeterSample.
+model OcppMessage {
+  id String @default(cuid())
+
+  chargePointId String
+  chargePoint   ChargePoint @relation(fields: [chargePointId], references: [id], onDelete: Restrict)
+
+  // Desnormalizado a partir de chargePoint.operatorId — mantido por trigger.
+  operatorId String
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  direction   OcppDirection
+  messageType OcppMessageType
+
+  // Id de correlação do envelope OCPP-J — junto com chargePointId é a chave
+  // de idempotência do handler (regra da Nova: nunca reprocessar a mesma
+  // (chargePointId, ocppMessageId) duas vezes).
+  ocppMessageId String
+  action        String? // nome da action OCPP no CALL; nulo em CALLRESULT/CALLERROR
+
+  payload Json // envelope bruto — auditoria/disputa
+
+  occurredAt DateTime @db.Timestamptz(3) // tempo do evento (do payload quando disponível) — chave de partição, nunca now()
+  receivedAt DateTime @default(now()) @db.Timestamptz(3) // quando o gateway processou — pode ficar bem depois do occurredAt (carregador offline reconectando)
+
+  @@id([id, occurredAt])
+  @@index([chargePointId, occurredAt])
+  @@index([operatorId, occurredAt])
+}
+
+// ------------------------------------------------------------
+// Pagamento — cartão (Cielo) e Pix (carteira pré-paga)
+// ------------------------------------------------------------
+
+model PaymentMethod {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  type PaymentMethodType @default(CREDIT_CARD)
+
+  // Token da Cielo — NUNCA PAN, NUNCA CVV.
+  cieloCardToken String
+  brand          String?
+  last4          String?
+  holderName     String?
+  expiryMonth    Int?
+  expiryYear     Int?
+
+  isDefault Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  paymentIntents PaymentIntent[]
+
+  @@index([userId])
+}
+
+model PaymentIntent {
+  id String @id @default(cuid())
+
+  // Desnormalizado (trigger) a partir de chargingSession.operatorId — nulo
+  // em recarga de carteira (WALLET_TOPUP_PIX), que não pertence a um
+  // operador específico (a carteira é da rede, não de um operador).
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+
+  purpose  PaymentIntentPurpose
+  provider PaymentProvider
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  chargingSessionId String?
+  chargingSession   ChargingSession? @relation(fields: [chargingSessionId], references: [id], onDelete: Restrict)
+
+  paymentMethodId String?
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+
+  walletId String?
+  wallet   Wallet? @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  cieloPaymentId String?             @unique
+  status         PaymentIntentStatus @default(CREATED)
+
+  // Cielo ReturnCode — Status sozinho NÃO prova aprovação (ex.: Status=1
+  // Authorized não é pago). Ver checagem obrigatória no handoff.
+  returnCode String?
+
+  amountRequestedCents  Int
+  amountAuthorizedCents Int?
+  amountCapturedCents   Int?
+
+  pixQrCode    String?
+  pixExpiresAt DateTime? @db.Timestamptz(3)
+
+  authorizedAt DateTime? @db.Timestamptz(3)
+  capturedAt   DateTime? @db.Timestamptz(3)
+  cancelledAt  DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  debts         Debt[]
+  webhookEvents WebhookEvent[]
+
+  @@index([operatorId])
+  @@index([userId])
+  @@index([status])
+  @@index([chargingSessionId])
+}
+
+// Carteira pré-paga (Pix). Saldo = SOMA das entradas — nunca
+// `UPDATE saldo = saldo - x`. Razão é per-usuário (rede toda), não por
+// operador, porque o motorista roda por qualquer operador (B2C).
+model Wallet {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  entries        WalletEntry[]
+  paymentIntents PaymentIntent[]
+}
+
+// Razão append-only — trigger na migration BLOQUEIA UPDATE/DELETE nesta
+// tabela (integridade por desenho, não por confiança no código da app).
+// Sem updatedAt de propósito: uma entrada nunca é alterada.
+model WalletEntry {
+  id       String @id @default(cuid())
+  walletId String
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  type        WalletEntryType
+  amountCents Int // assinado: crédito > 0, débito < 0
+
+  // Snapshot do saldo logo após esta entrada — só para leitura rápida do
+  // saldo atual sem somar o histórico inteiro; nunca recalculado depois.
+  balanceAfterCents Int
+
+  referenceType String? // "PAYMENT_INTENT" | "CHARGING_SESSION" | "MANUAL" | ...
+  referenceId   String?
+  description   String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  createdBy String? // userId do admin, se for ajuste manual
+
+  @@index([walletId, createdAt])
+}
+
+// Captura que falhou vira dívida e bloqueia NOVA sessão (checagem no
+// Authorize/StartTransaction, não aqui). Bloqueio é por usuário na rede
+// inteira, não só no operador de origem — por isso operatorId aqui é só
+// informativo/relatório, não é campo de escopo de acesso.
+model Debt {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+
+  chargingSessionId String?
+  chargingSession   ChargingSession? @relation(fields: [chargingSessionId], references: [id], onDelete: SetNull)
+
+  paymentIntentId String?
+  paymentIntent   PaymentIntent? @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+
+  amountCents Int
+  status      DebtStatus @default(OPEN)
+  reason      String?
+
+  settledAt              DateTime? @db.Timestamptz(3)
+  settledByWalletEntryId String? // referência informativa (sem FK) para a WalletEntry que quitou a dívida
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([userId, status])
+  @@index([operatorId])
+}
+
+// Idempotência dos webhooks da Cielo: retries reenviam o mesmo
+// (provider, externalId, changeType) — UNIQUE dedupe isso na escrita.
+model WebhookEvent {
+  id String @id @default(cuid())
+
+  provider   String // "CIELO"
+  externalId String // Cielo PaymentId
+  changeType Int // 1 status, 5 cancelamento negado, 7 chargeback, 25 estorno parcial
+
+  paymentIntentId String?
+  paymentIntent   PaymentIntent? @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+
+  payload         Json
+  receivedAt      DateTime  @default(now()) @db.Timestamptz(3)
+  processedAt     DateTime? @db.Timestamptz(3)
+  processingError String?
+
+  @@unique([provider, externalId, changeType])
+  @@index([paymentIntentId])
+}

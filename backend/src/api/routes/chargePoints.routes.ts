@@ -1,0 +1,180 @@
+import { randomUUID } from 'node:crypto'
+import { Router, type Request, type Response } from 'express'
+import bcrypt from 'bcryptjs'
+import type { ChargePoint, Prisma } from '@prisma/client'
+import { prisma } from '../../lib/prisma'
+import { logger } from '../../lib/logger'
+import { sendCommand } from '../../ocpp/commands'
+import { AppError } from '../middleware/errorHandler'
+import { asyncHandler } from '../middleware/asyncHandler'
+import { authenticate } from '../middleware/auth'
+import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
+import { validateBody, validateQuery } from '../middleware/validate'
+import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
+import { createChargePointSchema, updateChargePointSchema, type CreateChargePointInput, type UpdateChargePointInput } from '../schemas/chargePoint.schema'
+import {
+  changeAvailabilitySchema,
+  resetCommandSchema,
+  triggerMessageSchema,
+  unlockCommandSchema,
+} from '../schemas/command.schema'
+
+const BCRYPT_ROUNDS = 10
+const COMMAND_TIMEOUT_MS = 35_000
+
+const router = Router()
+
+router.use(authenticate, requireOperatorOrAdmin)
+
+/** NUNCA devolve `basicAuthSecretHash` — mesmo sendo hash, não tem por que sair da API. */
+function toChargePointDTO<T extends ChargePoint>(cp: T) {
+  const { basicAuthSecretHash: _basicAuthSecretHash, ...rest } = cp
+  return rest
+}
+
+router.get(
+  '/',
+  validateQuery(paginationQuerySchema),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize } = req.query as unknown as PaginationQuery
+    const where = operatorScopeWhere(req)
+
+    const [items, total] = await Promise.all([
+      prisma.chargePoint.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        include: { connectors: true, site: { select: { id: true, name: true } } },
+      }),
+      prisma.chargePoint.count({ where }),
+    ])
+
+    res.json({ items: items.map(toChargePointDTO), meta: paginationMeta(page, pageSize, total) })
+  }),
+)
+
+router.get(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const cp = await prisma.chargePoint.findFirst({
+      where: { id: req.params.id, ...operatorScopeWhere(req) },
+      include: { connectors: true, site: { select: { id: true, name: true } } },
+    })
+    if (!cp) throw new AppError('Charge point não encontrado.', 404, 'NOT_FOUND')
+    res.json(toChargePointDTO(cp))
+  }),
+)
+
+router.post(
+  '/',
+  validateBody(createChargePointSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as CreateChargePointInput
+
+    const site = await prisma.site.findFirst({ where: { id: body.siteId, ...operatorScopeWhere(req) } })
+    if (!site) throw new AppError('Site não encontrado.', 404, 'NOT_FOUND')
+
+    const basicAuthSecretHash = await bcrypt.hash(body.basicAuthSecret, BCRYPT_ROUNDS)
+
+    const cp = await prisma.chargePoint.create({
+      data: {
+        // operatorId é reescrito por trigger a partir de site.operatorId de
+        // qualquer forma — mandamos o valor já resolvido só para satisfazer
+        // o tipo obrigatório do Prisma (ver schema-innoelektron.md).
+        operatorId: site.operatorId,
+        siteId: site.id,
+        ocppIdentity: body.ocppIdentity,
+        vendor: body.vendor,
+        model: body.model,
+        serialNumber: body.serialNumber,
+        firmwareVersion: body.firmwareVersion,
+        basicAuthSecretHash,
+      },
+    })
+
+    res.status(201).json(toChargePointDTO(cp))
+  }),
+)
+
+router.patch(
+  '/:id',
+  validateBody(updateChargePointSchema),
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.chargePoint.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
+    if (!existing) throw new AppError('Charge point não encontrado.', 404, 'NOT_FOUND')
+
+    const { basicAuthSecret, ...rest } = req.body as UpdateChargePointInput
+    const data: Prisma.ChargePointUpdateInput = { ...rest }
+    if (basicAuthSecret) data.basicAuthSecretHash = await bcrypt.hash(basicAuthSecret, BCRYPT_ROUNDS)
+
+    const cp = await prisma.chargePoint.update({ where: { id: existing.id }, data })
+    res.json(toChargePointDTO(cp))
+  }),
+)
+
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.chargePoint.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
+    if (!existing) throw new AppError('Charge point não encontrado.', 404, 'NOT_FOUND')
+    await prisma.chargePoint.update({ where: { id: existing.id }, data: { active: false } })
+    res.status(204).send()
+  }),
+)
+
+// ------------------------------------------------------------
+// Comandos remotos — 202 assíncrono via barramento Redis do gateway OCPP.
+// ------------------------------------------------------------
+
+async function requireOwnedChargePoint(req: Request): Promise<ChargePoint> {
+  const cp = await prisma.chargePoint.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
+  if (!cp) throw new AppError('Charge point não encontrado.', 404, 'NOT_FOUND')
+  return cp
+}
+
+/**
+ * Dispara o comando e responde 202 IMEDIATAMENTE — não bloqueia a resposta
+ * HTTP esperando o carregador responder (pode levar até ~35s, ver
+ * commands.ts). O resultado fica só no log por enquanto; consumo em tempo
+ * real pelo frontend é via SSE (stub em `src/api/sse/`, ainda não fiado a
+ * isto — pendência explícita no handoff desta fase para a Lyra/F4).
+ */
+function dispatchCommand(req: Request, res: Response, method: string, params: Record<string, unknown>): Promise<void> {
+  return requireOwnedChargePoint(req).then((cp) => {
+    const correlationId = randomUUID()
+    logger.info({ chargePointId: cp.id, method, correlationId }, '[api] comando remoto disparado')
+
+    sendCommand(cp.id, method, params, { timeoutMs: COMMAND_TIMEOUT_MS })
+      .then((result) => logger.info({ chargePointId: cp.id, method, correlationId, result }, '[api] comando remoto concluído'))
+      .catch((err) => logger.error({ err, chargePointId: cp.id, method, correlationId }, '[api] comando remoto falhou'))
+
+    res.status(202).json({ correlationId, status: 'PENDING' })
+  })
+}
+
+router.post(
+  '/:id/commands/reset',
+  validateBody(resetCommandSchema),
+  asyncHandler((req, res) => dispatchCommand(req, res, 'Reset', req.body as Record<string, unknown>)),
+)
+
+router.post(
+  '/:id/commands/unlock',
+  validateBody(unlockCommandSchema),
+  asyncHandler((req, res) => dispatchCommand(req, res, 'UnlockConnector', req.body as Record<string, unknown>)),
+)
+
+router.post(
+  '/:id/commands/change-availability',
+  validateBody(changeAvailabilitySchema),
+  asyncHandler((req, res) => dispatchCommand(req, res, 'ChangeAvailability', req.body as Record<string, unknown>)),
+)
+
+router.post(
+  '/:id/commands/trigger-message',
+  validateBody(triggerMessageSchema),
+  asyncHandler((req, res) => dispatchCommand(req, res, 'TriggerMessage', req.body as Record<string, unknown>)),
+)
+
+export default router

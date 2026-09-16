@@ -1,0 +1,137 @@
+# InnoElektron — topologia de desenvolvimento local.
+#
+# Quem cria as tabelas é o Prisma (`cd backend && npm run prisma:migrate`),
+# não este arquivo — o Postgres aqui sobe limpo, do mesmo jeito que em
+# produção. POSTGRES_DB precisa bater com o banco da DATABASE_URL em
+# backend/.env.example.
+#
+# `api`, `ocpp-gateway` e `worker` são os 3 entrypoints do MESMO
+# backend/package.json (arquitetura da Nova: monólito modular, não
+# microsserviços separados) — mesma imagem (backend/Dockerfile), o que muda
+# é só o `command`. Hoje cada um é um stub que sobe e loga "ok" (Fase 0); o
+# Vega preenche o conteúdo real depois.
+#
+# `chargepoint-simulator` existe porque ainda não há hardware real: é o
+# Virtual Charge Point open source da Solidstudio (ver docs/PROXY-REVERSO.md
+# para a nota sobre proxy/WebSocket/SSE quando um proxy entrar na frente do
+# `ocpp-gateway`). CORREÇÃO ao pedido original: a imagem NÃO é MIT — o
+# repositório (github.com/solidstudiosh/ocpp-virtual-charge-point) é
+# Apache-2.0. Confirmado publicando/puxando o manifesto real do GHCR nesta
+# mesma sessão (não é suposição).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: innoelektron_postgres
+    environment:
+      POSTGRES_DB: innoelektron
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: innoelektron_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+    container_name: innoelektron_api
+    command: ["node", "dist/entrypoints/api.js"]
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/innoelektron
+      REDIS_URL: redis://redis:6379
+      # Dev only — troque por um segredo forte de verdade antes de produção.
+      JWT_SECRET: dev-only-troque-isto-por-um-segredo-forte-de-verdade
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ocpp-gateway:
+    build:
+      context: ./backend
+    container_name: innoelektron_ocpp_gateway
+    command: ["node", "dist/entrypoints/ocpp.js"]
+    environment:
+      NODE_ENV: development
+      OCPP_PORT: 9000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/innoelektron
+      REDIS_URL: redis://redis:6379
+      # lib/env.ts valida TODAS as env vars de uma vez em qualquer entrypoint
+      # (mesmo esquema para os 3) — sem isto o processo falha o boot mesmo
+      # não usando JWT diretamente. Dev only, troque em produção.
+      JWT_SECRET: dev-only-troque-isto-por-um-segredo-forte-de-verdade
+    ports:
+      # WebSocket OCPP 1.6-J — charge points (e o simulador) conectam aqui.
+      - "9000:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+    container_name: innoelektron_worker
+    command: ["node", "dist/entrypoints/worker.js"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/innoelektron
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-only-troque-isto-por-um-segredo-forte-de-verdade
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Virtual Charge Point (Solidstudio, Apache-2.0) — simula um carregador
+  # OCPP 1.6-J conversando com o ocpp-gateway local, enquanto não há
+  # hardware real. Porta 9999 é a API HTTP de admin da própria VCP (trocar
+  # RemoteStart/RemoteStop, ver estado) — não confundir com a porta OCPP.
+  chargepoint-simulator:
+    image: ghcr.io/solidstudiosh/ocpp-virtual-charge-point:latest
+    container_name: innoelektron_chargepoint_simulator
+    environment:
+      WS_URL: ws://ocpp-gateway:9000
+      CP_ID: vcp-dev-01
+      ENTRY_POINT: index_16.ts # OCPP 1.6-J — versão do protocolo definida pela Nova
+      ADMIN_PORT: "9999"
+    ports:
+      - "9999:9999"
+    depends_on:
+      - ocpp-gateway
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

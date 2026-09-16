@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — lint, typecheck, migrate, test (Postgres + Redis reais)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: innoelektron_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/innoelektron_test
+      REDIS_URL: redis://localhost:6379
+      # CI-only — JWT_SECRET virou obrigatório na Fase 3 (Vega, auth da API).
+      # Nunca reutilizar este valor fora de CI.
+      JWT_SECRET: ci-test-secret-nao-usar-em-producao-0000000000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Prisma generate
+        run: npx prisma generate
+      # Aplica as migrations REAIS (as do Cronos, com o SQL hand-escrito de
+      # particionamento/triggers) contra um Postgres de verdade — não um
+      # `db push` que ignoraria o que não cabe na DSL do Prisma.
+      - name: Aplicar migrations no banco de teste
+        run: npx prisma migrate deploy
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests (Vitest — unit + integração com Postgres/Redis reais)
+        run: npm test
+
+  frontend:
+    name: Frontend — lint, typecheck, build, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck + build
+        run: npm run build
+      - name: Unit tests (Vitest)
+        run: npm test
+
+  e2e:
+    name: E2E — smoke (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run E2E (Playwright)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  docker-compose:
+    name: docker-compose.yml — configuração válida
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Só valida a estrutura/sintaxe (interpolação de env, referências entre
+      # serviços) — não builda nem sobe nada. Builds completos ficam para
+      # quando o Vega tiver rotas de verdade (custaria minutos de CI hoje só
+      # para validar um Dockerfile que roda um stub).
+      - name: docker compose config
+        run: docker compose config --quiet
