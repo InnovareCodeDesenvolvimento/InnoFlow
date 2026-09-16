@@ -142,7 +142,19 @@ para OPERATOR, não vêm `null`). **Ainda não validado contra Postgres
 real** — depende do seed do Cronos (R1, em andamento) e das colunas
 `lastPowerW`/`lastSoc`.
 
-**Rodando em paralelo agora (R1/R3):**
+**✅ Lyra (R3) entregou** as 6 telas — código no `main`, lint/typecheck/
+testes/build limpos, validado com Playwright logando de verdade como
+ADMIN e OPERATOR contra mocks. Corrigiu 3 bugs reais de UI encontrados
+na validação: cartão de métrica cortando valor em telas ~1280px, selects
+de filtro cortando texto, e o mais sério — rótulo "E-mail" aparecia (com
+"—") no detalhe de sessão mesmo para OPERATOR, vazando que o dado existe
+mesmo sem mostrar o valor (campo agora some inteiro, não só mascara —
+lição de LGPD registrada em memória). **Ainda não validado contra API
+real** — mock por construção sempre fecha a conciliação em zero, então
+isso NÃO prova que a query real do Vega fecha; é o que a Íris precisa
+confirmar depois.
+
+**Rodando agora (R1, Cronos):**
 - Cronos: `calcularCustoSessao()` (função pura, será reusada pelo Vega na
   Fase 4 real — dívida evitada de propósito), índices de relatório, 3
   colunas de painel ao vivo em `ChargingSession`, `seed-demo.ts`
