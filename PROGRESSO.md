@@ -506,6 +506,35 @@ cobranças na F5. Não pular direto pra F5 sem o PWA existir.
 testes de integração novos (multi-tenant, conciliação, reconciliação de
 sessão órfã) contra Postgres real — nenhum dos dois foi feito ainda.
 
+## 🎉🎉 F4 FECHADA — ciclo completo provado com dinheiro real — 2026-09-17
+
+Testado ao vivo em produção, ponta a ponta, sem nenhum atalho: sessão
+iniciada remotamente → energia medida em tempo real (0→300 Wh) →
+carregador desconectou no meio (comportamento do simulador) →
+**reconciliação automática fechou a sessão sozinha** ao reconectar →
+custo calculado corretamente (aplicando até a regra de cobrança mínima
+da tarifa: 300 Wh custariam R$0,24, mas o mínimo é R$5,00 — foi isso que
+foi cobrado) → carteira debitada atomicamente (R$50,00 → R$45,00,
+`WalletEntry` referenciando a sessão certa) → **conciliação financeira
+fechando em ZERO** (`revenueCents: 500 = walletDebitCents: 500`,
+`differenceCents: 0`).
+
+É a prova final: toda a identidade de conciliação que a Nova desenhou
+quando a retaguarda ainda só tinha dado sintético agora se sustenta com
+dinheiro de teste circulando de verdade pelo sistema inteiro — sessão,
+tarifação, carteira e dashboard financeiro, tudo consistente.
+
+**Pendência residual (não bloqueante):** os 3 testes de integração
+escritos pelo Vega (multi-tenant, conciliação, reconciliação) ainda não
+rodaram formalmente contra Postgres via CI/Íris — mas o comportamento
+real que eles testam já foi confirmado manualmente em produção acima.
+
+**Ordem confirmada com o dono**: próximo passo é o **PWA do motorista**
+(pausado desde o início da retaguarda), depois sim a F5 (Cielo). Reforço
+do dono: além de robusto/profissional/intuitivo, o PWA precisa ser
+**bonito** — é a cara pública do produto, o motorista abre no celular na
+hora de carregar o carro.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
