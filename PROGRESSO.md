@@ -343,6 +343,29 @@ implementar qualquer coisa; Lyra só começa depois desse commit existir.
 Implementação liberada — Cronos (4.1: índices) e Vega (4.2: núcleo puro +
 commit de contrato) acionados em paralelo.
 
+## Primeira auditoria de QA (Íris) — 2026-09-17
+
+Testou ao vivo contra produção real com os 3 perfis (não só mock):
+autenticação, RBAC, paginação, os 5 presets de período, isolamento
+multi-tenant (forjando `operatorId`/`siteId` de outro operador — sempre
+403/404 corretos, nunca vazou dado), responsividade mobile (390px) e
+tablet (768px, nunca testado antes), validação de formulário, rate
+limit de login. **Tudo aprovado no comportamento.**
+
+**❌ REPROVADO por ausência, bloqueante antes da F5:** as duas lógicas
+mais sensíveis do sistema — **escopo multi-tenant**
+(`reportingScope.ts`/`tenantScope.ts`) e **conciliação financeira**
+(`paymentsService.ts`) — **não têm nenhum teste automatizado**. Funcionam
+hoje porque a Íris testou na mão; nada no CI pegaria uma regressão
+amanhã. A partir da F5 um bug nessas duas áreas é dinheiro real, não
+dado sintético.
+
+**Achado operacional**: o dado sintético (`db:seed:demo`, ~11 mil
+sessões) **sumiu ou nunca persistiu em produção** — confirmado com
+consulta simples, produção só tem o seed base. Precisa rodar de novo.
+
+E2E automatizado é só 1 smoke test — dívida real, mas não bloqueante.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
@@ -412,6 +435,8 @@ commit de contrato) acionados em paralelo.
   Playwright contra mocks MSW fiéis ao contrato — typecheck/lint/testes/
   build limpos, mas **ainda não testado contra a API real** (sem
   Docker/Postgres no ambiente da Lyra, mesma limitação recorrente).
-  **Pendência de produto:** não existe endpoint `/api/admin/operators` —
-  o campo `operatorId` no formulário de site/tarifa é texto livre para o
-  ADMIN, ruim de usar; decidir se vale criar a rota de listagem.
+  **Pendência de produto (atualizada 17/09, achado pela Íris):** o
+  endpoint `/api/admin/operators` **já existe** (foi implementado no
+  módulo de retaguarda) — o que falta é só trocar o campo de texto livre
+  do formulário de site/tarifa por um `<select>` de verdade consumindo
+  essa rota. UX ruim, não é mais um endpoint faltando.
