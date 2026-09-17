@@ -215,6 +215,59 @@ export interface CreateTariffInput {
 export type UpdateTariffInput = Partial<Omit<CreateTariffInput, "operatorId">> & { active?: boolean }
 
 // ---------------------------------------------------------------------------
+// TariffAssignment — vincula uma Tariff a um site/charge point/conector (ou
+// ao operador inteiro). `resolveActiveTariff` (backend, ocpp/tariffResolution.ts)
+// desempata por priority > especificidade do scope (CONNECTOR > CHARGE_POINT
+// > SITE > OPERATOR) > createdAt mais recente.
+// ---------------------------------------------------------------------------
+
+export const TARIFF_ASSIGNMENT_SCOPES = ["CONNECTOR", "CHARGE_POINT", "SITE", "OPERATOR"] as const
+export type TariffAssignmentScope = (typeof TARIFF_ASSIGNMENT_SCOPES)[number]
+
+export interface TariffAssignment {
+  id: string
+  operatorId: string
+  tariffId: string
+  scope: TariffAssignmentScope
+  connectorId: string | null
+  chargePointId: string | null
+  siteId: string | null
+  priority: number
+  validFrom: string
+  validTo: string | null
+  createdAt: string
+  updatedAt: string
+  /** Presente na listagem/detalhe — join leve, só o essencial para exibir. */
+  tariff?: Pick<Tariff, "id" | "name" | "model">
+}
+
+/**
+ * `scope` dita qual dos três campos abaixo é obrigatório — os outros dois
+ * têm que ficar ausentes (validado pelo backend via Zod `superRefine`):
+ * CONNECTOR -> `connectorId`, CHARGE_POINT -> `chargePointId`,
+ * SITE -> `siteId`, OPERATOR -> nenhum.
+ */
+export interface CreateTariffAssignmentInput {
+  operatorId?: string
+  tariffId: string
+  scope: TariffAssignmentScope
+  connectorId?: string
+  chargePointId?: string
+  siteId?: string
+  priority?: number
+  validFrom?: string
+  validTo?: string
+}
+
+/** `scope`/`connectorId`/`chargePointId`/`siteId` são imutáveis após criados — só reapontar a tarifa, reordenar prioridade ou ajustar a janela de validade. */
+export interface UpdateTariffAssignmentInput {
+  tariffId?: string
+  priority?: number
+  validFrom?: string
+  validTo?: string | null
+}
+
+// ---------------------------------------------------------------------------
 // AuthToken (RFID/app) — só ADMIN, ver authTokens.routes.ts
 // ---------------------------------------------------------------------------
 
