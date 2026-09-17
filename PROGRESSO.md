@@ -372,6 +372,39 @@ consulta simples, produção só tem o seed base. Precisa rodar de novo.
 
 E2E automatizado é só 1 smoke test — dívida real, mas não bloqueante.
 
+## 🎉 Marco: primeiro handshake OCPP real em produção — 2026-09-17
+
+Depois de criar os 3 serviços que faltavam no EasyPanel
+(`ocpp-gateway`/`worker`/`simulador`) e corrigir uma sequência de
+problemas de configuração (ver seção abaixo), o simulador de charge
+point (`vcp-prod-01`) **conectou de verdade no gateway OCPP em
+produção**: autenticou via Basic Auth, mandou `BootNotification`.
+Confirmado via API real: `GET /api/admin/charge-points` mostra
+`lastSeenAt` preenchido; `GET /api/admin/dashboard/live` mostra
+`chargePoints.online: 1`. **Primeira prova end-to-end de todo o sistema
+funcionando junto** (banco + gateway + API + dashboard) — tudo que
+existia até aqui só tinha sido validado em partes isoladas.
+
+**Problemas reais encontrados e corrigidos nesse processo** (documentados
+em detalhe para não se repetirem):
+1. Novo serviço criado com método de build "Nixpacks" em vez de
+   "Dockerfile" → `NODE_ENV=production` ligado antes da instalação fez o
+   `npm ci` pular dependências de dev, `tsc: not found`. Corrigido:
+   método de build = Dockerfile.
+2. EasyPanel **não permite sobrescrever o comando de start** quando o
+   método é "Dockerfile" (esse campo só existe para Nixpacks/Buildpacks)
+   — o `ocpp-gateway` ficou rodando o entrypoint da API. Corrigido:
+   `backend/Dockerfile.ocpp` e `backend/Dockerfile.worker` criados
+   (idênticos ao principal, só muda o `CMD`), cada serviço aponta pro
+   arquivo certo no campo "Arquivo".
+3. Simulador precisa da env `PASSWORD` pra autenticar (Basic Auth) —
+   não estava no checklist original, adicionado.
+4. IDs "amigáveis" do seed base (`seed-site-matriz`) são rejeitados pela
+   validação `.cuid()` dos formulários — contornado criando um site novo
+   pelo próprio painel admin (ver bug registrado em memória).
+
+`docs/DEPLOY-EASYPANEL.md` atualizado com todos os 4 pontos acima.
+
 ## F4 entregue (Vega) — 2026-09-17
 
 **Sessão de recarga cobrando da carteira, sem Cielo, publicada no `main`**
