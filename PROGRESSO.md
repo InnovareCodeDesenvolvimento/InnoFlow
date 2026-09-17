@@ -535,6 +535,46 @@ do dono: além de robusto/profissional/intuitivo, o PWA precisa ser
 **bonito** — é a cara pública do produto, o motorista abre no celular na
 hora de carregar o carro.
 
+## PWA do motorista desenhado (Nova) — 2026-09-17
+
+**Decisão: um app só**, não dois — PWA vive no MESMO frontend React
+(rotas públicas `/c/:ocppIdentity[/:connectorId]` pós-QR + área
+`/app/*` autenticada como DRIVER, mais `vite-plugin-pwa`). Motivo
+decisivo: duplicar `frontend/src/types/api.ts` num segundo app
+recriaria o incidente de contrato divergente já registrado em memória.
+
+**8 rotas novas sob `/api/me/*`** (+ 1 pública) — decisão de NÃO
+generalizar as rotas admin existentes (admin escopa por `operatorId`,
+motorista por `userId`; misturar as duas dimensões num handler é
+caminho de vazamento cruzado). **Todo o núcleo da F4 é reaproveitado
+sem mudar uma linha** (`avaliarInicioSessao`, `calcularTetoReserva`,
+`walletLedger`, `finalizarSessao`, `calcularCustoSessao`). Cronos não
+precisa de nenhuma migration — índices e campos necessários já existem.
+
+**Achado de produto real**: a regra de cobrança mínima da tarifa
+precisa aparecer **antes** de iniciar a recarga, não só no recibo —
+nasceu direto do teste real de hoje (300 Wh custaria R$0,24, mas foi
+cobrado R$5,00 pelo mínimo da tarifa; mostrar isso só depois seria
+sentido como cobrança injusta).
+
+QR codifica `ocppIdentity` (não o cuid — mais curto, já é a identidade
+pública do equipamento). Um adesivo por conector quando há mais de um.
+
+**Pendências pro dono** (Nova deu recomendação clara em todas):
+1. Domínio do QR — recomendação: mesmo host do painel (`/c/...`),
+   decidir ANTES de imprimir o primeiro adesivo (QR colado é imutável
+   na prática).
+2. Layout do adesivo — recomendação: `ocppIdentity` impresso ao lado
+   do QR + 1 adesivo por conector.
+3. Texto de "sem saldo" — se quer expor contato do operador na tela de
+   carteira (exigiria 1 migration, único ponto do PWA que precisaria).
+4. Confirmar que scanner in-app fica pra fase 2 (fase 1 = câmera
+   nativa do celular + digitação manual).
+
+**Plano**: Vega P0 (commit de contrato, bloqueia tudo) → P1a (Vega,
+backend `/api/me/*`) ‖ P1b/P1c (Lyra, PWA setup + telas) → P2 (Íris,
+teste real) → P3 (polimento visual/performance medido, não estimado).
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
