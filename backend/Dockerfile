@@ -43,4 +43,17 @@ COPY --from=builder /app/src ./src
 
 # Sobrescrito por `command:` em cada serviço do docker-compose.yml
 # (start:api / start:ocpp / start:worker).
-CMD ["node", "dist/entrypoints/api.js"]
+#
+# `npx prisma migrate deploy &&` — achado real em produção, 17/09/2026: as
+# migrations nunca rodavam sozinhas no deploy (só existia o passo manual
+# documentado em docs/DEPLOY-EASYPANEL.md, "rodar no shell do App depois do
+# deploy") — já esqueceram de rodar mais de uma vez, e a última vez derrubou
+# duas rotas novas com 500 ("table does not exist") sem ninguém perceber até
+# testar ao vivo. `migrate deploy` é seguro de rodar toda vez que o container
+# sobe (idempotente: sem migration pendente, não faz nada) e seguro mesmo
+# concorrente entre os 3 serviços (api/ocpp/worker sobem ao mesmo tempo,
+# nenhuma ordem garantida entre eles) — o Prisma usa um lock consultivo no
+# Postgres, quem chega depois só espera e não reaplica nada. Copie esta
+# mesma mudança pros outros dois Dockerfiles — CI não pega divergência entre
+# eles (mesmo aviso do comentário no topo deste arquivo).
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/entrypoints/api.js"]

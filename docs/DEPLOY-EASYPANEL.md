@@ -115,18 +115,30 @@ serviço da API no seu projeto EasyPanel**; se divergir, sobrescreva a env
 `API_UPSTREAM` no serviço do frontend (não precisa rebuild, é lida em
 runtime pelo entrypoint do Nginx).
 
-A rota de sessão ao vivo (`/api/sessions/:id/stream`, SSE) já tem uma
-regra própria no `nginx.conf.template` com buffering desligado — sem isso o
-Nginx seguraria os eventos até fechar a conexão e o front nunca veria nada
-em tempo real.
+Qualquer rota SSE sob `/api/` terminada em `/events` (hoje: `/api/admin/events`,
+`/api/me/events`) já tem uma regra genérica no `nginx.conf.template` com
+buffering desligado e timeout longo — sem isso o Nginx seguraria os eventos
+até fechar a conexão e o front nunca veria nada em tempo real. Achado real
+17/09/2026: o bloco genérico de `/api/` usava `location ^~ /api/`, que faz o
+Nginx pular TODA checagem de regex — mesmo com a rota certa, o bloco SSE
+nunca seria alcançado. Corrigido; não reintroduza `^~` ali sem entender essa
+consequência (comentário detalhado no próprio arquivo).
 
-## 2. Rodar a migration (uma vez, antes do primeiro boot valer a pena)
+## 2. Migration (automática desde 17/09/2026 — não precisa mais rodar na mão)
 
-No shell do App `api` (ou via "Run command" do EasyPanel), depois do primeiro
-deploy:
+**Histórico do problema que isto corrige**: o passo de migration era manual
+(rodar no shell do App depois do deploy) — já esqueceu de rodar mais de uma
+vez neste projeto, e a última vez derrubou rotas novas em produção com 500
+("table does not exist") sem ninguém perceber até testar ao vivo. Agora os 3
+`CMD` dos Dockerfiles (`Dockerfile`/`Dockerfile.ocpp`/`Dockerfile.worker`)
+rodam `npx prisma migrate deploy` automaticamente antes de subir o processo
+— seguro mesmo com os 3 serviços subindo ao mesmo tempo (lock consultivo do
+Prisma no Postgres, quem chega depois só espera e não reaplica nada).
+
+Ainda assim, o seed **não** roda sozinho (é dado de teste, não faz sentido em
+todo boot) — rodar manualmente só quando quiser popular dados de teste:
 
 ```sh
-npx prisma migrate deploy
 npm run prisma:seed        # opcional — cria dados de teste (operator, site,
                             # charge point CP-INNOELEKTRON-001 com 1 conector
                             # DC CCS2 + 1 AC Tipo 2, tarifa com idle fee)

@@ -23,10 +23,13 @@ import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
 const AUDITABLE_LOGIN_ROLES = new Set<Role>(['ADMIN', 'OPERATOR'])
 
 function requestMeta(req: Request) {
+  // `req.id` do pino-http é número, não string — ver mesmo fix em
+  // `api/middleware/auditTrail.ts` (achado real em produção, 17/09/2026).
+  const rawId = (req as { id?: string | number }).id
   return {
     ipAddress: req.ip ?? null,
     userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
-    requestId: (req as { id?: string }).id ?? null,
+    requestId: rawId != null ? String(rawId) : null,
   }
 }
 

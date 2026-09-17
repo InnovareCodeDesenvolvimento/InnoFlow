@@ -167,7 +167,14 @@ async function recordAuditEntry(req: Request, res: Response): Promise<void> {
     path: pathname,
     ipAddress: req.ip ?? null,
     userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
-    requestId: (req as { id?: string }).id ?? null,
+    // BUG REAL corrigido 17/09/2026, achado em produção: `req.id` do
+    // pino-http é NÚMERO (contador incremental), não string — a asserção de
+    // tipo aqui mentia pro TypeScript. `AuditLog.requestId` é `String?` no
+    // Prisma, então todo INSERT com `req.id` numérico falhava com
+    // `PrismaClientValidationError` (fire-and-forget, nunca quebrava a
+    // resposta ao cliente, mas NENHUMA linha de auditoria estava sendo
+    // gravada até este fix).
+    requestId: (req as { id?: string | number }).id != null ? String((req as { id?: string | number }).id) : null,
     correlationId: described?.correlationId ?? null,
     changes,
   })
