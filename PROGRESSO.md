@@ -405,6 +405,13 @@ em detalhe para não se repetirem):
 
 `docs/DEPLOY-EASYPANEL.md` atualizado com todos os 4 pontos acima.
 
+**Gap real descoberto ao tentar testar uma sessão completa**: não existe
+rota admin nem tela para vincular uma `Tariff` a um site/charge-point/
+connector (`TariffAssignment`) — só a tabela `Tariff` em si tem CRUD. Um
+carregador cadastrado pelo fluxo normal do admin fica sem tarifa, e a
+sessão falharia. Bloqueia onboarding real de carregador sem acesso direto
+ao banco. Prioridade média-alta para o próximo ciclo.
+
 ## F4 entregue (Vega) — 2026-09-17
 
 **Sessão de recarga cobrando da carteira, sem Cielo, publicada no `main`**
