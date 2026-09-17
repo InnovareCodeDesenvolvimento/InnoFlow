@@ -11,6 +11,37 @@ server {
     gzip_min_length 1024;
     gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
 
+    # ---- Headers de segurança (achado real: scanner externo deu nota F,
+    # 17/09/2026 — nenhum destes existia) -----------------------------------
+    # Nenhum destes depende do domínio final: são por natureza (X-Frame-
+    # Options/nosniff/Referrer-Policy/Permissions-Policy) ou HSTS é por
+    # hostname (se um dia trocar de domínio, o HSTS do domínio antigo
+    # simplesmente não se aplica ao novo — sem risco de "travar" nada).
+    # `always` força o header também em respostas de erro (404/5xx).
+    #
+    # nginx NÃO herda `add_header` do bloco pai numa location que já define
+    # o seu próprio `add_header` (gotcha clássico) — por isso estas linhas
+    # são repetidas em CADA location abaixo que já tinha `add_header`
+    # próprio (estáticos/health//), em vez de confiar em herança parcial.
+    #
+    # CSP: script-src sem 'unsafe-inline' (é a proteção real contra XSS);
+    # style-src precisa de 'unsafe-inline' (componentes React com `style=`
+    # inline) + fonts.googleapis.com (ver index.html, Inter via <link>);
+    # font-src libera fonts.gstatic.com (onde o arquivo da fonte realmente
+    # baixa). connect-src só 'self' — API e SSE são mesma origem, sem CORS
+    # externo. Permissions-Policy desliga geolocation/camera/microphone: a
+    # app não usa nenhuma (o scanner de QR é a câmera NATIVA do celular,
+    # fora do navegador — se um dia existir scanner DENTRO do app, câmera
+    # precisa ser liberada aqui). Não foi possível testar contra nginx real
+    # neste ambiente (sem Docker) — conferir o console do navegador por
+    # violação de CSP depois do primeiro deploy.
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+
     # ---- Qualquer stream SSE sob /api/ — buffering OFF, timeout longo ----
     # Genérico por DESENHO: casa qualquer endpoint que termine em "/events"
     # dentro de /api/ (ex.: /api/admin/events, /api/me/events, e o que vier
@@ -48,6 +79,15 @@ server {
         # (CDN/EasyPanel) que também respeite este header, ele desliga
         # buffering ali também, mesmo sem replicar esta location inteira.
         add_header X-Accel-Buffering "no" always;
+        # Repetido aqui por causa do gotcha de herança do `add_header`
+        # explicado no topo do arquivo — esta location já define o seu
+        # próprio `add_header` (acima), então NÃO herda os do server.
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 
     # ---- API na MESMA ORIGEM ----
@@ -73,19 +113,41 @@ server {
         proxy_read_timeout 30s;
     }
 
+    # Mesmo gotcha de herança do `add_header` (ver comentário no topo do
+    # arquivo) — as 3 locations abaixo já tinham `add_header` próprio antes
+    # desta mudança, então os headers de segurança do server NÃO chegariam
+    # aqui sem repetir.
     location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
         try_files $uri =404;
     }
 
     location /health {
         return 200 "ok";
         add_header Content-Type text/plain;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 
     location / {
         try_files $uri $uri/ /index.html;
         add_header Cache-Control "no-cache";
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 }
