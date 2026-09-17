@@ -173,6 +173,29 @@ enum OcppMessageType {
   CALL_ERROR
 }
 
+// Log de auditoria (ADMIN-only) — ver desenho completo da Nova em
+// .claude/agent-memory/nova/decisoes-audit-log.md. AuditAction cobre
+// mutação genérica (CREATE/UPDATE/DELETE), casos com semântica própria
+// (REMOTE_COMMAND grava intenção, não resultado; WALLET_ADJUSTMENT é
+// fail-closed dentro da transação do WalletEntry) e autenticação/extração.
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  REMOTE_COMMAND
+  WALLET_ADJUSTMENT
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  EXPORT
+  OTHER // rota não mapeada ainda gera linha (nunca silêncio) — decisão da Nova
+}
+
+enum AuditOutcome {
+  SUCCESS
+  DENIED
+  FAILED
+}
+
 // ------------------------------------------------------------
 // Multi-tenant: Operator / Site
 // ------------------------------------------------------------
@@ -814,4 +837,76 @@ model WebhookEvent {
 
   @@unique([provider, externalId, changeType])
   @@index([paymentIntentId])
+}
+
+// ------------------------------------------------------------
+// Auditoria (ADMIN-only)
+// ------------------------------------------------------------
+//
+// Desenho completo: .claude/agent-memory/nova/decisoes-audit-log.md
+// (Nova, 17/09/2026). Decisões que este model já reflete — não reabrir sem
+// motivo novo:
+// - SEM particionamento (volume 3 ordens de magnitude menor que MeterSample/
+//   OcppMessage; gatilho pra reconsiderar: >20M linhas ou p95 >800ms).
+// - Append-only por trigger no mesmo padrão de WalletEntry, MAS com DELETE
+//   liberado para linhas mais antigas que o piso de retenção (24 meses) —
+//   ver migration.sql. UPDATE é bloqueado sempre.
+// - `changes` é DIFF por allowlist de campos por entidade, nunca req.body
+//   cru e nunca segredo (password/hash/token) — a allowlist vive no código
+//   do Vega, não no banco.
+// - Campos de ator (actorUserId/actorRole/actorEmail/actorName/
+//   actorOperatorId) e targetOperatorId são SNAPSHOT histórico, sem FK.
+//   Motivo: a linha precisa sobreviver a um User apagado/anonimizado (LGPD)
+//   ou a mudança de role/operador depois do fato — uma FK obrigaria manter
+//   o registro pai vivo para sempre, o que contradiz o propósito do log.
+model AuditLog {
+  id String @id @default(cuid())
+
+  occurredAt DateTime @default(now()) @db.Timestamptz(3)
+
+  // Ator — snapshot no momento do evento, sem FK (ver comentário acima).
+  // userId/role/email/name são NOT NULL de propósito (Nova, §1.1): todo
+  // caminho que gera uma linha de auditoria já tem um ator autenticado
+  // conhecido (LOGIN_FAILED só loga quando o e-mail já é de uma conta
+  // existente — nunca tentativa de e-mail desconhecido). Só operatorId é
+  // opcional (ADMIN não tem operador próprio).
+  actorUserId     String
+  actorRole       Role
+  actorEmail      String
+  actorName       String
+  actorOperatorId String?
+
+  action       AuditAction
+  actionDetail String? // texto livre curto, ex.: "ajuste manual de saldo"
+  outcome      AuditOutcome
+  httpStatus   Int // toda linha nasce de uma requisição HTTP (Nova, §1.1)
+
+  entityType String? // ex.: "Tariff", "ChargePoint", "Wallet"
+  entityId   String?
+
+  // Operador afetado pela ação — também snapshot, sem FK (mesmo motivo).
+  targetOperatorId String?
+
+  method String // verbo HTTP — NOT NULL, mesmo motivo do httpStatus acima
+  path   String // rota, ex.: "/api/admin/drivers/:id/wallet"
+
+  ipAddress String?
+  userAgent String?
+
+  requestId     String? // correlação com log de aplicação/proxy
+  correlationId String? // correlação com OcppMessage, quando action=REMOTE_COMMAND
+
+  // DIFF apenas dos campos alterados (allowlist por entidade) — NUNCA
+  // snapshot completo, NUNCA segredo. Ver comentário do model.
+  changes Json?
+  // Índice PARCIAL (occurredAt) WHERE outcome <> 'SUCCESS' — Prisma não tem
+  // DSL para WHERE em índice normal (só em @@unique parcial via migration
+  // hand-escrita, mesma convenção dos ux_* já existentes neste projeto).
+  // Criado só no migration.sql, ver ix_audit_log_non_success.
+
+  @@index([occurredAt(sort: Desc)])
+  @@index([actorUserId, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([targetOperatorId, occurredAt])
 }
