@@ -72,7 +72,18 @@ export async function sendCommand(
   try {
     await subscriber.subscribe(replyChannel)
 
-    const result = await new Promise<unknown>((resolve, reject) => {
+    // BUG REAL corrigido 17/09/2026: a versão anterior dava `await` nesta
+    // Promise ANTES de publicar o comando — ou seja, ficava esperando uma
+    // resposta a uma pergunta que ainda não tinha sido feita. Resultado:
+    // TODO remote-start/stop/reset/etc. estourava o timeout de 35s sempre,
+    // incondicionalmente, porque o `publish()` (a linha que de fato dispara
+    // o comando) era código morto — só rodaria depois que a Promise abaixo
+    // resolvesse, e ela só resolve em reação a uma resposta que depende
+    // desse mesmo publish já ter acontecido. Confirmado em produção:
+    // OcppCommandTimeoutError em 100% das tentativas, mesmo com o charge
+    // point conectado e saudável. Ordem certa: registra o listener (sem
+    // aguardar), publica, só DEPOIS aguarda a resposta.
+    const resultPromise = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new OcppCommandTimeoutError(`Timeout aguardando resposta do charge point ${chargePointId} para ${method}.`))
       }, timeoutMs)
@@ -94,7 +105,7 @@ export async function sendCommand(
     const message: CommandMessage = { correlationId, method, params }
     await getPublisher().publish(`${CMD_CHANNEL_PREFIX}${chargePointId}`, JSON.stringify(message))
 
-    return await result
+    return await resultPromise
   } finally {
     subscriber.disconnect()
   }
@@ -127,7 +138,18 @@ export function startCommandListener(): void {
 async function handleIncomingCommand(channel: string, message: string, replyPublisher: Redis): Promise<void> {
   const chargePointId = channel.slice(CMD_CHANNEL_PREFIX.length)
   const client = getConnection(chargePointId)
-  if (!client) return // este nó não tem esse charge point conectado — outro nó (ou nenhum) responde
+  // Diagnóstico real, 17/09/2026: um remote-start ficou 35s sem NENHUM
+  // rastro no log do gateway (nem "recebido", nem "sem conexão local", nem
+  // erro) — impossível saber se o pmessage chegou e foi ignorado (nó errado,
+  // comportamento esperado com N>1 réplicas) ou se nunca chegou. Log
+  // explícito nos dois ramos a partir de agora, mesmo o "ignorado" — em N=1
+  // réplica (o caso real hoje) isso não deveria nunca disparar, então vale
+  // saber se dispara.
+  if (!client) {
+    logger.warn({ chargePointId, channel }, '[ocpp][commands] comando recebido mas sem conexão local para este charge point')
+    return
+  }
+  logger.info({ chargePointId, channel }, '[ocpp][commands] comando recebido, conexão local encontrada')
 
   let payload: CommandMessage
   try {
@@ -140,10 +162,13 @@ async function handleIncomingCommand(channel: string, message: string, replyPubl
   const replyChannel = `${REPLY_CHANNEL_PREFIX}${payload.correlationId}`
 
   try {
+    logger.info({ chargePointId, method: payload.method, correlationId: payload.correlationId }, '[ocpp][commands] enviando ao charge point')
     const result = await client.call(payload.method, payload.params ?? {}, { callTimeoutMs: DEFAULT_TIMEOUT_MS })
+    logger.info({ chargePointId, method: payload.method, correlationId: payload.correlationId, result }, '[ocpp][commands] charge point respondeu')
     const reply: CommandReply = { correlationId: payload.correlationId, ok: true, result }
     await replyPublisher.publish(replyChannel, JSON.stringify(reply))
   } catch (err) {
+    logger.error({ err, chargePointId, method: payload.method, correlationId: payload.correlationId }, '[ocpp][commands] falha ao enviar/receber do charge point')
     const reply: CommandReply = { correlationId: payload.correlationId, ok: false, error: err instanceof Error ? err.message : String(err) }
     await replyPublisher.publish(replyChannel, JSON.stringify(reply))
   }
