@@ -54,7 +54,7 @@ export default function ConnectorsPage() {
         description="Cada tomada de um ponto de recarga — tipo, potência e status."
         icon={Plug}
         actions={
-          <Button onClick={openCreate}>
+          <Button className="btn-glow-primary" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo conector
           </Button>

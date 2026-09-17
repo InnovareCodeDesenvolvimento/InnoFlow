@@ -124,7 +124,7 @@ export default function SessoesPage() {
             </TableHeader>
             <TableBody>
               {data.items.map((session) => (
-                <TableRow key={session.id} className="cursor-pointer" onClick={() => setSelectedSessionId(session.id)}>
+                <TableRow key={session.id} className="pressable cursor-pointer" onClick={() => setSelectedSessionId(session.id)}>
                   <TableCell>{formatDateTime(session.startedAt)}</TableCell>
                   <TableCell className="font-semibold text-ink">{session.siteName}</TableCell>
                   <TableCell>

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 
 function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="w-full overflow-x-auto rounded-xl border border-border-subtle">
+    <div className="table-premium w-full overflow-x-auto rounded-xl border border-border-subtle">
       <table className={cn("w-full min-w-[640px] border-collapse text-sm", className)} {...props} />
     </div>
   )

@@ -61,7 +61,7 @@ export default function AuthTokensPage() {
         description="RFID e tokens de app usados para iniciar recarga — identidade de rede, válida em qualquer operador."
         icon={KeyRound}
         actions={
-          <Button onClick={openCreate}>
+          <Button className="btn-glow-primary" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo token
           </Button>

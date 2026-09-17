@@ -54,7 +54,7 @@ export default function ChargePointsPage() {
         description="Carregadores OCPP 1.6-J — reinicie, destrave ou altere disponibilidade remotamente."
         icon={Zap}
         actions={
-          <Button onClick={openCreate}>
+          <Button className="btn-glow-primary" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo ponto de recarga
           </Button>

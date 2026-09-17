@@ -15,6 +15,11 @@ export function MetricCard({
   formatValue = (v) => String(v),
   /** Para métricas onde "subir" é ruim (nenhuma das 6 do dashboard hoje, mas deixa pronto). */
   invertDeltaColor = false,
+  /** Destaque visual (gradiente sutil no valor) — reservar pra 1 métrica "hero" por
+      tela (ex.: Faturamento no Dashboard), nunca todas — ver guia de intensidade em `index.css`. */
+  highlight = false,
+  /** Ordem de entrada (stagger) quando a métrica faz parte de uma grade/lista — index 0-based. */
+  index = 0,
 }: {
   label: string
   value: number
@@ -22,14 +27,17 @@ export function MetricCard({
   icon?: LucideIcon
   formatValue?: (value: number) => string
   invertDeltaColor?: boolean
+  highlight?: boolean
+  index?: number
 }) {
   const isNew = deltaPct === null && value !== 0
   const isFlat = deltaPct === null && value === 0
   const isPositive = deltaPct !== null && deltaPct >= 0
   const deltaIsGood = invertDeltaColor ? !isPositive : isPositive
+  const stagger = Math.min(index + 1, 4)
 
   return (
-    <div className="card-elevated p-5">
+    <div className={`card-premium animate-fade-in-up stagger-${stagger} p-5`}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">{label}</p>
         {Icon && (
@@ -38,7 +46,14 @@ export function MetricCard({
           </span>
         )}
       </div>
-      <p className="mt-2 break-words text-lg font-black leading-tight tracking-tight tabular-nums text-ink sm:text-xl xl:text-2xl">{formatValue(value)}</p>
+      <p
+        className={cn(
+          "mt-2 break-words text-lg font-black leading-tight tracking-tight tabular-nums sm:text-xl xl:text-2xl",
+          highlight ? "text-gradient-brand" : "text-ink",
+        )}
+      >
+        {formatValue(value)}
+      </p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs font-semibold">
         {isFlat && <span className="text-ink-subtle">— sem variação</span>}
         {isNew && (

@@ -42,13 +42,13 @@ export default function FinanceiroPage() {
 
       {!isLoading && !isError && data && (
         <>
-          <Card>
+          <Card className="card-premium animate-fade-in-up">
             <CardHeader>
               <CardTitle>Resumo do período</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y divide-border-subtle">
-                <Row label="Faturamento" value={data.reconciliation.revenueCents} />
+                <Row label="Faturamento" value={data.reconciliation.revenueCents} highlight />
                 <Row label="Recebido em cartão" value={data.reconciliation.cardCapturedCents} />
                 <Row label="Consumido de carteira" value={data.reconciliation.walletDebitCents} />
                 {data.reconciliation.walletTopupPixCents !== null && (
@@ -71,14 +71,24 @@ export default function FinanceiroPage() {
   )
 }
 
-function Row({ label, value, hint, tone }: { label: string; value: number; hint?: string; tone?: "warning" | "neutral" }) {
+function Row({ label, value, hint, tone, highlight }: { label: string; value: number; hint?: string; tone?: "warning" | "neutral"; highlight?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3">
       <div>
         <dt className="font-medium text-ink-soft">{label}</dt>
         {hint && <p className="mt-0.5 text-xs text-ink-subtle">{hint}</p>}
       </div>
-      <dd className={tone === "warning" ? "font-black tabular-nums text-warning-700" : "font-black tabular-nums text-ink"}>{formatCents(value)}</dd>
+      <dd
+        className={
+          highlight
+            ? "text-gradient-brand text-lg font-black tabular-nums"
+            : tone === "warning"
+              ? "font-black tabular-nums text-warning-700"
+              : "font-black tabular-nums text-ink"
+        }
+      >
+        {formatCents(value)}
+      </dd>
     </div>
   )
 }

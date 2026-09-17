@@ -53,7 +53,7 @@ export default function SitesPage() {
         description="Endereços físicos onde ficam os pontos de recarga."
         icon={MapPin}
         actions={
-          <Button onClick={openCreate}>
+          <Button className="btn-glow-primary" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo site
           </Button>

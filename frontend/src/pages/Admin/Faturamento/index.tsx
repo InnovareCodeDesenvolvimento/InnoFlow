@@ -77,10 +77,10 @@ export default function FaturamentoPage() {
 
       {!isLoading && !isError && data && (
         <>
-          <Card>
+          <Card className="card-premium animate-fade-in-up">
             <CardHeader>
               <CardTitle>
-                Faturamento total: <span className="tabular-nums">{formatCents(data.totals.revenueCents)}</span>
+                Faturamento total: <span className="text-gradient-brand tabular-nums">{formatCents(data.totals.revenueCents)}</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -92,7 +92,7 @@ export default function FaturamentoPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-premium">
             <CardHeader>
               <CardTitle>Detalhamento por {BREAKDOWN_OPTIONS.find((o) => o.value === breakdown)?.label.toLowerCase()}</CardTitle>
             </CardHeader>

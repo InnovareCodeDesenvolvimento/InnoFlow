@@ -211,10 +211,30 @@
  * Deliberadamente FORA de @layer: a ordem de declaração no arquivo já garante
  * prioridade sobre `.card-elevated`/utilities do Tailwind sem precisar de
  * `!important` — mesmo raciocínio do bloco de `prefers-reduced-motion` logo
- * abaixo. Aplicado só nas telas do PWA/Auth do motorista via `className`;
- * não mexe em Button/Card/Badge (compartilhados com o Admin) — a REUTILIZAÇÃO
- * é via estas classes utilitárias somadas ao `className`, nunca editando os
- * componentes base.
+ * abaixo.
+ *
+ * ---- REGRA DE APLICAÇÃO: className nas telas, não editar o componente base
+ * `Card`/`Button`/`Badge`/`EmptyState`/`ErrorState`/`Skeleton`/`Pagination`/
+ * `ConfirmDialog`/`Dialog` (em `components/ui/`) são compartilhados entre PWA
+ * E Admin (`Card` sozinho é importado por 5 telas do PWA + Dashboard/
+ * Financeiro/Faturamento do Admin). Por isso a regra vale nos dois produtos:
+ * aplicar estas classes via `className` em cada tela, NUNCA mudar a classe
+ * default desses componentes base. Motivo verificado, não hipotético: como
+ * este bloco fica fora de `@layer` (então sai DEPOIS do bucket de utilities
+ * do Tailwind na cascata compilada), se `.card-premium` virasse a classe
+ * default de `Card` ela ganharia de qualquer `bg-*` que uma tela passe por
+ * `className` (ex.: o card de saldo do PWA usa `bg-primary-950` — perderia
+ * pro `background-color` do `.card-premium` e o card ficaria branco). Testado
+ * raciocinando sobre a ordem de cascata do Tailwind (`@layer components` sai
+ * ANTES de `@layer utilities`, e um bloco não-layered escrito depois de
+ * `@tailwind utilities;` no arquivo sai depois dos dois).
+ *
+ * Exceção: componentes que são EXCLUSIVOS do Admin (não importados por
+ * nenhuma tela do PWA) podem ter a classe base trocada direto, sem esse
+ * risco — é o caso de `components/ui/Table.tsx`, `components/painel/
+ * PageHeader.tsx`, `components/relatorios/MetricCard.tsx` e `pages/Admin/
+ * Layout.tsx`. Confirme com um grep de import antes de decidir por esse
+ * caminho num componente novo.
  * ============================================================================
  */
 
@@ -226,6 +246,16 @@
   box-shadow:
     0 1px 2px rgb(15 23 42 / 0.04),
     0 12px 28px -16px rgb(var(--color-primary) / 0.35);
+}
+/* Só a sombra tingida, SEM `background-color`/`border-radius` — pra empilhar
+   em cima de um elemento que já tem sua própria cor de fundo por utilitário
+   (ex.: um selo `bg-primary/10`). `.card-premium` completo sobrescreveria
+   esse fundo (mesmo motivo do aviso "REGRA DE APLICAÇÃO" no topo do bloco);
+   esta variante existe justamente pra evitar precisar dele nesses casos. */
+.shadow-tinted-primary {
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 10px 20px -12px rgb(var(--color-primary) / 0.35);
 }
 .card-premium-interactive {
   /* Propriedade explícita (não o atalho `transition:`) porque várias telas
@@ -429,6 +459,20 @@
 }
 .animate-pop-in {
   animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ---- 8. Tabela densa (Admin) — sombra tingida no CONTAINER, não na linha */
+/* `components/ui/Table.tsx` é exclusivo do Admin (não é importado por
+   nenhuma tela do PWA) — por isso é o único componente-base desta lista que
+   leva a classe direto nele, sem precisar repetir via `className` em cada
+   tela. Só o wrapper (`<div>` que já faz `overflow-x-auto` — mantém o
+   scroll horizontal CONTIDO no card, nunca na página inteira) ganha a
+   sombra; a linha (`TableRow`) continua só com `hover:bg-muted/40` — data
+   densa pede mais silêncio visual por linha, não sombra em cada uma. */
+.table-premium {
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 10px 24px -18px rgb(var(--color-primary) / 0.3);
 }
 
 @media (prefers-reduced-motion: reduce) {

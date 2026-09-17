@@ -78,16 +78,16 @@ export default function DashboardPage() {
       {!isLoading && !isError && data && (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
-            <MetricCard label="Faturamento" value={data.metrics.revenueCents.value} deltaPct={data.metrics.revenueCents.deltaPct} formatValue={(v) => formatCents(v)} icon={DollarSign} />
-            <MetricCard label="Sessões" value={data.metrics.sessions.value} deltaPct={data.metrics.sessions.deltaPct} formatValue={(v) => v.toLocaleString("pt-BR")} icon={Zap} />
-            <MetricCard label="Energia" value={data.metrics.energyWh.value} deltaPct={data.metrics.energyWh.deltaPct} formatValue={(v) => formatEnergyWh(v)} icon={BatteryCharging} />
-            <MetricCard label="Ticket médio" value={data.metrics.avgTicketCents.value} deltaPct={data.metrics.avgTicketCents.deltaPct} formatValue={(v) => formatCents(v)} icon={Receipt} />
-            <MetricCard label="Taxa de sucesso" value={data.metrics.successRatePct.value} deltaPct={data.metrics.successRatePct.deltaPct} formatValue={(v) => formatPercent(v)} icon={CheckCircle2} />
-            <MetricCard label="Utilização" value={data.metrics.utilizationPct.value} deltaPct={data.metrics.utilizationPct.deltaPct} formatValue={(v) => formatPercent(v)} icon={Gauge} />
+            <MetricCard label="Faturamento" value={data.metrics.revenueCents.value} deltaPct={data.metrics.revenueCents.deltaPct} formatValue={(v) => formatCents(v)} icon={DollarSign} highlight index={0} />
+            <MetricCard label="Sessões" value={data.metrics.sessions.value} deltaPct={data.metrics.sessions.deltaPct} formatValue={(v) => v.toLocaleString("pt-BR")} icon={Zap} index={1} />
+            <MetricCard label="Energia" value={data.metrics.energyWh.value} deltaPct={data.metrics.energyWh.deltaPct} formatValue={(v) => formatEnergyWh(v)} icon={BatteryCharging} index={2} />
+            <MetricCard label="Ticket médio" value={data.metrics.avgTicketCents.value} deltaPct={data.metrics.avgTicketCents.deltaPct} formatValue={(v) => formatCents(v)} icon={Receipt} index={3} />
+            <MetricCard label="Taxa de sucesso" value={data.metrics.successRatePct.value} deltaPct={data.metrics.successRatePct.deltaPct} formatValue={(v) => formatPercent(v)} icon={CheckCircle2} index={4} />
+            <MetricCard label="Utilização" value={data.metrics.utilizationPct.value} deltaPct={data.metrics.utilizationPct.deltaPct} formatValue={(v) => formatPercent(v)} icon={Gauge} index={5} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+            <Card className="card-premium lg:col-span-2">
               <CardHeader>
                 <CardTitle>Faturamento por dia</CardTitle>
               </CardHeader>
@@ -99,7 +99,7 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-            <Card>
+            <Card className="card-premium">
               <CardHeader>
                 <CardTitle>Cartão × Carteira</CardTitle>
               </CardHeader>
@@ -110,7 +110,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
+            <Card className="card-premium">
               <CardHeader>
                 <CardTitle>Top 5 eletropostos</CardTitle>
                 <CardDescription>Por faturamento no período</CardDescription>
@@ -142,7 +142,7 @@ export default function DashboardPage() {
             </Card>
 
             {isAdmin && data.topOperators ? (
-              <Card>
+              <Card className="card-premium">
                 <CardHeader>
                   <CardTitle>Ranking por operador</CardTitle>
                   <CardDescription>Só visível para administradores da plataforma</CardDescription>
@@ -173,7 +173,7 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             ) : (
-              <Card>
+              <Card className="card-premium">
                 <CardHeader>
                   <CardTitle>Movimento de hoje</CardTitle>
                   <CardDescription>Por eletroposto</CardDescription>
@@ -207,7 +207,7 @@ export default function DashboardPage() {
           </div>
 
           {isAdmin && (
-            <Card>
+            <Card className="card-premium">
               <CardHeader>
                 <CardTitle>Movimento de hoje</CardTitle>
                 <CardDescription>Por eletroposto</CardDescription>
@@ -243,7 +243,7 @@ export default function DashboardPage() {
         </>
       )}
 
-      <Card>
+      <Card className="card-premium">
         <CardHeader>
           <CardTitle>Ao vivo</CardTitle>
           <CardDescription>Sessões ativas e status dos carregadores — atualiza a cada 15 segundos</CardDescription>

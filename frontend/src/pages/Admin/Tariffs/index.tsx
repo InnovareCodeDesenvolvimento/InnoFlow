@@ -61,7 +61,7 @@ export default function TariffsPage() {
         description="Preço cobrado do motorista — por kWh, por minuto, taxa fixa e taxa de ociosidade."
         icon={Wallet}
         actions={
-          <Button onClick={openCreate}>
+          <Button className="btn-glow-primary" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Nova tarifa
           </Button>

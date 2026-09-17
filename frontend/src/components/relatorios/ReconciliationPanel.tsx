@@ -13,7 +13,7 @@ export function ReconciliationPanel({ reconciliation }: { reconciliation: Paymen
   const isBalanced = reconciliation.differenceCents === 0
 
   return (
-    <Card className={cn(!isBalanced && "border-danger-100 ring-1 ring-danger-100")}>
+    <Card className={cn("animate-fade-in-up", isBalanced ? "card-premium" : "border-danger-100 ring-1 ring-danger-100")}>
       <CardHeader>
         <CardTitle>Conciliação financeira</CardTitle>
         <CardDescription>faturamento = capturas de cartão + débitos de carteira + dívida aberta</CardDescription>

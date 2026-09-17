@@ -103,7 +103,7 @@ function Field({ label, value, compact, strong }: { label: string; value: string
   return (
     <div>
       <dt className="text-[11px] font-bold uppercase tracking-wide text-ink-softer">{label}</dt>
-      <dd className={compact ? (strong ? "font-black text-ink" : "text-ink-soft") : "font-semibold text-ink"}>{value}</dd>
+      <dd className={compact ? (strong ? "text-gradient-brand text-base font-black" : "text-ink-soft") : "font-semibold text-ink"}>{value}</dd>
     </div>
   )
 }

@@ -17,10 +17,10 @@ export function PageHeader({
   className?: string
 }) {
   return (
-    <header className={cn("flex items-start gap-3", className)}>
+    <header className={cn("animate-fade-in-up flex items-start gap-3", className)}>
       {Icon && (
         <span
-          className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary sm:flex"
+          className="shadow-tinted-primary hidden h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary sm:flex"
           aria-hidden="true"
         >
           <Icon className="h-5 w-5" />
