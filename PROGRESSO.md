@@ -405,6 +405,20 @@ em detalhe para não se repetirem):
 
 `docs/DEPLOY-EASYPANEL.md` atualizado com todos os 4 pontos acima.
 
+**🔴 Bug crítico real encontrado e corrigido**: o primeiro `RemoteStartTransaction`
+de verdade do projeto (disparado manualmente pelo Atlas via API, testando
+com o dono) **nunca chegou ao carregador**. Causa: `sendCommand()`
+(`backend/src/ocpp/commands.ts`) dava `await` na resposta **antes** de
+publicar o comando no Redis — ordem invertida, `publish()` era código
+inalcançável. Todo comando remoto (iniciar, parar, reset, destravar)
+estourava o timeout de 35s **sempre**, incondicionalmente, mesmo com o
+carregador conectado e saudável. Só apareceu porque foi a primeira vez
+que alguém testou um comando remoto de ponta a ponta contra infraestrutura
+real — nenhum teste automatizado (nem os novos da F4) exercitava essa
+função contra um transporte de verdade. Corrigido e publicado; log
+explícito adicionado no lado do gateway para o próximo problema desse
+tipo ser diagnosticável direto pelo log, sem precisar ler código.
+
 **Gap real descoberto ao tentar testar uma sessão completa**: não existe
 rota admin nem tela para vincular uma `Tariff` a um site/charge-point/
 connector (`TariffAssignment`) — só a tabela `Tariff` em si tem CRUD. Um
