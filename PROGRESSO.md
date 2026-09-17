@@ -463,11 +463,19 @@ e energia subindo em tempo real no dashboard (0 → 300 Wh) → tentativa de
 mas **desconecta e reconecta em vez de completar o protocolo** (nunca
 manda o `StopTransaction` final com a leitura do medidor). A sessão de
 teste ficou presa em `STARTED` — não é bug nosso, é o simulador não
-completando o fluxo. Mas revelou um **gap real do sistema**: não existe
-reconciliação para quando um charge point reconecta com uma sessão ainda
-aberta — em produção real isso também aconteceria com queda de energia,
-mau contato, reinício de firmware. Registrado em memória para quando a
-robustez de produção da sessão for revisitada.
+completando o fluxo. Mas revelou um gap real do sistema, **corrigido no
+mesmo dia**: não existia reconciliação para quando um charge point
+reconecta com uma sessão ainda aberta.
+
+**✅ Vega entregou a correção**: núcleo de "fechar sessão" extraído de
+`stopTransaction.ts` para `services/carteira/finalizarSessao.ts`
+(reusado, comportamento do `StopTransaction` real inalterado).
+`bootNotification.ts` agora verifica sessões `STARTED`/`CHARGING`/
+`FINISHING` ao reconectar e fecha cada uma usando a última `MeterSample`
+conhecida (energia zero se não houver nenhuma) — fire-and-forget, nunca
+atrasa a resposta do boot ao carregador. 3 testes de integração novos
+(ainda não executados contra Postgres real — mesma limitação de
+ambiente recorrente). No `main`.
 
 ## Preparando o simulador de charge point — 2026-09-17
 
