@@ -26,18 +26,33 @@ muda é só o comando de start. Crie 3 Apps no EasyPanel, todos apontando para
 `github.com/InnovareCode/InnoElektron`, branch `main`, **build context**
 `backend/` (o Dockerfile está em `backend/Dockerfile`):
 
-| App | Start command | Porta interna | Exposta publicamente? |
+| App | Dockerfile (campo "Arquivo") | Porta interna | Exposta publicamente? |
 |---|---|---|---|
-| `api` | `node dist/entrypoints/api.js` | 3000 | Sim (é a API REST/SSE que o frontend consome) |
-| `ocpp-gateway` | `node dist/entrypoints/ocpp.js` | 9000 | Sim, mas só para os carregadores (WebSocket) — ver nota de proxy abaixo |
-| `worker` | `node dist/entrypoints/worker.js` | — | Não, não escuta porta HTTP |
+| `api` | `Dockerfile` | 3000 | Sim (é a API REST/SSE que o frontend consome) |
+| `ocpp-gateway` | `Dockerfile.ocpp` | 9000 | Sim, mas só para os carregadores (WebSocket) — ver nota de proxy abaixo |
+| `worker` | `Dockerfile.worker` | — | Não, não escuta porta HTTP |
 
-⚠️ **Build Path obrigatório:** o Dockerfile fica em `backend/Dockerfile`,
+⚠️ **Build Path obrigatório:** os Dockerfiles ficam em `backend/`,
 **não na raiz do repositório**. Na aba **Fonte** de cada um dos 3 Apps,
 defina o **Build Path** (diretório de build) como `backend` — sem isso o
 EasyPanel procura `Dockerfile` na raiz e o build falha com `failed to read
 dockerfile: open Dockerfile: no such file or directory` (erro real visto no
 primeiro deploy, 16/09/2026).
+
+⚠️ **Método de build = Dockerfile, não Nixpacks/Buildpacks/Railpack.**
+Nixpacks tenta autodetectar Node e roda a instalação com `NODE_ENV=production`
+já ligado — isso faz o `npm ci` pular as dependências de desenvolvimento
+(incluindo o `tsc`) e o build quebra com `tsc: not found`. Selecione
+**Dockerfile** no bloco "Construção" da aba Fonte.
+
+⚠️ **Comando de start não é configurável quando o método é "Dockerfile"**
+— esse campo só aparece para Nixpacks/Buildpacks. Por isso existem **três
+Dockerfiles** em `backend/` (`Dockerfile`, `Dockerfile.ocpp`,
+`Dockerfile.worker`), idênticos exceto pelo `CMD` final — aponte o campo
+**"Arquivo"** (mesmo bloco "Construção") para o Dockerfile certo de cada
+serviço, conforme a tabela acima. Achado real em produção (17/09/2026): o
+`ocpp-gateway` ficou rodando o entrypoint da API porque esse campo não
+existia e o Dockerfile único sempre roda `api.js` por padrão.
 
 ### Variáveis de ambiente (as 3 apps precisam de TODAS — `lib/env.ts`
 valida o schema inteiro em qualquer entrypoint, mesmo o que não usa direto):

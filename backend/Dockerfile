@@ -1,6 +1,14 @@
-# Um único Dockerfile para os 3 serviços Node do backend (api, ocpp-gateway,
-# worker) — mesmo código, mesmo package.json, 3 entrypoints diferentes. O
-# docker-compose.yml da raiz escolhe qual rodar via `command:` por serviço.
+# Backend do serviço `api` — mesmo código-fonte de `Dockerfile.ocpp` e
+# `Dockerfile.worker` (3 entrypoints do mesmo package.json), só muda o CMD
+# final de cada um. No docker-compose.yml local, os 3 usam ESTE arquivo e o
+# `command:` de cada serviço escolhe o entrypoint. No EasyPanel, como o
+# método de build "Dockerfile" não permite sobrescrever o comando de start
+# pela interface, cada serviço aponta pro Dockerfile certo (`Dockerfile`,
+# `Dockerfile.ocpp` ou `Dockerfile.worker`) no campo "Arquivo" da aba Fonte —
+# achado real em produção, 17/09/2026 (o `inno-elekton-ocpp` ficou rodando o
+# entrypoint da API porque não havia como sobrescrever o CMD do Dockerfile
+# único). Editou algo aqui? Copie a mudança pros outros dois — CI não pega
+# divergência entre eles.
 FROM node:20-alpine AS builder
 # Alpine (node:20-alpine) nao vem com o binario `openssl` instalado. Sem ele,
 # a propria deteccao de versao do OpenSSL que o Prisma roda (tanto aqui no
