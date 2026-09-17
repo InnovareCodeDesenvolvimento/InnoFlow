@@ -11,32 +11,56 @@ server {
     gzip_min_length 1024;
     gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
 
-    # ---- Sessão de recarga ao vivo (SSE) — buffering OFF, timeout longo ----
-    # /api/sessions/:id/stream manda eventos incrementais; nginx com buffer
-    # ligado (padrão) segura tudo até fechar a conexão, e o front nunca vê
-    # nada em tempo real. Location mais específica vence sobre /api/ abaixo.
-    location ~ ^/api/sessions/[^/]+/stream$ {
+    # ---- Qualquer stream SSE sob /api/ — buffering OFF, timeout longo ----
+    # Genérico por DESENHO: casa qualquer endpoint que termine em "/events"
+    # dentro de /api/ (ex.: /api/admin/events, /api/me/events, e o que vier
+    # depois), em vez de travar em um nome de rota específico que pode nunca
+    # existir de verdade (era o bug anterior: regex só casava
+    # /api/sessions/:id/stream, rota que o backend nunca implementou).
+    #
+    # ATENÇÃO ao mexer aqui: esta location só é alcançada porque o bloco
+    # /api/ abaixo NÃO tem o modificador `^~`. Em nginx, `^~` no prefixo mais
+    # específico faz o motor pular TODA checagem de regex — ou seja, com
+    # `^~ /api/` (como era antes), nenhuma location `~ regex` sob /api/
+    # jamais seria avaliada, mesmo que a rota existisse no backend. Não
+    # reintroduza `^~` em /api/ sem entender essa consequência.
+    location ~ ^/api/.*/events$ {
         resolver 127.0.0.11 valid=10s ipv6=off;
         set $api_upstream ${API_UPSTREAM};
         proxy_pass $api_upstream;
         proxy_http_version 1.1;
+        # Connection vazia + http/1.1: permite keepalive de verdade com o
+        # upstream em vez de fechar a conexão a cada chunk, importante pra
+        # uma conexão SSE que fica aberta minutos/horas.
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
-        proxy_read_timeout 300s;
+        # Heartbeat do servidor (`:ping`) sai a cada ~20-25s; 600s dá margem
+        # folgada pra nunca ser cortado por inatividade de rede instável.
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
         chunked_transfer_encoding off;
+        # Segunda camada de defesa: se algum dia isto passar por OUTRO proxy
+        # (CDN/EasyPanel) que também respeite este header, ele desliga
+        # buffering ali também, mesmo sem replicar esta location inteira.
+        add_header X-Accel-Buffering "no" always;
     }
 
     # ---- API na MESMA ORIGEM ----
     # O frontend chama /api/... no próprio domínio e o nginx repassa ao
     # container da API pela rede interna do EasyPanel. Sem DNS público de
-    # subdomínio, sem CORS. `^~` impede que o regex de estáticos capture
-    # essas rotas. resolver = DNS interno do Docker, resolvido a cada
-    # requisição (nginx sobe mesmo se a API ainda estiver reiniciando).
-    location ^~ /api/ {
+    # subdomínio, sem CORS. SEM `^~` de propósito: precisamos que a location
+    # de SSE acima (regex) seja avaliada para paths sob /api/ — ver o
+    # comentário lá em cima. Confirmado que nenhuma rota do backend serve
+    # paths terminados nas extensões estáticas abaixo, então o regex de
+    # assets não tem como interceptar nada de /api/ por engano. resolver =
+    # DNS interno do Docker, resolvido a cada requisição (nginx sobe mesmo
+    # se a API ainda estiver reiniciando).
+    location /api/ {
         resolver 127.0.0.11 valid=10s ipv6=off;
         set $api_upstream ${API_UPSTREAM};
         proxy_pass $api_upstream;
