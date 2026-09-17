@@ -592,3 +592,117 @@ export interface PaymentsReportResponse {
   items: PaymentListRow[]
   meta: PaginationMeta
 }
+
+// ---------------------------------------------------------------------------
+// F4: sessão de recarga cobrando da carteira (desenho da Nova, ver
+// PROGRESSO.md §F4 desenhada). Carteira pré-paga SEM hold — sem reserva
+// antecipada por débito (proibido pela identidade de conciliação acima:
+// reservar e devolver troco abriria diferença em vermelho na tela
+// Financeiro). Débito único e atômico no StopTransaction; o que faltar vira
+// Debt (bloqueia a próxima recarga).
+// ---------------------------------------------------------------------------
+
+// ---- POST /api/admin/charge-points/:id/commands/remote-start --------------
+
+export interface RemoteStartRequest {
+  connectorId: number
+  userId: string
+}
+
+/** 202 — fire-and-forget, mesmo padrão dos outros comandos remotos (ver PROGRESSO.md §F3b). */
+export interface RemoteStartResponse {
+  correlationId: string
+  status: "PENDING"
+  /** idTag do AuthToken VIRTUAL criado para esta sessão (amarrado ao userId). */
+  idTag: string
+  walletBalanceCents: number
+  /** Teto calculado (`calcularTetoReserva`) — só informativo aqui, NÃO é reservado/debitado agora (sem hold). */
+  estimatedMaxCostCents: number
+}
+
+export type RemoteStartErrorCode =
+  | "CHARGE_POINT_NOT_FOUND"
+  | "CONNECTOR_NOT_FOUND"
+  | "USER_NOT_FOUND"
+  | "DRIVER_HAS_OPEN_DEBT"
+  | "INSUFFICIENT_BALANCE"
+  | "CONNECTOR_BUSY"
+  | "CHARGE_POINT_OFFLINE"
+
+// ---- POST /api/admin/sessions/:id/stop -------------------------------------
+
+export interface StopSessionResponse {
+  correlationId: string
+  status: "PENDING"
+}
+
+export type StopSessionErrorCode = "SESSION_NOT_FOUND" | "SESSION_NOT_ACTIVE"
+
+// ---- GET /api/admin/drivers -------------------------------------------------
+
+export interface DriverListRow {
+  id: string
+  name: string
+  /** Chave OMITIDA (nunca `null`) para OPERATOR — LGPD, mesma regra do detalhe de sessão. */
+  email?: string
+  walletBalanceCents: number
+  openDebtCents: number
+  activeSessionId: string | null
+  createdAt: string
+}
+
+export interface DriversListQuery extends PaginationParams {
+  /**
+   * OBRIGATÓRIO (mín. 3 caracteres) para OPERATOR — motorista é conta de
+   * rede, não pertence a operador, então OPERATOR nunca lista a base
+   * inteira, só busca o que está no poste dele agora. Opcional para ADMIN.
+   */
+  search?: string
+}
+
+export interface DriversListResponse {
+  items: DriverListRow[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+// ---- GET /api/admin/drivers/:id/wallet --------------------------------------
+
+export type WalletEntryType = "TOPUP_PIX" | "TOPUP_REFUND" | "CHARGE_DEBIT" | "ADJUSTMENT_CREDIT" | "ADJUSTMENT_DEBIT" | "REFUND"
+
+export interface WalletEntryRow {
+  id: string
+  type: WalletEntryType
+  /** Assinado: crédito > 0, débito < 0. */
+  amountCents: number
+  balanceAfterCents: number
+  referenceType: string | null
+  referenceId: string | null
+  description: string | null
+  createdAt: string
+}
+
+export interface DriverWalletQuery extends PaginationParams {}
+
+export interface DriverWalletResponse {
+  driverId: string
+  driverName: string
+  balanceCents: number
+  openDebtCents: number
+  entries: WalletEntryRow[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+// ---- POST /api/admin/drivers/:id/wallet/entries — ADMIN ONLY ----------------
+
+export interface WalletAdjustmentRequest {
+  /** != 0; > 0 credita, < 0 debita; |valor| <= 500000 (R$ 5.000, teto do dono). */
+  amountCents: number
+  /** Obrigatório, mín. 5 caracteres — trilha de auditoria do lançamento manual. */
+  description: string
+}
+
+export type WalletAdjustmentErrorCode = "FORBIDDEN" | "INSUFFICIENT_BALANCE"
