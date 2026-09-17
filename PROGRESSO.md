@@ -333,15 +333,15 @@ teste antes da F5 existir).
 commita os tipos de API em `frontend/src/types/api.ts` ANTES de
 implementar qualquer coisa; Lyra só começa depois desse commit existir.
 
-**Pendências que só o dono decide** (aguardando resposta):
-1. Saldo mínimo pra iniciar sessão — Nova propõe R$ 20,00.
-2. Motorista pode terminar sessão devendo (overshoot entre amostras do
-   medidor vira `Debt`, que bloqueia a próxima recarga)? Consequência
-   direta de não travar energia no carregador nesta fase.
-3. `SuspendedEVSE` (estação suspende, não o motorista) NÃO deveria contar
-   como ociosidade cobrável — Nova propõe excluir, cobrar aí seria cobrar
-   por problema nosso.
-4. Teto do crédito manual do ADMIN por lançamento — Nova propõe R$ 5.000.
+**✅ Decidido pelo dono (2026-09-17), todas as recomendações da Nova aceitas:**
+1. Saldo mínimo pra iniciar sessão: **R$ 20,00** (`WALLET_MIN_START_BALANCE_CENTS`).
+2. Motorista pode terminar sessão devendo (vira `Debt`, bloqueia próxima
+   recarga até quitar) — **aceito**.
+3. `SuspendedEVSE` **não conta** como ociosidade cobrável.
+4. Teto do crédito manual do ADMIN por lançamento: **R$ 5.000**.
+
+Implementação liberada — Cronos (4.1: índices) e Vega (4.2: núcleo puro +
+commit de contrato) acionados em paralelo.
 
 ## Próximos passos
 
