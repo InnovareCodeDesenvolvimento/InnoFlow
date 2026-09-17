@@ -560,16 +560,14 @@ sentido como cobrança injusta).
 QR codifica `ocppIdentity` (não o cuid — mais curto, já é a identidade
 pública do equipamento). Um adesivo por conector quando há mais de um.
 
-**Pendências pro dono** (Nova deu recomendação clara em todas):
-1. Domínio do QR — recomendação: mesmo host do painel (`/c/...`),
-   decidir ANTES de imprimir o primeiro adesivo (QR colado é imutável
-   na prática).
-2. Layout do adesivo — recomendação: `ocppIdentity` impresso ao lado
-   do QR + 1 adesivo por conector.
-3. Texto de "sem saldo" — se quer expor contato do operador na tela de
-   carteira (exigiria 1 migration, único ponto do PWA que precisaria).
-4. Confirmar que scanner in-app fica pra fase 2 (fase 1 = câmera
-   nativa do celular + digitação manual).
+**✅ Decidido pelo dono (2026-09-17), todas as recomendações da Nova aceitas:**
+1. Domínio do QR: **mesmo host do painel** (`/c/...`).
+2. Layout do adesivo: **QR + `ocppIdentity` escrito do lado**, um
+   adesivo por conector quando houver mais de um.
+3. Tela de "sem saldo": **sem contato do operador por enquanto**, só
+   mensagem genérica — nenhuma migration nova necessária.
+4. Scanner: **só câmera nativa do celular nesta fase** — scanner
+   dentro do app fica pra fase 2.
 
 **Plano**: Vega P0 (commit de contrato, bloqueia tudo) → P1a (Vega,
 backend `/api/me/*`) ‖ P1b/P1c (Lyra, PWA setup + telas) → P2 (Íris,
