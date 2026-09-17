@@ -38,24 +38,30 @@ async function main() {
     },
   })
 
-  const site = await prisma.site.upsert({
-    where: { id: 'seed-site-matriz' },
-    update: {},
-    create: {
-      id: 'seed-site-matriz',
-      operatorId: operator.id,
-      name: 'InnoElektron — Estação Matriz',
-      addressLine: 'Av. Paulista, 1000',
-      city: 'São Paulo',
-      state: 'SP',
-      postalCode: '01310-100',
-      country: 'BR',
-      latitude: '-23.561684',
-      longitude: '-46.655981',
-      timezone: 'America/Sao_Paulo',
-      openingHours: { seg_sex: '00:00-23:59', sab_dom: '00:00-23:59' },
-    },
-  })
+  // Site não tem chave natural única no schema (só `id`) — em vez de fixar
+  // um id legível (`seed-site-matriz`, rejeitado por `.cuid()` em qualquer
+  // formulário que referencie este registro, bug já registrado em memória),
+  // buscamos por `operatorId`+`name` e deixamos o Postgres gerar o cuid real
+  // via `@default(cuid())` do schema, omitindo `id` no create. Resultado:
+  // dado de seed idêntico em FORMATO a um registro de produção real.
+  const SITE_MATRIZ_NAME = 'InnoElektron — Estação Matriz'
+  const site =
+    (await prisma.site.findFirst({ where: { operatorId: operator.id, name: SITE_MATRIZ_NAME } })) ??
+    (await prisma.site.create({
+      data: {
+        operatorId: operator.id,
+        name: SITE_MATRIZ_NAME,
+        addressLine: 'Av. Paulista, 1000',
+        city: 'São Paulo',
+        state: 'SP',
+        postalCode: '01310-100',
+        country: 'BR',
+        latitude: '-23.561684',
+        longitude: '-46.655981',
+        timezone: 'America/Sao_Paulo',
+        openingHours: { seg_sex: '00:00-23:59', sab_dom: '00:00-23:59' },
+      },
+    }))
 
   // ChargePoint.operatorId é desnormalizado por trigger — não precisa (e não
   // deve) ser setado aqui; o valor abaixo seria sobrescrito pelo Postgres de
@@ -105,36 +111,43 @@ async function main() {
   })
 
   // Tariff com idle fee — R$0,7912/kWh, R$1,00/min de ociosidade após 10min
-  // de carência, mínimo de R$5,00 por sessão.
-  const tariff = await prisma.tariff.upsert({
-    where: { id: 'seed-tariff-padrao' },
-    update: {},
-    create: {
-      id: 'seed-tariff-padrao',
-      operatorId: operator.id,
-      name: 'Padrão CCS2',
-      model: 'PER_KWH',
-      pricePerKwh: '0.7912',
-      minChargeCents: 500,
-      idleFeePerMinute: 100, // R$1,00/min
-      idleGracePeriodSeconds: 600, // 10 minutos de carência
-      currency: 'BRL',
-    },
-  })
+  // de carência, mínimo de R$5,00 por sessão. Mesmo raciocínio do site acima:
+  // sem chave natural única, busca por `operatorId`+`name` em vez de um id
+  // legível fixo.
+  const TARIFF_PADRAO_NAME = 'Padrão CCS2'
+  const tariff =
+    (await prisma.tariff.findFirst({ where: { operatorId: operator.id, name: TARIFF_PADRAO_NAME } })) ??
+    (await prisma.tariff.create({
+      data: {
+        operatorId: operator.id,
+        name: TARIFF_PADRAO_NAME,
+        model: 'PER_KWH',
+        pricePerKwh: '0.7912',
+        minChargeCents: 500,
+        idleFeePerMinute: 100, // R$1,00/min
+        idleGracePeriodSeconds: 600, // 10 minutos de carência
+        currency: 'BRL',
+      },
+    }))
 
-  await prisma.tariffAssignment.upsert({
-    where: { id: 'seed-tariff-assignment-cp001' },
-    update: {},
-    create: {
-      id: 'seed-tariff-assignment-cp001',
-      tariffId: tariff.id,
-      operatorId: operator.id,
-      scope: 'CHARGE_POINT',
-      chargePointId: chargePoint.id,
-      priority: 0,
-      validFrom: new Date('2026-01-01T00:00:00Z'),
-    },
+  // TariffAssignment também sem chave natural — idempotência aqui é "já
+  // existe um vínculo CHARGE_POINT ativo desta tarifa para este charge
+  // point?", não um id fixo.
+  const hasTariffAssignment = await prisma.tariffAssignment.findFirst({
+    where: { tariffId: tariff.id, chargePointId: chargePoint.id, scope: 'CHARGE_POINT' },
   })
+  if (!hasTariffAssignment) {
+    await prisma.tariffAssignment.create({
+      data: {
+        tariffId: tariff.id,
+        operatorId: operator.id,
+        scope: 'CHARGE_POINT',
+        chargePointId: chargePoint.id,
+        priority: 0,
+        validFrom: new Date('2026-01-01T00:00:00Z'),
+      },
+    })
+  }
 
   // --- Usuários ---
 

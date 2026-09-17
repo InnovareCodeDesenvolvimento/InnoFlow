@@ -345,8 +345,11 @@ async function main(): Promise<void> {
   // Fase 2 — Tarifas (+ janelas ponta/fora-ponta)
   // ------------------------------------------------------------
   // Reaproveita a tarifa do seed base para o site matriz (idle fee > 0, já
-  // cobre esse requisito).
-  const baseTariff = await prisma.tariff.findUniqueOrThrow({ where: { id: 'seed-tariff-padrao' } })
+  // cobre esse requisito). Busca por operatorId+name (chave natural do
+  // seed), não mais por id fixo — seed.ts parou de gravar ids legíveis
+  // (ver bug `.cuid()` registrado em memória), o cuid real varia a cada
+  // carga do banco.
+  const baseTariff = await prisma.tariff.findFirstOrThrow({ where: { operatorId: baseOperator.id, name: 'Padrão CCS2' } })
   const baseTariffSnapshot = serializeTariffSnapshot(baseTariff, [])
 
   // Ibirapuera (Operador A): HYBRID com janela ponta/fora-ponta, idle = 0.
@@ -440,7 +443,8 @@ async function main(): Promise<void> {
   // ------------------------------------------------------------
   // Fase 3 — Sites
   // ------------------------------------------------------------
-  const baseSite = await prisma.site.findUniqueOrThrow({ where: { id: 'seed-site-matriz' } })
+  // Idem baseTariff acima — busca por operatorId+name, não por id fixo.
+  const baseSite = await prisma.site.findFirstOrThrow({ where: { operatorId: baseOperator.id, name: 'InnoElektron — Estação Matriz' } })
 
   const siteIbirapuera = await prisma.site.create({
     data: {
