@@ -343,6 +343,12 @@ implementar qualquer coisa; Lyra só começa depois desse commit existir.
 Implementação liberada — Cronos (4.1: índices) e Vega (4.2: núcleo puro +
 commit de contrato) acionados em paralelo.
 
+**✅ Cronos (4.1) entregou** os 3 índices — no `main`. Achado real:
+`OcppMessage` é particionada por `RANGE(occurredAt)`, e o Postgres exige
+que a coluna de partição esteja em qualquer índice único da tabela — sem
+incluir `occurredAt` na chave, a migration falharia contra Postgres real
+(algo que nenhuma validação estática pega). Vega segue com 4.2-4.4.
+
 ## Primeira auditoria de QA (Íris) — 2026-09-17
 
 Testou ao vivo contra produção real com os 3 perfis (não só mock):
