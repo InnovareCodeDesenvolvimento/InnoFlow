@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit'
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import type { Request } from 'express'
 import { AppError } from './errorHandler'
 
@@ -43,4 +43,13 @@ export const publicRateLimit = buildLimiter(60 * 1000, 300, 'RATE_LIMITED')
  * por IP puniria uma garagem inteira atrás do mesmo NAT. Roda DEPOIS de
  * `authenticate` (precisa de `req.user` já resolvido).
  */
-export const meStartSessionRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_SESSION_START', (req) => req.user?.userId ?? req.ip ?? 'unknown')
+// Achado real em produção, 17/09/2026: passar `req.ip` cru pro keyGenerator
+// customizado (fallback do caso sem `req.user`, que não deveria acontecer
+// nesta rota já autenticada, mas existe por segurança) disparava o aviso de
+// validação do express-rate-limit — endereço IPv6 tem várias representações
+// equivalentes, então usar o texto cru como chave deixaria um cliente IPv6
+// contornar o limite variando a própria representação. `ipKeyGenerator` é o
+// helper oficial da lib pra normalizar isso (mesmo raciocínio dela pro
+// keyGenerator DEFAULT, que já faz isso sozinho — só o customizado precisa
+// chamar na mão).
+export const meStartSessionRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_SESSION_START', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
