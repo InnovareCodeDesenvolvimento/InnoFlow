@@ -1,7 +1,7 @@
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { bootNotificationReqSchema } from '../schemas/bootNotification'
-import { finalizarSessao } from '../../services/carteira/finalizarSessao'
+import { reconciliarSessaoOrfa } from '../../services/carteira/reconciliarSessaoOrfa'
 import { defineOcppHandler } from './defineHandler'
 import type { OcppHandlerCtx } from '../context'
 
@@ -66,31 +66,12 @@ const OPEN_SESSION_STATUSES = ['STARTED', 'CHARGING', 'FINISHING'] as const
 export async function reconciliarSessoesOrfas(ctx: OcppHandlerCtx): Promise<void> {
   const openSessions = await prisma.chargingSession.findMany({
     where: { chargePointId: ctx.chargePointId, status: { in: [...OPEN_SESSION_STATUSES] } },
-    select: { id: true, meterStartWh: true, startedAt: true },
+    select: { id: true },
   })
 
   for (const session of openSessions) {
     try {
-      // Última amostra de energia cumulativa já normalizada para Wh na
-      // ingestão (ver `meterValues.ts`) — nunca recalculamos aqui, só
-      // reaproveitamos o dado já persistido.
-      const lastSample = await prisma.meterSample.findFirst({
-        where: { sessionId: session.id, measurand: 'Energy.Active.Import.Register' },
-        orderBy: { ts: 'desc' },
-        select: { value: true, ts: true },
-      })
-
-      // Sessão que começou mas nunca recebeu nenhum MeterValues: energia
-      // entregue = 0, fecha no próprio instante de início.
-      const meterStopWh = lastSample ? Math.round(Number(lastSample.value)) : session.meterStartWh
-      const timestamp = lastSample ? lastSample.ts : session.startedAt
-
-      await finalizarSessao(session.id, { meterStopWh, timestamp, stopReason: 'OTHER' })
-
-      logger.warn(
-        { chargePointId: ctx.chargePointId, sessionId: session.id, meterStopWh },
-        '[ocpp] sessão órfã reconciliada no boot — carregador reconectou sem completar StopTransaction',
-      )
+      await reconciliarSessaoOrfa(session.id)
     } catch (err) {
       logger.error({ err, chargePointId: ctx.chargePointId, sessionId: session.id }, '[ocpp] falha ao reconciliar sessão órfã específica — seguindo para as demais')
     }
