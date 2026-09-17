@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Send, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/Dialog"
 import { Input } from "@/components/ui/Input"
 import { Select } from "@/components/ui/Select"
@@ -71,7 +72,7 @@ export function ChargePointCommandDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent widthClassName="sm:max-w-sm">
-        <DialogHeader>
+        <DialogHeader icon={Send}>
           <DialogTitle>{titles[command]}</DialogTitle>
           <DialogDescription>Comando enviado ao carregador via OCPP — sem confirmação em tempo real nesta fase.</DialogDescription>
         </DialogHeader>
@@ -130,9 +131,11 @@ export function ChargePointCommandDialog({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <X className="h-4 w-4" aria-hidden="true" />
               Cancelar
             </Button>
             <Button type="submit" loading={sendCommand.isPending}>
+              {!sendCommand.isPending && <Send className="h-4 w-4" aria-hidden="true" />}
               Enviar comando
             </Button>
           </DialogFooter>

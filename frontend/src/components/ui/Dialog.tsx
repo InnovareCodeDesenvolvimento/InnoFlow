@@ -1,6 +1,6 @@
-import { type ComponentPropsWithoutRef, type ElementRef, forwardRef } from "react"
+import { type ComponentPropsWithoutRef, type ElementRef, forwardRef, type HTMLAttributes } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { X } from "lucide-react"
+import { X, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const Dialog = DialogPrimitive.Root
@@ -46,8 +46,32 @@ const DialogContent = forwardRef<
 ))
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
-function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("mb-4 pr-8", className)} {...props} />
+/**
+ * Cabeçalho do modal. `icon` reaproveita a linguagem visual do `PageHeader`
+ * (selo com fundo tingido `bg-primary/10 text-primary` + `shadow-tinted-primary`)
+ * só que menor — o modal não é o cabeçalho da página inteira. Fica de fora do
+ * `DialogTitle` (que é o `Radix.Title`, texto puro) para não misturar o nome
+ * acessível do diálogo com decoração.
+ */
+function DialogHeader({
+  className,
+  icon: Icon,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { icon?: LucideIcon }) {
+  return (
+    <div className={cn("mb-4 flex items-start gap-3 pr-8", className)} {...props}>
+      {Icon && (
+        <span
+          className="shadow-tinted-primary flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+      )}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
 }
 
 const DialogTitle = forwardRef<

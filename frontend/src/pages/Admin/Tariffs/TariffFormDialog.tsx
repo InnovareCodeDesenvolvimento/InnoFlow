@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
+import { Check, Plus, Wallet, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/Dialog"
 import { Input } from "@/components/ui/Input"
 import { Select } from "@/components/ui/Select"
@@ -107,7 +108,7 @@ export function TariffFormDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent widthClassName="sm:max-w-xl">
-        <DialogHeader>
+        <DialogHeader icon={Wallet}>
           <DialogTitle>{isEdit ? "Editar tarifa" : "Nova tarifa"}</DialogTitle>
           <DialogDescription>Preço cobrado do motorista pela recarga.</DialogDescription>
         </DialogHeader>
@@ -189,9 +190,11 @@ export function TariffFormDialog({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <X className="h-4 w-4" aria-hidden="true" />
               Cancelar
             </Button>
             <Button type="submit" loading={isSubmitting}>
+              {!isSubmitting && (isEdit ? <Check className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />)}
               {isEdit ? "Salvar alterações" : "Criar tarifa"}
             </Button>
           </DialogFooter>

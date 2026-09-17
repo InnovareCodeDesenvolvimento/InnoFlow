@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, Check, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./Dialog"
 import { Button } from "./Button"
 
@@ -40,9 +40,11 @@ export function ConfirmDialog({
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
+            <X className="h-4 w-4" aria-hidden="true" />
             {cancelLabel}
           </Button>
           <Button type="button" variant={destructive ? "destructive" : "default"} loading={loading} onClick={onConfirm}>
+            <Check className="h-4 w-4" aria-hidden="true" />
             {confirmLabel}
           </Button>
         </DialogFooter>

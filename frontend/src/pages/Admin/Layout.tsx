@@ -64,7 +64,19 @@ function AdminShell() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    // `h-screen overflow-hidden`: o shell inteiro tem a altura da viewport e não
+    // rola — só o `<main>` (flex-1 overflow-y-auto) rola por dentro. Antes era
+    // a PÁGINA/`body` inteira que rolava, e o `InnovareCodeBadge` (fixed no
+    // canto) sobrepunha conteúdo real sempre que a altura natural da página
+    // (com ou sem rolar) coincidia com o retângulo fixo do selo — acontecia
+    // tanto ao rolar até o fim de uma tabela longa quanto, sem rolar nada,
+    // quando o conteúdo de uma tela curta (Dashboard, Sessões) já nascia perto
+    // da altura da viewport. Com o shell fixo, o selo deixou de ser `fixed`:
+    // agora é uma faixa de rodapé própria (`footer`, fora da área de rolagem
+    // do `main`) — não overlap é garantido pela própria disposição em flex-col
+    // (header/main/footer são caixas empilhadas, nunca sobrepostas), não por
+    // cálculo de padding. Achado real, revisão premium do painel, 17/09/2026.
+    <div className="h-screen overflow-hidden bg-background">
       {/* Sidebar desktop */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col bg-primary-950 lg:flex">
         <div className="flex h-16 items-center gap-2 border-b border-white/10 px-5">
@@ -150,9 +162,10 @@ function AdminShell() {
         </div>
       )}
 
-      {/* Conteúdo */}
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border-subtle bg-background/85 px-4 backdrop-blur-md backdrop-saturate-150 sm:px-6">
+      {/* Conteúdo — coluna de altura fixa (viewport inteira): header e footer
+          não rolam, só o `main` do meio rola. */}
+      <div className="flex h-screen flex-col lg:pl-64">
+        <header className="z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border-subtle bg-background/85 px-4 backdrop-blur-md backdrop-saturate-150 sm:px-6">
           <div className="hidden min-w-0 flex-1 lg:block">
             <p className="text-[11px] font-bold uppercase tracking-widest text-ink-subtle">Painel administrativo</p>
             <h2 className="truncate text-lg font-black tracking-tight text-ink">{current?.label ?? "Administração"}</h2>
@@ -182,17 +195,23 @@ function AdminShell() {
           </div>
         </header>
 
-        {/* `pb-24`/`sm:pb-28` reserva o espaço do `InnovareCodeBadge` (fixo no
-            canto inferior direito) — sem isso, a última linha de tabelas
-            longas (Faturamento, Pagamentos, Sessões) ou o último KPI do
-            Dashboard em mobile ficava por baixo do selo. Achado real na
-            revisão premium do painel, 17/09/2026. */}
-        <main className="p-4 pb-24 sm:p-6 sm:pb-28 lg:p-8 lg:pb-28">
+        {/* `flex-1 overflow-y-auto`: única área que rola — sobra de espaço da
+            coluna (viewport menos header e rodapé), nunca o tamanho do
+            conteúdo. Padding extra mantido de propósito (era a mitigação
+            antiga para o selo fixo); com o rodapé próprio abaixo já não é
+            estritamente necessário, mas não faz mal manter como respiro. */}
+        <main className="flex-1 overflow-y-auto p-4 pb-8 sm:p-6 sm:pb-10 lg:p-8 lg:pb-10">
           <Outlet />
         </main>
-      </div>
 
-      <InnovareCodeBadge />
+        {/* Rodapé do shell — fora da área de rolagem do `main`, então nunca
+            sobrepõe conteúdo real (são caixas empilhadas em flex-col, não
+            camadas). Sempre visível, mesmo em listagens longas, sem depender
+            de o operador rolar até o fim. */}
+        <footer className="flex h-11 shrink-0 items-center justify-end border-t border-border-subtle bg-background px-3 sm:h-14 sm:px-4">
+          <InnovareCodeBadge />
+        </footer>
+      </div>
     </div>
   )
 }

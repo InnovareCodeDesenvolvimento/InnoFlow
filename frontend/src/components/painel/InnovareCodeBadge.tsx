@@ -2,19 +2,18 @@ import { APP_VERSION, BUILD_DATE, DESENVOLVEDORA, DESENVOLVEDORA_URL, VERSAO_EXI
 import { cn } from "@/lib/utils"
 
 /**
- * Selo da desenvolvedora no canto inferior direito dos painéis.
+ * Selo da desenvolvedora — vive numa faixa de rodapé própria do shell do
+ * painel (`Admin/Layout.tsx`), fora da área que rola (`<main>`). NÃO é mais
+ * `fixed`: chegou a ser (mesmo padrão do projeto irmão ParquedasFeiras), mas
+ * `position: fixed` no canto da tela sobrepunha conteúdo real sempre que a
+ * altura da página coincidia com aquele retângulo — tanto ao rolar até o fim
+ * de uma tabela longa quanto, sem rolar nada, em telas curtas (Dashboard,
+ * Sessões) cujo conteúdo já nascia perto da altura da viewport. Um rodapé
+ * estrutural resolve por construção (caixas empilhadas em flex-col nunca se
+ * sobrepõem) em vez de tentar calcular padding suficiente. Achado real,
+ * revisão premium do painel, 17/09/2026.
  *
- * Fica fixo na tela porque a assinatura em texto do rodapé só aparece depois
- * de rolar a página inteira — em listagem longa o operador nunca chega lá.
- *
- * Discreto de propósito: translúcido em repouso, opaco no hover. Ele divide o
- * canto com conteúdo real (paginação, botões de ação das listagens), então
- * não pode brigar por atenção nem cobrir nada — daí o tamanho pequeno e o
- * recuo maior no celular, onde a área útil é menor.
- *
- * Mesmo componente do projeto irmão ParquedasFeiras
- * (`frontend/src/components/painel/InnovareCodeBadge.tsx` lá) — porta 1:1
- * o padrão visual, só trocando a paleta pelos tokens do InnoElektron.
+ * Continua discreto de propósito: translúcido em repouso, opaco no hover.
  */
 export function InnovareCodeBadge({ className }: { className?: string }) {
   return (
@@ -22,14 +21,8 @@ export function InnovareCodeBadge({ className }: { className?: string }) {
       href={DESENVOLVEDORA_URL}
       target="_blank"
       rel="noopener noreferrer"
-      // `pointer-events-none` no contêiner e `auto` no conteúdo: o selo é
-      // clicável, mas o espaço em volta dele não intercepta clique de quem
-      // está usando o que estiver embaixo.
       className={cn(
-        "pointer-events-auto fixed bottom-4 right-4 z-40 flex items-center gap-2",
-        "rounded-2xl bg-white/85 px-2.5 py-1.5 shadow-lg ring-1 ring-border-subtle backdrop-blur-md",
-        "opacity-70 transition-all hover:-translate-y-0.5 hover:opacity-100 hover:shadow-xl",
-        "sm:bottom-6 sm:right-6",
+        "flex items-center gap-2 rounded-xl px-2 py-1 opacity-70 transition-opacity hover:opacity-100",
         className,
       )}
       aria-label={`Desenvolvido por ${DESENVOLVEDORA} — versão ${APP_VERSION}`}
@@ -41,7 +34,7 @@ export function InnovareCodeBadge({ className }: { className?: string }) {
         aria-hidden="true"
         loading="lazy"
         decoding="async"
-        className="h-7 w-auto sm:h-8"
+        className="h-6 w-auto sm:h-7"
       />
       <span className="hidden flex-col leading-none sm:flex">
         <span className="text-[8px] font-bold uppercase tracking-widest text-ink-subtle">Desenvolvido por</span>
