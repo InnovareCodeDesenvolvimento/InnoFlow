@@ -278,6 +278,26 @@ pagamento real (F5 — cartão/PIX Cielo). Em paralelo, **Íris (QA) e Órion
 (segurança) acionados pela primeira vez neste projeto** para auditar o que
 já existe — nenhum dos dois tinha sido chamado até agora.
 
+## Primeira auditoria de segurança (Órion) — 2026-09-17
+
+**Achado crítico corrigido no mesmo dia:** `pino-http` logava o header
+`Authorization` (JWT completo) em texto puro em toda requisição
+autenticada — sem `redact` configurado. Combinado com token de 12h sem
+revogação (dívida já conhecida), equivalia a sequestro de qualquer sessão
+(inclusive ADMIN) para quem tivesse acesso aos logs de produção.
+**Bloqueante explícito antes da F5** (pagamento real) — corrigido na hora
+(`redact` na config raiz do pino, testado manualmente). Precisa
+reimplantar o backend no EasyPanel para valer em produção.
+
+Resto da auditoria: **isolamento multi-tenant confirmado sólido** (as 7
+rotas de `$queryRaw` usam bind param em 100% dos pontos revisados, sem
+concatenação), OCPP com validação Zod + Basic Auth via bcrypt + lock
+anti-split-brain corretos, LGPD (e-mail de motorista) consistente em
+todas as rotas. 3 achados "importante" (sem rate limit no OCPP auth —
+depende da topologia da porta 9000, pendência para o Vulcano; CORS
+aberto; `ajv` ReDoS via `ocpp-rpc` reavaliado como risco menor do que se
+temia) e 2 sugestões (bcrypt rounds, JWT sem refresh) — nenhum bloqueante.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
