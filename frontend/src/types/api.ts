@@ -706,3 +706,208 @@ export interface WalletAdjustmentRequest {
 }
 
 export type WalletAdjustmentErrorCode = "FORBIDDEN" | "INSUFFICIENT_BALANCE"
+
+// ---------------------------------------------------------------------------
+// PWA do motorista — rotas /api/me/* (DRIVER only) e a única rota pública
+// nova, GET /api/public/charge-points/:ocppIdentity (desenho da Nova, ver
+// .claude/agent-memory/nova/decisoes-pwa-motorista.md). O motorista escaneia
+// um QR no carregador (codifica `ocppIdentity`, não o cuid) e inicia/
+// acompanha/para a própria recarga, gastando da carteira pré-paga da F4.
+//
+// Núcleo de negócio 100% reaproveitado da F4 (avaliarInicioSessao,
+// calcularTetoReserva, calcularCustoSessao) — as rotas admin (`/api/admin/
+// sessions`, `/api/admin/charge-points/:id/commands/remote-start`) continuam
+// existindo sem mudança de contrato; estas são as equivalentes escopadas por
+// `userId` (o motorista) em vez de `operatorId` (o admin).
+// ---------------------------------------------------------------------------
+
+// ---- GET /api/public/charge-points/:ocppIdentity — SEM autenticação --------
+
+export interface PublicTariffSummary {
+  name: string
+  model: TariffModel
+  /** Reais por kWh — Decimal serializado como string. */
+  pricePerKwh: string | null
+  /** Reais por minuto — Decimal serializado como string. */
+  pricePerMinute: string | null
+  sessionFeeCents: number | null
+  minChargeCents: number | null
+  idleFeePerMinute: number
+  currency: string
+}
+
+export interface PublicChargePointConnector {
+  connectorId: number
+  type: ConnectorType
+  maxPowerKw: string | null
+  status: ConnectorStatus
+  /** `null` = conector sem `TariffAssignment` ativa cadastrada — não bloqueia a listagem, só o início de recarga (`CHARGE_POINT_NOT_FOUND`-like checagem acontece de novo em `POST /api/me/sessions/start`). */
+  tariff: PublicTariffSummary | null
+}
+
+export interface PublicChargePointCard {
+  ocppIdentity: string
+  vendor: string | null
+  model: string | null
+  /** `lastSeenAt` dentro do threshold de "online" do dashboard admin (5min). */
+  online: boolean
+  site: { id: string; name: string; addressLine: string | null; city: string | null; state: string | null }
+  connectors: PublicChargePointConnector[]
+  generatedAt: string
+}
+
+export type PublicChargePointErrorCode = "CHARGE_POINT_NOT_FOUND"
+
+// ---- POST /api/me/sessions/start --------------------------------------------
+
+export interface MeStartSessionRequest {
+  ocppIdentity: string
+  connectorId: number
+}
+
+/** 202 — fire-and-forget, mesmo padrão do remote-start admin. */
+export interface MeStartSessionResponse {
+  correlationId: string
+  status: "PENDING"
+  walletBalanceCents: number
+  /** Teto calculado (`calcularTetoReserva`) — só informativo, NUNCA reservado/debitado antecipadamente. */
+  estimatedMaxCostCents: number
+  /** Cobrança mínima da tarifa — precisa aparecer ANTES de iniciar (achado de produto da F6, ver decisoes-pwa-motorista.md §6), não só no recibo. */
+  minChargeCents: number | null
+}
+
+export type MeStartSessionErrorCode =
+  | "CHARGE_POINT_NOT_FOUND"
+  | "CONNECTOR_NOT_FOUND"
+  | "CHARGE_POINT_OFFLINE"
+  | "CONNECTOR_BUSY"
+  | "DRIVER_HAS_OPEN_DEBT"
+  | "INSUFFICIENT_BALANCE"
+  | "ALREADY_HAS_ACTIVE_SESSION"
+
+// ---- GET /api/me/sessions/active --------------------------------------------
+
+export interface MeActiveSession {
+  id: string
+  status: ChargingSessionStatus
+  startedAt: string
+  chargePoint: { ocppIdentity: string; vendor: string | null; model: string | null }
+  site: { id: string; name: string; addressLine: string | null; city: string | null }
+  connector: { connectorId: number; type: ConnectorType; maxPowerKw: string | null }
+  energyDeliveredWh: number
+  lastPowerW: number | null
+  lastSoc: number | null
+  lastSampleAt: string | null
+  /** Calculado pela MESMA função (`calcularCustoSessao`) que a guarda ao vivo do MeterValues usa — nunca diverge do que pode disparar o auto-stop. */
+  estimatedCostCents: number
+  estimatedMaxCostCents: number
+  minChargeCents: number | null
+  tariff: PublicTariffSummary
+}
+
+export interface MeActiveSessionResponse {
+  /** `null` (200, não 404) quando o motorista não tem sessão ativa agora. */
+  session: MeActiveSession | null
+  walletBalanceCents: number
+  generatedAt: string
+}
+
+// ---- GET /api/me/sessions ----------------------------------------------------
+
+export interface MeSessionListItem {
+  id: string
+  status: ChargingSessionStatus
+  startedAt: string
+  stoppedAt: string | null
+  siteName: string
+  ocppIdentity: string
+  connectorId: number
+  energyDeliveredWh: number | null
+  totalCostCents: number | null
+}
+
+export interface MeSessionsQuery extends PaginationParams {}
+
+export interface MeSessionsListResponse {
+  items: MeSessionListItem[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+// ---- GET /api/me/sessions/:id -------------------------------------------------
+
+export interface MeSessionDetail {
+  id: string
+  status: ChargingSessionStatus
+  startedAt: string
+  stoppedAt: string | null
+  stopReason: StopReason | null
+  site: { name: string; addressLine: string | null; city: string | null }
+  chargePoint: { ocppIdentity: string }
+  connector: { connectorId: number; type: ConnectorType }
+  energyDeliveredWh: number | null
+  idleSeconds: number | null
+  energyCostCents: number | null
+  timeCostCents: number | null
+  idleFeeCents: number | null
+  sessionFeeCents: number | null
+  minChargeAdjustmentCents: number | null
+  totalCostCents: number | null
+  tariff: PublicTariffSummary
+  walletEntry: { id: string; amountCents: number; balanceAfterCents: number; createdAt: string } | null
+  debt: { id: string; amountCents: number } | null
+}
+
+export type MeSessionDetailErrorCode = "SESSION_NOT_FOUND"
+
+// ---- POST /api/me/sessions/:id/stop --------------------------------------------
+
+/** 202 — fire-and-forget, mesmo padrão de `POST /api/admin/sessions/:id/stop`. */
+export interface MeStopSessionResponse {
+  correlationId: string
+  status: "PENDING"
+}
+
+export type MeStopSessionErrorCode = "SESSION_NOT_FOUND" | "SESSION_NOT_ACTIVE"
+
+// ---- GET /api/me/commands/:correlationId ---------------------------------------
+
+/**
+ * Conserta o "202 cego": consulta o resultado real do comando OCPP disparado
+ * por `POST /api/me/sessions/start` ou `POST /api/me/sessions/:id/stop`.
+ * `PENDING` = ainda não resolveu (ou a chave já expirou/nunca existiu —
+ * mesma resposta, não dá para distinguir e não precisa). `TIMEOUT` = o
+ * carregador não respondeu dentro do prazo do comando (35s).
+ */
+export type MeCommandStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "TIMEOUT"
+
+export interface MeCommandStatusResponse {
+  status: MeCommandStatus
+}
+
+// ---- GET /api/me/wallet ----------------------------------------------------------
+
+export interface MeWalletEntryDTO {
+  id: string
+  type: WalletEntryType
+  /** Assinado: crédito > 0, débito < 0. */
+  amountCents: number
+  balanceAfterCents: number
+  referenceType: string | null
+  referenceId: string | null
+  description: string | null
+  createdAt: string
+}
+
+export interface MeWalletQuery extends PaginationParams {}
+
+/** Mesmo shape de `DriverWalletResponse`, mas sem `driverId`/`driverName` — o próprio motorista sabe quem é. */
+export interface MeWalletResponse {
+  balanceCents: number
+  openDebtCents: number
+  entries: MeWalletEntryDTO[]
+  total: number
+  page: number
+  pageSize: number
+}
