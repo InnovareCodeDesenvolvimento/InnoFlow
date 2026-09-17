@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { AlertCircle, LogIn, MapPin, Zap } from "lucide-react"
+import { AlertCircle, LogIn, LogOut, MapPin, UserX, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
 import { buttonVariants } from "@/components/ui/buttonVariants"
@@ -13,25 +13,40 @@ import { usePublicChargePoint } from "@/hooks/usePublicChargePoint"
 import { useMeWallet, useStartSession } from "@/hooks/useMeSessions"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
-import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus } from "@/lib/utils"
+import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
 // Variante pequena (128×128, ~16kB) do ícone — a original (512×512, ~140kB)
-// é overkill para um `h-6 w-6` no cabeçalho e pesava sozinha mais que todo o
-// JS desta página no Lighthouse mobile (achado medindo a landing).
+// é overkill para um `h-7 w-7` no hero e pesava sozinha mais que todo o JS
+// desta página no Lighthouse mobile (achado medindo a landing).
 import logoIcon from "@/assets/logo-icon-sm.png"
 
 /**
  * `/c/:ocppIdentity` (+ `:connectorId` opcional) — a tela MAIS importante do
  * produto: o motorista acabou de escanear o QR do adesivo colado no
- * carregador, em pé do lado do carro. Regra de layout (não é estética, é
- * requisito): informação essencial acima da dobra, sem scroll, sem spinner
- * longo — por isso o wrapper é próprio (sem Header/Footer do site público),
- * um único card, coluna estreita (`max-w-md`) mesmo em telas maiores.
+ * carregador, em pé do lado do carro, SEM contexto nenhum sobre a marca
+ * (a primeira vez que essa pessoa vê a InnoFlow pode ser esta tela). Regra de
+ * layout (não é estética, é requisito): informação essencial acima da dobra,
+ * sem scroll, sem spinner longo — por isso o wrapper é próprio (sem Header/
+ * Footer do site público), um único card, coluna estreita (`max-w-md`) mesmo
+ * em telas maiores.
+ *
+ * Passe visual de 17/09/2026 (veredito do dono vendo a v1 ao vivo: "muito
+ * feia e fraca, sem nada de interessante"): a v1 tinha um card pequeno
+ * centralizado por `justify-center` numa coluna alta — isso CRIA vazio em
+ * cima E embaixo por construção (centralizar algo curto num container alto
+ * sobra espaço nas duas pontas), e os blobs decorativos em 10% de opacidade
+ * sobre fundo CLARO eram baixo contraste demais pra sequer aparecer num
+ * screenshot. A v2 substitui isso por uma faixa de herói (mesmo gradiente
+ * escuro do painel de marca do Login) com o slogan oficial em destaque — o
+ * card não fica mais sozinho no vazio, ele "flutua" por cima da fronteira do
+ * herói (`-mt-8`), e os blobs, sobre fundo ESCURO e em opacidade maior,
+ * finalmente aparecem. Sem `justify-center`: o fluxo é do topo pra baixo,
+ * então o card fica logo abaixo do herói, não centralizado numa coluna vazia.
  */
 export function ChargePointLanding() {
   const { ocppIdentity = "", connectorId } = useParams<{ ocppIdentity: string; connectorId?: string }>()
   const navigate = useNavigate()
   const { data: cp, isLoading, isError, error, refetch } = usePublicChargePoint(ocppIdentity)
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, logout } = useAuthStore()
   const isDriver = isAuthenticated && user?.role === "DRIVER"
 
   // pageSize:1 — só precisamos de balanceCents/openDebtCents aqui, não do
@@ -58,26 +73,62 @@ export function ChargePointLanding() {
     }
   }
 
+  // Estado "logado, mas não é motorista" (ex.: admin/operador testando o QR)
+  // ficava travado sem saída óbvia — só um parágrafo cinza. Agora oferece a
+  // ação de verdade: sair da conta atual e ir pro login já com o redirect de
+  // volta pra ESTE carregador, pra não perder o contexto do QR escaneado.
+  const handleSwitchAccount = () => {
+    logout()
+    navigate(`/login?redirect=${encodeURIComponent(redirectTarget)}`)
+  }
+
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-gradient-to-b from-primary-50 via-background to-background">
-      {/* Decoração de marca discreta — a tela é curta e centrada (sem scroll
-          de propósito), então sobra espaço vazio acima/abaixo do card; em
-          vez de deixar isso em branco, um wash de marca sutil (mesmo
-          vocabulário visual do Login/Home) evita que a tela mais importante
-          do produto pareça inacabada. */}
-      <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-accent-glow/10 blur-3xl animate-float-soft" aria-hidden="true" />
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background">
+      {/* Herói de marca — faixa cheia no topo (mesmo gradiente escuro do
+          painel de marca do Login), não um wash quase invisível. O slogan
+          oficial mora AQUI, é a primeira coisa que um motorista desconhecido
+          vê ao escanear o QR. Altura contida de propósito (a regra "acima da
+          dobra, sem scroll" continua valendo) — o impacto vem da COR/
+          conteúdo, não de ocupar mais tela. */}
+      <div className="relative shrink-0 overflow-hidden bg-gradient-to-br from-primary-950 via-primary-900 to-primary-800 px-4 pb-14 pt-6 text-center">
+        <div
+          className="pointer-events-none absolute -right-8 -top-12 h-52 w-52 rounded-full bg-accent-glow/60 blur-2xl animate-float-soft"
+          aria-hidden="true"
+        />
+        <div
+          className="pointer-events-none absolute -bottom-10 -left-10 h-48 w-48 rounded-full bg-brand-teal/60 blur-2xl animate-float-soft"
+          style={{ animationDelay: "1.2s" }}
+          aria-hidden="true"
+        />
+        <div className="relative mx-auto flex max-w-md flex-col items-center gap-2">
+          <div className="flex items-center gap-2">
+            <img src={logoIcon} alt="" className="h-7 w-7 shrink-0" />
+            <span className="text-base font-black tracking-tight text-white">InnoFlow</span>
+          </div>
+          <p className="text-xl font-black leading-snug tracking-tight text-white sm:text-2xl">
+            Carregue um{" "}
+            <span className="bg-gradient-to-r from-accent-300 to-accent-glow bg-clip-text text-transparent">futuro melhor</span>.
+          </p>
+        </div>
+      </div>
+
+      {/* Blob de continuidade na área clara, atrás do card — bem mais sutil
+          que os do herói (fundo claro pede menos opacidade pra não brigar
+          com o texto), só pra a metade de baixo não voltar a ficar "morta". */}
       <div
-        className="pointer-events-none absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-brand-teal/10 blur-3xl animate-float-soft"
-        style={{ animationDelay: "1.2s" }}
+        className="pointer-events-none absolute -bottom-20 -right-16 h-72 w-72 rounded-full bg-primary-200/40 blur-3xl"
         aria-hidden="true"
       />
 
-      <header className="relative flex h-14 shrink-0 items-center justify-center gap-2">
-        <img src={logoIcon} alt="" className="h-6 w-6" />
-        <span className="text-sm font-black tracking-tight text-ink">InnoFlow</span>
-      </header>
-
-      <main className="relative mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 pb-6">
+      {/* SEM `justify-center`: o conteúdo fica logo abaixo do herói (fluxo do
+          topo pra baixo), não centralizado numa coluna vazia — era exatamente
+          isso que criava vazio em cima E embaixo na v1. O "flutuar por cima
+          da fronteira do herói" (`-mt-8`) é aplicado SÓ no Card do conector
+          selecionado (só ele tem fundo branco cobrindo a sobreposição) — os
+          outros estados (loading/erro/escolha de conector) não têm essa
+          margem negativa, senão o texto nascia direto em cima do gradiente
+          escuro do herói, ilegível (achado testando esta própria versão). */}
+      <main className="relative z-10 mx-auto w-full max-w-md flex-1 px-4 pb-6">
         {isLoading && (
           <div className="space-y-3" aria-hidden="true">
             <Skeleton className="h-5 w-2/3 rounded-md" />
@@ -130,7 +181,11 @@ export function ChargePointLanding() {
             const hasOpenDebt = isDriver && (wallet?.openDebtCents ?? 0) > 0
 
             return (
-              <Card className="card-premium animate-fade-in-up">
+              // `-mt-8`: só este card tem fundo branco cobrindo a
+              // sobreposição com o herói (ver comentário do `<main>` acima)
+              // — "flutua" por cima da fronteira em vez de nascer colado
+              // nela, evitando o vazio entre o herói e o card.
+              <Card className="card-premium animate-fade-in-up -mt-8">
                 <CardContent className="p-5">
                   <p className="text-xs font-bold uppercase tracking-wide text-ink-subtle">{cp.site.name}</p>
                   {(cp.site.addressLine || cp.site.city) && (
@@ -188,9 +243,22 @@ export function ChargePointLanding() {
                     )}
 
                     {isAuthenticated && !isDriver && (
-                      <p className="rounded-xl bg-muted px-4 py-3 text-center text-sm text-ink-softer">
-                        Esta função é exclusiva para contas de motorista.
-                      </p>
+                      <div className="flex flex-col items-center gap-3 rounded-xl bg-muted px-4 py-5 text-center">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-warning-100 text-warning-700" aria-hidden="true">
+                          <UserX className="h-5 w-5" />
+                        </span>
+                        <div>
+                          <p className="text-sm font-bold text-ink">Conta sem acesso à recarga</p>
+                          <p className="mt-1 text-xs leading-relaxed text-ink-softer">
+                            Você está conectado como {user ? ROLE_LABELS[user.role].toLowerCase() : "outra conta"} — esta função é exclusiva
+                            para contas de motorista.
+                          </p>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={handleSwitchAccount}>
+                          <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+                          Sair e entrar com outra conta
+                        </Button>
+                      </div>
                     )}
 
                     {isDriver && (
