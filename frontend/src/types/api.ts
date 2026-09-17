@@ -964,3 +964,202 @@ export interface MeWalletResponse {
   page: number
   pageSize: number
 }
+
+// ---------------------------------------------------------------------------
+// AuditLog (ADMIN-only) — trilha de "quem fez o quê, onde e como" no painel
+// admin. Contrato traduzido do desenho da Nova (2026-09-17), decisões
+// completas em `.claude/agent-memory/nova/decisoes-audit-log.md`: append-only
+// por trigger (UPDATE sempre bloqueado, DELETE só permitido além do piso de
+// retenção), payload é ALLOWLIST por entidade — nunca `req.body` cru, e
+// segredo (`password`/`basicAuthSecret`/`cieloCardToken`/`*Hash`/`idTag`
+// completo) nunca entra em `changes`. Comando remoto grava INTENÇÃO (o
+// resultado real mora em `OcppMessage`, correlacionado por `correlationId`).
+// Ver o log não gera log; `format=csv` gera (`action=EXPORT`).
+// ---------------------------------------------------------------------------
+
+export const AUDIT_ACTIONS = [
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "REMOTE_COMMAND",
+  "WALLET_ADJUSTMENT",
+  "LOGIN_SUCCESS",
+  "LOGIN_FAILED",
+  "EXPORT",
+  "OTHER",
+] as const
+export type AuditAction = (typeof AUDIT_ACTIONS)[number]
+
+export const AUDIT_OUTCOMES = ["SUCCESS", "DENIED", "FAILED"] as const
+export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number]
+
+/** Mesmos presets de `reportingWindow.ts` (backend) — reuso explícito decidido pela Nova, não uma cópia por acaso. */
+export const AUDIT_LOG_PERIODS = ["today", "7d", "30d", "month", "prev_month", "custom"] as const
+export type AuditLogPeriod = (typeof AUDIT_LOG_PERIODS)[number]
+
+export interface AuditLogActor {
+  userId: string
+  name: string
+  email: string
+  role: Role
+  operatorId: string | null
+}
+
+export interface AuditLogListItem {
+  id: string
+  occurredAt: string
+  actor: AuditLogActor
+  action: AuditAction
+  actionDetail: string | null
+  outcome: AuditOutcome
+  httpStatus: number | null
+  entityType: string | null
+  entityId: string | null
+  targetOperatorId: string | null
+  method: string
+  path: string
+  ipAddress: string | null
+  /** `true` quando existe payload em `AuditLogDetail.changes` — evita o cliente abrir o detalhe só para descobrir que está vazio. */
+  hasChanges: boolean
+}
+
+// ---- GET /api/admin/audit-logs -------------------------------------------------
+
+export interface AuditLogQuery {
+  period?: AuditLogPeriod
+  from?: string
+  to?: string
+  tz?: string
+  actorUserId?: string
+  actorRole?: Role
+  action?: AuditAction
+  outcome?: AuditOutcome
+  entityType?: string
+  entityId?: string
+  /** Só ADMIN pode filtrar por operador — mesma regra de `ReportPeriodParams.operatorId`. Tela é ADMIN-only, mas o filtro ainda faz sentido com múltiplos operadores na mesma listagem. */
+  operatorId?: string
+  /** Busca livre (nome/e-mail do ator, id de entidade) — o backend decide o que indexar. */
+  q?: string
+  page?: number
+  pageSize?: number
+  format?: "json" | "csv"
+}
+
+export interface AuditLogListResponse {
+  items: AuditLogListItem[]
+  meta: PaginationMeta
+}
+
+// ---- GET /api/admin/audit-logs/:id ----------------------------------------------
+
+export interface AuditLogDetail extends AuditLogListItem {
+  userAgent: string | null
+  requestId: string | null
+  correlationId: string | null
+  /** `null` quando `hasChanges` é `false`. Allowlist por entidade — nunca contém segredo. */
+  changes: Record<string, unknown> | null
+}
+
+// ---- GET /api/admin/audit-logs/actors --------------------------------------------
+
+export interface AuditLogActorsQuery {
+  period?: AuditLogPeriod
+  from?: string
+  to?: string
+  tz?: string
+}
+
+export interface AuditLogActorSummary {
+  userId: string
+  name: string
+  email: string
+  role: Role
+  operatorId: string | null
+  eventCount: number
+}
+
+export interface AuditLogActorsResponse {
+  items: AuditLogActorSummary[]
+}
+
+// ---------------------------------------------------------------------------
+// Tempo real (SSE) — canal servidor→cliente para dashboard/sessão ativa/PWA.
+// Decisões completas em
+// `.claude/agent-memory/nova/decisoes-tempo-real-sse.md` (Nova, 2026-09-17):
+// SSE (não WebSocket), fan-out via Redis pub/sub em namespace próprio
+// (`ui:ev:*`), fronteira multi-tenant na ASSINATURA do canal (não num `if`
+// depois de receber o evento), auth por `Authorization: Bearer` (nunca JWT
+// na querystring — vazaria em access log/histórico/Referer), publish sempre
+// DEPOIS do commit da transação. Nenhum endpoint existe ainda — só o FORMATO
+// do evento, para o cliente SSE já poder ser escrito contra ele.
+//
+// Regra de consumo (Lyra): default é invalidar a query React Query
+// correspondente (o evento só diz "isto ficou velho", o REST continua fonte
+// única de forma/autorização). Única exceção enumerada pela Nova:
+// `session.metrics` pode ir direto em `setQueryData` (energyWh/powerW/soc/
+// partialCostCents da sessão ativa) — a cada poucos segundos, invalidate+
+// refetch seria só reinventar o polling com passos a mais.
+// ---------------------------------------------------------------------------
+
+export interface RealtimeEventBase {
+  type: string
+  /** ISO 8601 — momento em que o evento foi gerado no servidor, não em que o cliente recebeu. */
+  occurredAt: string
+}
+
+/** Única exceção ao "default invalidar" (ver nota acima) — consumir com `setQueryData`. */
+export interface SessionMetricsEvent extends RealtimeEventBase {
+  type: "session.metrics"
+  sessionId: string
+  energyWh: number
+  powerW: number | null
+  soc: number | null
+  partialCostCents: number
+}
+
+export interface SessionStatusEvent extends RealtimeEventBase {
+  type: "session.started" | "session.stopped"
+  sessionId: string
+  chargePointId: string
+}
+
+export interface WalletUpdatedEvent extends RealtimeEventBase {
+  type: "wallet.updated"
+  userId: string
+  balanceCents: number
+}
+
+/** `status` é o mesmo enum de `Connector.status` (`ConnectorStatus`), nunca um valor novo inventado para o evento. */
+export interface ChargePointStatusEvent extends RealtimeEventBase {
+  type: "chargepoint.status"
+  chargePointId: string
+  connectorId: number
+  status: ConnectorStatus
+}
+
+/**
+ * Sai do MESMO ponto que grava `AuditLog` (`res.on('finish')` do middleware
+ * de auditoria) — todo CRUD admin futuro nasce coberto pelos dois de uma vez,
+ * sem instrumentação nova. `action` aqui é só CREATE/UPDATE/DELETE (não os 9
+ * valores de `AuditAction` — comando remoto/login/export não mudam uma
+ * entidade administrável, não fazem sentido aqui).
+ */
+export interface AdminEntityChangedEvent extends RealtimeEventBase {
+  type: "admin.entity.changed"
+  entityType: string
+  entityId: string
+  action: "CREATE" | "UPDATE" | "DELETE"
+}
+
+/** No máx. 1 a cada 5s (throttle do servidor) — nunca dispara recálculo do agregado por evento, só invalidação; `getDashboardLive`/`getDashboardSummary` continuam sendo quem busca de verdade. */
+export interface DashboardDirtyEvent extends RealtimeEventBase {
+  type: "dashboard.dirty"
+}
+
+export type RealtimeEvent =
+  | SessionMetricsEvent
+  | SessionStatusEvent
+  | WalletUpdatedEvent
+  | ChargePointStatusEvent
+  | AdminEntityChangedEvent
+  | DashboardDirtyEvent
