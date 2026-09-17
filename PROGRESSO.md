@@ -573,6 +573,15 @@ pública do equipamento). Um adesivo por conector quando há mais de um.
 backend `/api/me/*`) ‖ P1b/P1c (Lyra, PWA setup + telas) → P2 (Íris,
 teste real) → P3 (polimento visual/performance medido, não estimado).
 
+**✅ Vega (P0+P1a) entregou** — contrato commitado sozinho primeiro
+(regra do projeto), depois o backend: `iniciarSessaoRemota.ts` (núcleo
+do remote-start extraído, reusado por admin E motorista sem duplicar
+lógica), cache de resultado de comando no Redis (conserta o "202 cego"
+que a Nova identificou), 7 rotas `/api/me/*` + 1 pública, lock
+anti-duplo-toque, rate limit próprio. Validado de forma independente:
+typecheck/lint/build/57 testes limpos nos dois lados. No `main`. Lyra
+liberada para as telas.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
