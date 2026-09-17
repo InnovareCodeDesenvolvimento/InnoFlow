@@ -29,7 +29,10 @@ import {
   startMockSession,
   stopMockSession,
 } from "./meData"
+import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
+import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
+  AuditLogListItem,
   AuthToken,
   ChargePoint,
   Connector,
@@ -647,6 +650,82 @@ export const handlers = [
     }
 
     return HttpResponse.json(buildPaymentsReport(toScope(scope.user), { ...period, ...filters, ...pagination }))
+  }),
+
+  // ---- Auditoria (ADMIN only) ---------------------------------------------------
+  // Contrato/decisões: `.claude/agent-memory/nova/decisoes-audit-log.md`.
+  // "Ver o log não gera log" — nenhum handler abaixo grava nada em
+  // `mockAuditLogItems`, só lê (exceto `format=csv`, que É auditado de
+  // verdade no backend real — aqui não simulamos essa auto-referência).
+  http.get("/api/admin/audit-logs", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    const format = url.searchParams.get("format")
+    const filters = {
+      from: period.from,
+      to: period.to,
+      actorUserId: url.searchParams.get("actorUserId") ?? undefined,
+      actorRole: (url.searchParams.get("actorRole") as Role | null) ?? undefined,
+      action: (url.searchParams.get("action") as AuditLogListItem["action"] | null) ?? undefined,
+      outcome: (url.searchParams.get("outcome") as AuditLogListItem["outcome"] | null) ?? undefined,
+      entityType: url.searchParams.get("entityType") ?? undefined,
+      entityId: url.searchParams.get("entityId") ?? undefined,
+      operatorId: url.searchParams.get("operatorId") ?? undefined,
+      q: url.searchParams.get("q") ?? undefined,
+    }
+    const items = filterAuditLogs(filters)
+
+    if (format === "csv") {
+      const csv = toCsv<AuditLogListItem>(items, [
+        { key: "occurredAt", label: "Quando" },
+        { key: "action", label: "Ação" },
+        { key: "outcome", label: "Resultado" },
+        { key: "entityType", label: "Entidade" },
+        { key: "entityId", label: "ID da entidade" },
+        { key: "method", label: "Método" },
+        { key: "path", label: "Rota" },
+        { key: "httpStatus", label: "HTTP" },
+        { key: "ipAddress", label: "IP" },
+      ])
+      return csvResponse(csv, `auditoria_${period.from}_${period.to}.csv`)
+    }
+
+    return HttpResponse.json(paginate(items, url))
+  }),
+
+  http.get("/api/admin/audit-logs/actors", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const period = parsePeriod(url)
+    return HttpResponse.json({ items: listAuditLogActors(period.from, period.to) })
+  }),
+
+  http.get("/api/admin/audit-logs/:id", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const detail = mockAuditLogDetails.get(String(params.id))
+    if (!detail) return HttpResponse.json(errorBody("Registro de auditoria não encontrado.", "NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(detail)
+  }),
+
+  // ---- Tempo real (SSE) -------------------------------------------------------
+  // Ver `decisoes-tempo-real-sse.md` (Nova) — cliente real fala `fetch` +
+  // `ReadableStream` com `Authorization: Bearer`, nunca JWT na querystring.
+  // O stream sintético (`mocks/realtimeStream.ts`) prova a integração inteira
+  // (parsing + reconexão + invalidação de query) sem o backend do Vega.
+  http.get("/api/admin/events", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    return new HttpResponse(createAdminEventStream(), { headers: SSE_RESPONSE_HEADERS })
+  }),
+
+  http.get("/api/me/events", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    return new HttpResponse(createMeEventStream(scope.user.userId), { headers: SSE_RESPONSE_HEADERS })
   }),
 
   // ---- PWA do motorista: charge point público + rotas /api/me/* ---------------

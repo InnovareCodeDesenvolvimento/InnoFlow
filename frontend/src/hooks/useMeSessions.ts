@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { meService } from "@/services/me"
+import { useRealtimeHealthy } from "@/store/realtimeStore"
 import type { MeSessionsQuery, MeStartSessionRequest } from "@/types/api"
 
 export const meKeys = {
@@ -19,11 +20,16 @@ export function useStartSession() {
 }
 
 /**
- * Sessão ativa do motorista — máquina de estados por polling (sem SSE nesta
- * fase, mesmo padrão do dashboard admin). Intervalo varia com o status:
- * `STARTED`/`CHARGING` a cada 5s, `FINISHING` a cada 3s (mais perto do fim),
- * parado quando não há sessão. `refetchIntervalInBackground: false` — não
- * bate na API com a tela em segundo plano (bateria do celular do motorista).
+ * Sessão ativa do motorista — máquina de estados por polling, agora com SSE
+ * (`RealtimeConnection`) como mecanismo PRINCIPAL: `session.metrics` atualiza
+ * `energyDeliveredWh`/`lastPowerW`/`lastSoc`/`estimatedCostCents` direto via
+ * `setQueryData` (ver `realtimeEventHandlers.ts`), `session.started`/
+ * `session.stopped` invalidam esta query. O polling abaixo virou REDE DE
+ * SEGURANÇA (Nova, `decisoes-tempo-real-sse.md` item 7): 5s/3s de sempre
+ * quando o stream está fora do ar (ou nunca provou que está vivo — conexão
+ * fresca, ainda sem heartbeat), 60s quando está saudável. Nunca desliga de
+ * vez — SSE morre de formas que parecem sucesso (rádio dormindo, iOS
+ * suspendendo o PWA em segundo plano, timeout de proxy).
  *
  * - `pollWhileIdle`: continua o polling mesmo com `session: null` — usado só
  *   pela tela `/app/sessao` enquanto aguarda a sessão aparecer (comando
@@ -33,19 +39,22 @@ export function useStartSession() {
  *   normal do TanStack Query, sem polling contínuo — não faz sentido gastar
  *   bateria do motorista em polling de fundo em toda tela do app.
  * - `fastPollMs`: força o intervalo (usado ao clicar "Parar recarga", para
- *   feedback mais rápido que o intervalo baseado em status).
+ *   feedback mais rápido que o intervalo baseado em status) — vence mesmo
+ *   com o stream saudável, é um pedido explícito de "quero saber JÁ".
  */
 export function useActiveSession(options: { pollWhileIdle?: boolean; fastPollMs?: number } = {}) {
   const { pollWhileIdle = false, fastPollMs } = options
+  const realtimeHealthy = useRealtimeHealthy()
   return useQuery({
     queryKey: meKeys.activeSession,
     queryFn: () => meService.activeSession(),
     refetchInterval: (query) => {
       if (fastPollMs) return fastPollMs
       const status = query.state.data?.session?.status
-      if (status === "FINISHING") return 3000
-      if (status === "STARTED" || status === "CHARGING") return 5000
-      return pollWhileIdle ? 5000 : false
+      const isActive = status === "STARTED" || status === "CHARGING" || status === "FINISHING"
+      if (!isActive) return pollWhileIdle ? (realtimeHealthy ? 60000 : 5000) : false
+      if (realtimeHealthy) return 60000
+      return status === "FINISHING" ? 3000 : 5000
     },
     refetchIntervalInBackground: false,
     // Requisito duro (ver PROGRESSO.md §PWA): uma falha de rede nunca pode

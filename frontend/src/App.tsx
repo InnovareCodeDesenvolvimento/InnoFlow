@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/Toaster"
 import { Layout } from "@/components/layout/Layout"
 import { ScrollToTop } from "@/components/layout/ScrollToTop"
 import { RequireAuth } from "@/components/layout/RequireAuth"
+import { RealtimeConnection } from "@/components/realtime/RealtimeConnection"
 import { Home } from "@/pages/Public/Home"
 import { registerInstallPromptListeners } from "@/store/installPromptStore"
 
@@ -27,6 +28,7 @@ const AdminMovimentoDiario = lazy(() => import("@/pages/Admin/MovimentoDiario"))
 const AdminFaturamento = lazy(() => import("@/pages/Admin/Faturamento"))
 const AdminSessoes = lazy(() => import("@/pages/Admin/Sessoes"))
 const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
+const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 
 const ChargePointLanding = lazy(() => import("@/pages/Public/ChargePointLanding").then((m) => ({ default: m.ChargePointLanding })))
 const AppLayout = lazy(() => import("@/pages/App/Layout").then((m) => ({ default: m.AppLayout })))
@@ -53,6 +55,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <RealtimeConnection />
       <ScrollToTop />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -90,6 +93,15 @@ export default function App() {
               element={
                 <RequireAuth roles={["ADMIN"]}>
                   <AdminAuthTokens />
+                </RequireAuth>
+              }
+            />
+            {/* AuditLog é ADMIN-only por decisão de produto (rastreabilidade da rede inteira, ver decisoes-audit-log.md). */}
+            <Route
+              path="auditoria"
+              element={
+                <RequireAuth roles={["ADMIN"]}>
+                  <AdminAuditoria />
                 </RequireAuth>
               }
             />

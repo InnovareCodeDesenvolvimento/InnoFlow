@@ -3,6 +3,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-d
 import { Building2, ExternalLink, LogOut, Menu, ShieldAlert, X } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
+import { QuickActions } from "@/components/admin/QuickActions"
 import { matchNavItem } from "@/components/painel/navegacao"
 import { InnovareCodeBadge } from "@/components/painel/InnovareCodeBadge"
 import { cn, operatorContextLabel, ROLE_LABELS } from "@/lib/utils"
@@ -97,6 +98,7 @@ function AdminShell() {
           )}
         </div>
         <nav className="flex-1 overflow-y-auto px-4 pb-4" aria-label="Navegação do painel administrativo">
+          <QuickActions role={user?.role} />
           {navGroups()}
         </nav>
         <div className="border-t border-white/10 p-4">
@@ -146,6 +148,7 @@ function AdminShell() {
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto p-4" aria-label="Navegação do painel administrativo (mobile)">
+              <QuickActions role={user?.role} onNavigate={() => setDrawerOpen(false)} />
               {navGroups(() => setDrawerOpen(false))}
             </nav>
             <div className="border-t border-white/10 p-4">

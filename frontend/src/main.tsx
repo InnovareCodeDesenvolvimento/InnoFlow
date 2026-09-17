@@ -9,7 +9,14 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 60_000,
       retry: 1,
-      refetchOnWindowFocus: false,
+      // Ligado (era `false`) a partir do SSE (`RealtimeConnection`): o push
+      // já mantém a tela em dia enquanto ela existe, mas o stream some de
+      // formas que parecem sucesso quando a aba/PWA volta de segundo plano
+      // (iOS suspende a conexão, o navegador não avisa nada quebrou) — o
+      // refetch ao focar é a rede de segurança que pega exatamente essa
+      // lacuna. Barato: só refaz a busca de queries que já passaram do
+      // `staleTime` (60s aqui), não de tudo que está montado na tela.
+      refetchOnWindowFocus: true,
     },
   },
 })

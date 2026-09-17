@@ -1,0 +1,109 @@
+/**
+ * Stream SSE sintético para `/api/admin/events` e `/api/me/events` — o
+ * hook real (`useRealtimeStream.ts`) fala `fetch`+`ReadableStream`, então o
+ * mock precisa devolver um `ReadableStream` de verdade (não dá pra simular
+ * isso com uma resposta JSON única). Objetivo: provar a integração inteira
+ * (parsing + reconexão + invalidação de query) no navegador sem o backend
+ * real do Vega — mesmo espírito dos outros mocks deste diretório.
+ */
+import { mockChargePoints, mockConnectors } from "./data"
+import { getMockActiveSession } from "./meData"
+
+const TICK_MS = 5_000
+
+function encode(text: string): Uint8Array {
+  return new TextEncoder().encode(text)
+}
+
+function sseFrame(event: Record<string, unknown>): Uint8Array {
+  return encode(`data: ${JSON.stringify(event)}\n\n`)
+}
+
+/** Comentário SSE (`:`) — heartbeat puro, prova que a conexão está viva sem carregar evento de negócio (ver `lib/sse.ts`). */
+function heartbeatFrame(): Uint8Array {
+  return encode(": ping\n\n")
+}
+
+/**
+ * Canal do painel admin — alterna `dashboard.dirty` (aggregate "ficou
+ * velho") com `chargepoint.status` de um conector real do dataset (pra
+ * exercitar `admin.entity.changed`-like invalidação sem inventar entidade
+ * nova), e heartbeat puro no meio pra provar que o watchdog de 35s do
+ * cliente nunca precisa disparar em uso normal.
+ */
+export function createAdminEventStream(): ReadableStream<Uint8Array> {
+  let tick = 0
+  let timer: ReturnType<typeof setInterval> | undefined
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(heartbeatFrame())
+      timer = setInterval(() => {
+        tick += 1
+        const occurredAt = new Date().toISOString()
+        if (tick % 3 === 0) {
+          controller.enqueue(sseFrame({ type: "dashboard.dirty", occurredAt }))
+          return
+        }
+        if (tick % 3 === 1) {
+          const cp = mockChargePoints[tick % mockChargePoints.length]
+          const connector = mockConnectors.find((c) => c.chargePointId === cp.id)
+          if (connector) {
+            controller.enqueue(
+              sseFrame({ type: "chargepoint.status", occurredAt, chargePointId: cp.id, connectorId: connector.connectorId, status: connector.status }),
+            )
+            return
+          }
+        }
+        controller.enqueue(heartbeatFrame())
+      }, TICK_MS)
+    },
+    cancel() {
+      if (timer) clearInterval(timer)
+    },
+  })
+}
+
+/**
+ * Canal do motorista — espelha `getMockActiveSession` (o MESMO motor que já
+ * faz a sessão "progredir" pro polling de hoje, ver `meData.ts`) como
+ * `session.metrics`. Sem sessão ativa, só heartbeat — não inventa energia
+ * que a simulação de sessão não gerou (mesma regra do backend real: push
+ * não cria dado que o carregador não mandou).
+ */
+export function createMeEventStream(userId: string): ReadableStream<Uint8Array> {
+  let timer: ReturnType<typeof setInterval> | undefined
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(heartbeatFrame())
+      timer = setInterval(() => {
+        const session = getMockActiveSession(userId)
+        if (!session) {
+          controller.enqueue(heartbeatFrame())
+          return
+        }
+        controller.enqueue(
+          sseFrame({
+            type: "session.metrics",
+            occurredAt: new Date().toISOString(),
+            sessionId: session.id,
+            energyWh: session.energyDeliveredWh,
+            powerW: session.lastPowerW,
+            soc: session.lastSoc,
+            partialCostCents: session.estimatedCostCents,
+          }),
+        )
+      }, TICK_MS)
+    },
+    cancel() {
+      if (timer) clearInterval(timer)
+    },
+  })
+}
+
+export const SSE_RESPONSE_HEADERS = {
+  "Content-Type": "text/event-stream",
+  "Cache-Control": "no-cache",
+  Connection: "keep-alive",
+} as const

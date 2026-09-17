@@ -1,6 +1,8 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type {
+  AuditAction,
+  AuditOutcome,
   ChargingSessionStatus,
   ConnectorStatus,
   ConnectorType,
@@ -217,6 +219,39 @@ export const WALLET_ENTRY_TYPE_LABELS: Record<WalletEntryType, string> = {
   ADJUSTMENT_CREDIT: "Crédito manual",
   ADJUSTMENT_DEBIT: "Débito manual",
   REFUND: "Estorno",
+}
+
+// ---------------------------------------------------------------------------
+// AuditLog (painel admin, ADMIN-only)
+// ---------------------------------------------------------------------------
+
+export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
+  CREATE: "Criação",
+  UPDATE: "Atualização",
+  DELETE: "Exclusão",
+  REMOTE_COMMAND: "Comando remoto",
+  WALLET_ADJUSTMENT: "Ajuste de carteira",
+  LOGIN_SUCCESS: "Login",
+  LOGIN_FAILED: "Falha de login",
+  EXPORT: "Exportação",
+  OTHER: "Outro",
+}
+
+export const AUDIT_OUTCOME_LABELS: Record<AuditOutcome, string> = {
+  SUCCESS: "Sucesso",
+  DENIED: "Negado",
+  FAILED: "Falhou",
+}
+
+/** `DENIED`/`FAILED` em destaque (`danger`) — é o sinal de segurança mais valioso da tela (pedido explícito do dono). */
+export function auditOutcomeBadgeVariant(outcome: AuditOutcome): BadgeVariant {
+  switch (outcome) {
+    case "SUCCESS":
+      return "success"
+    case "DENIED":
+    case "FAILED":
+      return "danger"
+  }
 }
 
 export function paymentStatusBadgeVariant(status: SessionPaymentStatus | PaymentIntentStatus): BadgeVariant {

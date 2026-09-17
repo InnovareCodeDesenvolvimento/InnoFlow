@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { TrendingUp } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
@@ -17,6 +18,7 @@ import { useReportPeriod } from "@/hooks/useReportPeriod"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
 import { formatCents, formatEnergyWh } from "@/lib/utils"
+import type { PeriodPreset } from "@/lib/period"
 import type { RevenueBreakdownDimension, RevenueGranularity } from "@/types/api"
 
 const GRANULARITY_OPTIONS: Array<{ value: RevenueGranularity; label: string }> = [
@@ -36,7 +38,12 @@ export default function FaturamentoPage() {
   const role = useAuthStore((s) => s.user?.role)
   const isAdmin = role === "ADMIN"
 
-  const period = useReportPeriod("30d")
+  // `?period=today` vem do atalho rápido da sidebar ("Faturamento de hoje",
+  // ver `adminQuickActions.ts`) — só um preset inicial, não é parâmetro de
+  // contrato novo, a tela continua controlando o próprio período depois.
+  const [searchParams] = useSearchParams()
+  const initialPreset = (searchParams.get("period") as PeriodPreset | null) ?? "30d"
+  const period = useReportPeriod(initialPreset)
   const [operatorId, setOperatorId] = useState("")
   const [siteId, setSiteId] = useState("")
   const [granularity, setGranularity] = useState<RevenueGranularity>("day")
