@@ -2,8 +2,12 @@ import { Activity, LayoutDashboard, ScrollText, TrendingUp, Zap, type LucideIcon
 import type { Role } from "@/types/api"
 
 /**
- * Atalhos rápidos da sidebar — pedido do dono (17/09/2026): "as opções mais
- * usadas" no topo, sem precisar navegar pelos grupos.
+ * Atalhos rápidos — pedido do dono (17/09/2026): "as opções mais usadas"
+ * sempre à mão, sem precisar navegar pelos grupos. Vivem no HEADER do painel
+ * (`QuickActionsBar`/`QuickActionsDropdown`, ver `Admin/Layout.tsx`), não na
+ * sidebar — o dono testou a primeira versão (na sidebar) e achou que
+ * misturava "navegação" com "ação"; separar em faixas diferentes ficou mais
+ * profissional (ajuste de 17/09/2026, mesmo dia).
  *
  * CURADORIA ESTÁTICA por ora: não existe telemetria de uso real no projeto
  * (seria escopo novo, fora desta rodada) — a lista abaixo é um julgamento de
