@@ -1,12 +1,16 @@
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import path from "path"
+import { buildDefine } from "./buildInfo.ts"
 
 // Alvo do proxy de desenvolvimento: a API local (entrypoints/api.ts).
 const API_DEV_TARGET = process.env.VITE_DEV_API_TARGET || "http://localhost:3000"
 
 export default defineConfig({
   plugins: [react()],
+  // Versão e data do build viram constantes no bundle (ver lib/appInfo.ts e
+  // o selo InnovareCodeBadge) — mesmo padrão do ParquedasFeiras.
+  define: buildDefine,
   resolve: {
     alias: {
       // import.meta.dirname (não __dirname) — exigido pelo configLoader

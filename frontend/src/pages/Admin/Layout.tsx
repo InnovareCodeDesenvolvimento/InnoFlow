@@ -4,6 +4,7 @@ import { Building2, ExternalLink, LogOut, Menu, ShieldAlert, X } from "lucide-re
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
 import { matchNavItem } from "@/components/painel/navegacao"
+import { InnovareCodeBadge } from "@/components/painel/InnovareCodeBadge"
 import { cn, operatorContextLabel, ROLE_LABELS } from "@/lib/utils"
 import logoIcon from "@/assets/logo-icon.png"
 
@@ -185,6 +186,8 @@ function AdminShell() {
           <Outlet />
         </main>
       </div>
+
+      <InnovareCodeBadge />
     </div>
   )
 }
