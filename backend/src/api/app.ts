@@ -16,6 +16,7 @@ import adminSitesRoutes from './routes/sites.routes'
 import adminChargePointsRoutes from './routes/chargePoints.routes'
 import adminConnectorsRoutes from './routes/connectors.routes'
 import adminTariffsRoutes from './routes/tariffs.routes'
+import adminTariffAssignmentsRoutes from './routes/tariffAssignments.routes'
 import adminAuthTokensRoutes from './routes/authTokens.routes'
 import adminDashboardRoutes from './routes/dashboard.routes'
 import adminReportsRoutes from './routes/reports.routes'
@@ -70,6 +71,7 @@ export function createApp(): Express {
   app.use('/api/admin/charge-points', adminRateLimit, adminChargePointsRoutes)
   app.use('/api/admin/connectors', adminRateLimit, adminConnectorsRoutes)
   app.use('/api/admin/tariffs', adminRateLimit, adminTariffsRoutes)
+  app.use('/api/admin/tariff-assignments', adminRateLimit, adminTariffAssignmentsRoutes)
   app.use('/api/admin/auth-tokens', adminRateLimit, adminAuthTokensRoutes)
   app.use('/api/admin/dashboard', adminRateLimit, adminDashboardRoutes)
   app.use('/api/admin/reports', adminRateLimit, adminReportsRoutes)
