@@ -1,0 +1,125 @@
+import { Prisma, type StopReason } from '@prisma/client'
+import { prisma } from '../../lib/prisma'
+import { logger } from '../../lib/logger'
+import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
+import { liquidarSessao } from './liquidarSessao'
+
+const ZERO_CUSTOS: CustoSessaoResultado = {
+  energyCostCents: 0,
+  timeCostCents: 0,
+  idleFeeCents: 0,
+  sessionFeeCents: 0,
+  minChargeAdjustmentCents: 0,
+  totalCostCents: 0,
+}
+
+export interface FinalizarSessaoInput {
+  /** Leitura final do medidor, em Wh. */
+  meterStopWh: number
+  /** Instante em que a sessão terminou de verdade (nunca `now()` — vem da fonte da medição). */
+  timestamp: Date
+  stopReason: StopReason | null
+}
+
+/**
+ * Núcleo de "fechar uma `ChargingSession` de verdade": calcula energia
+ * entregue, ociosidade, custo (`calcularCustoSessao`) e debita a carteira
+ * (`liquidarSessao`) — tudo dentro de UMA `$transaction` com lock pessimista
+ * (`SELECT ... FOR UPDATE`), pra nunca correr com outra finalização
+ * concorrente da MESMA sessão (ex.: `StopTransaction` real chegando ao mesmo
+ * tempo que a reconciliação de sessão órfã no boot).
+ *
+ * Extraído de `stopTransaction.ts` (F5, 2026-09-17) para ser reaproveitado
+ * por `bootNotification.ts` (reconciliação de sessão que ficou aberta porque
+ * o carregador desconectou/reconectou sem completar o `StopTransaction`) —
+ * MESMA regra de cálculo, MESMA idempotência, sem duplicar a lógica.
+ *
+ * Idempotente: se a sessão já estiver `STOPPED` quando o lock é obtido
+ * (corrida com outra chamada concorrente), não faz nada.
+ *
+ * Blindada contra falha de CÁLCULO (`calcularCustoSessao` só lança para
+ * inconsistência estrutural, capturado aqui com fallback de custo zerado —
+ * nunca deixa uma tarifa/medição incomum impedir o fechamento da sessão).
+ * Falha de INFRAESTRUTURA (conexão/deadlock na `$transaction`) ainda
+ * propaga — é responsabilidade de quem chama decidir o que fazer (o
+ * `StopTransaction` real responde `Accepted` mesmo assim e enfileira retry
+ * via `enqueueLiquidarSessaoRetry`; a reconciliação de boot loga e segue para
+ * a próxima sessão órfã, sem travar o processamento do `BootNotification`).
+ */
+export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "ChargingSession" WHERE id = ${sessionId} FOR UPDATE`)
+
+    const session = await tx.chargingSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        status: true,
+        meterStartWh: true,
+        startedAt: true,
+        chargingEndedAt: true,
+        tariffSnapshot: true,
+        site: { select: { timezone: true } },
+      },
+    })
+
+    if (session.status === 'STOPPED') return // corrida: outra chamada já finalizou entre o read e o lock
+
+    const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
+
+    let energyDeliveredWh = final.meterStopWh - session.meterStartWh
+    let stopReason = final.stopReason
+    if (energyDeliveredWh < 0) {
+      logger.warn(
+        { sessionId: session.id, meterStopWh: final.meterStopWh, meterStartWh: session.meterStartWh },
+        '[finalizarSessao] energyDeliveredWh negativo — clampado em 0',
+      )
+      energyDeliveredWh = 0
+      stopReason = 'OTHER'
+    }
+
+    // Janela de ociosidade: [chargingEndedAt + carência, stoppedAt) — mesma
+    // fórmula documentada no schema (`ChargingSession.idleSeconds`).
+    let idleSeconds: number | null = null
+    if (session.chargingEndedAt) {
+      const idleStartMs = session.chargingEndedAt.getTime() + tariffSnapshot.idleGracePeriodSeconds * 1000
+      idleSeconds = Math.max(0, Math.round((final.timestamp.getTime() - idleStartMs) / 1000))
+    }
+
+    // NUNCA pode lançar daqui pra fora — ver contrato documentado no
+    // cabeçalho da função. `calcularCustoSessao` só lança para
+    // inconsistência estrutural (datas fora de ordem), que os clamps acima
+    // já deveriam prevenir — mesmo assim blindamos com fallback de custo
+    // zerado em vez de propagar.
+    let custos: CustoSessaoResultado = ZERO_CUSTOS
+    try {
+      custos = calcularCustoSessao(tariffSnapshot, {
+        energyDeliveredWh,
+        startedAt: session.startedAt,
+        chargingEndedAt: session.chargingEndedAt,
+        stoppedAt: final.timestamp,
+        timezone: session.site.timezone,
+      })
+    } catch (err) {
+      logger.error({ err, sessionId: session.id }, '[finalizarSessao] calcularCustoSessao lançou — usando custo zerado (nunca bloqueia o chamador)')
+    }
+
+    await tx.chargingSession.update({
+      where: { id: session.id },
+      data: {
+        status: 'STOPPED',
+        meterStopWh: final.meterStopWh,
+        energyDeliveredWh,
+        stoppedAt: final.timestamp,
+        stopReason,
+        idleSeconds,
+        ...custos,
+      },
+    })
+
+    // Débito atômico da carteira — MESMA função usada pelo job de retry
+    // (`liquidarSessao`), aqui reaproveitando a transação já aberta (nunca
+    // abre uma transação aninhada).
+    await liquidarSessao(session.id, tx)
+  })
+}

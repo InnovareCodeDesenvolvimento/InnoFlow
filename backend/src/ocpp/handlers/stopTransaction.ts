@@ -1,28 +1,23 @@
-import { Prisma, type StopReason } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { STOP_REASON_MAP, stopTransactionReqSchema } from '../schemas/stopTransaction'
-import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
-import { liquidarSessao, enqueueLiquidarSessaoRetry } from '../../services/carteira/liquidarSessao'
+import { finalizarSessao } from '../../services/carteira/finalizarSessao'
+import { enqueueLiquidarSessaoRetry } from '../../services/carteira/liquidarSessao'
 import { defineOcppHandler } from './defineHandler'
 
-const ZERO_CUSTOS: CustoSessaoResultado = {
-  energyCostCents: 0,
-  timeCostCents: 0,
-  idleFeeCents: 0,
-  sessionFeeCents: 0,
-  minChargeAdjustmentCents: 0,
-  totalCostCents: 0,
-}
-
 /**
- * F4 (2026-09-17): agora calcula custo de verdade (`calcularCustoSessao`) e
- * liquida a carteira (`liquidarSessao`) — dentro de UMA `$transaction`
- * (status + custo + débito). Regra de ouro da Nova, reforçada aqui: o
- * carregador NUNCA fica refém da nossa contabilidade — respondemos
- * `Accepted` mesmo se a transação de finalização falhar, enfileirando um
- * retry (`enqueueLiquidarSessaoRetry`) em vez de deixar o `CALL_ERROR`
- * propagar (o carregador ficaria retentando o StopTransaction pra sempre).
+ * F4 (2026-09-17): agora calcula custo de verdade e liquida a carteira via
+ * `finalizarSessao` — regra de ouro da Nova, reforçada aqui: o carregador
+ * NUNCA fica refém da nossa contabilidade — respondemos `Accepted` mesmo se
+ * a transação de finalização falhar, enfileirando um retry
+ * (`enqueueLiquidarSessaoRetry`) em vez de deixar o `CALL_ERROR` propagar (o
+ * carregador ficaria retentando o StopTransaction pra sempre).
+ *
+ * F5 (2026-09-17): o núcleo (cálculo de energia/idle/custo + débito) foi
+ * extraído para `finalizarSessao` — reaproveitado agora também pela
+ * reconciliação de sessão órfã em `bootNotification.ts`. Este handler cuida
+ * só da parte OCPP-específica: idempotência de negócio (sessão já
+ * conhecida/já STOPPED) e o mapeamento de `StopReason`.
  *
  * NÃO escreve mais `Connector.status = AVAILABLE` aqui — mentia quando o
  * carro continuava plugado em `Finishing` (a fonte de verdade do conector
@@ -48,81 +43,10 @@ export const handleStopTransaction = defineOcppHandler('StopTransaction', stopTr
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM "ChargingSession" WHERE id = ${existing.id} FOR UPDATE`)
-
-      const session = await tx.chargingSession.findUniqueOrThrow({
-        where: { id: existing.id },
-        select: {
-          id: true,
-          status: true,
-          meterStartWh: true,
-          startedAt: true,
-          chargingEndedAt: true,
-          tariffSnapshot: true,
-          site: { select: { timezone: true } },
-        },
-      })
-
-      if (session.status === 'STOPPED') return // corrida: outra chamada já finalizou entre o read e o lock
-
-      const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
-
-      let energyDeliveredWh = data.meterStop - session.meterStartWh
-      let stopReason: StopReason | null = data.reason ? STOP_REASON_MAP[data.reason] : null
-      if (energyDeliveredWh < 0) {
-        logger.warn(
-          { sessionId: session.id, meterStop: data.meterStop, meterStartWh: session.meterStartWh },
-          '[ocpp] StopTransaction: energyDeliveredWh negativo — clampado em 0',
-        )
-        energyDeliveredWh = 0
-        stopReason = 'OTHER'
-      }
-
-      // Janela de ociosidade: [chargingEndedAt + carência, stoppedAt) — mesma
-      // fórmula documentada no schema (`ChargingSession.idleSeconds`).
-      let idleSeconds: number | null = null
-      if (session.chargingEndedAt) {
-        const idleStartMs = session.chargingEndedAt.getTime() + tariffSnapshot.idleGracePeriodSeconds * 1000
-        idleSeconds = Math.max(0, Math.round((data.timestamp.getTime() - idleStartMs) / 1000))
-      }
-
-      // NUNCA pode lançar daqui pra fora — uma exceção viraria CALL_ERROR e o
-      // carregador ficaria retentando o StopTransaction pra sempre.
-      // `calcularCustoSessao` só lança para inconsistência estrutural (datas
-      // fora de ordem), que os clamps acima já deveriam prevenir — mesmo
-      // assim blindamos com fallback de custo zerado em vez de propagar.
-      let custos: CustoSessaoResultado = ZERO_CUSTOS
-      try {
-        custos = calcularCustoSessao(tariffSnapshot, {
-          energyDeliveredWh,
-          startedAt: session.startedAt,
-          chargingEndedAt: session.chargingEndedAt,
-          stoppedAt: data.timestamp,
-          timezone: session.site.timezone,
-        })
-      } catch (err) {
-        logger.error({ err, sessionId: session.id }, '[ocpp] calcularCustoSessao lançou — usando custo zerado (nunca bloqueia o carregador)')
-      }
-
-      await tx.chargingSession.update({
-        where: { id: session.id },
-        data: {
-          status: 'STOPPED',
-          meterStopWh: data.meterStop,
-          energyDeliveredWh,
-          stoppedAt: data.timestamp,
-          stopReason,
-          idleSeconds,
-          ...custos,
-        },
-      })
-
-      // Débito atômico da carteira — MESMA função usada pelo job de retry
-      // (`liquidarSessao`), aqui reaproveitando a transação já aberta (nunca
-      // abre uma transação aninhada). Essa costura (inline + job) é o que a
-      // F5 reaproveita sem reescrever o handler.
-      await liquidarSessao(session.id, tx)
+    await finalizarSessao(existing.id, {
+      meterStopWh: data.meterStop,
+      timestamp: data.timestamp,
+      stopReason: data.reason ? STOP_REASON_MAP[data.reason] : null,
     })
   } catch (err) {
     logger.error(
