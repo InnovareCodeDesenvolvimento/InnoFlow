@@ -225,6 +225,17 @@ Paleta foi lida visualmente pelo Atlas a partir da imagem colada no chat
 (sem arquivo da logo em mãos) — pendente: pedir ao dono o arquivo oficial
 (PNG/SVG) da logo para favicon/header de verdade, quando ele puder enviar.
 
+**✅ Bug real de schema encontrado e corrigido (17/09/2026):** ao rodar
+`db:seed:demo` em produção pela primeira vez, a CHECK constraint
+`payment_intent_return_code_required` bloqueou a inserção de recargas de
+carteira via PIX. A constraint original exigia `returnCode` para
+QUALQUER `PaymentIntent` capturado, mas `returnCode` é conceito exclusivo
+do fluxo de **cartão** da Cielo — PIX nunca tem esse campo (confirma via
+webhook). **Isso teria bloqueado pagamentos PIX reais em produção na
+Fase 5, não só o seed.** Nova migration
+(`20260917130000_fix_payment_intent_return_code_pix`) estreita a
+exigência só para `purpose = SESSION_CARD_CAPTURE`. No `main`.
+
 **✅ Lyra entregou o rebrand** (código no `main`, lint/typecheck/testes/
 build limpos): rampa de cores derivada por HSL com contraste WCAG AA
 calculado (não estimado), corrigiu de passagem um bug pré-existente onde
