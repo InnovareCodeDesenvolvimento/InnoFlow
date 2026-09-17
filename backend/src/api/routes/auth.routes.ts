@@ -12,8 +12,8 @@ const BCRYPT_ROUNDS = 10
 
 const router = Router()
 
-function toUserDTO(user: { id: string; name: string; email: string; role: string; operatorId: string | null }) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId }
+function toUserDTO(user: { id: string; name: string; email: string; role: string; operatorId: string | null; operatorName?: string | null }) {
+  return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId, operatorName: user.operatorName ?? null }
 }
 
 router.post(
@@ -45,7 +45,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, password } = req.body as LoginInput
 
-    const user = await prisma.user.findUnique({ where: { email } })
+    const user = await prisma.user.findUnique({ where: { email }, include: { operator: { select: { name: true } } } })
     if (!user || !user.active || !user.passwordHash) {
       throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
     }
@@ -54,7 +54,7 @@ router.post(
     if (!passwordOk) throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
 
     const token = issueToken(user)
-    res.json({ token, user: toUserDTO(user) })
+    res.json({ token, user: toUserDTO({ ...user, operatorName: user.operator?.name }) })
   }),
 )
 
