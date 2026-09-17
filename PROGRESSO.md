@@ -372,6 +372,31 @@ consulta simples, produção só tem o seed base. Precisa rodar de novo.
 
 E2E automatizado é só 1 smoke test — dívida real, mas não bloqueante.
 
+## F4 entregue (Vega) — 2026-09-17
+
+**Sessão de recarga cobrando da carteira, sem Cielo, publicada no `main`**
+(commits `eff02eb`/`369e87d`/`d123ade` — Vega commitou localmente mas não
+deu push; Atlas validou tudo de novo de forma independente — typecheck/
+lint/build/57 testes unitários — e publicou). Núcleo: `calcularTetoReserva`/
+`avaliarInicioSessao` puros, `walletLedger`/`liquidarSessao` com débito
+atômico (`FOR UPDATE`) e retry via BullMQ. Handlers OCPP reescritos:
+`tariffSnapshot` agora com `TariffWindow[]` (tarifa HYBRID cobra ponta de
+verdade), guarda de saldo com auto-stop via `RemoteStopTransaction`,
+`Connector.status` passa a vir só do `StatusNotification` real (não mais
+forçado pelo Start/Stop). 5 rotas novas: iniciar/parar sessão, listagem
+de motoristas, carteira do motorista, ajuste manual de saldo (ADMIN).
+
+2 testes de integração novos cobrindo exatamente as lacunas que a Íris
+reprovou (multi-tenant, conciliação financeira) — escritos, mas **ainda
+não confirmados contra Postgres real** (sem Docker no sandbox do Vega
+também). Próximo passo da Íris: rodar esses dois contra produção/seed
+real antes de considerar o bloqueio da F5 removido.
+
+**Pendência real para testar**: `remoteStartCommandSchema.userId` também
+valida `.cuid()` — se o motorista de teste tiver ID não-cuid (mesmo bug
+do site, ver abaixo), iniciar sessão pela API falha até alguém decidir a
+correção.
+
 ## Preparando o simulador de charge point — 2026-09-17
 
 Dono criou os 3 serviços que faltavam no EasyPanel (`inno-elekton-ocpp`,
