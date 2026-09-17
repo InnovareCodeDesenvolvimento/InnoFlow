@@ -18,6 +18,8 @@ import { authenticate, requireRole } from '../middleware/auth'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { meStartSessionRateLimit } from '../middleware/rateLimit'
 import { meStartSessionSchema, meListQuerySchema, type MeStartSessionInput, type MeListQuery } from '../schemas/me.schema'
+import { userChannel } from '../../realtime/bus'
+import { startSseStream } from './events.routes'
 
 /**
  * PWA do motorista (F6, 2026-09-17) — ver `.claude/agent-memory/nova/
@@ -458,5 +460,16 @@ router.get(
     })
   }),
 )
+
+/**
+ * `GET /api/me/events` — canal SSE do motorista. Assina SÓ o próprio canal
+ * (`ui:ev:user:{userId}`) — `wallet.updated`/`session.metrics`/
+ * `session.started`/`session.stopped` do próprio motorista, nunca de outro
+ * (fronteira multi-tenant na assinatura, ver `realtime/bus.ts`). Mesma
+ * mecânica de heartbeat/headers do painel admin (`events.routes.ts`).
+ */
+router.get('/events', (req, res) => {
+  startSseStream(req, res, [userChannel(req.user!.userId)])
+})
 
 export default router

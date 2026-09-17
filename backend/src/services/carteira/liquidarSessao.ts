@@ -3,6 +3,14 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { createQueue, LIQUIDAR_SESSAO_QUEUE_NAME, type LiquidarSessaoJobData } from '../../worker/queues'
 import { debitarSessao } from './walletLedger'
+import { emitWalletUpdated } from '../../realtime/emit'
+
+export interface LiquidarSessaoResultado {
+  userId: string
+  /** `true` só quando um `WalletEntry` novo foi de fato criado nesta chamada — idempotência/sessão gratuita/já liquidada não contam. */
+  debited: boolean
+  balanceAfterCents: number
+}
 
 /**
  * Liquida financeiramente uma `ChargingSession` já finalizada (STOPPED, com
@@ -30,15 +38,29 @@ import { debitarSessao } from './walletLedger'
  * baixo risco o suficiente para não justificar replicar o payload OCPP no
  * job agora — reavaliar se isso acontecer na prática.
  */
-export async function liquidarSessao(sessionId: string, tx?: Prisma.TransactionClient): Promise<void> {
+export async function liquidarSessao(sessionId: string, tx?: Prisma.TransactionClient): Promise<LiquidarSessaoResultado | null> {
   if (tx) {
-    await liquidarSessaoComTx(tx, sessionId)
-    return
+    // Chamador (`finalizarSessao.ts`) é dono desta transação — NÃO publica
+    // aqui (o commit ainda não aconteceu do ponto de vista de quem chamou).
+    // Quem tem `tx` é responsável por publicar `wallet.updated` depois do
+    // PRÓPRIO `$transaction` resolver, usando o resultado retornado aqui.
+    return liquidarSessaoComTx(tx, sessionId)
   }
-  await prisma.$transaction((freshTx) => liquidarSessaoComTx(freshTx, sessionId))
+
+  // Sem `tx` (job de retry do BullMQ, worker) — este É o dono da transação:
+  // publica logo depois do commit, ponto de convergência real entre API/
+  // gateway (via finalizarSessao) e worker (aqui) que a Nova pediu (ver
+  // decisoes-tempo-real-sse.md, item 5).
+  const resultado = await prisma.$transaction((freshTx) => liquidarSessaoComTx(freshTx, sessionId))
+  if (resultado?.debited) {
+    await emitWalletUpdated(resultado.userId, resultado.balanceAfterCents).catch((err) =>
+      logger.error({ err, sessionId }, '[realtime] falha ao publicar wallet.updated após retry de liquidação (não bloqueante)'),
+    )
+  }
+  return resultado
 }
 
-async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: string): Promise<void> {
+async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: string): Promise<LiquidarSessaoResultado | null> {
   const session = await tx.chargingSession.findUnique({
     where: { id: sessionId },
     select: { id: true, userId: true, ocppTransactionId: true, operatorId: true, status: true, totalCostCents: true, site: { select: { name: true } } },
@@ -46,14 +68,14 @@ async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: stri
 
   if (!session) {
     logger.error({ sessionId }, '[liquidarSessao] sessão não encontrada — nada a liquidar')
-    return
+    return null
   }
   if (session.status !== 'STOPPED' || session.totalCostCents === null) {
     // Ver limitação documentada no cabeçalho — a sessão ainda não foi
     // tecnicamente finalizada (custo não persistido), não há o que debitar
     // ainda.
     logger.warn({ sessionId, status: session.status, totalCostCents: session.totalCostCents }, '[liquidarSessao] sessão ainda sem custo persistido — pulando esta tentativa')
-    return
+    return null
   }
 
   const resultado = await debitarSessao({
@@ -64,6 +86,8 @@ async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: stri
   })
 
   logger.info({ sessionId, ...resultado }, '[liquidarSessao] sessão liquidada')
+
+  return { userId: session.userId, debited: resultado.walletEntryId !== null, balanceAfterCents: resultado.balanceAfterCents }
 }
 
 /**

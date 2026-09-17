@@ -3,9 +3,12 @@ import { prisma } from '../../lib/prisma'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate, requireRole } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createAuthTokenSchema, updateAuthTokenSchema, type CreateAuthTokenInput, type UpdateAuthTokenInput } from '../schemas/authToken.schema'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 
 /**
  * DECISÃO (documentada, não pedida explicitamente): `AuthToken` não tem
@@ -52,6 +55,12 @@ router.post(
       data: { idTag: body.idTag, type: body.type, userId: body.userId, expiresAt: body.expiresAt },
     })
     res.status(201).json(token)
+
+    auditCtx(res).describe({
+      entityType: 'AuthToken',
+      entityId: token.id,
+      changes: diffEntity(null, token, AUDIT_ALLOWLIST_BY_ENTITY.AuthToken),
+    })
   }),
 )
 
@@ -65,6 +74,12 @@ router.patch(
     const body = req.body as UpdateAuthTokenInput
     const token = await prisma.authToken.update({ where: { id: existing.id }, data: body })
     res.json(token)
+
+    auditCtx(res).describe({
+      entityType: 'AuthToken',
+      entityId: token.id,
+      changes: diffEntity(existing, token, AUDIT_ALLOWLIST_BY_ENTITY.AuthToken),
+    })
   }),
 )
 
@@ -73,8 +88,14 @@ router.delete(
   asyncHandler(async (req, res) => {
     const existing = await prisma.authToken.findUnique({ where: { id: req.params.id } })
     if (!existing) throw new AppError('Token não encontrado.', 404, 'NOT_FOUND')
-    await prisma.authToken.update({ where: { id: existing.id }, data: { status: 'BLOCKED' } })
+    const token = await prisma.authToken.update({ where: { id: existing.id }, data: { status: 'BLOCKED' } })
     res.status(204).send()
+
+    auditCtx(res).describe({
+      entityType: 'AuthToken',
+      entityId: token.id,
+      changes: diffEntity(existing, token, AUDIT_ALLOWLIST_BY_ENTITY.AuthToken),
+    })
   }),
 )
 

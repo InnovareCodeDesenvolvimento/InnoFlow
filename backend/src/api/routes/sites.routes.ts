@@ -3,10 +3,13 @@ import { prisma } from '../../lib/prisma'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin, resolveOperatorIdForWrite } from '../middleware/tenantScope'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createSiteSchema, updateSiteSchema, type CreateSiteInput, type UpdateSiteInput } from '../schemas/site.schema'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 
 const router = Router()
 
@@ -61,6 +64,13 @@ router.post(
     })
 
     res.status(201).json(site)
+
+    auditCtx(res).describe({
+      entityType: 'Site',
+      entityId: site.id,
+      targetOperatorId: site.operatorId,
+      changes: diffEntity(null, site, AUDIT_ALLOWLIST_BY_ENTITY.Site),
+    })
   }),
 )
 
@@ -74,6 +84,13 @@ router.patch(
     const body = req.body as UpdateSiteInput
     const site = await prisma.site.update({ where: { id: existing.id }, data: body })
     res.json(site)
+
+    auditCtx(res).describe({
+      entityType: 'Site',
+      entityId: site.id,
+      targetOperatorId: site.operatorId,
+      changes: diffEntity(existing, site, AUDIT_ALLOWLIST_BY_ENTITY.Site),
+    })
   }),
 )
 
@@ -86,8 +103,15 @@ router.delete(
     // Soft delete: Site tem FKs Restrict de ChargePoint/ChargingSession —
     // apagar de verdade quebraria histórico. `active: false` é o padrão de
     // "desativado" em todo o schema do Cronos.
-    await prisma.site.update({ where: { id: existing.id }, data: { active: false } })
+    const site = await prisma.site.update({ where: { id: existing.id }, data: { active: false } })
     res.status(204).send()
+
+    auditCtx(res).describe({
+      entityType: 'Site',
+      entityId: site.id,
+      targetOperatorId: site.operatorId,
+      changes: diffEntity(existing, site, AUDIT_ALLOWLIST_BY_ENTITY.Site),
+    })
   }),
 )
 

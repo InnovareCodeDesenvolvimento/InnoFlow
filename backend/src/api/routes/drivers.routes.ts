@@ -5,6 +5,7 @@ import { toNumber } from '../lib/reportingSql'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate, requireRole } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { requireOperatorOrAdmin } from '../middleware/tenantScope'
 import { validateBody, validateQuery } from '../middleware/validate'
 import {
@@ -15,7 +16,7 @@ import {
   type DriverWalletQuery,
   type WalletAdjustmentInput,
 } from '../schemas/driver.schema'
-import { ajustarCarteira, SaldoInsuficienteError } from '../../services/carteira/walletLedger'
+import { ajustarCarteiraTransacional, SaldoInsuficienteError } from '../../services/carteira/walletLedger'
 
 /**
  * Motorista é conta de rede (não pertence a um `operatorId`) — ver PROGRESSO.md
@@ -151,6 +152,11 @@ router.get(
       page,
       pageSize,
     })
+
+    // Decisão do dono: ver o EXTRATO de um motorista específico é auditável
+    // (mesmo sendo GET) — listagem geral (`GET /`, acima) não é, só este
+    // drill-down por indivíduo.
+    auditCtx(res).describe({ entityType: 'Wallet', entityId: driver.id, forceAudit: true })
   }),
 )
 
@@ -171,10 +177,26 @@ router.post(
     const driver = await prisma.user.findFirst({ where: { id: req.params.id, role: 'DRIVER' } })
     if (!driver) throw new AppError('Motorista não encontrado.', 404, 'NOT_FOUND')
 
+    // Ator completo (email/name — o JWT só carrega userId/role/operatorId) —
+    // consulta única, aceitável dado o baixo volume desta rota (ação
+    // discricionária do ADMIN, não um evento de sessão em massa).
+    const actor = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.userId }, select: { email: true, name: true } })
+
     try {
-      const { entry } = await prisma.$transaction((tx) =>
-        ajustarCarteira({ tx, userId: driver.id, amountCents: body.amountCents, description: body.description, createdByUserId: req.user!.userId }),
-      )
+      const { entry } = await ajustarCarteiraTransacional({
+        userId: driver.id,
+        amountCents: body.amountCents,
+        description: body.description,
+        createdByUserId: req.user!.userId,
+        actor: { userId: req.user!.userId, role: req.user!.role, email: actor.email, name: actor.name, operatorId: req.user!.operatorId ?? null },
+        request: {
+          method: req.method,
+          path: req.originalUrl.split('?')[0],
+          ipAddress: req.ip ?? null,
+          userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+          requestId: (req as { id?: string }).id ?? null,
+        },
+      })
 
       res.status(201).json({
         id: entry.id,
@@ -186,6 +208,11 @@ router.post(
         description: entry.description,
         createdAt: entry.createdAt,
       })
+
+      // A linha de auditoria JÁ foi gravada (fail-closed, dentro da MESMA
+      // transação do WalletEntry, ver walletLedger.ts) — `skip` evita o
+      // middleware genérico duplicar.
+      auditCtx(res).describe({ skip: true })
     } catch (err) {
       if (err instanceof SaldoInsuficienteError) throw new AppError(err.message, 409, 'INSUFFICIENT_BALANCE')
       throw err

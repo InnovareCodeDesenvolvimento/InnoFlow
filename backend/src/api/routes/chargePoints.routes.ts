@@ -9,10 +9,13 @@ import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createChargePointSchema, updateChargePointSchema, type CreateChargePointInput, type UpdateChargePointInput } from '../schemas/chargePoint.schema'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 import {
   changeAvailabilitySchema,
   remoteStartCommandSchema,
@@ -97,6 +100,13 @@ router.post(
     })
 
     res.status(201).json(toChargePointDTO(cp))
+
+    auditCtx(res).describe({
+      entityType: 'ChargePoint',
+      entityId: cp.id,
+      targetOperatorId: cp.operatorId,
+      changes: diffEntity(null, cp, AUDIT_ALLOWLIST_BY_ENTITY.ChargePoint),
+    })
   }),
 )
 
@@ -113,6 +123,18 @@ router.patch(
 
     const cp = await prisma.chargePoint.update({ where: { id: existing.id }, data })
     res.json(toChargePointDTO(cp))
+
+    // `basicAuthSecret`/`basicAuthSecretHash` nunca entram no diff — nem
+    // estão na allowlist de ChargePoint (ver auditAllowlists.ts). Trocar a
+    // senha só aparece como "algo mudou" indiretamente pelo `updatedAt`, que
+    // também não está na allowlist — decisão deliberada: o log de auditoria
+    // não precisa provar QUANDO a senha mudou, só quem tinha acesso pra isso.
+    auditCtx(res).describe({
+      entityType: 'ChargePoint',
+      entityId: cp.id,
+      targetOperatorId: cp.operatorId,
+      changes: diffEntity(existing, cp, AUDIT_ALLOWLIST_BY_ENTITY.ChargePoint),
+    })
   }),
 )
 
@@ -121,8 +143,15 @@ router.delete(
   asyncHandler(async (req, res) => {
     const existing = await prisma.chargePoint.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
     if (!existing) throw new AppError('Charge point não encontrado.', 404, 'NOT_FOUND')
-    await prisma.chargePoint.update({ where: { id: existing.id }, data: { active: false } })
+    const cp = await prisma.chargePoint.update({ where: { id: existing.id }, data: { active: false } })
     res.status(204).send()
+
+    auditCtx(res).describe({
+      entityType: 'ChargePoint',
+      entityId: cp.id,
+      targetOperatorId: cp.operatorId,
+      changes: diffEntity(existing, cp, AUDIT_ALLOWLIST_BY_ENTITY.ChargePoint),
+    })
   }),
 )
 
@@ -153,6 +182,19 @@ function dispatchCommand(req: Request, res: Response, method: string, params: Re
       .catch((err) => logger.error({ err, chargePointId: cp.id, method, correlationId }, '[api] comando remoto falhou'))
 
     res.status(202).json({ correlationId, status: 'PENDING' })
+
+    // Grava a INTENÇÃO (quem pediu o quê, com o correlationId), nunca o
+    // resultado — o efeito é assíncrono e o append-only proíbe voltar e
+    // atualizar a linha depois. O resultado real mora em `OcppMessage`/log,
+    // correlacionado pelo mesmo `correlationId` (ver decisão 4 da Nova).
+    auditCtx(res).describe({
+      entityType: 'ChargePoint',
+      entityId: cp.id,
+      targetOperatorId: cp.operatorId,
+      action: 'REMOTE_COMMAND',
+      actionDetail: method,
+      correlationId,
+    })
   })
 }
 
@@ -218,6 +260,16 @@ router.post(
       idTag: resultado.idTag,
       walletBalanceCents: resultado.walletBalanceCents,
       estimatedMaxCostCents: resultado.estimatedMaxCostCents,
+    })
+
+    // entityType/entityId já vêm certos do fallback (path começa com
+    // `/api/admin/charge-points`, `:id` é o próprio charge point) — só
+    // enriquece com o correlationId e quem foi o motorista-alvo (intenção,
+    // não resultado — mesma regra do `dispatchCommand` acima).
+    auditCtx(res).describe({
+      action: 'REMOTE_COMMAND',
+      actionDetail: `RemoteStartTransaction (userId=${user.id})`,
+      correlationId: resultado.correlationId,
     })
   }),
 )

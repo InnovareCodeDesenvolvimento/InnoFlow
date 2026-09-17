@@ -76,6 +76,30 @@ const envSchema = z.object({
   // roda em processo separado da API, precisa de estado compartilhado).
   OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
+
+  // Achado da Nova (log de auditoria, 2026-09-17): `app.set('trust proxy')`
+  // nunca existiu neste backend. Sem isto, `req.ip` em produção é sempre o
+  // IP do container do proxy do EasyPanel (nginx do frontend -> rede interna
+  // -> container da API) — o campo `ipAddress` do audit log nasceria sempre
+  // igual (inútil) e o rate limit de login por IP conta a internet inteira
+  // num balde só. Número de hops (não `true` cego): 1 hop confirmado (nginx
+  // do frontend é o único proxy reverso entre o cliente e o Express nesta
+  // topologia — EasyPanel roteia direto por rede interna, sem LB extra na
+  // frente). Ajustável por env se a topologia mudar.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
+
+  // Log de auditoria (Nova, 2026-09-17) — teto de tamanho do diff gravado em
+  // `AuditLog.changes` (allowlist por entidade, nunca payload cru). Acima
+  // disso grava só `{ truncated: true }` em vez do diff.
+  AUDIT_LOG_CHANGES_MAX_BYTES: z.coerce.number().int().positive().default(8192),
+
+  // Canal SSE (tempo real) — intervalo de heartbeat (`:ping`) para o nginx
+  // não cortar a conexão por inatividade (janela de proxy é bem maior, mas
+  // não vale deixar a conexão muda por tanto tempo) e throttle mínimo do
+  // evento `dashboard.dirty` (nunca recalcula agregado por evento — só
+  // invalida a query no máximo nesta cadência).
+  SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
+  DASHBOARD_DIRTY_THROTTLE_MS: z.coerce.number().int().positive().default(5000),
 })
 
 export type Env = z.infer<typeof envSchema>

@@ -1,4 +1,9 @@
-import { Prisma, type PrismaClient, type WalletEntryType } from '@prisma/client'
+import { Prisma, type PrismaClient, type Role, type WalletEntryType } from '@prisma/client'
+import { prisma } from '../../lib/prisma'
+import { logger } from '../../lib/logger'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { writeAuditLog } from '../auditoria/writeAuditLog'
+import { emitWalletUpdated } from '../../realtime/emit'
 
 /**
  * Débito atômico da carteira no fim de uma sessão de recarga (`StopTransaction`).
@@ -36,9 +41,9 @@ export interface DebitarSessaoResultado {
   remainingDebtCents: number
   walletEntryId: string | null
   debtId: string | null
+  /** Saldo da carteira IMEDIATAMENTE após esta chamada — usado para publicar `wallet.updated` (sempre depois do commit, nunca daqui). */
+  balanceAfterCents: number
 }
-
-const ZERO_RESULT: DebitarSessaoResultado = { debitedCents: 0, remainingDebtCents: 0, walletEntryId: null, debtId: null }
 
 /**
  * `SELECT ... FOR UPDATE` na `Wallet` do usuário — serializa qualquer débito
@@ -85,13 +90,14 @@ export async function debitarSessao(params: DebitarSessaoParams): Promise<Debita
       remainingDebtCents: existingDebt?.amountCents ?? 0,
       walletEntryId: existingEntry?.id ?? null,
       debtId: existingDebt?.id ?? null,
+      balanceAfterCents: existingEntry?.balanceAfterCents ?? (await getCurrentBalanceCents(tx, wallet.id)),
     }
   }
 
   if (custoTotalCents <= 0) {
     // Sessão gratuita (ex.: energyDeliveredWh=0, falha instantânea) — nada a
     // debitar, nada a registrar. Idempotente por construção (nunca escreve).
-    return ZERO_RESULT
+    return { debitedCents: 0, remainingDebtCents: 0, walletEntryId: null, debtId: null, balanceAfterCents: await getCurrentBalanceCents(tx, wallet.id) }
   }
 
   const saldoAtual = await getCurrentBalanceCents(tx, wallet.id)
@@ -134,7 +140,7 @@ export async function debitarSessao(params: DebitarSessaoParams): Promise<Debita
     debtId = debt.id
   }
 
-  return { debitedCents: debitar, remainingDebtCents: faltou, walletEntryId, debtId }
+  return { debitedCents: debitar, remainingDebtCents: faltou, walletEntryId, debtId, balanceAfterCents: saldoAtual - debitar }
 }
 
 // ------------------------------------------------------------
@@ -198,4 +204,64 @@ export async function ajustarCarteira(params: AjustarCarteiraParams): Promise<Aj
   })
 
   return { entry }
+}
+
+// ------------------------------------------------------------
+// Wrapper transacional + auditoria FAIL-CLOSED (Nova, decisoes-audit-log.md
+// item "Ajuste de saldo de carteira" — única gravação fail-closed do
+// sistema: é dinheiro, então se a linha de auditoria não gravar, o crédito/
+// débito TAMBÉM não acontece, no MESMO rollback). `POST /api/admin/drivers/
+// :id/wallet/entries` chama isto em vez de orquestrar a própria transação.
+// ------------------------------------------------------------
+
+export interface AjustarCarteiraTransacionalParams {
+  userId: string
+  amountCents: number
+  description: string
+  createdByUserId: string
+  actor: { userId: string; role: Role; email: string; name: string; operatorId: string | null }
+  request: { method: string; path: string; ipAddress: string | null; userAgent: string | null; requestId: string | null }
+}
+
+export async function ajustarCarteiraTransacional(params: AjustarCarteiraTransacionalParams): Promise<AjustarCarteiraResultado> {
+  const { actor, request, userId, amountCents, description, createdByUserId } = params
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    const r = await ajustarCarteira({ tx, userId, amountCents, description, createdByUserId })
+
+    // FAIL-CLOSED: se `writeAuditLog` lançar (ex.: constraint violada), o
+    // `$transaction` inteiro reverte — o crédito/débito não fica "meio
+    // feito sem rastro". Todo o resto do sistema é fire-and-forget; só este
+    // ponto (dinheiro por decisão discricionária de um humano, sem o
+    // protocolo OCPP como testemunha) exige essa garantia mais forte.
+    await writeAuditLog(
+      {
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+        actorEmail: actor.email,
+        actorName: actor.name,
+        actorOperatorId: actor.operatorId,
+        action: 'WALLET_ADJUSTMENT',
+        outcome: 'SUCCESS',
+        httpStatus: 201,
+        entityType: 'Wallet',
+        entityId: userId,
+        method: request.method,
+        path: request.path,
+        ipAddress: request.ipAddress,
+        userAgent: request.userAgent,
+        requestId: request.requestId,
+        changes: diffEntity(null, { amountCents: r.entry.amountCents, description }, ['amountCents', 'description']),
+      },
+      tx,
+    )
+
+    return r
+  })
+
+  await emitWalletUpdated(userId, resultado.entry.balanceAfterCents).catch((err) =>
+    logger.error({ err, userId }, '[carteira] falha ao publicar wallet.updated após ajuste manual (best-effort)'),
+  )
+
+  return resultado
 }

@@ -9,6 +9,7 @@ import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { meterValuesReqSchema } from '../schemas/meterValues'
 import { defineOcppHandler } from './defineHandler'
 import type { OcppHandlerCtx } from '../context'
+import { emitSessionMetrics } from '../../realtime/emit'
 
 const ENERGY_MEASURANDS = new Set([
   'Energy.Active.Import.Register',
@@ -122,6 +123,32 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
     void runBalanceGuard(ctx, { ...session, tariffSnapshot: session.tariffSnapshot }, latestEnergyWh).catch((err) =>
       logger.error({ err, sessionId: session.id }, '[ocpp][guard] falha ao avaliar guarda de saldo (não bloqueante)'),
     )
+
+    // `session.metrics` — coalescido a no máximo 1 evento/5s por sessão
+    // dentro de `emitSessionMetrics` (ver realtime/emit.ts). O custo parcial
+    // é calculado com a MESMA função pura da guarda de saldo acima — nunca
+    // diverge do que pode disparar o auto-stop.
+    try {
+      const energyDeliveredWh = Math.max(0, latestEnergyWh - session.meterStartWh)
+      const { totalCostCents } = calcularCustoSessao(session.tariffSnapshot as unknown as TariffSnapshot, {
+        energyDeliveredWh,
+        startedAt: session.startedAt,
+        chargingEndedAt: session.chargingEndedAt,
+        stoppedAt: new Date(),
+        timezone: session.site.timezone,
+      })
+      void emitSessionMetrics({
+        operatorId: ctx.operatorId,
+        userId: session.userId,
+        sessionId: session.id,
+        energyWh: energyDeliveredWh,
+        powerW: latestPowerW,
+        soc: latestSoc,
+        partialCostCents: totalCostCents,
+      }).catch((err) => logger.error({ err, sessionId: session.id }, '[realtime] falha ao publicar session.metrics (não bloqueante)'))
+    } catch (err) {
+      logger.error({ err, sessionId: session.id }, '[realtime] calcularCustoSessao lançou ao montar session.metrics — evento pulado (não bloqueante)')
+    }
   }
 
   return {}

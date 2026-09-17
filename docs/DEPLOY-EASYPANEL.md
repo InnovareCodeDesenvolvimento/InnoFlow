@@ -86,6 +86,13 @@ Formato: lista separada por vírgula, sem barra final.
 CORS_ALLOWED_ORIGINS=https://<dominio-real-do-frontend>.easypanel.host
 ```
 
+⚠️ **`TRUST_PROXY_HOPS` (default `1`, só o App `api` usa de verdade):** log
+de auditoria (2026-09-17) — sem `app.set('trust proxy', ...)`, `req.ip`
+sempre foi o IP do container do nginx do frontend, nunca o do cliente real.
+O default `1` já assume a topologia atual (nginx do frontend → rede interna
+do EasyPanel → container da API, um único hop) — só mexer se um proxy/LB
+novo entrar na frente disso.
+
 ## 1.1 Frontend
 
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**

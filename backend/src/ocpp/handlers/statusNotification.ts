@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { CONNECTOR_STATUS_MAP, statusNotificationReqSchema } from '../schemas/statusNotification'
 import { defineOcppHandler } from './defineHandler'
+import { emitChargePointStatus } from '../../realtime/emit'
 
 /**
  * F4 (2026-09-17): além de atualizar `Connector.status` (como sempre fez),
@@ -49,14 +50,20 @@ export const handleStatusNotification = defineOcppHandler('StatusNotification', 
     return {}
   }
 
+  const mappedStatus = CONNECTOR_STATUS_MAP[data.status]
+
   await prisma.connector.update({
     where: { id: connector.id },
-    data: { status: CONNECTOR_STATUS_MAP[data.status], statusUpdatedAt: data.timestamp ?? now, errorCode: data.errorCode },
+    data: { status: mappedStatus, statusUpdatedAt: data.timestamp ?? now, errorCode: data.errorCode },
   })
 
   await syncChargingSessionStatus(connector.id, data.status, data.timestamp ?? now)
 
   await prisma.chargePoint.update({ where: { id: ctx.chargePointId }, data: { lastSeenAt: now } })
+
+  void emitChargePointStatus(ctx.operatorId, ctx.chargePointId, data.connectorId, mappedStatus).catch((err) =>
+    logger.error({ err, chargePointId: ctx.chargePointId, connectorId: data.connectorId }, '[realtime] falha ao publicar chargepoint.status (não bloqueante)'),
+  )
 
   return {}
 })

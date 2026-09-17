@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin, resolveOperatorIdForWrite } from '../middleware/tenantScope'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
@@ -14,6 +15,8 @@ import {
   type TariffAssignmentFilterQuery,
   type UpdateTariffAssignmentInput,
 } from '../schemas/tariffAssignment.schema'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 
 const router = Router()
 
@@ -101,6 +104,13 @@ router.post(
     })
 
     res.status(201).json(assignment)
+
+    auditCtx(res).describe({
+      entityType: 'TariffAssignment',
+      entityId: assignment.id,
+      targetOperatorId: assignment.operatorId,
+      changes: diffEntity(null, assignment, AUDIT_ALLOWLIST_BY_ENTITY.TariffAssignment),
+    })
   }),
 )
 
@@ -120,6 +130,13 @@ router.patch(
 
     const assignment = await prisma.tariffAssignment.update({ where: { id: existing.id }, data: body })
     res.json(assignment)
+
+    auditCtx(res).describe({
+      entityType: 'TariffAssignment',
+      entityId: assignment.id,
+      targetOperatorId: assignment.operatorId,
+      changes: diffEntity(existing, assignment, AUDIT_ALLOWLIST_BY_ENTITY.TariffAssignment),
+    })
   }),
 )
 
@@ -133,8 +150,15 @@ router.delete(
     // exatamente o critério que `resolveActiveTariff` usa para ignorá-la
     // (`validTo: { gte: now } | null`). Preserva o histórico em vez de
     // apagar a linha.
-    await prisma.tariffAssignment.update({ where: { id: existing.id }, data: { validTo: new Date() } })
+    const assignment = await prisma.tariffAssignment.update({ where: { id: existing.id }, data: { validTo: new Date() } })
     res.status(204).send()
+
+    auditCtx(res).describe({
+      entityType: 'TariffAssignment',
+      entityId: assignment.id,
+      targetOperatorId: assignment.operatorId,
+      changes: diffEntity(existing, assignment, AUDIT_ALLOWLIST_BY_ENTITY.TariffAssignment),
+    })
   }),
 )
 

@@ -7,6 +7,7 @@ import { resolveActiveTariff } from '../tariffResolution'
 import { checkAuthorization } from '../authorizationCheck'
 import { serializeTariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { defineOcppHandler } from './defineHandler'
+import { emitSessionStarted } from '../../realtime/emit'
 
 /**
  * F4 (2026-09-17): repete a MESMA checagem do `Authorize` (o Authorize é
@@ -66,6 +67,12 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
   logger.info(
     { chargePointId: ctx.chargePointId, connectorId: data.connectorId, transactionId: session.ocppTransactionId, userId: token.userId },
     '[ocpp] StartTransaction aceito',
+  )
+
+  // Publicado DEPOIS do `create()` já ter resolvido (commit implícito de um
+  // único INSERT) — nunca antes de a linha existir de verdade.
+  void emitSessionStarted({ operatorId: ctx.operatorId, userId: token.userId, sessionId: session.id, chargePointId: chargePoint.id }).catch((err) =>
+    logger.error({ err, sessionId: session.id }, '[realtime] falha ao publicar session.started (não bloqueante)'),
   )
 
   return { transactionId: session.ocppTransactionId, idTagInfo: { status: 'Accepted' } }

@@ -9,6 +9,7 @@ import { prisma } from '../lib/prisma'
 import { redis } from '../lib/redis'
 import { AppError, errorHandler } from './middleware/errorHandler'
 import { adminRateLimit, publicRateLimit } from './middleware/rateLimit'
+import { auditTrail } from './middleware/auditTrail'
 import authRoutes from './routes/auth.routes'
 import publicSitesRoutes from './routes/publicSites.routes'
 import publicChargePointsRoutes from './routes/publicChargePoints.routes'
@@ -24,6 +25,8 @@ import adminReportsRoutes from './routes/reports.routes'
 import adminOperatorsRoutes from './routes/operators.routes'
 import adminSessionsRoutes from './routes/sessions.routes'
 import adminDriversRoutes from './routes/drivers.routes'
+import adminAuditLogsRoutes from './routes/auditLogs.routes'
+import adminEventsRoutes from './routes/events.routes'
 
 /**
  * Monta o app Express da API — auth JWT, isolamento multi-tenant e os CRUDs
@@ -33,6 +36,13 @@ import adminDriversRoutes from './routes/drivers.routes'
  */
 export function createApp(): Express {
   const app = express()
+
+  // Achado da Nova (log de auditoria, 2026-09-17): sem isto, `req.ip` é
+  // sempre o IP do proxy (nginx do frontend), nunca o do cliente real — o
+  // campo `ipAddress` do audit log nasceria inútil, e o rate limit de login
+  // por IP conta a internet inteira num balde só. Número de hops vem de env
+  // (`TRUST_PROXY_HOPS`, default 1), nunca `true` cego.
+  app.set('trust proxy', env.TRUST_PROXY_HOPS)
 
   app.use(helmet())
   // Allowlist explícita via `CORS_ALLOWED_ORIGINS` (env, ver env.ts) — achado
@@ -83,6 +93,14 @@ export function createApp(): Express {
   app.use('/api/sites', publicRateLimit, publicSitesRoutes) // público — app do motorista
   app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
   app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start é mais apertado, aplicado na própria rota
+
+  // Log de auditoria (Nova, 2026-09-17) — montado ANTES de todo router
+  // admin: registra o listener de `res.on('finish')` cedo, mas o listener só
+  // dispara depois que a resposta É enviada (por definição), então enxerga
+  // `req.user`/`res.statusCode`/`res.locals` já preenchidos pelos
+  // middlewares/rotas que rodam DEPOIS deste `next()`.
+  app.use('/api/admin', auditTrail())
+
   app.use('/api/admin/sites', adminRateLimit, adminSitesRoutes)
   app.use('/api/admin/charge-points', adminRateLimit, adminChargePointsRoutes)
   app.use('/api/admin/connectors', adminRateLimit, adminConnectorsRoutes)
@@ -94,6 +112,8 @@ export function createApp(): Express {
   app.use('/api/admin/operators', adminRateLimit, adminOperatorsRoutes)
   app.use('/api/admin/sessions', adminRateLimit, adminSessionsRoutes)
   app.use('/api/admin/drivers', adminRateLimit, adminDriversRoutes)
+  app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
+  app.use('/api/admin/events', adminEventsRoutes) // SSE — sem adminRateLimit (conexão longa, não uma rajada de requests)
 
   // 404 — nenhuma rota bateu.
   app.use((_req, res) => {

@@ -6,6 +6,7 @@ import { sendCommand } from '../../ocpp/commands'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
 
 const COMMAND_TIMEOUT_MS = 35_000
@@ -40,6 +41,17 @@ router.post(
       .catch((err) => logger.error({ err, sessionId: session.id, correlationId }, '[api] stop de sessão falhou'))
 
     res.status(202).json({ correlationId, status: 'PENDING' })
+
+    // Intenção, não resultado (mesma regra do comando remoto ao charge
+    // point) — o `StopTransaction` real (protocolo OCPP) é quem de fato
+    // fecha a sessão e cobra.
+    auditCtx(res).describe({
+      entityType: 'ChargingSession',
+      entityId: session.id,
+      action: 'REMOTE_COMMAND',
+      actionDetail: 'RemoteStopTransaction',
+      correlationId,
+    })
   }),
 )
 

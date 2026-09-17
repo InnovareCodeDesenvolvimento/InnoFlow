@@ -3,10 +3,13 @@ import { prisma } from '../../lib/prisma'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createConnectorSchema, updateConnectorSchema, type CreateConnectorInput, type UpdateConnectorInput } from '../schemas/connector.schema'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 
 const router = Router()
 
@@ -59,6 +62,13 @@ router.post(
     })
 
     res.status(201).json(connector)
+
+    auditCtx(res).describe({
+      entityType: 'Connector',
+      entityId: connector.id,
+      targetOperatorId: connector.operatorId,
+      changes: diffEntity(null, connector, AUDIT_ALLOWLIST_BY_ENTITY.Connector),
+    })
   }),
 )
 
@@ -72,6 +82,13 @@ router.patch(
     const body = req.body as UpdateConnectorInput
     const connector = await prisma.connector.update({ where: { id: existing.id }, data: body })
     res.json(connector)
+
+    auditCtx(res).describe({
+      entityType: 'Connector',
+      entityId: connector.id,
+      targetOperatorId: connector.operatorId,
+      changes: diffEntity(existing, connector, AUDIT_ALLOWLIST_BY_ENTITY.Connector),
+    })
   }),
 )
 
@@ -82,8 +99,15 @@ router.delete(
     if (!existing) throw new AppError('Conector não encontrado.', 404, 'NOT_FOUND')
     // Connector não tem coluna `active` no schema do Cronos — desativar de
     // verdade é marcar UNAVAILABLE, o equivalente operacional.
-    await prisma.connector.update({ where: { id: existing.id }, data: { status: 'UNAVAILABLE' } })
+    const connector = await prisma.connector.update({ where: { id: existing.id }, data: { status: 'UNAVAILABLE' } })
     res.status(204).send()
+
+    auditCtx(res).describe({
+      entityType: 'Connector',
+      entityId: connector.id,
+      targetOperatorId: connector.operatorId,
+      changes: diffEntity(existing, connector, AUDIT_ALLOWLIST_BY_ENTITY.Connector),
+    })
   }),
 )
 

@@ -3,10 +3,13 @@ import { prisma } from '../../lib/prisma'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
+import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin, resolveOperatorIdForWrite } from '../middleware/tenantScope'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createTariffSchema, updateTariffSchema, type CreateTariffInput, type UpdateTariffInput } from '../schemas/tariff.schema'
+import { diffEntity } from '../../core/auditoria/diffEntity'
+import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 
 const router = Router()
 
@@ -60,6 +63,13 @@ router.post(
     })
 
     res.status(201).json(tariff)
+
+    auditCtx(res).describe({
+      entityType: 'Tariff',
+      entityId: tariff.id,
+      targetOperatorId: tariff.operatorId,
+      changes: diffEntity(null, tariff, AUDIT_ALLOWLIST_BY_ENTITY.Tariff),
+    })
   }),
 )
 
@@ -73,6 +83,13 @@ router.patch(
     const body = req.body as UpdateTariffInput
     const tariff = await prisma.tariff.update({ where: { id: existing.id }, data: body })
     res.json(tariff)
+
+    auditCtx(res).describe({
+      entityType: 'Tariff',
+      entityId: tariff.id,
+      targetOperatorId: tariff.operatorId,
+      changes: diffEntity(existing, tariff, AUDIT_ALLOWLIST_BY_ENTITY.Tariff),
+    })
   }),
 )
 
@@ -81,8 +98,15 @@ router.delete(
   asyncHandler(async (req, res) => {
     const existing = await prisma.tariff.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
     if (!existing) throw new AppError('Tarifa não encontrada.', 404, 'NOT_FOUND')
-    await prisma.tariff.update({ where: { id: existing.id }, data: { active: false } })
+    const tariff = await prisma.tariff.update({ where: { id: existing.id }, data: { active: false } })
     res.status(204).send()
+
+    auditCtx(res).describe({
+      entityType: 'Tariff',
+      entityId: tariff.id,
+      targetOperatorId: tariff.operatorId,
+      changes: diffEntity(existing, tariff, AUDIT_ALLOWLIST_BY_ENTITY.Tariff),
+    })
   }),
 )
 

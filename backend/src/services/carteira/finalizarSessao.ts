@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { liquidarSessao } from './liquidarSessao'
+import { emitSessionStopped, emitWalletUpdated } from '../../realtime/emit'
 
 const ZERO_CUSTOS: CustoSessaoResultado = {
   energyCostCents: 0,
@@ -47,7 +48,7 @@ export interface FinalizarSessaoInput {
  * a próxima sessão órfã, sem travar o processamento do `BootNotification`).
  */
 export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  const resultado = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM "ChargingSession" WHERE id = ${sessionId} FOR UPDATE`)
 
     const session = await tx.chargingSession.findUniqueOrThrow({
@@ -55,6 +56,9 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       select: {
         id: true,
         status: true,
+        userId: true,
+        chargePointId: true,
+        operatorId: true,
         meterStartWh: true,
         startedAt: true,
         chargingEndedAt: true,
@@ -63,7 +67,7 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       },
     })
 
-    if (session.status === 'STOPPED') return // corrida: outra chamada já finalizou entre o read e o lock
+    if (session.status === 'STOPPED') return null // corrida: outra chamada já finalizou entre o read e o lock
 
     const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
 
@@ -119,7 +123,27 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
 
     // Débito atômico da carteira — MESMA função usada pelo job de retry
     // (`liquidarSessao`), aqui reaproveitando a transação já aberta (nunca
-    // abre uma transação aninhada).
-    await liquidarSessao(session.id, tx)
+    // abre uma transação aninhada). NÃO publica aqui dentro — `tx` fornecido
+    // faz `liquidarSessao` só retornar o resultado, sem publicar (a
+    // transação desta função ainda não commitou).
+    const walletResultado = await liquidarSessao(session.id, tx)
+
+    return { userId: session.userId, chargePointId: session.chargePointId, operatorId: session.operatorId, walletResultado }
   })
+
+  // Publicado DEPOIS do `$transaction` acima ter resolvido (= commit real) —
+  // nunca de dentro dela (decisão 5 da Nova: rollback publicando saldo que
+  // não existe seria o pior cenário). `resultado === null` = corrida
+  // detectada (sessão já estava STOPPED), nada novo a publicar.
+  if (!resultado) return
+
+  await emitSessionStopped({ operatorId: resultado.operatorId, userId: resultado.userId, sessionId, chargePointId: resultado.chargePointId }).catch((err) =>
+    logger.error({ err, sessionId }, '[realtime] falha ao publicar session.stopped (não bloqueante)'),
+  )
+
+  if (resultado.walletResultado?.debited) {
+    await emitWalletUpdated(resultado.walletResultado.userId, resultado.walletResultado.balanceAfterCents).catch((err) =>
+      logger.error({ err, sessionId }, '[realtime] falha ao publicar wallet.updated (não bloqueante)'),
+    )
+  }
 }
