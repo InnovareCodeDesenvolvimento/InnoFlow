@@ -85,9 +85,33 @@ async function onClientConnected(client: RpcServerClient): Promise<void> {
   const ctx = client.session as OcppHandlerCtx
   logger.info({ chargePointId: ctx.chargePointId, ocppIdentity: ctx.ocppIdentity }, '[ocpp] charge point conectado')
 
-  await acquireChargePointLock(ctx.chargePointId)
-  registerConnection(ctx.chargePointId, client)
-  registerOcppHandlers(client, ctx)
+  try {
+    await acquireChargePointLock(ctx.chargePointId)
+    registerConnection(ctx.chargePointId, client)
+    registerOcppHandlers(client, ctx)
+  } catch (err) {
+    // BUG REAL corrigido 17/09/2026: esta função rodava via `void
+    // onClientConnected(client)` no `server.on('client', ...)`, sem
+    // try/catch. Se `acquireChargePointLock` lançasse (ex.: Redis
+    // instável durante um ciclo de reconexão), a exceção era engolida em
+    // silêncio e `registerOcppHandlers` nunca rodava — a conexão
+    // WebSocket continuava viva (o handshake/auth já tinha sido aceito
+    // antes disso), mas SEM NENHUM handler registrado. Todo
+    // BootNotification/StatusNotification/etc. subsequente caía no
+    // comportamento padrão do próprio `ocpp-rpc` para método sem handler
+    // ("Unable to handle 'X' calls"), diferente da nossa mensagem
+    // customizada do handler coringa — sintoma real observado em
+    // produção: charge point "conectado" (PING respondendo) mas todo
+    // comando falhando com NotImplemented. Fechamos a conexão para o
+    // carregador reconectar do zero em vez de ficar zumbi para sempre.
+    logger.error(
+      { err, chargePointId: ctx.chargePointId, ocppIdentity: ctx.ocppIdentity },
+      '[ocpp] falha ao inicializar conexão (lock/handlers) — fechando para o charge point reconectar',
+    )
+    unregisterConnection(ctx.chargePointId)
+    await client.close({ code: 1011, reason: 'internal error during connection setup' }).catch(() => {})
+    return
+  }
 
   client.on('close', () => {
     void (async () => {
