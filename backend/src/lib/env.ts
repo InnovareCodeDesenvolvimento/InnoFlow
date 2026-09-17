@@ -51,6 +51,31 @@ const envSchema = z.object({
   // antecipadamente (ver decisão da Nova sobre a identidade de conciliação).
   RESERVA_PISO_CENTS: z.coerce.number().int().positive().default(5000),
   RESERVA_TETO_CENTS: z.coerce.number().int().positive().default(40000),
+
+  // Achado da auditoria do Órion (2026-09-17, "importante"): `cors()` sem
+  // args aceita QUALQUER origem. Allowlist explícita, separada por vírgula.
+  // Default cobre só o dev local (Vite `5173`, `vite preview` `4173`) — em
+  // produção o valor real (domínio `*.easypanel.host` do frontend) tem que
+  // vir da env. Fail-CLOSED de propósito: esquecer de configurar em produção
+  // derruba o frontend na hora (sintoma óbvio no navegador — erro de CORS no
+  // console), o que é preferível a abrir silenciosamente para qualquer
+  // origem.
+  CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default('http://localhost:5173,http://localhost:4173')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    ),
+
+  // Rate limit do auth OCPP (achado "importante" do Órion) — mesmo espírito
+  // do rate limit de login da API REST (`middleware/rateLimit.ts`): N
+  // tentativas falhas por identidade/janela, contador em Redis (o gateway
+  // roda em processo separado da API, precisa de estado compartilhado).
+  OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
 })
 
 export type Env = z.infer<typeof envSchema>

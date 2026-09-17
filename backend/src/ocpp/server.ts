@@ -6,7 +6,10 @@ import { logger } from '../lib/logger'
 import { registerOcppHandlers } from './handlers'
 import { acquireChargePointLock, releaseChargePointLock, registerConnection, unregisterConnection } from './registry'
 import { startCommandListener } from './commands'
+import { isAuthRateLimited, registerAuthFailure } from './authRateLimit'
 import type { OcppHandlerCtx } from './context'
+
+type AuthResult = { ok: true; ctx: OcppHandlerCtx } | { ok: false; reason: 'rate_limited' | 'invalid' }
 
 /**
  * Servidor OCPP 1.6-J real (substitui o stub da Fase 0). Identidade do
@@ -25,12 +28,16 @@ export async function startOcppServer(port: number) {
 
   server.auth((accept, reject, handshake) => {
     void authenticateChargePoint(handshake.identity, handshake.password)
-      .then((ctx) => {
-        if (!ctx) {
+      .then((result) => {
+        if (!result.ok) {
+          if (result.reason === 'rate_limited') {
+            reject(429, 'too many authentication attempts')
+            return
+          }
           reject(401, 'unauthorized')
           return
         }
-        accept(ctx, 'ocpp1.6')
+        accept(result.ctx, 'ocpp1.6')
       })
       .catch((err) => {
         logger.error({ err, identity: handshake.identity }, '[ocpp] erro inesperado durante autenticação')
@@ -58,12 +65,21 @@ export async function startOcppServer(port: number) {
   return server
 }
 
-async function authenticateChargePoint(identity: string, password: Buffer | undefined): Promise<OcppHandlerCtx | null> {
+async function authenticateChargePoint(identity: string, password: Buffer | undefined): Promise<AuthResult> {
+  // Checa ANTES de tocar o banco/bcrypt — rate limit é achado "importante"
+  // da auditoria do Órion (2026-09-17): sem isto, tentativas de Basic Auth
+  // contra uma `ocppIdentity` eram ilimitadas.
+  if (await isAuthRateLimited(identity)) {
+    logger.warn({ identity }, '[ocpp] auth: bloqueado por rate limit — tentativas demais nesta janela')
+    return { ok: false, reason: 'rate_limited' }
+  }
+
   const chargePoint = await prisma.chargePoint.findUnique({ where: { ocppIdentity: identity } })
 
   if (!chargePoint || !chargePoint.active) {
     logger.warn({ identity }, '[ocpp] auth: charge point desconhecido ou inativo')
-    return null
+    await registerAuthFailure(identity)
+    return { ok: false, reason: 'invalid' }
   }
 
   const providedPassword = password?.toString('utf8') ?? ''
@@ -71,13 +87,17 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
 
   if (!passwordOk) {
     logger.warn({ identity }, '[ocpp] auth: senha incorreta')
-    return null
+    await registerAuthFailure(identity)
+    return { ok: false, reason: 'invalid' }
   }
 
   return {
-    chargePointId: chargePoint.id,
-    operatorId: chargePoint.operatorId,
-    ocppIdentity: chargePoint.ocppIdentity,
+    ok: true,
+    ctx: {
+      chargePointId: chargePoint.id,
+      operatorId: chargePoint.operatorId,
+      ocppIdentity: chargePoint.ocppIdentity,
+    },
   }
 }
 

@@ -3,10 +3,11 @@ import cors from 'cors'
 import helmet from 'helmet'
 import compression from 'compression'
 import pinoHttp from 'pino-http'
+import { env } from '../lib/env'
 import { logger } from '../lib/logger'
 import { prisma } from '../lib/prisma'
 import { redis } from '../lib/redis'
-import { errorHandler } from './middleware/errorHandler'
+import { AppError, errorHandler } from './middleware/errorHandler'
 import { adminRateLimit, publicRateLimit } from './middleware/rateLimit'
 import authRoutes from './routes/auth.routes'
 import publicSitesRoutes from './routes/publicSites.routes'
@@ -34,7 +35,22 @@ export function createApp(): Express {
   const app = express()
 
   app.use(helmet())
-  app.use(cors())
+  // Allowlist explícita via `CORS_ALLOWED_ORIGINS` (env, ver env.ts) — achado
+  // "importante" da auditoria do Órion: `cors()` sem args aceitava qualquer
+  // origem. Requisições sem header `Origin` (curl, health check, apps
+  // nativos) passam direto — não são navegador, CORS não é a defesa delas.
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || env.CORS_ALLOWED_ORIGINS.includes(origin)) {
+          callback(null, true)
+          return
+        }
+        logger.warn({ origin }, '[cors] origem bloqueada — fora da allowlist de CORS_ALLOWED_ORIGINS')
+        callback(new AppError('Origem não permitida.', 403, 'CORS_FORBIDDEN'))
+      },
+    }),
+  )
   app.use(compression())
   app.use(express.json())
   app.use(pinoHttp({ logger }))

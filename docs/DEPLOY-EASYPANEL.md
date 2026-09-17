@@ -69,6 +69,23 @@ OCPP_PORT=9000
 
 `OCPP_NODE_ID` pode ficar vazio (cada processo gera um UUID próprio no boot).
 
+⚠️ **`CORS_ALLOWED_ORIGINS` (só o App `api` precisa, os outros dois ignoram
+— `ocpp-gateway` é WebSocket puro, sem Express/CORS):** achado "importante"
+da auditoria do Órion, corrigido em 2026-09-17 — `cors()` sem allowlist
+aceitava qualquer origem. O default sem esta env (`http://localhost:5173,
+http://localhost:4173`) só cobre dev local; **sem configurar em produção com
+o domínio público real do App `inno-elekton-frontend`
+(`https://<algo>.easypanel.host`, confira o domínio exato na aba "Domínios"
+do App no EasyPanel), toda chamada do frontend em produção quebra com 403
+`CORS_FORBIDDEN`** — mesmo o Nginx proxiando `/api/*` na mesma origem
+internamente (nota acima), o navegador ainda manda o header `Origin` do
+domínio público do frontend, e a API confere esse header antes de responder.
+Formato: lista separada por vírgula, sem barra final.
+
+```
+CORS_ALLOWED_ORIGINS=https://<dominio-real-do-frontend>.easypanel.host
+```
+
 ## 1.1 Frontend
 
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
