@@ -573,6 +573,19 @@ pública do equipamento). Um adesivo por conector quando há mais de um.
 backend `/api/me/*`) ‖ P1b/P1c (Lyra, PWA setup + telas) → P2 (Íris,
 teste real) → P3 (polimento visual/performance medido, não estimado).
 
+**✅ Lyra (P1b+P1c) entregou** — 6 telas (landing pós-QR, sessão ativa,
+recibo, carteira, home, histórico), PWA instalável de verdade
+(`vite-plugin-pwa`, `NetworkOnly` explícito em `/api/**`, ícone
+maskable, prompt de instalação só depois da primeira recarga
+concluída). Achou e corrigiu **2 bugs financeiros reais** na validação
+visual: cobrança mínima escondida na tela de sessão ativa, e cache da
+carteira não invalidando após parar a recarga (saldo desatualizado).
+Mediu Lighthouse mobile de verdade (não estimou): TTI 3,3s contra meta
+de 2,5s — causa raiz é overhead de rede sob throttling, não o JS da
+página; correção maior de estratégia de bundle fica para decisão
+futura. Validado com Playwright contra mocks — ainda não testado
+contra a API real do Vega. No `main`.
+
 **✅ Vega (P0+P1a) entregou** — contrato commitado sozinho primeiro
 (regra do projeto), depois o backend: `iniciarSessaoRemota.ts` (núcleo
 do remote-start extraído, reusado por admin E motorista sem duplicar
@@ -656,3 +669,63 @@ liberada para as telas.
   módulo de retaguarda) — o que falta é só trocar o campo de texto livre
   do formulário de site/tarifa por um `<select>` de verdade consumindo
   essa rota. UX ruim, não é mais um endpoint faltando.
+
+## PWA do motorista entregue (Lyra) — 2026-09-17
+
+Consumindo o contrato que o Vega já tinha commitado (`frontend/src/types/
+api.ts` — `PublicChargePointCard`/`MeStartSessionResponse`/etc.) e as 8
+rotas reais (`/api/public/charge-points/:ocppIdentity` + 7 sob
+`/api/me/*`). Entregue: configuração PWA de verdade
+(`vite-plugin-pwa`, manifest com ícone maskable, metas iOS), as 8 telas
+novas (`/c/:ocppIdentity[/:connectorId]` pública + `/app`, `/app/sessao`,
+`/app/sessoes`, `/app/sessoes/:id`, `/app/carteira` sob guarda DRIVER-only),
+e o fluxo de instalação (prompt Android depois do primeiro recibo, coach
+manual no iOS).
+
+**Decisões/achados de implementação:**
+- Landing pós-QR (`/c/...`) tem wrapper PRÓPRIO, sem o `Header`/`Footer`
+  públicos — a exigência de "acima da dobra, sem scroll" não convivia com a
+  topbar+rodapé do site institucional.
+- Máquina de estados da sessão (conectando → carregando → parando → recibo)
+  é 100% derivada de `location.state` + duas queries por render — nenhum
+  `useEffect` sincroniza estado próprio a partir delas (achado: a versão
+  instalada de `eslint-plugin-react-hooks`, `^7.0.1`, tem a regra
+  `set-state-in-effect` e reprovou a primeira versão escrita do jeito
+  "clássico"). `useWakeLock` mantém a tela acesa durante a sessão, com
+  degradação graciosa onde a Screen Wake Lock API não existe.
+- Prompt de instalação (`beforeinstallprompt`) capturado GLOBAL na raiz do
+  app (`installPromptStore.ts`), não dentro do componente do recibo —
+  o evento pode disparar bem antes do motorista chegar lá.
+- **Bug real de cache financeiro encontrado testando o fluxo completo no
+  navegador**: `useStopSession` só invalidava a sessão ativa, não a
+  carteira — como parar a sessão debita o saldo no servidor, qualquer tela
+  que já tivesse buscado `useMeWallet` antes (a Home, ao montar) ficava
+  com o saldo ANTIGO em cache até o `staleTime` global (60s) vencer
+  sozinho. Corrigido invalidando `["me","wallet"]`/`["me","sessions"]` em
+  dois pontos (na mutation E no efeito que detecta a sessão ter
+  terminado, cobrindo também auto-stop/outro dispositivo). Ver
+  `[[pwa-motorista-padroes]]` na memória da Lyra para o detalhe completo
+  (inclui também um bug irmão no próprio mock, que escondia o card de
+  "cobrança mínima").
+- Validado com Playwright de ponta a ponta contra **mocks MSW** (sem
+  Docker/Postgres no ambiente da Lyra, mesma limitação recorrente do
+  projeto) — fluxo completo login → escanear → iniciar → carregar →
+  parar → recibo → histórico/carteira refletindo o saldo novo, em 390px e
+  768px, zero erros de console. **Ainda não validado contra as rotas reais
+  do Vega** — é o próximo passo da Íris.
+- Lighthouse mobile medido de verdade (build de produção, `vite preview` +
+  `lighthouse --emulated-form-factor=mobile`): performance 84, TTI 3,3s
+  (meta era ≤2,5s, **não atingida**), chunk próprio da rota 2,98kB gzip
+  (meta ≤60kB, atingida com folga). Diagnosticado: o gargalo é overhead de
+  rede sob throttling simulado (muitos chunks pequenos + payload total),
+  não o JS da página em si (`bootup-time` 0,4s). Duas correções seguras
+  aplicadas (fonte via `<link>` em vez de `@import`, ícone de 16kB em vez
+  de 140kB só nas telas novas) — ganho real porém marginal (~0,1s).
+  **Não** mexi em `manualChunks`/estratégia de bundle do app inteiro —
+  é decisão de arquitetura de build que atravessa todas as rotas já
+  validadas por Íris, fica de pendência para Vulcano/Nova avaliarem.
+
+Portão de saída (Íris): repetir a mesma validação contra a API real (troca
+de `VITE_USE_MOCKS`), incluindo os 3 testes de integração da F4 que ainda
+não rodaram contra Postgres, e conferir que o service worker de fato nunca
+serve `/api/**` do cache em produção.
