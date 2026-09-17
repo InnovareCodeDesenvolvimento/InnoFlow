@@ -243,6 +243,17 @@ o hover não tinha efeito visual (`DEFAULT` e o degrau de hover eram o
 mesmo valor). Marca "InnoFlow" + slogan visíveis em toda a UI. Favicon
 com placeholder genérico documentado até a logo oficial chegar.
 
+## Logo oficial, empresa no header e redesign do login — 2026-09-17
+
+Dono confirmou: `db:seed:demo` rodou com sucesso após o fix da constraint
+de PIX. Três pedidos novos: (1) usar `logomarca.png` (arquivo real,
+1774×887) como logo oficial em vez do placeholder; (2) mostrar no
+cabeçalho a empresa (operador) do usuário logado — multi-tenant visível;
+(3) redesenhar a tela de login com cara mais profissional/robusta.
+Atlas já adicionou `operatorName` na resposta de `/api/auth/login`
+(join com `Operator`). Lyra acionada para o resto (logo real, header,
+redesign do login).
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
