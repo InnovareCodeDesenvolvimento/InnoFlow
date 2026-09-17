@@ -109,8 +109,11 @@ export function Sessao() {
   if (awaitingStart) {
     return (
       <div className="mx-auto flex max-w-md flex-col items-center px-4 py-16 text-center">
-        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+        <span className="relative flex h-16 w-16 items-center justify-center">
+          <span className="animate-radar-ping absolute inset-0 rounded-full bg-primary/20" aria-hidden="true" />
+          <span className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+          </span>
         </span>
         <h1 className="mt-5 text-lg font-black text-ink">Conectando ao carregador…</h1>
         <p className="mt-1 text-sm text-ink-softer">
@@ -160,7 +163,7 @@ export function Sessao() {
         {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
       </p>
 
-      <Card className="mt-4">
+      <Card className={`card-premium animate-fade-in-up mt-4 ${!stopRequested ? "animate-live-glow" : ""}`}>
         <CardContent className="p-5 text-center">
           {stopRequested && (
             <p className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wide text-warning-700">
@@ -169,7 +172,7 @@ export function Sessao() {
             </p>
           )}
 
-          <p className="text-6xl font-black leading-none tracking-tight text-ink">
+          <p className="text-6xl font-black leading-none tracking-tight text-gradient-brand">
             {energyKwh}
             <span className="ml-1.5 text-xl font-bold text-ink-softer">kWh</span>
           </p>

@@ -42,11 +42,11 @@ export function Sessoes() {
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
           <div className={`mt-4 space-y-2.5 ${isFetching ? "opacity-60" : ""}`}>
-            {data.items.map((item) => (
+            {data.items.map((item, index) => (
               <Link
                 key={item.id}
                 to={`/app/sessoes/${item.id}`}
-                className="flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card transition-colors hover:border-primary/30 active:bg-primary-50"
+                className={`pressable stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card transition-colors hover:border-primary/30 active:bg-primary-50`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

@@ -65,8 +65,12 @@ export function ChargePointLanding() {
           vez de deixar isso em branco, um wash de marca sutil (mesmo
           vocabulário visual do Login/Home) evita que a tela mais importante
           do produto pareça inacabada. */}
-      <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-accent-glow/10 blur-3xl" aria-hidden="true" />
-      <div className="pointer-events-none absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-brand-teal/10 blur-3xl" aria-hidden="true" />
+      <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-accent-glow/10 blur-3xl animate-float-soft" aria-hidden="true" />
+      <div
+        className="pointer-events-none absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-brand-teal/10 blur-3xl animate-float-soft"
+        style={{ animationDelay: "1.2s" }}
+        aria-hidden="true"
+      />
 
       <header className="relative flex h-14 shrink-0 items-center justify-center gap-2">
         <img src={logoIcon} alt="" className="h-6 w-6" />
@@ -126,7 +130,7 @@ export function ChargePointLanding() {
             const hasOpenDebt = isDriver && (wallet?.openDebtCents ?? 0) > 0
 
             return (
-              <Card>
+              <Card className="card-premium animate-fade-in-up">
                 <CardContent className="p-5">
                   <p className="text-xs font-bold uppercase tracking-wide text-ink-subtle">{cp.site.name}</p>
                   {(cp.site.addressLine || cp.site.city) && (
@@ -160,7 +164,7 @@ export function ChargePointLanding() {
 
                   {selected.tariff ? (
                     <div className="mt-5 rounded-xl bg-primary-50 p-4">
-                      <p className="text-2xl font-black tracking-tight text-primary-800">{formatTariffHeadlinePrice(selected.tariff)}</p>
+                      <p className="text-2xl font-black tracking-tight text-gradient-brand">{formatTariffHeadlinePrice(selected.tariff)}</p>
                       {selected.tariff.minChargeCents ? (
                         <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold text-warning-700">
                           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -212,7 +216,7 @@ export function ChargePointLanding() {
                         <Button
                           type="button"
                           size="lg"
-                          className="w-full"
+                          className="w-full btn-glow-primary"
                           disabled={isOffline || !selected.tariff || hasOpenDebt}
                           loading={startSession.isPending}
                           onClick={() => handleStart(selected.connectorId)}

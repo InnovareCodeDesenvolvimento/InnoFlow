@@ -41,7 +41,7 @@ export function Carteira() {
 
       {!isLoading && !isError && data && (
         <>
-          <Card className="mt-4 bg-primary-950 text-white ring-0">
+          <Card className="animate-fade-in-up mt-4 bg-primary-950 text-white ring-0">
             <CardContent className="p-5">
               <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-white/60">
                 <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
@@ -77,10 +77,13 @@ export function Carteira() {
             <EmptyState icon={Wallet} title="Nenhum lançamento ainda" />
           ) : (
             <div className={`space-y-2 ${isFetching ? "opacity-60" : ""}`}>
-              {data.entries.map((entry) => {
+              {data.entries.map((entry, index) => {
                 const credit = entry.amountCents > 0
                 return (
-                  <div key={entry.id} className="flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-3.5 shadow-card">
+                  <div
+                    key={entry.id}
+                    className={`stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-3.5 shadow-card`}
+                  >
                     <WalletEntryIcon type={entry.type} credit={credit} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-ink">{entry.description || WALLET_ENTRY_TYPE_LABELS[entry.type]}</p>

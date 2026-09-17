@@ -23,7 +23,7 @@ export function Home() {
         <h1 className="text-xl font-black tracking-tight text-ink">Bem-vindo de volta</h1>
       </div>
 
-      <Card className="bg-primary-950 text-white ring-0">
+      <Card className="animate-fade-in-up bg-primary-950 text-white ring-0">
         <CardContent className="flex items-center justify-between gap-3 p-5">
           <div>
             <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-white/60">
@@ -48,7 +48,7 @@ export function Home() {
       {session && (
         <Link
           to="/app/sessao"
-          className="flex items-center gap-3 rounded-2xl bg-accent/10 p-4 ring-1 ring-accent/30 transition-colors hover:bg-accent/15"
+          className="pressable stagger-1 animate-fade-in-up flex items-center gap-3 rounded-2xl bg-accent/10 p-4 ring-1 ring-accent/30 transition-colors hover:bg-accent/15"
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/20 text-accent-700">
             <Zap className="h-5 w-5" aria-hidden="true" />
@@ -61,7 +61,7 @@ export function Home() {
         </Link>
       )}
 
-      <div className="rounded-2xl border border-dashed border-border-strong bg-muted/40 p-5 text-center">
+      <div className="stagger-2 animate-fade-in-up rounded-2xl border border-dashed border-border-strong bg-muted/40 p-5 text-center">
         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
           <QrCode className="h-6 w-6" aria-hidden="true" />
         </span>
@@ -92,11 +92,11 @@ export function Home() {
 
         {!sessionsLoading && recentSessions && recentSessions.items.length > 0 && (
           <div className="space-y-2">
-            {recentSessions.items.map((item) => (
+            {recentSessions.items.map((item, index) => (
               <Link
                 key={item.id}
                 to={`/app/sessoes/${item.id}`}
-                className="flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-3.5 shadow-card hover:border-primary/30"
+                className={`pressable stagger-${Math.min(index + 3, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-3.5 shadow-card transition-colors hover:border-primary/30`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

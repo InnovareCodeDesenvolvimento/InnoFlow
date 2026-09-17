@@ -59,8 +59,8 @@ export function SessaoDetalhe() {
       {!isLoading && !isError && session && (
         <>
           {justCompleted && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl bg-success-50 px-4 py-3 text-sm font-bold text-success-700">
-              <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+            <div className="animate-fade-in-up mb-4 flex items-center gap-2 rounded-xl bg-success-50 px-4 py-3 text-sm font-bold text-success-700">
+              <CheckCircle2 className="animate-pop-in h-5 w-5 shrink-0" aria-hidden="true" />
               Recarga concluída
             </div>
           )}
@@ -77,7 +77,7 @@ export function SessaoDetalhe() {
             </Badge>
           </div>
 
-          <Card className="mt-4">
+          <Card className="card-premium animate-fade-in-up mt-4">
             <CardContent className="grid grid-cols-2 gap-4 p-5">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Início</p>
@@ -98,7 +98,7 @@ export function SessaoDetalhe() {
             </CardContent>
           </Card>
 
-          <Card className="mt-4">
+          <Card className="card-premium stagger-1 animate-fade-in-up mt-4">
             <CardContent className="p-5">
               <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-subtle">Detalhamento do custo</p>
               <dl className="space-y-2">
@@ -110,7 +110,7 @@ export function SessaoDetalhe() {
                 ))}
                 <div className="flex items-center justify-between border-t border-border-subtle pt-2.5 text-base">
                   <dt className="font-bold text-ink">Total</dt>
-                  <dd className="font-black text-ink">{formatCents(session.totalCostCents)}</dd>
+                  <dd className="text-lg font-black text-gradient-brand">{formatCents(session.totalCostCents)}</dd>
                 </div>
               </dl>
 

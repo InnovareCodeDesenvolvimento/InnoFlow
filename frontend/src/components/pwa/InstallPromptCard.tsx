@@ -49,7 +49,7 @@ export function InstallPromptCard() {
   }
 
   return (
-    <div className="rounded-2xl border border-primary/20 bg-primary-50 p-4">
+    <div className="animate-fade-in-up rounded-2xl border border-primary/20 bg-primary-50 p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary-700">
           {showAndroidPrompt ? <Download className="h-5 w-5" aria-hidden="true" /> : <Share className="h-5 w-5" aria-hidden="true" />}

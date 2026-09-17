@@ -36,8 +36,8 @@ function AppShell() {
   const isActive = (href: string, exact: boolean) => (exact ? location.pathname === href : location.pathname.startsWith(href))
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border-subtle bg-surface/90 px-4 backdrop-blur-md">
+    <div className="flex min-h-screen flex-col bg-background lg:bg-gradient-to-b lg:from-primary-50 lg:via-background lg:to-background">
+      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border-subtle bg-surface/90 px-4 backdrop-blur-md backdrop-saturate-150">
         <Link to="/app" className="flex items-center gap-2 font-black tracking-tight text-ink">
           <img src={logoIcon} alt="" className="h-7 w-7 shrink-0" />
           <span className="text-sm">InnoFlow</span>
@@ -59,7 +59,7 @@ function AppShell() {
       </main>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md backdrop-saturate-150"
         aria-label="Navegação do aplicativo"
       >
         <div className="mx-auto flex max-w-md items-stretch justify-around">
@@ -71,15 +71,20 @@ function AppShell() {
                 to={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold transition-colors",
+                  "pressable relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold transition-colors",
                   active ? "text-primary" : "text-ink-softer hover:text-ink-soft",
                 )}
               >
-                <span className="relative">
+                <span
+                  className={cn(
+                    "relative flex h-7 w-11 items-center justify-center rounded-full transition-colors",
+                    active && "bg-primary/10",
+                  )}
+                >
                   <item.icon className="h-5 w-5" aria-hidden="true" />
                   {item.href === "/app/sessao" && hasActiveSession && (
                     <span
-                      className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-surface"
+                      className="absolute right-1.5 top-0.5 h-2 w-2 animate-pulse rounded-full bg-accent ring-2 ring-surface"
                       aria-label="Sessão ativa"
                     />
                   )}

@@ -32,14 +32,26 @@ export function Register() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-primary-50 via-background to-background px-4 py-12">
+      {/* Mesmo wash de marca sutil da Landing/Login — fecha a consistência
+          visual das três telas de "primeira impressão" do PWA. */}
+      <div
+        className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent-glow/10 blur-3xl animate-float-soft"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute -bottom-28 -left-20 h-80 w-80 rounded-full bg-brand-teal/10 blur-3xl animate-float-soft"
+        style={{ animationDelay: "1.2s" }}
+        aria-hidden="true"
+      />
+
+      <div className="relative w-full max-w-sm">
         <Link to="/" className="mb-8 flex items-center justify-center gap-2 font-black tracking-tight text-ink">
           <img src={logoIcon} alt="" className="h-9 w-9 shrink-0" />
           InnoFlow
         </Link>
 
-        <div className="card-elevated p-6">
+        <div className="card-premium animate-fade-in-up p-6">
           <h1 className="text-xl font-bold text-ink">Criar conta</h1>
           <p className="mt-1 text-sm text-ink-softer">Cadastre-se como motorista para acompanhar sua recarga.</p>
 
@@ -63,7 +75,7 @@ export function Register() {
               </p>
             )}
 
-            <Button type="submit" className="w-full" size="lg" loading={isSubmitting}>
+            <Button type="submit" className="w-full btn-glow-primary" size="lg" loading={isSubmitting}>
               Criar conta
             </Button>
           </form>

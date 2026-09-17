@@ -10,7 +10,7 @@ export function ConnectorPickerCard({ ocppIdentity, connector }: { ocppIdentity:
   return (
     <Link
       to={`/c/${encodeURIComponent(ocppIdentity)}/${connector.connectorId}`}
-      className="flex min-h-[64px] items-center gap-4 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card transition-colors hover:border-primary/40 active:bg-primary-50"
+      className="pressable flex min-h-[64px] items-center gap-4 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card transition-colors hover:border-primary/40 active:bg-primary-50"
     >
       <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-lg font-black text-primary-700">
         {connector.connectorId}

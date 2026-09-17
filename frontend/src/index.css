@@ -154,6 +154,283 @@
   }
 }
 
+/*
+ * ============================================================================
+ * VOCABULÁRIO "PREMIUM" — referência única (design system de motion/elevação)
+ * ============================================================================
+ * Nasceu na revisão do PWA do motorista (17/09/2026, pedido explícito do
+ * dono: "capriche, deixe o layout realmente premium, mesmo nível do
+ * Pontua.me — mas fiel à NOSSA paleta"). A TÉCNICA visual é emprestada do
+ * Pontua.me (sombras tingidas da cor da marca em vez de cinza neutro,
+ * microinterações via CSS puro — sem framer-motion —, gradiente sutil só em
+ * valores de destaque); a PALETA é 100% InnoFlow (tokens de `:root` no topo
+ * deste arquivo — nenhuma classe aqui embute um hex novo, todas compõem
+ * `--color-primary`/`--color-accent`/etc. via `rgb(var(...) / alpha)`).
+ *
+ * Este bloco é a ÚNICA fonte de verdade do vocabulário — quando o Admin
+ * passar pela mesma revisão de layout (ainda não feita), ele deve REAPROVEITAR
+ * estas classes, não recriar equivalentes com outro nome. Mesmo DNA visual
+ * (paleta, sombras tingidas, raios, tipografia) nos dois lugares é decisão
+ * explícita do dono — "isso traz confiabilidade, credibilidade,
+ * profissionalismo" entre PWA e painel administrativo.
+ *
+ * ---- GUIA DE INTENSIDADE (a decisão mais importante deste bloco) --------
+ * O PWA do motorista (experiência de consumidor, "carregue um futuro
+ * melhor") pode ser mais OUSADO em motion do que o Admin (ferramenta de
+ * trabalho de operador/admin) vai ser quando chegar a vez dele. Mesmas
+ * classes, dosagem diferente por contexto:
+ *
+ *   - Estático (`.card-premium`, `.text-gradient-brand`, `.btn-glow-*`):
+ *     sombra tingida e gradiente de texto são baixo risco — servem tanto
+ *     pro PWA quanto pro Admin, sem ressalva.
+ *   - Feedback de toque (`.pressable`, `.card-premium-interactive`): use em
+ *     QUALQUER elemento tocável/clicável nos dois produtos — é acessibilidade
+ *     tátil (confirma que o toque registrou), não "efeito bonito".
+ *   - Entrada em sequência (`.animate-fade-in-up` + `.stagger-1..4`): ótimo
+ *     em LISTAS (extrato, histórico, itens carregados de uma vez). No Admin,
+ *     usar com moderação bem maior (ex.: só a tabela principal ao trocar de
+ *     página) — lá o operador quer densidade de informação rápida, não
+ *     espetáculo.
+ *   - Loops contínuos (`.animate-float-soft`, `.animate-radar-ping`,
+ *     `.animate-live-glow`): RESERVADOS a hero/estado principal de uma tela
+ *     do PWA (blob decorativo de fundo em Login/Cadastro/Landing; spinner de
+ *     "aguardando o carregador responder"; número que está de fato mudando
+ *     ao vivo). NUNCA em nav, ícones de lista, ou qualquer coisa repetida
+ *     N vezes na tela — um loop múltiplo vira ruído visual, não vida. Se/quando
+ *     isso for portado pro Admin, a recomendação é NÃO usar loops contínuos
+ *     lá (o dono foi claro: Admin é mais contido) — ficam só os itens acima.
+ *   - Pop de confirmação (`.animate-pop-in`): um-tiro, só em ícone de
+ *     sucesso/confirmação (ex.: recibo concluído). Não usar em nada que
+ *     apareça com frequência (perderia o efeito de "quero comemorar" e viraria
+ *     só uma distração).
+ *
+ * Todo LOOP contínuo cai sob `@media (prefers-reduced-motion: reduce)` no
+ * fim deste arquivo (`animation-duration: 0.001ms !important` no seletor
+ * universal) — é automático, não precisa repetir a regra por classe.
+ *
+ * Deliberadamente FORA de @layer: a ordem de declaração no arquivo já garante
+ * prioridade sobre `.card-elevated`/utilities do Tailwind sem precisar de
+ * `!important` — mesmo raciocínio do bloco de `prefers-reduced-motion` logo
+ * abaixo. Aplicado só nas telas do PWA/Auth do motorista via `className`;
+ * não mexe em Button/Card/Badge (compartilhados com o Admin) — a REUTILIZAÇÃO
+ * é via estas classes utilitárias somadas ao `className`, nunca editando os
+ * componentes base.
+ * ============================================================================
+ */
+
+/* ---- 1. Cards — sombra tingida da marca, não cinza neutro --------------- */
+.card-premium {
+  position: relative;
+  border-radius: 1.25rem;
+  background-color: rgb(var(--color-surface));
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 12px 28px -16px rgb(var(--color-primary) / 0.35);
+}
+.card-premium-interactive {
+  /* Propriedade explícita (não o atalho `transition:`) porque várias telas
+     já têm `transition-colors` do Tailwind no mesmo elemento — usar o
+     atalho aqui zeraria a lista de propriedades dele e o hover de cor
+     pararia de suavizar (achado testando o hover do Card da Landing). */
+  transition-property: transform, box-shadow, color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 180ms;
+}
+@media (hover: hover) {
+  .card-premium-interactive:hover {
+    box-shadow:
+      0 4px 10px rgb(15 23 42 / 0.05),
+      0 20px 38px -18px rgb(var(--color-primary) / 0.42);
+    transform: translateY(-2px);
+  }
+}
+.card-premium-interactive:active {
+  transform: scale(0.98);
+}
+
+/* ---- 2. Feedback tátil — confirma visualmente que o toque registrou ----- */
+/* Genérico pra qualquer card/linha tocável (listas, cards de ação) — sem
+   precisar herdar o `.card-premium` inteiro. */
+.pressable {
+  /* Mesmo motivo do comentário em `.card-premium-interactive` acima: lista
+     explícita de propriedades, não o atalho `transition:`. */
+  transition-property: transform, box-shadow, color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+.pressable:active {
+  transform: scale(0.98);
+}
+
+/* ---- 3. CTA em destaque — sombra tingida da cor da marca ---------------- */
+/* `-primary` pro botão de ação principal (variant default, azul-petróleo,
+   o mais usado no PWA); `-accent` pra quando o verde for o destaque. */
+.btn-glow-primary {
+  box-shadow:
+    0 10px 22px -8px rgb(var(--color-primary) / 0.45),
+    0 3px 8px -3px rgb(var(--color-primary) / 0.3);
+  /* Mesmo motivo do comentário em `.card-premium-interactive`: o Button já
+     tem `transition-colors` (buttonVariants) — atalho `transition:` aqui
+     apagaria essa lista. */
+  transition-property: transform, box-shadow, color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+@media (hover: hover) {
+  .btn-glow-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+}
+.btn-glow-primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-glow-accent {
+  box-shadow:
+    0 10px 22px -8px rgb(var(--color-accent) / 0.5),
+    0 3px 8px -3px rgb(var(--color-accent) / 0.3);
+  transition-property: transform, box-shadow, color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+@media (hover: hover) {
+  .btn-glow-accent:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+}
+.btn-glow-accent:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ---- 4. Números de destaque — gradiente sutil só no TEXTO --------------- */
+/* Saldo, kWh, preço, total do recibo. Nunca em fundo grande. Só usar sobre
+   fundo CLARO: mantém contraste AA (o degrau mais claro do gradiente,
+   accent-600, já é 4.54:1 sozinho contra branco); sobre fundo escuro (ex.:
+   card de saldo bg-primary-950) usar branco sólido, não clip de gradiente —
+   evita risco de contraste. Moderação: no máximo 1 número em destaque por
+   tela/card — vira poluição se todo texto grande virar gradiente. */
+.text-gradient-brand {
+  background-image: linear-gradient(135deg, rgb(var(--color-primary-700)), rgb(var(--color-accent-600)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- 5. Entrada em sequência (listas) — CSS puro, sem framer-motion ----- */
+/* Dispara uma vez (não é loop), mas cai sob o bloco de
+   `prefers-reduced-motion` abaixo do mesmo jeito (vira instantâneo). */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.45s ease-out both;
+}
+.stagger-1 {
+  animation-delay: 60ms;
+}
+.stagger-2 {
+  animation-delay: 120ms;
+}
+.stagger-3 {
+  animation-delay: 180ms;
+}
+.stagger-4 {
+  animation-delay: 240ms;
+}
+
+/* ---- 6. Loops contínuos — só em hero/estado principal, NUNCA repetido --- */
+/* Ver "GUIA DE INTENSIDADE" no topo do bloco: reservados a UM elemento
+   principal por tela, nunca em algo que se repete (nav, ícones de lista). */
+
+/* 6a. Flutuação bem sutil pros blobs decorativos de fundo (Login/Cadastro/
+   Landing do QR) — decorativo, sempre `aria-hidden`. */
+@keyframes softFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.03);
+  }
+}
+.animate-float-soft {
+  animation: softFloat 7s ease-in-out infinite;
+}
+
+/* 6b. "Radar" — usar SÓ no spinner de espera de uma resposta real de
+   hardware (ex.: comando de início ainda não confirmado pelo carregador,
+   `Sessao.tsx` estado "conectando"). Composição em JSX (não `::before`, pra
+   não brigar com a ordem de pintura do ícone dentro do círculo):
+     <span className="relative ...">
+       <span className="absolute inset-0 rounded-full bg-primary/20 animate-radar-ping" aria-hidden="true" />
+       <span className="relative z-10 ...">{ícone}</span>
+     </span> */
+@keyframes radarPing {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+.animate-radar-ping {
+  animation: radarPing 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* 6c. "Pulso de dado ao vivo" — halo suave atrás de um número que está DE
+   FATO mudando em tempo real (kWh/potência durante a recarga em
+   andamento). NÃO usar em números estáticos (recibo, extrato) — só
+   enquanto o valor está de fato ao vivo, senão vira mentira visual. */
+@keyframes liveGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 1px 2px rgb(15 23 42 / 0.04),
+      0 12px 28px -16px rgb(var(--color-primary) / 0.35),
+      0 0 0 0 rgb(var(--color-accent) / 0.16);
+  }
+  50% {
+    box-shadow:
+      0 1px 2px rgb(15 23 42 / 0.04),
+      0 12px 28px -16px rgb(var(--color-primary) / 0.35),
+      0 0 0 12px rgb(var(--color-accent) / 0);
+  }
+}
+.animate-live-glow {
+  animation: liveGlow 2.2s ease-out infinite;
+}
+
+/* ---- 7. Pop de confirmação — um-tiro, só em ícone de sucesso ------------ */
+/* Ex.: check verde do "Recarga concluída" no recibo. Não é loop (não
+   precisaria do bloco de reduced-motion, mas cai nele mesmo assim por
+   estar sob o seletor universal — vira instantâneo, não perde a
+   informação). Não usar em nada frequente/repetido. */
+@keyframes popIn {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.animate-pop-in {
+  animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
