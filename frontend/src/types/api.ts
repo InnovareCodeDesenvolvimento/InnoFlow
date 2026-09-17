@@ -683,7 +683,7 @@ export interface WalletEntryRow {
   createdAt: string
 }
 
-export interface DriverWalletQuery extends PaginationParams {}
+export type DriverWalletQuery = PaginationParams
 
 export interface DriverWalletResponse {
   driverId: string
@@ -826,7 +826,7 @@ export interface MeSessionListItem {
   totalCostCents: number | null
 }
 
-export interface MeSessionsQuery extends PaginationParams {}
+export type MeSessionsQuery = PaginationParams
 
 export interface MeSessionsListResponse {
   items: MeSessionListItem[]
@@ -900,7 +900,7 @@ export interface MeWalletEntryDTO {
   createdAt: string
 }
 
-export interface MeWalletQuery extends PaginationParams {}
+export type MeWalletQuery = PaginationParams
 
 /** Mesmo shape de `DriverWalletResponse`, mas sem `driverId`/`driverName` — o próprio motorista sabe quem é. */
 export interface MeWalletResponse {

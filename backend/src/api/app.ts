@@ -10,6 +10,8 @@ import { errorHandler } from './middleware/errorHandler'
 import { adminRateLimit, publicRateLimit } from './middleware/rateLimit'
 import authRoutes from './routes/auth.routes'
 import publicSitesRoutes from './routes/publicSites.routes'
+import publicChargePointsRoutes from './routes/publicChargePoints.routes'
+import meRoutes from './routes/me.routes'
 import adminSitesRoutes from './routes/sites.routes'
 import adminChargePointsRoutes from './routes/chargePoints.routes'
 import adminConnectorsRoutes from './routes/connectors.routes'
@@ -62,6 +64,8 @@ export function createApp(): Express {
 
   app.use('/api/auth', authRoutes) // rate limit próprio (mais apertado) já aplicado nas rotas de login/registro
   app.use('/api/sites', publicRateLimit, publicSitesRoutes) // público — app do motorista
+  app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
+  app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start é mais apertado, aplicado na própria rota
   app.use('/api/admin/sites', adminRateLimit, adminSitesRoutes)
   app.use('/api/admin/charge-points', adminRateLimit, adminChargePointsRoutes)
   app.use('/api/admin/connectors', adminRateLimit, adminConnectorsRoutes)

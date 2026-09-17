@@ -4,12 +4,8 @@ import bcrypt from 'bcryptjs'
 import type { ChargePoint, Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
-import { env } from '../../lib/env'
 import { sendCommand } from '../../ocpp/commands'
-import { resolveActiveTariff } from '../../ocpp/tariffResolution'
-import { avaliarInicioSessao } from '../../core/carteira/avaliarInicioSessao'
-import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
-import { CHARGE_POINT_ONLINE_THRESHOLD_MS } from '../services/dashboardService'
+import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
@@ -190,6 +186,14 @@ router.post(
 // de disparar o comando, porque aqui é o admin decidindo por um motorista —
 // o carregador não tem chance de recusar por saldo/dívida sozinho (o idTag
 // que vamos mandar é um AuthToken VIRTUAL recém-criado, sempre ACCEPTED).
+//
+// F6 (2026-09-17) — núcleo extraído para `services/sessao/iniciarSessaoRemota.ts`
+// (reaproveitado por `POST /api/me/sessions/start`, PWA do motorista — ver
+// decisoes-pwa-motorista.md §3). Esta rota só resolve o `userId` (o único
+// passo que é exclusivo do admin: o motorista pode ser qualquer um, então
+// precisa existir/ser DRIVER) e repassa o `operatorScopeWhere(req)` como
+// filtro do charge point — mesmo comportamento/contrato de antes, mesmos
+// códigos de erro, mesmos campos de resposta.
 // ------------------------------------------------------------
 
 router.post(
@@ -198,71 +202,23 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = req.body as RemoteStartCommandInput
 
-    const chargePoint = await prisma.chargePoint.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
-    if (!chargePoint) throw new AppError('Charge point não encontrado.', 404, 'CHARGE_POINT_NOT_FOUND')
-
-    const connector = await prisma.connector.findUnique({
-      where: { chargePointId_connectorId: { chargePointId: chargePoint.id, connectorId: body.connectorId } },
-    })
-    if (!connector) throw new AppError('Conector não encontrado.', 404, 'CONNECTOR_NOT_FOUND')
-
     const user = await prisma.user.findFirst({ where: { id: body.userId, role: 'DRIVER' } })
     if (!user) throw new AppError('Motorista não encontrado.', 404, 'USER_NOT_FOUND')
 
-    const online = chargePoint.lastSeenAt !== null && Date.now() - chargePoint.lastSeenAt.getTime() < CHARGE_POINT_ONLINE_THRESHOLD_MS
-    if (!online) throw new AppError('Charge point está offline.', 409, 'CHARGE_POINT_OFFLINE')
-
-    if (connector.status !== 'AVAILABLE') throw new AppError('Conector ocupado.', 409, 'CONNECTOR_BUSY')
-
-    const [openDebt, wallet] = await Promise.all([
-      prisma.debt.findFirst({ where: { userId: user.id, status: 'OPEN' }, select: { id: true } }),
-      prisma.wallet.findUnique({ where: { userId: user.id }, select: { id: true } }),
-    ])
-
-    let walletBalanceCents = 0
-    if (wallet) {
-      const lastEntry = await prisma.walletEntry.findFirst({
-        where: { walletId: wallet.id },
-        orderBy: { createdAt: 'desc' },
-        select: { balanceAfterCents: true },
-      })
-      walletBalanceCents = lastEntry?.balanceAfterCents ?? 0
-    }
-
-    const resultado = avaliarInicioSessao({
-      token: { status: 'ACCEPTED', expiresAt: null, userId: user.id },
-      now: new Date(),
-      openDebt: !!openDebt,
-      walletBalanceCents,
-      minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS,
+    const resultado = await iniciarSessaoRemota({
+      chargePointId: req.params.id,
+      chargePointScope: operatorScopeWhere(req),
+      connectorId: body.connectorId,
+      userId: user.id,
     })
 
-    if (resultado.decision !== 'Accepted') {
-      if (resultado.reason === 'OPEN_DEBT') throw new AppError('Motorista tem dívida em aberto.', 409, 'DRIVER_HAS_OPEN_DEBT')
-      throw new AppError('Saldo insuficiente para iniciar a recarga.', 409, 'INSUFFICIENT_BALANCE')
-    }
-
-    const tariff = await resolveActiveTariff(connector, chargePoint)
-    const estimatedMaxCostCents = calcularTetoReserva(
-      { pricePerKwh: tariff.pricePerKwh?.toString() ?? null, pricePerMinute: tariff.pricePerMinute?.toString() ?? null, sessionFeeCents: tariff.sessionFeeCents },
-      { maxPowerKw: connector.maxPowerKw?.toString() ?? null },
-      { pisoCents: env.RESERVA_PISO_CENTS, tetoCents: env.RESERVA_TETO_CENTS },
-    )
-
-    // idTag VIRTUAL fresco por disparo — evita janela de reuso entre
-    // remote-starts concorrentes do mesmo motorista. Limite de 20 chars do
-    // protocolo (CiString20Type) — ver `ocpp/schemas/common.ts`.
-    const idTag = `V${randomUUID().replace(/-/g, '')}`.slice(0, 20)
-    await prisma.authToken.create({ data: { idTag, type: 'VIRTUAL', userId: user.id, status: 'ACCEPTED' } })
-
-    const correlationId = randomUUID()
-    logger.info({ chargePointId: chargePoint.id, connectorId: body.connectorId, userId: user.id, idTag, correlationId }, '[api] remote-start disparado')
-
-    sendCommand(chargePoint.id, 'RemoteStartTransaction', { connectorId: body.connectorId, idTag }, { timeoutMs: COMMAND_TIMEOUT_MS })
-      .then((result) => logger.info({ chargePointId: chargePoint.id, correlationId, result }, '[api] remote-start concluído'))
-      .catch((err) => logger.error({ err, chargePointId: chargePoint.id, correlationId }, '[api] remote-start falhou'))
-
-    res.status(202).json({ correlationId, status: 'PENDING', idTag, walletBalanceCents, estimatedMaxCostCents })
+    res.status(202).json({
+      correlationId: resultado.correlationId,
+      status: 'PENDING',
+      idTag: resultado.idTag,
+      walletBalanceCents: resultado.walletBalanceCents,
+      estimatedMaxCostCents: resultado.estimatedMaxCostCents,
+    })
   }),
 )
 
