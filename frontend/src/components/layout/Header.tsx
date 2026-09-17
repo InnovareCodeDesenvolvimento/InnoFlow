@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { ChevronDown, LayoutDashboard, LogOut, Menu, User, X, Zap } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Building2, ChevronDown, LayoutDashboard, LogOut, Menu, User, X } from "lucide-react"
+import { cn, operatorContextLabel } from "@/lib/utils"
 import { useAuthStore } from "@/store/authStore"
+import logoIcon from "@/assets/logo-icon.png"
 
 /**
  * Cabeçalho do site público (mapa/lista de eletropostos). Lê autenticação
@@ -17,6 +18,7 @@ export function Header() {
 
   const { user, isAuthenticated, logout } = useAuthStore()
   const isStaff = user?.role === "ADMIN" || user?.role === "OPERATOR"
+  const contextLabel = operatorContextLabel(user)
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -46,9 +48,7 @@ export function Header() {
         </button>
 
         <Link to="/" className="flex items-center gap-2 font-black tracking-tight text-ink">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-brand-teal to-accent text-white">
-            <Zap className="h-5 w-5" aria-hidden="true" />
-          </span>
+          <img src={logoIcon} alt="" className="h-9 w-9 shrink-0" />
           <span className="hidden sm:inline">InnoFlow</span>
         </Link>
 
@@ -65,6 +65,15 @@ export function Header() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          {isAuthenticated && user && contextLabel && (
+            <span
+              className="hidden items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-ink-soft md:inline-flex"
+              title={contextLabel}
+            >
+              <Building2 className="h-3.5 w-3.5 text-ink-softer" aria-hidden="true" />
+              {contextLabel}
+            </span>
+          )}
           {isAuthenticated && user ? (
             <div className="relative" ref={userMenuRef}>
               <button
@@ -85,6 +94,12 @@ export function Header() {
                   <div className="border-b border-border-subtle px-4 py-2.5">
                     <p className="truncate text-sm font-bold text-ink">{user.name}</p>
                     <p className="truncate text-xs text-ink-softer">{user.email}</p>
+                    {contextLabel && (
+                      <p className="mt-1.5 flex items-center gap-1.5 truncate text-xs font-semibold text-primary-700 md:hidden">
+                        <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        {contextLabel}
+                      </p>
+                    )}
                   </div>
                   {isStaff && (
                     <Link

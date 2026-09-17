@@ -1,11 +1,11 @@
 import { useState } from "react"
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { ExternalLink, LogOut, Menu, ShieldAlert, X, Zap } from "lucide-react"
+import { Building2, ExternalLink, LogOut, Menu, ShieldAlert, X } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
 import { matchNavItem } from "@/components/painel/navegacao"
-import { ROLE_LABELS } from "@/lib/utils"
-import { cn } from "@/lib/utils"
+import { cn, operatorContextLabel, ROLE_LABELS } from "@/lib/utils"
+import logoIcon from "@/assets/logo-icon.png"
 
 /**
  * Casca do painel administrativo — sidebar azul-marca fixa no desktop,
@@ -40,6 +40,7 @@ function AdminShell() {
 
   const nav = getAdminNav(user?.role)
   const current = matchNavItem(nav, location.pathname)
+  const contextLabel = operatorContextLabel(user)
 
   const isActive = (item: AdminNavItem) =>
     item.exact ? location.pathname === item.href || location.pathname === `${item.href}/` : location.pathname.startsWith(item.href)
@@ -67,16 +68,20 @@ function AdminShell() {
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col bg-primary-950 lg:flex">
         <div className="flex h-16 items-center gap-2 border-b border-white/10 px-5">
           <Link to="/" className="flex items-center gap-2 font-black tracking-tight text-white" aria-label="Ir para o site público">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary-600 via-brand-teal to-accent">
-              <Zap className="h-4 w-4" aria-hidden="true" />
-            </span>
+            <img src={logoIcon} alt="" className="h-8 w-8 shrink-0" />
             InnoFlow
           </Link>
         </div>
-        <div className="px-5 py-4">
+        <div className="space-y-2 px-5 py-4">
           <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white ring-1 ring-white/20">
             Painel administrativo
           </span>
+          {contextLabel && (
+            <p className="flex items-center gap-1.5 truncate text-xs font-semibold text-white/70" title={contextLabel}>
+              <Building2 className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />
+              {contextLabel}
+            </p>
+          )}
         </div>
         <nav className="flex-1 overflow-y-auto px-4 pb-4" aria-label="Navegação do painel administrativo">
           {navGroups()}
@@ -108,8 +113,16 @@ function AdminShell() {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-ink/50 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
           <div className="absolute inset-y-0 right-0 flex w-72 flex-col bg-primary-950 shadow-2xl">
-            <div className="flex h-16 items-center justify-between border-b border-white/10 px-5">
-              <span className="text-sm font-black uppercase tracking-widest text-white">Menu</span>
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5">
+              <div className="min-w-0">
+                <span className="text-sm font-black uppercase tracking-widest text-white">Menu</span>
+                {contextLabel && (
+                  <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-semibold text-white/60">
+                    <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {contextLabel}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}

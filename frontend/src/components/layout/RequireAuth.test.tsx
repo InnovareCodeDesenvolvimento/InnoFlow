@@ -34,7 +34,7 @@ describe("RequireAuth", () => {
 
   it("mostra acesso restrito quando o papel não bate", () => {
     useAuthStore.setState({
-      user: { id: "1", name: "Ana", email: "ana@ex.com", role: "DRIVER", operatorId: null },
+      user: { id: "1", name: "Ana", email: "ana@ex.com", role: "DRIVER", operatorId: null, operatorName: null },
       token: "tok",
       isAuthenticated: true,
     })
@@ -44,7 +44,7 @@ describe("RequireAuth", () => {
 
   it("libera o conteúdo quando autenticado com o papel certo", () => {
     useAuthStore.setState({
-      user: { id: "1", name: "Ana", email: "ana@ex.com", role: "ADMIN", operatorId: null },
+      user: { id: "1", name: "Ana", email: "ana@ex.com", role: "ADMIN", operatorId: null, operatorName: null },
       token: "tok",
       isAuthenticated: true,
     })

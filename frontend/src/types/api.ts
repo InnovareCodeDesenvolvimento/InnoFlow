@@ -16,6 +16,8 @@ export interface User {
   email: string
   role: Role
   operatorId: string | null
+  /** Nome do operador (empresa) dono do usuário — `null` para `ADMIN`/`DRIVER`, que não pertencem a um único operador. Join feito pelo backend em `/api/auth/login`. */
+  operatorName: string | null
 }
 
 export interface AuthResponse {

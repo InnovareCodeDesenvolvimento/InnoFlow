@@ -2,12 +2,12 @@ import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Zap } from "lucide-react"
 import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
 import { registerSchema, type RegisterFormValues } from "@/schemas/auth.schema"
+import logoIcon from "@/assets/logo-icon.png"
 
 /** `POST /api/auth/register` sempre cria um DRIVER (motorista) — não existe cadastro de ADMIN/OPERATOR pela UI, ver PROGRESSO.md. */
 export function Register() {
@@ -35,9 +35,7 @@ export function Register() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-sm">
         <Link to="/" className="mb-8 flex items-center justify-center gap-2 font-black tracking-tight text-ink">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-brand-teal to-accent text-white">
-            <Zap className="h-5 w-5" aria-hidden="true" />
-          </span>
+          <img src={logoIcon} alt="" className="h-9 w-9 shrink-0" />
           InnoFlow
         </Link>
 

@@ -13,28 +13,29 @@
    * Nome técnico do projeto/repo continua InnoElektron — isto é só a marca
    * que o usuário final vê.
    *
-   * Origem: leitura visual da logo oficial (Atlas, 16/09/2026) — não é
-   * extração de pixel exata, foi recalibrada aqui por HSL para garantir
-   * WCAG AA. Ver `[[rebrand-innoflow-paleta]]` na memória da Lyra para as
-   * contas de contraste e o porquê de cada ajuste.
+   * Origem: 17/09/2026 o dono mandou o arquivo oficial (`logomarca.png`,
+   * 1774×887, PNG com transparência) — a rampa abaixo foi recalibrada por
+   * amostragem de pixel real (Python/Pillow, contagem de moda por região),
+   * não mais leitura visual. Ver `[[rebrand-innoflow-paleta]]` na memória
+   * da Lyra para as contas de contraste e o histórico do primeiro ajuste
+   * (16/09/2026, sem o arquivo em mãos).
    *
-   * - primary (azul-petróleo, texto "Inno" da logo): a cor -950 é o hex
-   *   exato pedido (#0E2A3A). O resto da rampa foi derivado no mesmo matiz
-   *   (h202) por HSL. O token DEFAULT usa o degrau -600 (não o -700, que
-   *   fica reservado pro hover mais escuro) — no valor antigo DEFAULT e
-   *   -700 eram idênticos e o hover não tinha efeito visual nenhum.
-   * - accent (verde folha, texto "Flow" + folha do ícone): o hex exato da
-   *   logo (#35A153) tem contraste 3.28:1 com branco — passa WCAG AA só
-   *   para texto grande/UI não-textual (>=3:1), não para texto pequeno
-   *   branco em cima (precisa >=4.5:1). Por isso o verde exato vive em
-   *   -500 (uso decorativo/ilustrativo) e o DEFAULT/-600 é uma versão ~7%
-   *   mais escura (#2D8646, contraste 4.56:1) usada em botões/textos.
-   * - brand-teal: o teal do meio da espiral do ícone (#1C8C6E) — token
-   *   único, só para gradientes decorativos (ex. selo do logo), não é uma
-   *   cor de estado interativo.
-   * - accent-glow: o verde-lima mais claro pedido para hover/destaque
-   *   pontual (#8CC63F, um dos dois hex sugeridos). Baixo contraste com
-   *   branco (~1.9:1) — nunca usar como fundo de texto, só glow/gradiente.
+   * - primary (azul-petróleo, texto "Inno"): pixel real ≈ #022439, hue 203
+   *   — bate com o hue 202 que já estava na rampa (diferença de 1°,
+   *   imperceptível). RAMPA MANTIDA, sem mudança.
+   * - accent (verde, texto "Flow" + folha do ícone): pixel real tem hue
+   *   ~113–129 (folha ≈#279930 h125, corpo do "Flow" ≈#339F24 h113) — bem
+   *   mais "verde-grama/lima" do que o hue 137 (mais "teal") estimado sem
+   *   o arquivo. RAMPA RECALIBRADA para hue 123 (compromisso entre folha e
+   *   corpo do texto), s58%. -600 recalculado para 4.54:1 com branco (AA),
+   *   -500 seguindo em ~3.4:1 (decorativo, mesmo papel de antes).
+   * - brand-teal: pixel real do meio da espiral ≈ #025964, hue 187–195
+   *   (bem mais ciano/azulado do que o #1C8C6E/h164 anterior). RECALIBRADO
+   *   para hue 188 — token único, só gradiente decorativo, não é escala de
+   *   estado.
+   * - accent-glow: ponta lima do gradiente do "Flow" real ≈ hue 100 (vs.
+   *   hue 86 anterior). RECALIBRADO — só hover/glow/gradiente, nunca fundo
+   *   de texto (baixo contraste, como antes).
    */
   :root {
     /* ====== AZUL-PETRÓLEO (primary) — hue ~202, h202 ====== */
@@ -52,28 +53,28 @@
     --color-primary-950: 14 42 58;         /* #0E2A3A — hex exato da logo (sidebar admin) */
     --color-primary-foreground: 255 255 255; /* #FFFFFF */
 
-    /* ====== VERDE FOLHA (accent — CTAs, "Flow") — hue ~137 ====== */
-    --color-accent: 45 134 70;             /* #2D8646 — DEFAULT = degrau 600 */
-    --color-accent-50: 239 250 242;        /* #EFFAF2 */
-    --color-accent-100: 219 245 227;       /* #DBF5E3 */
-    --color-accent-200: 185 233 199;       /* #B9E9C7 */
-    --color-accent-300: 133 214 156;       /* #85D69C */
-    --color-accent-400: 83 198 115;        /* #53C673 — decorativo/grande, <4.5:1 com branco */
-    --color-accent-500: 53 161 83;         /* #35A153 — verde EXATO da logo; decorativo/grande (3.28:1 com branco) */
-    --color-accent-600: 45 134 70;         /* #2D8646 — AA com branco (4.56:1) */
-    --color-accent-700: 36 107 56;         /* #246B38 — hover-darken (6.49:1) */
+    /* ====== VERDE GRAMA/LIMA (accent — CTAs, "Flow") — hue ~123, recalibrado do pixel real ====== */
+    --color-accent: 36 136 41;             /* #248829 — DEFAULT = degrau 600 */
+    --color-accent-50: 243 252 243;        /* #F3FCF3 */
+    --color-accent-100: 231 249 232;       /* #E7F9E8 */
+    --color-accent-200: 199 240 201;       /* #C7F0C9 */
+    --color-accent-300: 142 225 146;       /* #8EE192 */
+    --color-accent-400: 86 210 92;         /* #56D25C — decorativo/grande, <4.5:1 com branco */
+    --color-accent-500: 43 161 49;         /* #2BA131 — verde do "Flow"/folha; decorativo/grande (3.36:1 com branco) */
+    --color-accent-600: 36 136 41;         /* #248829 — AA com branco (4.54:1) */
+    --color-accent-700: 28 105 32;         /* #1C6920 — hover-darken (6.79:1) */
     --color-accent-foreground: 255 255 255; /* #FFFFFF */
 
     /* ====== TOKENS DE MARCA COMPLEMENTARES (uso decorativo, moderado) ====== */
-    --color-brand-teal: 28 140 110;        /* #1C8C6E — meio da espiral do ícone; só gradiente/decoração */
-    --color-accent-glow: 140 198 63;       /* #8CC63F — verde-lima claro; só hover/glow/gradiente, nunca fundo de texto */
+    --color-brand-teal: 13 137 156;        /* #0D899C — meio da espiral do ícone (hue 188, pixel real); só gradiente/decoração */
+    --color-accent-glow: 97 219 36;        /* #61DB24 — ponta lima do gradiente do "Flow"; só hover/glow/gradiente, nunca fundo de texto */
 
     /* ====== SEMÂNTICAS ====== */
-    --color-success: 45 134 70;            /* #2D8646 (mesmo tom do accent — verde já é "sucesso") */
-    --color-success-50: 239 250 242;       /* #EFFAF2 */
-    --color-success-100: 219 245 227;      /* #DBF5E3 */
-    --color-success-600: 45 134 70;        /* #2D8646 */
-    --color-success-700: 36 107 56;        /* #246B38 */
+    --color-success: 36 136 41;            /* #248829 (mesmo tom do accent — verde já é "sucesso") */
+    --color-success-50: 243 252 243;       /* #F3FCF3 */
+    --color-success-100: 231 249 232;      /* #E7F9E8 */
+    --color-success-600: 36 136 41;        /* #248829 */
+    --color-success-700: 28 105 32;        /* #1C6920 */
     --color-warning: 217 119 6;            /* #D97706 */
     --color-warning-50: 255 251 235;       /* #FFFBEB */
     --color-warning-100: 254 243 199;      /* #FEF3C7 */

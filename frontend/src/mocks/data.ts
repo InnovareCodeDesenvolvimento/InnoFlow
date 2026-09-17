@@ -10,13 +10,31 @@ import type { AuthToken, ChargePoint, Connector, Site, Tariff, User } from "@/ty
 export const OPERATOR_A_ID = "operator_a_cuid000000000001"
 export const OPERATOR_B_ID = "operator_b_cuid000000000002"
 
+export const mockOperators = [
+  { id: OPERATOR_A_ID, name: "InnovareCharge Sudeste", active: true },
+  { id: OPERATOR_B_ID, name: "Posto Estrada Real Ltda.", active: true },
+]
+
 export interface MockUser extends User {
   password: string
 }
 
+/** `operatorName` espelha o join `Operator.name` que o backend faz em `/api/auth/login` — nunca hardcoded solto, sempre derivado de `mockOperators` para não divergir. */
+function operatorNameFor(operatorId: string | null): string | null {
+  return operatorId ? (mockOperators.find((o) => o.id === operatorId)?.name ?? null) : null
+}
+
 export const mockUsers: MockUser[] = [
-  { id: "user_admin", name: "Ana Admin", email: "admin@innoelektron.com", role: "ADMIN", operatorId: null, password: "senha1234" },
-  { id: "user_operator", name: "Beto Operador", email: "operador@innoelektron.com", role: "OPERATOR", operatorId: OPERATOR_A_ID, password: "senha1234" },
+  { id: "user_admin", name: "Ana Admin", email: "admin@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  {
+    id: "user_operator",
+    name: "Beto Operador",
+    email: "operador@innoelektron.com",
+    role: "OPERATOR",
+    operatorId: OPERATOR_A_ID,
+    operatorName: operatorNameFor(OPERATOR_A_ID),
+    password: "senha1234",
+  },
 ]
 
 export const mockSites: Site[] = [
@@ -234,11 +252,6 @@ export const mockTariffs: Tariff[] = [
     createdAt: "2026-08-02T12:00:00.000Z",
     updatedAt: "2026-08-02T12:00:00.000Z",
   },
-]
-
-export const mockOperators = [
-  { id: OPERATOR_A_ID, name: "InnovareCharge Sudeste", active: true },
-  { id: OPERATOR_B_ID, name: "Posto Estrada Real Ltda.", active: true },
 ]
 
 /** Pool de motoristas sintéticos — usado só pelo gerador de sessões (ver `reportsData.ts`), nunca pelo CRUD de `User`. */

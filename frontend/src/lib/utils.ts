@@ -7,6 +7,7 @@ import type {
   PaymentIntentStatus,
   Role,
   SessionPaymentStatus,
+  User,
 } from "@/types/api"
 
 /** Combina classes Tailwind com o tailwind-merge resolvendo conflitos (última classe conflitante vence). */
@@ -87,6 +88,20 @@ export const ROLE_LABELS: Record<Role, string> = {
   ADMIN: "Administrador",
   OPERATOR: "Operador",
   DRIVER: "Motorista",
+}
+
+/**
+ * Rótulo de contexto multi-tenant para o cabeçalho: `OPERATOR` mostra a
+ * empresa (`operatorName`, join que o backend faz em `/api/auth/login`);
+ * `ADMIN` atravessa todos os operadores, então não há uma empresa "dona" —
+ * mostra um rótulo fixo em vez de nome de empresa. `DRIVER` não tem
+ * operador e não usa o painel admin, então não precisa de rótulo aqui.
+ */
+export function operatorContextLabel(user: Pick<User, "role" | "operatorName"> | null | undefined): string | null {
+  if (!user) return null
+  if (user.role === "ADMIN") return "Administrador da plataforma"
+  if (user.role === "OPERATOR") return user.operatorName ?? "Operador sem empresa vinculada"
+  return null
 }
 
 /** Potência do conector formatada com a unidade; travessão quando ausente. */

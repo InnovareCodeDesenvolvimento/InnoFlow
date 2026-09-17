@@ -66,7 +66,14 @@ function errorBody(error: string, code: string) {
 
 /** Nunca devolve a senha — mesma regra do `toUserDTO` real (`auth.routes.ts`). */
 function toUserDTO(user: MockUser) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId }
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    operatorId: user.operatorId,
+    operatorName: user.operatorName,
+  }
 }
 
 function paginate<T>(items: T[], url: URL): PaginatedResponse<T> {
@@ -181,6 +188,7 @@ export const handlers = [
       email: body.email,
       role: "DRIVER",
       operatorId: null,
+      operatorName: null,
       password: body.password,
     }
     mockUsers.push(newUser)
