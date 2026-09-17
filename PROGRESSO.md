@@ -372,6 +372,23 @@ consulta simples, produção só tem o seed base. Precisa rodar de novo.
 
 E2E automatizado é só 1 smoke test — dívida real, mas não bloqueante.
 
+## Preparando o simulador de charge point — 2026-09-17
+
+Dono criou os 3 serviços que faltavam no EasyPanel (`inno-elekton-ocpp`,
+`inno-elekton-worker`, `inno-elekton-simulador`). Atlas cadastrou o
+carregador simulado no sistema via painel admin (`ocppIdentity=vcp-prod-01`,
+site novo "Site de Testes - Simulador" — o site do seed base tem ID não
+padrão e foi rejeitado, ver bug abaixo). **Falta**: dono adicionar
+`PASSWORD=<secret>` no serviço do simulador e reimplantar, para a
+autenticação Basic Auth do gateway aceitar a conexão.
+
+**Bug real encontrado**: sites/registros do seed base têm IDs legíveis
+(`seed-site-matriz`) que a validação `.cuid()` dos formulários de criação
+rejeita — não dá para criar `ChargePoint` referenciando esses sites pela
+API/UI. Contornado criando site novo. Registrado em memória para o Vega
+decidir a correção (relaxar validação vs. gerar cuid real no seed)
+quando mexer de novo nesses schemas — não urgente.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
