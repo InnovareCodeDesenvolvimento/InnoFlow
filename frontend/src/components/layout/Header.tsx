@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Building2, ChevronDown, LayoutDashboard, LogOut, Menu, User, X } from "lucide-react"
+import { Building2, ChevronDown, LayoutDashboard, LogOut, Menu, Smartphone, User, X } from "lucide-react"
 import { cn, operatorContextLabel } from "@/lib/utils"
 import { useAuthStore } from "@/store/authStore"
 import logoIcon from "@/assets/logo-icon.png"
@@ -109,6 +109,16 @@ export function Header() {
                     >
                       <LayoutDashboard className="h-4 w-4 text-ink-softer" aria-hidden="true" />
                       Painel administrativo
+                    </Link>
+                  )}
+                  {user.role === "DRIVER" && (
+                    <Link
+                      to="/app"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink hover:bg-muted"
+                    >
+                      <Smartphone className="h-4 w-4 text-ink-softer" aria-hidden="true" />
+                      Meu app
                     </Link>
                   )}
                   <button

@@ -42,7 +42,9 @@ export function Login() {
       } else if (user.role === "ADMIN" || user.role === "OPERATOR") {
         navigate("/admin", { replace: true })
       } else {
-        navigate("/", { replace: true })
+        // DRIVER sem redirect explícito: o app do motorista (`/app`) é a
+        // casa dele agora — o site público (`/`) é para visitante anônimo.
+        navigate("/app", { replace: true })
       }
     } catch (err) {
       setFormError(getApiErrorMessage(err, "E-mail ou senha inválidos."))

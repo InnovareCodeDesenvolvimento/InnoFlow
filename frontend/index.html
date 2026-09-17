@@ -4,8 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0E2A3A" />
+    <!-- iOS ignora a maior parte do manifest — precisa destas tags à parte
+         para o PWA instalado (Adicionar à Tela de Início) abrir em modo
+         standalone com a barra de status certa, ver PROGRESSO.md §PWA. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="InnoFlow" />
+    <!-- Fonte Inter movida do `@import` em index.css para cá — achado
+         medindo Lighthouse mobile da landing pós-QR: `@import` dentro de CSS
+         só é descoberto DEPOIS do navegador buscar e parsear o stylesheet
+         principal (bloqueia o primeiro paint numa segunda viagem de rede);
+         como `<link>` aqui, o preload scanner do HTML já dispara a busca em
+         paralelo. Preconnect antecipa a conexão TLS com o CDN da Google
+         Fonts. Nada de visual muda, só a ordem de carregamento. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
     <title>InnoFlow</title>
   </head>
   <body>

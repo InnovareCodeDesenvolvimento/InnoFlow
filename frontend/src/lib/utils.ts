@@ -5,9 +5,11 @@ import type {
   ConnectorStatus,
   ConnectorType,
   PaymentIntentStatus,
+  PublicTariffSummary,
   Role,
   SessionPaymentStatus,
   User,
+  WalletEntryType,
 } from "@/types/api"
 
 /** Combina classes Tailwind com o tailwind-merge resolvendo conflitos (última classe conflitante vence). */
@@ -183,6 +185,38 @@ export function sessionStatusBadgeVariant(status: ChargingSessionStatus): BadgeV
     case "FINISHING":
       return "warning"
   }
+}
+
+// ---------------------------------------------------------------------------
+// PWA do motorista
+// ---------------------------------------------------------------------------
+
+/**
+ * Selo de status simplificado da landing pós-QR (3 estados, não os 9 de
+ * `ConnectorStatusBadge` — a tela do motorista não precisa saber a diferença
+ * entre `PREPARING`/`FINISHING`, só se dá para carregar agora).
+ */
+export function landingConnectorStatus(online: boolean, status: ConnectorStatus): { label: string; variant: BadgeVariant } {
+  if (!online || status === "UNAVAILABLE" || status === "FAULTED") return { label: "Fora do ar", variant: "neutral" }
+  if (status === "AVAILABLE") return { label: "Disponível", variant: "success" }
+  return { label: "Ocupado", variant: "warning" }
+}
+
+/** Preço em destaque da tarifa — prioriza R$/kWh (o mais comum), cai para R$/min, depois taxa fixa por sessão. */
+export function formatTariffHeadlinePrice(tariff: PublicTariffSummary): string {
+  if (tariff.pricePerKwh) return `${formatCurrency(tariff.pricePerKwh)} / kWh`
+  if (tariff.pricePerMinute) return `${formatCurrency(tariff.pricePerMinute)} / min`
+  if (tariff.sessionFeeCents) return `${formatCents(tariff.sessionFeeCents)} / sessão`
+  return "Tarifa sob consulta"
+}
+
+export const WALLET_ENTRY_TYPE_LABELS: Record<WalletEntryType, string> = {
+  TOPUP_PIX: "Recarga via Pix",
+  TOPUP_REFUND: "Estorno de recarga",
+  CHARGE_DEBIT: "Recarga de veículo",
+  ADJUSTMENT_CREDIT: "Crédito manual",
+  ADJUSTMENT_DEBIT: "Débito manual",
+  REFUND: "Estorno",
 }
 
 export function paymentStatusBadgeVariant(status: SessionPaymentStatus | PaymentIntentStatus): BadgeVariant {

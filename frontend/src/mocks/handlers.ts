@@ -19,6 +19,16 @@ import {
   listOperators,
   type Scope,
 } from "./reportsAggregate"
+import {
+  getCommandStatus,
+  getMockActiveSession,
+  getMockSessionDetail,
+  getMockWallet,
+  getPublicChargePointCard,
+  listMockSessions,
+  startMockSession,
+  stopMockSession,
+} from "./meData"
 import type {
   AuthToken,
   ChargePoint,
@@ -104,6 +114,14 @@ function requireAdmin(req: Request) {
   const user = currentUser(req)
   if (!user) return { error: HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 }) }
   if (user.role !== "ADMIN") return { error: HttpResponse.json(errorBody("Acesso restrito a administradores.", "FORBIDDEN"), { status: 403 }) }
+  return { user }
+}
+
+/** Rotas `/api/me/*` — DRIVER only (ver PROGRESSO.md §PWA do motorista). */
+function requireDriver(req: Request) {
+  const user = currentUser(req)
+  if (!user) return { error: HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 }) }
+  if (user.role !== "DRIVER") return { error: HttpResponse.json(errorBody("Acesso restrito a motoristas.", "FORBIDDEN"), { status: 403 }) }
   return { user }
 }
 
@@ -629,5 +647,80 @@ export const handlers = [
     }
 
     return HttpResponse.json(buildPaymentsReport(toScope(scope.user), { ...period, ...filters, ...pagination }))
+  }),
+
+  // ---- PWA do motorista: charge point público + rotas /api/me/* ---------------
+  // Ver `mocks/meData.ts` — simulação com atraso realista (não resolve tudo
+  // no mesmo tick), pra provar a máquina de estados "conectando → carregando
+  // → parando → recibo" de verdade no navegador.
+
+  http.get("/api/public/charge-points/:ocppIdentity", ({ params }) => {
+    const card = getPublicChargePointCard(String(params.ocppIdentity))
+    if (!card) return HttpResponse.json(errorBody("Carregador não encontrado.", "CHARGE_POINT_NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(card)
+  }),
+
+  http.post("/api/me/sessions/start", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const body = (await request.json()) as { ocppIdentity: string; connectorId: number }
+    const result = startMockSession(scope.user.userId, body.ocppIdentity, body.connectorId)
+    if (!result.ok) return HttpResponse.json(errorBody(result.message, result.code), { status: result.code === "ALREADY_HAS_ACTIVE_SESSION" ? 409 : 422 })
+    return HttpResponse.json(
+      {
+        correlationId: result.correlationId,
+        status: "PENDING",
+        walletBalanceCents: result.walletBalanceCents,
+        estimatedMaxCostCents: result.estimatedMaxCostCents,
+        minChargeCents: result.minChargeCents,
+      },
+      { status: 202 },
+    )
+  }),
+
+  http.get("/api/me/sessions/active", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const session = getMockActiveSession(scope.user.userId)
+    const wallet = getMockWallet(scope.user.userId, 1, 0)
+    return HttpResponse.json({ session, walletBalanceCents: wallet.balanceCents, generatedAt: new Date().toISOString() })
+  }),
+
+  http.get("/api/me/sessions/:id", ({ request, params }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const detail = getMockSessionDetail(String(params.id))
+    if (!detail) return HttpResponse.json(errorBody("Sessão não encontrada.", "SESSION_NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(detail)
+  }),
+
+  http.get("/api/me/sessions", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const { page, pageSize } = parsePagination(url, 15)
+    return HttpResponse.json(listMockSessions(page, pageSize))
+  }),
+
+  http.post("/api/me/sessions/:id/stop", ({ request, params }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const result = stopMockSession(scope.user.userId, String(params.id))
+    if (!result.ok) return HttpResponse.json(errorBody(result.message, result.code), { status: 404 })
+    return HttpResponse.json({ correlationId: result.correlationId, status: "PENDING" }, { status: 202 })
+  }),
+
+  http.get("/api/me/commands/:correlationId", ({ request, params }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    return HttpResponse.json({ status: getCommandStatus(String(params.correlationId)) })
+  }),
+
+  http.get("/api/me/wallet", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const { page, pageSize } = parsePagination(url, 20)
+    return HttpResponse.json(getMockWallet(scope.user.userId, page, pageSize))
   }),
 ]

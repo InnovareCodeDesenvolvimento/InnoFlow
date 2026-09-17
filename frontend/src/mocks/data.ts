@@ -35,6 +35,9 @@ export const mockUsers: MockUser[] = [
     operatorName: operatorNameFor(OPERATOR_A_ID),
     password: "senha1234",
   },
+  // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
+  // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).
+  { id: "user_driver", name: "Carla Motorista", email: "motorista@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 
 export const mockSites: Site[] = [
