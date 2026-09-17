@@ -82,21 +82,29 @@ Levantadas pela Nova durante a arquitetura — nenhuma foi decidida sozinha.
    Cronos modela o enum de `Connector` cobrindo AC Tipo 2 + DC CCS2 + DC
    CHAdeMO (fácil estender), mas o cenário de teste/seed real é CCS2.
 
-**Ainda em aberto:**
+**Decididas em 2026-09-17:**
 
-2. **PIX:** confirmar o modelo de carteira pré-paga, e o que fazer com sobra
-   de saldo. Devolução por PIX só funciona se houver saldo disponível na
-   conta Pix do lojista — se a conta for de transferência automática, não
-   dá para devolver.
-3. **Teto da pré-autorização do cartão:** valor fixo (ex. R$ 200) ou
-   estimado por tarifa × capacidade típica do carregador? Afeta a UX — a
-   Cielo não permite autorização incremental, então ao atingir o teto a
-   recarga para.
-5. **Credenciais Cielo:** quem abre a conta sandbox (autoatendimento) e
-   quem cadastra a URL de notificação no Site Cielo Gestão (exige 2FA pelo
-   app — só o dono pode fazer, não dá para delegar ao código).
-8. **Nota fiscal / tributação** da venda de recarga — fora do escopo técnico
-   levantado até aqui, precisa de resposta antes da fase F8 (deploy).
+2. ✅ **PIX — sobra de saldo:** permanece como crédito na carteira do
+   motorista, para usar na próxima recarga (não há devolução automática).
+   Já bate com o modelo de carteira pré-paga que o Cronos implementou —
+   nenhuma mudança de schema necessária.
+3. ✅ **Teto da pré-autorização do cartão: CALCULADO**, não fixo.
+   Recomendação do Atlas, aceita pelo dono:
+   `teto = potência do conector (kW) × 1h30 (sessão longa típica) ×
+   preço/kWh da tarifa × 1,15 (margem)`, com **piso** (~R$ 50, evita
+   reserva ridícula em tarifa barata) e **teto absoluto** (~R$ 400, trava
+   de sanidade). A formular em detalhe quando a F5 chegar.
+5. ✅ **Credenciais Cielo: parametrizáveis pela própria plataforma**
+   (tela de configuração, credenciais cifradas no banco, sem env var
+   hardcoded) — mesmo padrão do `/admin/gateway` do ParquedasFeiras.
+   **Decisão de arquitetura a confirmar com a Nova na F5:** como o
+   InnoElektron é multi-tenant (múltiplos operadores), o modelo mais
+   provável — seguindo o precedente do ParquedasFeiras (marketplace) — é
+   **uma única conta Cielo da plataforma**, que recebe tudo, com acerto
+   entre plataforma e operador por fora (mesma lógica de "saques" que já
+   existe lá). Não implementar sem confirmar esse desenho primeiro.
+8. **Nota fiscal / tributação** — explicitamente **adiada pelo dono**,
+   não mexer agora. Revisitar antes da fase F8 (deploy final).
 9. ✅ **Motorista (driver): confirmado como conta única de rede** (decisão
    do dono, 2026-09-16). O motorista se cadastra uma vez e carrega em
    eletropostos de qualquer operador, com a mesma carteira — exatamente
@@ -260,6 +268,15 @@ parte do dono, mesmo padrão do ParquedasFeiras): canto inferior direito
 do painel admin, versão do sistema vinda do `package.json` (fonte
 única), data do build. Porta 1:1 o componente já validado no projeto
 irmão.
+
+## Rumo confirmado: F4 (sessão) antes de F5 (pagamento real) — 2026-09-17
+
+Após reavaliação geral do projeto a pedido do dono, ficou definido: fechar
+**totalmente** a sessão de recarga (F4 — OCPP real com cálculo de tarifa
+ligado, sem integração Cielo ainda) antes de iniciar a integração de
+pagamento real (F5 — cartão/PIX Cielo). Em paralelo, **Íris (QA) e Órion
+(segurança) acionados pela primeira vez neste projeto** para auditar o que
+já existe — nenhum dos dois tinha sido chamado até agora.
 
 ## Próximos passos
 
