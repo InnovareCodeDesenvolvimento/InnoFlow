@@ -298,6 +298,51 @@ depende da topologia da porta 9000, pendência para o Vulcano; CORS
 aberto; `ajv` ReDoS via `ocpp-rpc` reavaliado como risco menor do que se
 temia) e 2 sugestões (bcrypt rounds, JWT sem refresh) — nenhum bloqueante.
 
+## F4 desenhada (Nova) — 2026-09-17
+
+**Achado central**: a identidade de conciliação já em produção
+(`paymentsService.ts`: `revenue === cardCaptured + walletDebit + openDebt`)
+**proíbe reserva antecipada por débito** — se a carteira debitasse um teto
+no início e devolvesse o troco no fim, a tela Financeiro mostraria
+diferença em vermelho. Por isso: **carteira pré-paga sem hold**, saldo
+mínimo pra iniciar, guarda ao vivo no `MeterValues` (auto-stop via
+`RemoteStopTransaction` se o custo parcial atingir o teto calculado —
+mesma fórmula do dono, agora com uso real), débito único e atômico no
+`StopTransaction`, o que faltar vira `Debt` (bloqueia próxima recarga).
+
+**Contrato literal do débito** (não é detalhe, é o que faz a retaguarda
+enxergar sessão real em vez de só o sintético): `WalletEntry` com
+`type='CHARGE_DEBIT'`, `referenceType='CHARGING_SESSION'`,
+`referenceId = ChargingSession.id` (o cuid, não o `ocppTransactionId`).
+
+Confirmado: `tariffSnapshot` passa a incluir `TariffWindow[]` agora (é o
+momento certo, senão tarifa HYBRID perde receita de ponta em silêncio).
+`StopTransaction` liquida inline (débito é INSERT local, não precisa
+esperar worker) mas sempre responde `Accepted` ao carregador mesmo se a
+liquidação falhar, enfileirando um job de retry — **essa costura
+(inline + job de liquidação) é o que a F5 reaproveita sem reescrever o
+handler**, trocando "debitar carteira" por "criar PaymentIntent
+CAPTURE_PENDING" no inline e "capturar de verdade" no job.
+
+3 telas mínimas necessárias (nada disso existe hoje): iniciar/parar
+recarga pelo admin, e **carteira do motorista** (saldo/extrato/crédito
+manual do ADMIN — sem isso não dá nem para financiar uma carteira de
+teste antes da F5 existir).
+
+**Regra de processo herdada do incidente de contrato divergente**: Vega
+commita os tipos de API em `frontend/src/types/api.ts` ANTES de
+implementar qualquer coisa; Lyra só começa depois desse commit existir.
+
+**Pendências que só o dono decide** (aguardando resposta):
+1. Saldo mínimo pra iniciar sessão — Nova propõe R$ 20,00.
+2. Motorista pode terminar sessão devendo (overshoot entre amostras do
+   medidor vira `Debt`, que bloqueia a próxima recarga)? Consequência
+   direta de não travar energia no carregador nesta fase.
+3. `SuspendedEVSE` (estação suspende, não o motorista) NÃO deveria contar
+   como ociosidade cobrável — Nova propõe excluir, cobrar aí seria cobrar
+   por problema nosso.
+4. Teto do crédito manual do ADMIN por lançamento — Nova propõe R$ 5.000.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
