@@ -251,8 +251,15 @@ de PIX. Três pedidos novos: (1) usar `logomarca.png` (arquivo real,
 cabeçalho a empresa (operador) do usuário logado — multi-tenant visível;
 (3) redesenhar a tela de login com cara mais profissional/robusta.
 Atlas já adicionou `operatorName` na resposta de `/api/auth/login`
-(join com `Operator`). Lyra acionada para o resto (logo real, header,
-redesign do login).
+(join com `Operator`). Lyra entregou o resto (logo real, header,
+redesign do login) — validado com Playwright, lint/typecheck/testes/
+build limpos.
+
+**✅ Selo InnovareCode + versionamento** também adicionado (pedido à
+parte do dono, mesmo padrão do ParquedasFeiras): canto inferior direito
+do painel admin, versão do sistema vinda do `package.json` (fonte
+única), data do build. Porta 1:1 o componente já validado no projeto
+irmão.
 
 ## Próximos passos
 
