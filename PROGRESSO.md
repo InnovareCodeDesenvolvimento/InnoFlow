@@ -451,6 +451,24 @@ valida `.cuid()` — se o motorista de teste tiver ID não-cuid (mesmo bug
 do site, ver abaixo), iniciar sessão pela API falha até alguém decidir a
 correção.
 
+## 🎉 Primeira sessão de recarga real testada de ponta a ponta — 2026-09-17
+
+Depois do fix do bug crítico do barramento de comandos, testamos o fluxo
+completo pela primeira vez: `RemoteStartTransaction` → carregador aceita
+→ `StartTransaction` real (transactionId 11733) → `MeterValues` chegando
+e energia subindo em tempo real no dashboard (0 → 300 Wh) → tentativa de
+`RemoteStopTransaction`.
+
+**Achado**: o simulador (Solidstudio VCP) aceita o `RemoteStopTransaction`
+mas **desconecta e reconecta em vez de completar o protocolo** (nunca
+manda o `StopTransaction` final com a leitura do medidor). A sessão de
+teste ficou presa em `STARTED` — não é bug nosso, é o simulador não
+completando o fluxo. Mas revelou um **gap real do sistema**: não existe
+reconciliação para quando um charge point reconecta com uma sessão ainda
+aberta — em produção real isso também aconteceria com queda de energia,
+mau contato, reinício de firmware. Registrado em memória para quando a
+robustez de produção da sessão for revisitada.
+
 ## Preparando o simulador de charge point — 2026-09-17
 
 Dono criou os 3 serviços que faltavam no EasyPanel (`inno-elekton-ocpp`,
