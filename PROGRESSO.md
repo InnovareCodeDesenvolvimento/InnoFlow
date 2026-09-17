@@ -494,6 +494,18 @@ API/UI. Contornado criando site novo. Registrado em memória para o Vega
 decidir a correção (relaxar validação vs. gerar cuid real no seed)
 quando mexer de novo nesses schemas — não urgente.
 
+## Ordem cronológica confirmada pelo dono — 2026-09-17
+
+**F4 (terminar completamente) → PWA do motorista → F5 (pagamento Cielo).**
+O PWA (fluxo do motorista via QR code, pausado desde o início da retaguarda)
+entra ANTES do pagamento real — faz sentido, é ele quem vai disparar as
+cobranças na F5. Não pular direto pra F5 sem o PWA existir.
+
+**Terminar a F4 significa**: provar um ciclo completo feliz (start → medir
+→ stop → carteira debitada → aparece certo no financeiro) e rodar os 3
+testes de integração novos (multi-tenant, conciliação, reconciliação de
+sessão órfã) contra Postgres real — nenhum dos dois foi feito ainda.
+
 ## Próximos passos
 
 - F0 (Vulcano) e F1 (Cronos) entregues. **Pendência comum:** nenhum dos dois
