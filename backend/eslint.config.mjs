@@ -55,6 +55,11 @@ export default tseslint.config(
             { name: 'express', message: 'core/ é domínio puro — proibido importar express (ver docs da Nova).' },
             { name: 'ws', message: 'core/ é domínio puro — proibido importar ws (ver docs da Nova).' },
             { name: 'ocpp-rpc', message: 'core/ é domínio puro — proibido importar ocpp-rpc (ver docs da Nova).' },
+            // Débito da F3a fechado na F4 (Vega, 2026-09-17): core/ não pode
+            // fazer I/O nenhum, nem Postgres — walletLedger/liquidarSessao
+            // (que PRECISAM de Prisma/transação) moram em src/services/, não
+            // aqui. Ver .claude/agent-memory/vega/innoelektron-f4-carteira-sessao.md.
+            { name: '@prisma/client', message: 'core/ é domínio puro — proibido importar @prisma/client. Código com I/O de banco vai em src/services/.' },
           ],
         },
       ],

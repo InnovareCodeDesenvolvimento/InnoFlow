@@ -1,32 +1,25 @@
-import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { authorizeReqSchema } from '../schemas/authorize'
+import { checkAuthorization } from '../authorizationCheck'
 import { defineOcppHandler } from './defineHandler'
 
 /**
- * MVP: só reflete o `AuthToken.status` já cadastrado. NÃO reserva
- * dinheiro/pré-autorização (isso é F5 — ver decisão da Nova: Authorize e
- * StartTransaction nunca chamam a Cielo de forma síncrona, o carregador está
- * esperando na tomada).
+ * F4 (2026-09-17): além do `AuthToken.status`, agora também bloqueia por
+ * `Debt` aberta e saldo de carteira abaixo do mínimo — regra centralizada em
+ * `avaliarInicioSessao` (núcleo puro), reaproveitada aqui via
+ * `checkAuthorization`. NÃO reserva/debita nada aqui (carteira pré-paga sem
+ * hold — decisão da Nova, ver PROGRESSO.md §F4 desenhada); débito real só
+ * acontece no `StopTransaction`.
  */
 export const handleAuthorize = defineOcppHandler('Authorize', authorizeReqSchema, async (data, ctx) => {
-  const token = await prisma.authToken.findUnique({ where: { idTag: data.idTag } })
+  const { resultado } = await checkAuthorization(data.idTag)
 
-  if (!token) {
-    logger.warn({ idTag: data.idTag, chargePointId: ctx.chargePointId }, '[ocpp] Authorize: idTag desconhecido')
-    return { idTagInfo: { status: 'Invalid' } }
+  if (resultado.decision !== 'Accepted') {
+    logger.warn(
+      { idTag: data.idTag, chargePointId: ctx.chargePointId, decision: resultado.decision, reason: resultado.reason },
+      '[ocpp] Authorize recusado',
+    )
   }
 
-  if (token.expiresAt && token.expiresAt.getTime() < Date.now()) {
-    return { idTagInfo: { status: 'Expired' } }
-  }
-
-  const statusMap: Record<string, string> = {
-    ACCEPTED: 'Accepted',
-    BLOCKED: 'Blocked',
-    EXPIRED: 'Expired',
-    INVALID: 'Invalid',
-  }
-
-  return { idTagInfo: { status: statusMap[token.status] ?? 'Invalid' } }
+  return { idTagInfo: { status: resultado.decision } }
 })

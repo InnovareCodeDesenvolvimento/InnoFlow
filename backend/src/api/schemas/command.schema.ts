@@ -24,3 +24,10 @@ export const triggerMessageSchema = z.object({
   ]),
   connectorId: z.number().int().min(0).optional(),
 })
+
+// F4 (2026-09-17) — o admin dispara a sessão em nome do motorista.
+export const remoteStartCommandSchema = z.object({
+  connectorId: z.number().int().min(1),
+  userId: z.string().cuid(),
+})
+export type RemoteStartCommandInput = z.infer<typeof remoteStartCommandSchema>

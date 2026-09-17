@@ -36,6 +36,21 @@ const envSchema = z.object({
   // default de propósito — campo novo obrigatório sem default derrubaria os
   // 3 entrypoints no boot (ver bug-env-eager-todos-entrypoints.md).
   REPORTING_TIMEZONE: z.string().trim().min(1).default('America/Sao_Paulo'),
+
+  // F4 (2026-09-17) — carteira pré-paga sem hold. Defaults de propósito
+  // (mesma lição do bug-env-eager-todos-entrypoints.md): um campo novo
+  // obrigatório sem default derrubaria os 3 entrypoints no boot, não só quem
+  // de fato usa. Valor real de produção pode ser ajustado por env sem
+  // redeploy de código.
+  //
+  // Saldo mínimo para AUTORIZAR o início de uma sessão — decisão do dono,
+  // 2026-09-17: R$ 20,00.
+  WALLET_MIN_START_BALANCE_CENTS: z.coerce.number().int().min(0).default(2000),
+  // Clamp do teto de custo estimado (`calcularTetoReserva`) — usado só como
+  // referência para a guarda ao vivo do MeterValues, NUNCA reservado/debitado
+  // antecipadamente (ver decisão da Nova sobre a identidade de conciliação).
+  RESERVA_PISO_CENTS: z.coerce.number().int().positive().default(5000),
+  RESERVA_TETO_CENTS: z.coerce.number().int().positive().default(40000),
 })
 
 export type Env = z.infer<typeof envSchema>

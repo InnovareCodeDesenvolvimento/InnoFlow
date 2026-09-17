@@ -1,27 +1,36 @@
+import type { TariffScope } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 
 /**
  * Resolve a tarifa ativa para um conector no momento do StartTransaction.
  *
- * SIMPLIFICADO DE PROPÓSITO para esta fase (F3a): pega a `TariffAssignment`
- * de maior prioridade cujo escopo (CONNECTOR > CHARGE_POINT > SITE >
- * OPERATOR, mas aqui tratado só por `priority`, não por especificidade
- * automática) bate e está dentro da janela de validade. NÃO resolve
- * `TariffWindow` (ponta/fora-ponta) nem calcula custo — isso é tarifação de
- * verdade, trabalho da F4. Aqui só precisamos de uma tarifa válida para
- * preencher `ChargingSession.tariffId`/`tariffSnapshot` (colunas NOT NULL).
- *
- * Se o operador cadastrar assignments sobrepostos no mesmo `priority`, a
- * ordem de desempate fica a cargo do Postgres (não determinística) — outro
- * ponto para a F4 endurecer se virar problema real.
+ * F4 (2026-09-17): agora inclui `TariffWindow[]` (gap deixado de propósito
+ * pela F3a, documentado em PROGRESSO.md — sem isso, tarifa `HYBRID` nunca
+ * cobrava o preço de ponta) e endurece o desempate de `TariffAssignment` com
+ * a MESMA `priority`: antes disso a ordem ficava a cargo do Postgres (não
+ * determinística). Critério de desempate, nesta ordem:
+ *   1. `priority` (maior ganha) — já era assim.
+ *   2. Especificidade do `scope` (CONNECTOR > CHARGE_POINT > SITE >
+ *      OPERATOR) — NÃO confiar na ordem alfabética do enum do Postgres.
+ *   3. `createdAt` mais recente — desempate final, determinístico.
+ * Resolvido em MEMÓRIA (não no SQL) porque especificidade de escopo não é
+ * uma coluna, é uma regra de negócio sobre o enum `TariffScope`.
  */
+
+const SCOPE_SPECIFICITY: Record<TariffScope, number> = {
+  CONNECTOR: 4,
+  CHARGE_POINT: 3,
+  SITE: 2,
+  OPERATOR: 1,
+}
+
 export async function resolveActiveTariff(
   connector: { id: string },
   chargePoint: { id: string; siteId: string; operatorId: string },
 ) {
   const now = new Date()
 
-  const assignment = await prisma.tariffAssignment.findFirst({
+  const assignments = await prisma.tariffAssignment.findMany({
     where: {
       operatorId: chargePoint.operatorId,
       validFrom: { lte: now },
@@ -37,13 +46,19 @@ export async function resolveActiveTariff(
         },
       ],
     },
-    include: { tariff: true },
-    orderBy: { priority: 'desc' },
+    include: { tariff: { include: { windows: true } } },
   })
 
-  if (!assignment) {
+  if (assignments.length === 0) {
     throw new Error(`Nenhuma tarifa ativa encontrada para o conector ${connector.id} (operador ${chargePoint.operatorId})`)
   }
 
-  return assignment.tariff
+  const best = [...assignments].sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority
+    const specDiff = SCOPE_SPECIFICITY[b.scope] - SCOPE_SPECIFICITY[a.scope]
+    if (specDiff !== 0) return specDiff
+    return b.createdAt.getTime() - a.createdAt.getTime()
+  })[0]
+
+  return best.tariff
 }
