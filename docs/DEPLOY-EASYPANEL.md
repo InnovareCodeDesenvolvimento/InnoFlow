@@ -83,8 +83,25 @@ domínio público do frontend, e a API confere esse header antes de responder.
 Formato: lista separada por vírgula, sem barra final.
 
 ```
-CORS_ALLOWED_ORIGINS=https://<dominio-real-do-frontend>.easypanel.host
+# Domínio OFICIAL (19/09/2026): https://innoflow.innovarecode.com.br
+# Mantém o domínio antigo *.easypanel.host na lista durante a transição
+# (sessões/PWA já instalados nele); remova quando ninguém mais usar.
+CORS_ALLOWED_ORIGINS=https://innoflow.innovarecode.com.br,https://innovare-code-inno-elekton-frontend.6ytvem.easypanel.host
 ```
+
+**Domínio oficial `https://innoflow.innovarecode.com.br`** (19/09/2026): apontado
+no App `inno-elekton-frontend` (aba "Domínios" do EasyPanel; certificado HTTPS
+emitido pelo próprio EasyPanel). Ao trocar/adicionar um domínio, três lugares
+precisam saber — esquecer qualquer um quebra uma parte específica:
+
+| Onde | O que quebra se esquecer |
+|---|---|
+| `CORS_ALLOWED_ORIGINS` (App `api`) | login/cadastro/qualquer POST → 403 "Origem não permitida" |
+| Google Cloud → "Origens JavaScript autorizadas" | o botão "Continuar com o Google" mostra erro de origem |
+| QR codes/adesivos dos carregadores | apontam para o domínio antigo (o QR deve codificar sempre o domínio OFICIAL: `https://innoflow.innovarecode.com.br/c/<ocppIdentity>/<conector>`) |
+
+PWA já instalado no domínio antigo é uma instalação **separada** (origem
+diferente): o motorista precisa instalar de novo a partir do domínio oficial.
 
 **`GOOGLE_CLIENT_ID` (opcional, só o App `api` usa):** login/cadastro de
 motorista com Google (2026-09-19). É o "ID do cliente OAuth" (tipo *Aplicativo
@@ -94,7 +111,9 @@ Sem a env (ou em branco), o botão "Entrar com Google" simplesmente não aparece
 (`GET /api/public/config` devolve `googleClientId: null`) e
 `POST /api/auth/google` responde 503 `GOOGLE_NOT_CONFIGURED`. No Google Cloud
 Console, cadastre o domínio público do frontend em **"Origens JavaScript
-autorizadas"** (sem isso o botão do Google recusa abrir).
+autorizadas"** (sem isso o botão do Google recusa abrir) — cadastre
+`https://innoflow.innovarecode.com.br` e, durante a transição, também o
+domínio antigo `*.easypanel.host`.
 
 ```
 GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com
