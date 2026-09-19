@@ -1,6 +1,8 @@
 import type Redis from 'ioredis'
 import { createRedisConnection } from '../lib/redis'
 import { logger } from '../lib/logger'
+import { createLogGate } from '../lib/rateLimitedLog'
+import { DeadlineExceededError, withDeadline } from '../lib/withDeadline'
 import { createChannelHub, type ChannelHub } from '../core/realtime/channelHub'
 import type { RealtimeEvent } from './events'
 
@@ -55,18 +57,73 @@ function getPublisher(): Redis {
   return publisher
 }
 
+/** Estado da conexão de PUBLICAÇÃO (diagnóstico/testes): `ready`, `reconnecting`, ... */
+export function publisherStatus(): string {
+  return getPublisher().status
+}
+
 /**
- * Publica em um canal — best-effort, NUNCA lança (evento de UI não pode
- * derrubar o fluxo de negócio que o originou: uma sessão que termina/um
- * saldo que muda tem que persistir no banco mesmo que o Redis esteja fora
- * do ar naquele instante; o pior caso é a tela não atualizar sozinha, e o
- * polling de segurança cobre isso — ver decisão 7 da Nova).
+ * Prazo do publish. Vários chamadores fazem `await` do publish DEPOIS de o dinheiro/sessão já ter
+ * sido gravado (`walletLedger`, `finalizarSessao`, `liquidarSessao`): com o Redis fora do ar, esse
+ * `await` é o tempo a mais da resposta. Curto de propósito (mesma ordem do `throttleSafely` do login).
+ */
+export const PUBLISH_TIMEOUT_MS = 500
+
+/**
+ * Teto de publishes SEM resposta ao mesmo tempo. Com o Redis fora do ar o ioredis não rejeita: ele
+ * ENFILEIRA o comando (fila offline, sem limite próprio) e o comando abandonado pelo prazo continua
+ * lá até a reconexão — numa queda longa, cada evento do sistema empilharia mais um. Acima do teto o
+ * evento é DESCARTADO na hora (evento de UI é best-effort e o polling de segurança cobre); abaixo, o
+ * pior caso ao voltar é entregar no máximo este tanto de eventos atrasados.
+ */
+export const MAX_PUBLISHES_IN_FLIGHT = 100
+
+/**
+ * Disjuntor para o Redis "mudo" (partição de rede: a conexão parece de pé, mas não responde): depois
+ * de UM publish estourar o prazo, os seguintes são descartados na hora por este tempo, em vez de cada
+ * um pagar os 500ms de novo. Curto para o Redis que volta ser notado logo. Com o Redis DERRUBADO (a
+ * conexão sabe que caiu) nem precisa: ver `connectionIsDown`.
+ */
+export const PUBLISH_CIRCUIT_OPEN_MS = 1_000
+
+/** A conexão SABE que está fora (reconectando/fechada): enfileirar só empilha comando que ninguém vai esperar. Inclui só o que é certeza — 'connecting' pode ser o primeiro uso da conexão preguiçosa. */
+function connectionIsDown(connection: Redis): boolean {
+  return connection.status === 'reconnecting' || connection.status === 'close' || connection.status === 'end'
+}
+
+let publishesInFlight = 0
+let circuitOpenUntil = 0
+const logPublishFailure = createLogGate(10_000)
+
+/**
+ * Publica em um canal — best-effort, NUNCA lança E NUNCA pendura (evento de UI não pode derrubar
+ * nem atrasar o fluxo de negócio que o originou: uma sessão que termina/um saldo que muda tem que
+ * persistir no banco, e a resposta sair, mesmo que o Redis esteja fora do ar naquele instante; o pior
+ * caso é a tela não atualizar sozinha, e o polling de segurança cobre isso — ver decisão 7 da Nova).
+ *
+ * O `.catch` sozinho NÃO bastava: com `maxRetriesPerRequest: null` (exigência do BullMQ) o ioredis
+ * não rejeita com o Redis fora — enfileira e espera reconectar, então o `await` nunca voltava. Por
+ * isso: não enfileira com a conexão sabidamente fora, e no resto dá prazo (`PUBLISH_TIMEOUT_MS`),
+ * disjuntor (`PUBLISH_CIRCUIT_OPEN_MS`) e teto de pendentes (`MAX_PUBLISHES_IN_FLIGHT`).
  */
 export async function publish(channel: string, event: RealtimeEvent): Promise<void> {
   try {
-    await getPublisher().publish(channel, JSON.stringify(event))
+    const connection = getPublisher()
+    if (connectionIsDown(connection) || Date.now() < circuitOpenUntil || publishesInFlight >= MAX_PUBLISHES_IN_FLIGHT) {
+      logPublishFailure((suppressed) => logger.warn({ channel, type: event.type, status: connection.status, suppressed }, '[realtime] Redis indisponível — evento de UI descartado (best-effort)'))
+      return
+    }
+    const pending = connection.publish(channel, JSON.stringify(event))
+    publishesInFlight++
+    // O contador desce quando o comando de fato liquida (não no prazo): é ele que mede a fila do ioredis.
+    pending.then(
+      () => publishesInFlight--,
+      () => publishesInFlight--,
+    )
+    await withDeadline(pending, PUBLISH_TIMEOUT_MS, 'publish no Redis')
   } catch (err) {
-    logger.error({ err, channel, type: event.type }, '[realtime] falha ao publicar evento (best-effort, não propaga)')
+    if (err instanceof DeadlineExceededError) circuitOpenUntil = Date.now() + PUBLISH_CIRCUIT_OPEN_MS
+    logPublishFailure((suppressed) => logger.error({ err, channel, type: event.type, suppressed }, '[realtime] falha ao publicar evento (best-effort, não propaga)'))
   }
 }
 
