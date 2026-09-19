@@ -332,15 +332,35 @@ export interface PublicConnector {
   id: string
   connectorId: number
   type: ConnectorType
+  /** Status CRU vindo do carregador (StatusNotification). Para decidir "livre" use `isFree` — o status sozinho mente quando o carregador está offline. */
   status: ConnectorStatus
   maxPowerKw: string | number | null
+  /**
+   * Regra ÚNICA de "livre agora", calculada no SERVIDOR: carregador online
+   * (mesmo limiar de `CHARGE_POINT_ONLINE_THRESHOLD_MS` do dashboard) E
+   * `status === "AVAILABLE"`. Nunca reescreva essa regra no cliente.
+   * Estado de AGORA — não existe reserva (ver `decisoes-mapa-eletropostos.md`).
+   */
+  isFree: boolean
 }
 
 export interface PublicChargePoint {
   id: string
+  /** Identidade pública do equipamento — base do deep link `/c/:ocppIdentity/:connectorId`. */
+  ocppIdentity: string
+  /** Conectado agora (regra única do servidor, ver `PublicConnector.isFree`). */
+  online: boolean
   vendor: string | null
   model: string | null
   connectors: PublicConnector[]
+}
+
+/** Agregado por (tipo, potência) de um site — o que o mapa/lista mostra sem precisar somar conector por conector. */
+export interface PublicConnectorGroup {
+  type: ConnectorType
+  maxPowerKw: number | null
+  total: number
+  free: number
 }
 
 export interface PublicSite {
@@ -349,12 +369,16 @@ export interface PublicSite {
   addressLine: string
   city: string
   state: string
+  /** Sempre `number` (o servidor converte o Decimal — nunca string). */
   latitude: number
   longitude: number
   chargePoints: PublicChargePoint[]
+  /** Totais do site inteiro, já calculados pelo servidor com a mesma regra de `isFree`. */
+  connectorSummary: { total: number; free: number; groups: PublicConnectorGroup[] }
 }
 
 export interface PublicSitesQuery extends PaginationParams {
+  /** Bounding box GROSSEIRA: o cliente arredonda em grade de 0,1° (~11 km) antes de mandar — a querystring vai pro access log e não pode reconstituir a posição exata (LGPD). A posição real do motorista nunca sai do aparelho. */
   minLat?: number
   maxLat?: number
   minLng?: number
@@ -1153,7 +1177,11 @@ export interface WalletUpdatedEvent extends RealtimeEventBase {
   balanceCents: number
 }
 
-/** `status` é o mesmo enum de `Connector.status` (`ConnectorStatus`), nunca um valor novo inventado para o evento. */
+/**
+ * `status` é o mesmo enum de `Connector.status` (`ConnectorStatus`), nunca um valor novo inventado para o evento.
+ * Também chega a TODO motorista logado pelo canal público `ui:ev:stations` (mapa "perto de mim") —
+ * por isso o payload é só o que já é público na resposta de `GET /api/sites`; nada sensível entra aqui.
+ */
 export interface ChargePointStatusEvent extends RealtimeEventBase {
   type: "chargepoint.status"
   chargePointId: string
