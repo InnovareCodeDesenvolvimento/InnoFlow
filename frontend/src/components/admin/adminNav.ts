@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, CreditCard, KeyRound, LayoutDashboard, Landmark, MapPin, Plug, ScrollText, TrendingUp, Wallet, Zap } from "lucide-react"
+import { Activity, CalendarDays, CreditCard, KeyRound, LayoutDashboard, Landmark, MapPin, Plug, ScrollText, TrendingUp, Wallet, WalletCards, Zap } from "lucide-react"
 import type { NavGroup, NavItem } from "@/components/painel/navegacao"
 import { flattenNav, matchNavItem } from "@/components/painel/navegacao"
 import type { Role } from "@/types/api"
@@ -31,6 +31,7 @@ const BASE_NAV: NavGroup[] = [
       { label: "Faturamento", href: "/admin/faturamento", icon: TrendingUp, hint: "Série temporal de receita, com detalhamento" },
       { label: "Movimento diário", href: "/admin/movimento-diario", icon: CalendarDays, hint: "Sessões e faturamento por dia e eletroposto" },
       { label: "Pagamentos", href: "/admin/pagamentos", icon: CreditCard, hint: "Tentativas de cobrança — cartão, Pix e carteira" },
+      { label: "Carteiras", href: "/admin/carteiras", icon: WalletCards, hint: "Saldo e extrato dos motoristas; ajuste de saldo (admin)" },
     ],
   },
   {

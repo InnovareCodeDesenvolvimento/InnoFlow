@@ -413,3 +413,31 @@ export function getMockWallet(driverId: string, page: number, pageSize: number) 
     pageSize,
   }
 }
+
+/**
+ * Ajuste manual de saldo (Admin → Carteiras) sobre a MESMA carteira que o PWA
+ * do motorista lê (`getMockWallet`) — assim, creditar o motorista de teste no
+ * painel muda o saldo que ele vê (e o que libera "Iniciar recarga") no PWA.
+ * Débito maior que o saldo é recusado (mesmo `INSUFFICIENT_BALANCE` do backend).
+ */
+export function adjustMockWallet(
+  driverId: string,
+  amountCents: number,
+  description: string,
+): { ok: true; entry: MeWalletEntryDTO } | { ok: false; code: "INSUFFICIENT_BALANCE" } {
+  const wallet = getWalletState(driverId)
+  if (wallet.balanceCents + amountCents < 0) return { ok: false, code: "INSUFFICIENT_BALANCE" }
+  wallet.balanceCents += amountCents
+  const entry: MeWalletEntryDTO = {
+    id: `we_adj_${Date.now()}_${wallet.entries.length}`,
+    type: amountCents > 0 ? "ADJUSTMENT_CREDIT" : "ADJUSTMENT_DEBIT",
+    amountCents,
+    balanceAfterCents: wallet.balanceCents,
+    referenceType: null,
+    referenceId: null,
+    description,
+    createdAt: new Date().toISOString(),
+  }
+  wallet.entries.unshift(entry)
+  return { ok: true, entry }
+}

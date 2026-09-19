@@ -31,6 +31,7 @@ import {
 } from "./meData"
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
+import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -692,6 +693,55 @@ export const handlers = [
     }
 
     return HttpResponse.json(buildPaymentsReport(toScope(scope.user), { ...period, ...filters, ...pagination }))
+  }),
+
+  // ---- Carteiras dos motoristas (Admin → Carteiras) -------------------------------
+  // Espelho de `drivers.routes.ts`: OPERATOR precisa de `search` >= 3 chars (400
+  // VALIDATION_ERROR) e NÃO recebe `email` (chave omitida, LGPD); o extrato é
+  // OPERATOR+ADMIN; o POST de ajuste é ADMIN-only (403 FORBIDDEN), com teto de
+  // R$ 5.000, descrição >= 5 chars e 409 INSUFFICIENT_BALANCE. Resposta da
+  // listagem/extrato usa `{items,total,page,pageSize}` (não `meta`).
+  http.get("/api/admin/drivers", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const isAdmin = scope.user.role === "ADMIN"
+    const search = url.searchParams.get("search")?.trim() || undefined
+    if (!isAdmin && (!search || search.length < 3)) {
+      return HttpResponse.json(errorBody('Operadores precisam informar "search" com pelo menos 3 caracteres.', "VALIDATION_ERROR"), { status: 400 })
+    }
+    const { page, pageSize } = parsePagination(url, 20)
+    return HttpResponse.json(listDrivers({ search, page, pageSize, isAdmin }))
+  }),
+
+  http.get("/api/admin/drivers/:id/wallet", ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const { page, pageSize } = parsePagination(new URL(request.url), 20)
+    const wallet = getDriverWallet(String(params.id), page, pageSize)
+    if (!wallet) return HttpResponse.json(errorBody("Motorista não encontrado.", "NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(wallet)
+  }),
+
+  http.post("/api/admin/drivers/:id/wallet/entries", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = (await request.json().catch(() => ({}))) as { amountCents?: unknown; description?: unknown }
+    const amountCents = body.amountCents
+    const description = typeof body.description === "string" ? body.description.trim() : ""
+    if (typeof amountCents !== "number" || !Number.isInteger(amountCents) || amountCents === 0 || Math.abs(amountCents) > 500_000) {
+      return HttpResponse.json(errorBody("amountCents inválido: inteiro, diferente de zero, no máximo 500000 em módulo.", "VALIDATION_ERROR"), { status: 400 })
+    }
+    if (description.length < 5 || description.length > 500) {
+      return HttpResponse.json(errorBody("description precisa ter entre 5 e 500 caracteres.", "VALIDATION_ERROR"), { status: 400 })
+    }
+    const result = adjustDriverWallet(String(params.id), amountCents, description)
+    if (!result.ok) {
+      return result.code === "NOT_FOUND"
+        ? HttpResponse.json(errorBody("Motorista não encontrado.", "NOT_FOUND"), { status: 404 })
+        : HttpResponse.json(errorBody("Saldo insuficiente para este débito.", "INSUFFICIENT_BALANCE"), { status: 409 })
+    }
+    return HttpResponse.json(result.entry, { status: 201 })
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------

@@ -29,6 +29,7 @@ const AdminFaturamento = lazy(() => import("@/pages/Admin/Faturamento"))
 const AdminSessoes = lazy(() => import("@/pages/Admin/Sessoes"))
 const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
 const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
+const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 
 const ChargePointLanding = lazy(() => import("@/pages/Public/ChargePointLanding").then((m) => ({ default: m.ChargePointLanding })))
 const AppLayout = lazy(() => import("@/pages/App/Layout").then((m) => ({ default: m.AppLayout })))
@@ -85,6 +86,8 @@ export default function App() {
             <Route path="faturamento" element={<AdminFaturamento />} />
             <Route path="sessoes" element={<AdminSessoes />} />
             <Route path="pagamentos" element={<AdminPagamentos />} />
+            {/* Motorista é conta de rede: OPERATOR e ADMIN consultam (OPERATOR só buscando); o ajuste de saldo é ADMIN-only no servidor e na UI. */}
+            <Route path="carteiras" element={<AdminCarteiras />} />
             <Route path="sites" element={<AdminSites />} />
             <Route path="charge-points" element={<AdminChargePoints />} />
             <Route path="connectors" element={<AdminConnectors />} />

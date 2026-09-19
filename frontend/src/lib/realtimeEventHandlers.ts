@@ -5,6 +5,7 @@ import { chargePointsKeys } from "@/hooks/useChargePoints"
 import { connectorsKeys } from "@/hooks/useConnectors"
 import { tariffsKeys } from "@/hooks/useTariffs"
 import { authTokensKeys } from "@/hooks/useAuthTokens"
+import { driversKeys } from "@/hooks/useDrivers"
 import type { MeActiveSessionResponse, PaginatedResponse, PublicSite, RealtimeEvent } from "@/types/api"
 
 /** `entityType` do evento → raiz da query que precisa ser invalidada (ver `admin.entity.changed`). `TariffAssignment` não tem hook ainda (gap conhecido, ver PROGRESSO.md) — evento chega mas não tem o que invalidar. */
@@ -65,6 +66,10 @@ export function handleRealtimeEvent(event: RealtimeEvent, queryClient: QueryClie
 
     case "wallet.updated":
       queryClient.invalidateQueries({ queryKey: ["me", "wallet"] })
+      // Painel admin (se o evento chegar até ele): só a LISTA de motoristas — o saldo mudou.
+      // O EXTRATO individual fica de fora de propósito: cada GET dele é uma linha de
+      // auditoria no backend, então invalidá-lo por evento encheria a trilha de ruído.
+      queryClient.invalidateQueries({ queryKey: driversKeys.lists })
       return
 
     case "chargepoint.status":

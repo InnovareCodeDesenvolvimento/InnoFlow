@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils"
 
 function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="table-premium w-full overflow-x-auto rounded-xl border border-border-subtle">
+    // `relative`: contém elementos `absolute` (ex.: `sr-only` num <th>) DENTRO do scroller — sem isso
+    // eles escapam do `overflow-x-auto` e criam scroll horizontal na página inteira (achado em Carteiras, 390px).
+    <div className="table-premium relative w-full overflow-x-auto rounded-xl border border-border-subtle">
       <table className={cn("w-full min-w-[640px] border-collapse text-sm", className)} {...props} />
     </div>
   )
