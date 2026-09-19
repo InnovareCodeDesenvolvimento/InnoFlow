@@ -24,6 +24,14 @@ server {
     # são repetidas em CADA location abaixo que já tinha `add_header`
     # próprio (estáticos/health//), em vez de confiar em herança parcial.
     #
+    # LOGIN COM GOOGLE (19/09/2026): script-src/style-src/connect-src/frame-src
+    # liberam SÓ os caminhos oficiais do Google Identity Services
+    # (accounts.google.com/gsi/*, lista da doc do Google) e img-src o domínio
+    # de avatar (googleusercontent.com) — nada de accounts.google.com inteiro.
+    # Sem isso o botão "Continuar com o Google" nunca carrega (o CSP bloqueia o
+    # script). Mantenha as 5 cópias da linha CSP em sincronia (gotcha de herança
+    # do add_header, ver acima).
+    #
     # CSP: script-src sem 'unsafe-inline' (é a proteção real contra XSS);
     # style-src precisa de 'unsafe-inline' (componentes React com `style=`
     # inline) + fonts.googleapis.com (ver index.html, Inter via <link>);
@@ -40,7 +48,7 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
     add_header Strict-Transport-Security "max-age=31536000" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
 
     # ---- Qualquer stream SSE sob /api/ — buffering OFF, timeout longo ----
     # Genérico por DESENHO: casa qualquer endpoint que termine em "/events"
@@ -87,7 +95,7 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 
     # ---- API na MESMA ORIGEM ----
@@ -125,7 +133,7 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
         try_files $uri =404;
     }
 
@@ -137,7 +145,7 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 
     location / {
@@ -148,6 +156,6 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 }
