@@ -141,16 +141,16 @@ describe('handshakes LEGÍTIMOS simultâneos do mesmo IP (site com muitos carreg
   }, 120_000)
 
   /**
-   * ACHADO (Íris, 2026-09-19 — NÃO corrigido aqui, é código de produção): a reserva conta a tentativa EM
+   * ACHADO (Íris, 2026-09-19) — CORRIGIDO por Vega (2026-09-19): a tentativa em andamento agora tem teto próprio
+   * (`OCPP_AUTH_IP_MAX_CONCURRENT`, default 100), separado das 30 FALHAS do IP. Texto original: a reserva conta a tentativa EM
    * ANDAMENTO no global do IP (limite 30) e só a devolve DEPOIS do bcrypt. Um site com mais de 30
    * carregadores atrás do mesmo IP que reconectam JUNTOS (restart/deploy do gateway) tem os excedentes
    * barrados com 429 — carregadores com a credencial CERTA, sem nenhuma falha. Antes da correção o sucesso
    * nunca contava e isso não acontecia. O carregador barrado se recupera sozinho no backoff do OCPP-J, mas
    * o comportamento contradiz a regra escrita no cabeçalho de `authRateLimiter.ts` ("o sucesso não conta
-   * como falha"). `it.fails` = comportamento DESEJADO; vire `it` ao corrigir (ex.: teto de tentativas em
-   * andamento separado do teto de falhas, ou só as FALHAS contarem no global e a reserva ser por par).
+   * como falha"). Era `it.fails` (comportamento DESEJADO); virou `it` com a correção. A asserção não mudou.
    */
-  it.fails('40 carregadores legítimos do MESMO IP conectando ao mesmo tempo (acima das 30 vagas do IP): todos entram (ACHADO: os excedentes levam 429 mesmo com a senha certa)', async () => {
+  it('40 carregadores legítimos do MESMO IP conectando ao mesmo tempo (acima das 30 vagas do IP): todos entram (era ACHADO: os excedentes levavam 429 mesmo com a senha certa)', async () => {
     const ids = await carregadoresDoSite(40, 'b')
     const ip = freshIp()
     const status = await Promise.all(ids.map((id) => handshake(id, SEGREDO, ip)))

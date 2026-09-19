@@ -139,6 +139,7 @@ identidade: qualquer um trancava o carregador real errando 5 senhas). Envs do Ap
 ```
 OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS=5     # falhas do par identidade+IP na janela
 OCPP_AUTH_IP_MAX_FAILURES=30            # falhas de um IP (qualquer identidade) na janela
+OCPP_AUTH_IP_MAX_CONCURRENT=100         # tentativas de um IP em andamento AO MESMO TEMPO (frota atrás de NAT reconectando junta)
 OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS=300
 OCPP_TRUST_PROXY_HOPS=0                 # proxies reversos entre o carregador e a porta 9000
 ```

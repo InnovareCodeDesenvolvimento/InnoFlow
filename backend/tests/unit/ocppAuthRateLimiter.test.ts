@@ -3,18 +3,34 @@ import { createOcppAuthRateLimiter, type AuthCounterStore } from '../../src/core
 import { resolveHandshakeIp } from '../../src/core/ocpp/clientIp'
 import { createChargePointSchema, updateChargePointSchema } from '../../src/api/schemas/chargePoint.schema'
 
-/** Store em memória (sem TTL — os testes não avançam a janela). `reserve` tem a mesma semântica do script Lua (lib/redisCounter.ts): síncrono = atômico. */
+/**
+ * Store em memória (sem TTL — os testes não avançam a janela). `reserve`/`settleFailure` têm a mesma semântica dos
+ * scripts Lua (lib/redisCounter.ts): síncrono = atômico. Três contadores: par, falhas do IP e em andamento do IP.
+ */
 function memoryStore(): AuthCounterStore & { keys(): string[] } {
   const data = new Map<string, number>()
+  const giveBack = (key: string) => {
+    const v = data.get(key) ?? 0
+    if (v > 1) data.set(key, v - 1)
+    else data.delete(key)
+  }
   return {
     async reserve(keys, limits) {
-      const ip = data.get(keys.ip) ?? 0
-      if (ip >= limits.maxIp) return { ok: false, scope: 'ip' }
+      const fails = data.get(keys.ipFailures) ?? 0
+      if (fails >= limits.maxIpFailures) return { ok: false, scope: 'ip' }
+      const inflight = data.get(keys.ipInflight) ?? 0
+      if (inflight >= limits.maxIpInflight) return { ok: false, scope: 'ip' }
       const pair = data.get(keys.pair) ?? 0
       if (pair >= limits.maxPair) return { ok: false, scope: 'identity_ip' }
       data.set(keys.pair, pair + 1)
-      data.set(keys.ip, ip + 1)
-      return { ok: true, pairCount: pair + 1, ipCount: ip + 1 }
+      data.set(keys.ipInflight, inflight + 1)
+      return { ok: true, pairCount: pair + 1, ipFailures: fails }
+    },
+    async settleFailure(keys) {
+      const fails = (data.get(keys.ipFailures) ?? 0) + 1
+      data.set(keys.ipFailures, fails)
+      giveBack(keys.ipInflight)
+      return fails
     },
     async release(keys) {
       for (const k of keys) {
@@ -35,10 +51,10 @@ const CONFIG = { maxAttemptsPerIdentityIp: 5, maxFailuresPerIp: 30, windowSecond
 type Limiter = ReturnType<typeof createOcppAuthRateLimiter>
 type Attempt = { identity: string; ip: string }
 
-/** Uma tentativa que FALHA (identidade desconhecida/senha errada): reserva a vaga e não devolve. `null` = barrada pelo portão. */
+/** Uma tentativa que FALHA (identidade desconhecida/senha errada): reserva a vaga e a falha fica contada. `null` = barrada pelo portão. */
 async function falhar(limiter: Limiter, attempt: Attempt) {
   const gate = await limiter.reserve(attempt)
-  return gate.allowed ? limiter.describeFailure(gate) : null
+  return gate.allowed ? limiter.registerFailure(attempt, gate) : null
 }
 
 /** "Espia" o portão sem gastar vaga: reserva e devolve na hora. */
@@ -133,7 +149,7 @@ describe('reserva ANTES de avaliar (rajada paralela — achado da Íris, 2026-09
     const gate = await limiter.reserve(attempt)
     if (!gate.allowed) return false
     await new Promise((r) => setTimeout(r, 20)) // o bcrypt de verdade leva dezenas/centenas de ms: tempo de sobra para o furo antigo aparecer
-    limiter.describeFailure(gate)
+    await limiter.registerFailure(attempt, gate)
     return true
   }
 
@@ -164,8 +180,81 @@ describe('reserva ANTES de avaliar (rajada paralela — achado da Íris, 2026-09
     const par = { identity: 'CP-1', ip: '10.10.10.10' }
     const gates = []
     for (let i = 0; i < 5; i++) gates.push(await limiter.reserve(par))
-    const alertas = gates.map((g) => (g.allowed ? limiter.describeFailure(g).identityIpBlockedNow : null))
+    const alertas = await Promise.all(gates.map(async (g) => (g.allowed ? (await limiter.registerFailure(par, g)).identityIpBlockedNow : null)))
     expect(alertas).toEqual([false, false, false, false, true])
+  })
+})
+
+describe('teto de tentativas EM ANDAMENTO separado do teto de FALHAS do IP (achado da Íris, 2026-09-19: 40 carregadores legítimos atrás de um NAT levavam 429)', () => {
+  const COM_TETO = { ...CONFIG, maxConcurrentPerIp: 100 } // as falhas continuam em 30
+
+  /** Um handshake como o real: reserva -> "bcrypt" assíncrono -> sucesso (`ok`) ou falha. Devolve se foi AVALIADO (passou do portão). */
+  async function handshakeComBcrypt(limiter: Limiter, attempt: Attempt, ok: boolean): Promise<boolean> {
+    const gate = await limiter.reserve(attempt)
+    if (!gate.allowed) return false
+    await new Promise((r) => setTimeout(r, 20))
+    if (ok) await limiter.registerSuccess(attempt)
+    else await limiter.registerFailure(attempt, gate)
+    return true
+  }
+
+  it('REGRESSÃO: 40 carregadores LEGÍTIMOS do mesmo IP em paralelo (limite de falhas 30) entram TODOS e o IP não fica com falha nem chave nenhuma', async () => {
+    const store = memoryStore()
+    const limiter = createOcppAuthRateLimiter(store, COM_TETO)
+    const entraram = await Promise.all(Array.from({ length: 40 }, (_, i) => handshakeComBcrypt(limiter, { identity: `CP-SITE-${i}`, ip: '11.11.11.11' }, true)))
+    expect(entraram.every(Boolean)).toBe(true)
+    expect(store.keys()).toEqual([]) // o sucesso devolveu a vaga de "em andamento" e zerou o par: nada sobra
+  })
+
+  it('o teto de concorrência vale: 150 paralelos com teto 100 -> EXATAMENTE 100 avaliados e 50 barrados no escopo do IP (protege o banco/bcrypt da rajada)', async () => {
+    const limiter = createOcppAuthRateLimiter(memoryStore(), COM_TETO)
+    const gates = await Promise.all(Array.from({ length: 150 }, (_, i) => limiter.reserve({ identity: `CP-${i}`, ip: '12.12.12.12' })))
+    expect(gates.filter((g) => g.allowed)).toHaveLength(100)
+    for (const g of gates.filter((g) => !g.allowed)) expect(g).toEqual({ allowed: false, scope: 'ip' })
+  })
+
+  it('a vaga de "em andamento" volta em TODO desfecho: 500 tentativas em sequência (sucesso, falha e erro nosso) com teto 2 nunca são barradas pela concorrência', async () => {
+    const limiter = createOcppAuthRateLimiter(memoryStore(), { ...CONFIG, maxFailuresPerIp: 1_000, maxAttemptsPerIdentityIp: 1_000, maxConcurrentPerIp: 2 })
+    for (let i = 0; i < 500; i++) {
+      const attempt = { identity: `CP-${i}`, ip: '13.13.13.13' }
+      const gate = await limiter.reserve(attempt)
+      expect(gate.allowed).toBe(true)
+      if (i % 3 === 0) await limiter.registerSuccess(attempt)
+      else if (i % 3 === 1 && gate.allowed) await limiter.registerFailure(attempt, gate)
+      else await limiter.release(attempt)
+    }
+  })
+
+  it('as FALHAS continuam bloqueando o IP no limite de falhas (30), mesmo com teto de concorrência alto — só que agora só falha conta', async () => {
+    const limiter = createOcppAuthRateLimiter(memoryStore(), COM_TETO)
+    const ip = '14.14.14.14'
+    for (let i = 0; i < 29; i++) await falhar(limiter, { identity: `FANTASMA-${i}`, ip })
+    // 29 falhas + 40 legítimos em paralelo no mesmo IP: ainda entram (não há falha demais, só concorrência)
+    const legitimos = await Promise.all(Array.from({ length: 40 }, (_, i) => handshakeComBcrypt(limiter, { identity: `CP-OK-${i}`, ip }, true)))
+    expect(legitimos.every(Boolean)).toBe(true)
+    expect(await portao(limiter, { identity: 'FANTASMA-29', ip })).toEqual({ allowed: true })
+    await falhar(limiter, { identity: 'FANTASMA-29', ip }) // a 30ª falha
+    expect(await portao(limiter, { identity: 'CP-QUALQUER', ip })).toEqual({ allowed: false, scope: 'ip' })
+  })
+
+  it('CUSTO ACEITO (documentado): uma rajada de tentativas que FALHAM admite até o teto de concorrência antes de o limite de falhas valer — e o IP fica bloqueado depois dela', async () => {
+    const limiter = createOcppAuthRateLimiter(memoryStore(), { ...CONFIG, maxFailuresPerIp: 10, maxConcurrentPerIp: 25 })
+    const ip = '15.15.15.15'
+    const avaliadas = (await Promise.all(Array.from({ length: 60 }, (_, i) => handshakeComBcrypt(limiter, { identity: `CP-${i}`, ip }, false)))).filter(Boolean).length
+    expect(avaliadas).toBe(25) // o teto de concorrência, não as 10 falhas
+    expect(await portao(limiter, { identity: 'CP-NOVO', ip })).toEqual({ allowed: false, scope: 'ip' }) // 25 falhas >= 10: bloqueado pela janela
+  })
+
+  it('o alerta de flood do IP sai da falha que FECHOU o limite de falhas, e só dela (mesmo com rajada de falhas simultâneas)', async () => {
+    const limiter = createOcppAuthRateLimiter(memoryStore(), { ...CONFIG, maxFailuresPerIp: 5, maxConcurrentPerIp: 20 })
+    const outcomes = await Promise.all(Array.from({ length: 20 }, (_, i) => falhar(limiter, { identity: `CP-${i}`, ip: '16.16.16.16' })))
+    expect(outcomes.filter((o) => o?.ipBlockedNow)).toHaveLength(1)
+  })
+
+  it('sem `maxConcurrentPerIp` o teto de concorrência é o de falhas (comportamento rígido anterior)', async () => {
+    const limiter = createOcppAuthRateLimiter(memoryStore(), { ...CONFIG, maxFailuresPerIp: 10 })
+    const gates = await Promise.all(Array.from({ length: 30 }, (_, i) => limiter.reserve({ identity: `CP-${i}`, ip: '17.17.17.17' })))
+    expect(gates.filter((g) => g.allowed)).toHaveLength(10)
   })
 })
 

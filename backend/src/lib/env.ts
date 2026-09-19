@@ -81,6 +81,13 @@ const envSchema = z.object({
   // por (identidade + IP) e este é o limite GLOBAL de falhas por IP (cobre identidade inexistente).
   // Alto de propósito: um IP legítimo (frota atrás de NAT) quase não falha.
   OCPP_AUTH_IP_MAX_FAILURES: z.coerce.number().int().positive().default(30),
+  // Tentativas de autenticação de um IP EM ANDAMENTO ao mesmo tempo (banco + bcrypt de cada uma). Separado
+  // do limite de falhas de propósito: uma frota atrás de um mesmo NAT reconectando junta (restart do
+  // gateway) tem dezenas de handshakes legítimos simultâneos e nenhuma falha. Dimensione para o maior
+  // site atrás de um IP; acima disto o excedente leva 429 e o carregador tenta de novo no backoff. Custo:
+  // uma rajada de tentativas que FALHAM pode produzir até este número de falhas de uma vez antes de o
+  // bloqueio por falhas valer (ver `core/ocpp/authRateLimiter.ts`).
+  OCPP_AUTH_IP_MAX_CONCURRENT: z.coerce.number().int().positive().default(100),
   // Quantos proxies reversos há entre o carregador e a porta do gateway (9000) — resolve o IP do
   // handshake a partir do X-Forwarded-For (mesma semântica de `TRUST_PROXY_HOPS` da API, mas o
   // caminho até a porta 9000 é OUTRO). Default 0 = confia só no endereço do socket (seguro se a
