@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { AuthResponse } from "@/types/api"
+import type { AuthResponse, GoogleAuthRequest } from "@/types/api"
 
 export interface LoginPayload {
   email: string
@@ -26,6 +26,16 @@ export const authService = {
 
   async register(payload: RegisterPayload): Promise<AuthResponse> {
     const { data } = await api.post<AuthResponse>("/api/auth/register", payload)
+    return data
+  },
+
+  /**
+   * `POST /api/auth/google` — cria conta de motorista (201) ou entra numa
+   * existente (200); o formato de resposta é o mesmo, então o cliente não
+   * distingue os dois. Só DRIVER (ADMIN/OPERATOR → 403 `GOOGLE_LOGIN_NOT_ALLOWED`).
+   */
+  async google(payload: GoogleAuthRequest): Promise<AuthResponse> {
+    const { data } = await api.post<AuthResponse>("/api/auth/google", payload)
     return data
   },
 }

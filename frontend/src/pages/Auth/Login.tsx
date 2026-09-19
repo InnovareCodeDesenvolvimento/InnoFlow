@@ -5,9 +5,12 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { LogIn, MapPin, ShieldCheck, Zap } from "lucide-react"
 import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
+import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
+import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
 import { loginSchema, type LoginFormValues } from "@/schemas/auth.schema"
+import type { User } from "@/types/api"
 import logoIcon from "@/assets/logo-icon.png"
 
 /**
@@ -32,20 +35,17 @@ export function Login() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema) })
 
+  // `?redirect=` (fluxo do QR: escaneia → cai aqui → volta pro carregador) tem
+  // prioridade; sem ele, cada papel vai pra própria casa — DRIVER pro app do
+  // motorista (`/app`), o site público (`/`) é para visitante anônimo. Mesma
+  // regra pro login normal e pro Google (`lib/authRedirect.ts`).
+  const redirect = params.get("redirect")
+  const goAfterAuth = (user: User) => navigate(resolvePostAuthPath(user, redirect), { replace: true })
+
   const onSubmit = async (values: LoginFormValues) => {
     setFormError(null)
     try {
-      const user = await login(values)
-      const redirect = params.get("redirect")
-      if (redirect) {
-        navigate(redirect, { replace: true })
-      } else if (user.role === "ADMIN" || user.role === "OPERATOR") {
-        navigate("/admin", { replace: true })
-      } else {
-        // DRIVER sem redirect explícito: o app do motorista (`/app`) é a
-        // casa dele agora — o site público (`/`) é para visitante anônimo.
-        navigate("/app", { replace: true })
-      }
+      goAfterAuth(await login(values))
     } catch (err) {
       setFormError(getApiErrorMessage(err, "E-mail ou senha inválidos."))
     }
@@ -113,6 +113,8 @@ export function Login() {
             <h2 className="mt-3 text-2xl font-black tracking-tight text-ink">Bem-vindo de volta</h2>
             <p className="mt-1.5 text-sm text-ink-softer">Entre com seu e-mail e senha para continuar.</p>
 
+            <GoogleAuthSection onSuccess={goAfterAuth} />
+
             <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
               <Input
                 type="email"
@@ -145,7 +147,11 @@ export function Login() {
 
           <p className="mt-6 text-center text-sm text-ink-softer">
             Ainda não tem conta?{" "}
-            <Link to="/cadastro" className="font-semibold text-primary hover:underline">
+            {/* Leva o `?redirect=` junto: senão o QR escaneado por quem ainda não tem conta se perde ao passar pelo cadastro. */}
+            <Link
+              to={safeRedirect(redirect) ? `/cadastro?redirect=${encodeURIComponent(redirect as string)}` : "/cadastro"}
+              className="font-semibold text-primary hover:underline"
+            >
               Cadastre-se
             </Link>
           </p>

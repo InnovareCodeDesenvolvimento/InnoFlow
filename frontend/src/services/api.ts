@@ -32,7 +32,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const url: string = error?.config?.url ?? ""
-    const isAuthRoute = url.includes("/api/auth/login") || url.includes("/api/auth/register")
+    // `/api/auth/google` também: `INVALID_GOOGLE_TOKEN` volta como 401 e, sem
+    // isto, estando em `/cadastro` o interceptor daria hard-redirect pro login
+    // e engoliria a mensagem de erro (mesma lógica da senha errada no login).
+    const isAuthRoute = url.includes("/api/auth/login") || url.includes("/api/auth/register") || url.includes("/api/auth/google")
     if (error?.response?.status === 401 && !isAuthRoute) {
       localStorage.removeItem(TOKEN_STORAGE_KEY)
       if (!window.location.pathname.startsWith("/login")) {

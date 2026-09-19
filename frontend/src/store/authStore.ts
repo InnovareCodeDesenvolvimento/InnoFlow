@@ -26,6 +26,8 @@ interface AuthState {
   isLoading: boolean
   login: (payload: LoginPayload) => Promise<User>
   register: (payload: RegisterPayload) => Promise<User>
+  /** Login/cadastro com Google (ID token do GIS) — mesmo destino do login normal: token no localStorage + estado de auth. */
+  googleLogin: (credential: string) => Promise<User>
   logout: () => void
 }
 
@@ -54,6 +56,19 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true })
         try {
           const { token, user } = await authService.register(payload)
+          localStorage.setItem(TOKEN_STORAGE_KEY, token)
+          set({ user, token, isAuthenticated: true, isLoading: false })
+          return user
+        } catch (err) {
+          set({ isLoading: false })
+          throw err
+        }
+      },
+
+      googleLogin: async (credential) => {
+        set({ isLoading: true })
+        try {
+          const { token, user } = await authService.google({ credential })
           localStorage.setItem(TOKEN_STORAGE_KEY, token)
           set({ user, token, isAuthenticated: true, isLoading: false })
           return user

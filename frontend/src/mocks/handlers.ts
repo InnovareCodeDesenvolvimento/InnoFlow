@@ -216,6 +216,52 @@ export const handlers = [
     return HttpResponse.json({ token: fakeToken(newUser), user: toUserDTO(newUser) }, { status: 201 })
   }),
 
+  // ---- Login com Google (GIS) ---------------------------------------------------
+  // Contrato: `PublicClientConfig`/`GoogleAuthRequest` em `types/api.ts`. O
+  // script real do Google não roda em localhost com Client ID fake, então o
+  // frontend em modo mock mostra um botão "Google (mock)" (ver
+  // `GoogleAuthSection`) que manda as credentials abaixo:
+  //  - vazia            → 401 INVALID_GOOGLE_TOKEN
+  //  - "bloqueado"      → 403 GOOGLE_LOGIN_NOT_ALLOWED (e-mail de ADMIN/OPERATOR)
+  //  - "nao-verificado" → 403 GOOGLE_EMAIL_NOT_VERIFIED
+  //  - "novo"           → 201, cria motorista novo
+  //  - qualquer outra   → 200, entra no motorista de sempre (mesmo do e-mail/senha)
+  // Config controlável por localStorage (os handlers rodam na página, não no
+  // service worker): `mock:google-disabled=1` → `googleClientId: null`, pra
+  // provar a tela SEM o botão (usado no E2E e na validação visual).
+  http.get("/api/public/config", () => {
+    const disabled = localStorage.getItem("mock:google-disabled") === "1"
+    return HttpResponse.json({ googleClientId: disabled ? null : "mock-client-id.apps.googleusercontent.com" })
+  }),
+
+  http.post("/api/auth/google", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { credential?: string }
+    const credential = body.credential?.trim() ?? ""
+    if (!credential) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    if (credential === "bloqueado") {
+      return HttpResponse.json(errorBody("Esta conta não pode entrar com o Google.", "GOOGLE_LOGIN_NOT_ALLOWED"), { status: 403 })
+    }
+    if (credential === "nao-verificado") {
+      return HttpResponse.json(errorBody("E-mail do Google não verificado.", "GOOGLE_EMAIL_NOT_VERIFIED"), { status: 403 })
+    }
+    if (credential === "novo") {
+      const created: MockUser = {
+        id: `user_google_${Date.now()}`,
+        name: "Nova Conta Google",
+        email: `google.${Date.now()}@example.com`,
+        role: "DRIVER",
+        operatorId: null,
+        operatorName: null,
+        password: "",
+      }
+      mockUsers.push(created)
+      return HttpResponse.json({ token: fakeToken(created), user: toUserDTO(created) }, { status: 201 })
+    }
+    const driver = mockUsers.find((u) => u.role === "DRIVER" && u.id === "user_driver")
+    if (!driver) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    return HttpResponse.json({ token: fakeToken(driver), user: toUserDTO(driver) })
+  }),
+
   // ---- Sites públicos ---------------------------------------------------------
   http.get("/api/sites", ({ request }) => {
     const url = new URL(request.url)

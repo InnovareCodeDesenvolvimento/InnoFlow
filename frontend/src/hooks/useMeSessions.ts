@@ -52,7 +52,13 @@ export function useActiveSession(options: { pollWhileIdle?: boolean; fastPollMs?
       if (fastPollMs) return fastPollMs
       const status = query.state.data?.session?.status
       const isActive = status === "STARTED" || status === "CHARGING" || status === "FINISHING"
-      if (!isActive) return pollWhileIdle ? (realtimeHealthy ? 60000 : 5000) : false
+      // Sem sessão ativa mas a tela está ESPERANDO uma (`pollWhileIdle`: comando
+      // aceito, `StartTransaction` ainda não chegou — ou confirmando que parou):
+      // fica em 5s mesmo com o stream saudável. `session.started` deveria
+      // chegar por SSE, mas é fan-out best-effort — se se perder, o motorista
+      // ficaria até 60s olhando "Conectando…". Achado rodando o E2E do fluxo
+      // de recarga (`e2e/pwa-fluxo-recarga.spec.ts`), que estourava o timeout.
+      if (!isActive) return pollWhileIdle ? 5000 : false
       if (realtimeHealthy) return 60000
       return status === "FINISHING" ? 3000 : 5000
     },

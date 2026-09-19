@@ -104,7 +104,8 @@ test.describe("Admin — Relatório de Faturamento", () => {
     await loginAsAdmin(page)
 
     const initialResponsePromise = page.waitForResponse((resp) => resp.url().includes("/api/admin/reports/revenue"))
-    await page.getByRole("link", { name: "Faturamento" }).click()
+    // `exact`: o header também tem o atalho "Faturamento de hoje" (ícone com aria-label).
+    await page.getByRole("link", { name: "Faturamento", exact: true }).click()
     await expect(page).toHaveURL(/\/admin\/faturamento/)
 
     const initialResponse = await initialResponsePromise

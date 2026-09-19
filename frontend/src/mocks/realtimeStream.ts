@@ -73,14 +73,29 @@ export function createAdminEventStream(): ReadableStream<Uint8Array> {
  */
 export function createMeEventStream(userId: string): ReadableStream<Uint8Array> {
   let timer: ReturnType<typeof setInterval> | undefined
+  // Transições de sessão (`session.started`/`session.stopped`) — o backend real
+  // as emite; sem elas o mock só provaria `session.metrics`.
+  let announced: { sessionId: string; chargePointId: string } | null = null
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(heartbeatFrame())
       timer = setInterval(() => {
         const session = getMockActiveSession(userId)
+        const occurredAt = new Date().toISOString()
         if (!session) {
+          if (announced) {
+            controller.enqueue(sseFrame({ type: "session.stopped", occurredAt, ...announced }))
+            announced = null
+            return
+          }
           controller.enqueue(heartbeatFrame())
+          return
+        }
+        if (announced?.sessionId !== session.id) {
+          const chargePointId = mockChargePoints.find((cp) => cp.ocppIdentity === session.chargePoint.ocppIdentity)?.id ?? ""
+          announced = { sessionId: session.id, chargePointId }
+          controller.enqueue(sseFrame({ type: "session.started", occurredAt, ...announced }))
           return
         }
         controller.enqueue(

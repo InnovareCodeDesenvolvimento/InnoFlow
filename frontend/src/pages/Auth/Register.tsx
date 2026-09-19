@@ -1,11 +1,13 @@
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
+import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
+import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
 import { registerSchema, type RegisterFormValues } from "@/schemas/auth.schema"
 import logoIcon from "@/assets/logo-icon.png"
 
@@ -24,8 +26,16 @@ import logoIcon from "@/assets/logo-icon.png"
  */
 export function Register() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const register_ = useAuthStore((s) => s.register)
   const [formError, setFormError] = useState<string | null>(null)
+
+  // Mesmo `?redirect=` do Login (fluxo do QR): quem se cadastra — por e-mail
+  // ou pelo Google — volta pro carregador que escaneou. Sem ele, o cadastro
+  // por e-mail segue indo pra `/` (como sempre) e o Google segue a regra de
+  // sempre do login (`resolvePostAuthPath`: motorista → `/app`).
+  const redirect = params.get("redirect")
+  const redirectQuery = safeRedirect(redirect) ? `?redirect=${encodeURIComponent(redirect as string)}` : ""
 
   const {
     register,
@@ -37,7 +47,7 @@ export function Register() {
     setFormError(null)
     try {
       await register_({ ...values, phone: values.phone || undefined })
-      navigate("/", { replace: true })
+      navigate(safeRedirect(redirect) ?? "/", { replace: true })
     } catch (err) {
       setFormError(getApiErrorMessage(err, "Não foi possível criar sua conta."))
     }
@@ -75,6 +85,9 @@ export function Register() {
           <h1 className="text-xl font-bold text-ink">Criar conta</h1>
           <p className="mt-1 text-sm text-ink-softer">Cadastre-se como motorista para acompanhar sua recarga.</p>
 
+          {/* Quem entra pelo Google não passa por senha nenhuma: o backend cria a conta direto. */}
+          <GoogleAuthSection onSuccess={(user) => navigate(resolvePostAuthPath(user, redirect), { replace: true })} />
+
           <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
             <Input label="Nome" autoComplete="name" required error={errors.name?.message} {...register("name")} />
             <Input type="email" label="E-mail" autoComplete="email" required error={errors.email?.message} {...register("email")} />
@@ -103,7 +116,7 @@ export function Register() {
 
         <p className="mt-6 text-center text-sm text-ink-softer">
           Já tem conta?{" "}
-          <Link to="/login" className="font-semibold text-primary hover:underline">
+          <Link to={`/login${redirectQuery}`} className="font-semibold text-primary hover:underline">
             Entrar
           </Link>
         </p>
