@@ -110,23 +110,35 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
     if (USE_MOCK_GOOGLE || !scriptReady || !clientId || !host || width <= 0) return
 
     initGoogleIdentity(clientId, (credential) => void handlerRef.current(credential))
-    host.replaceChildren()
-    renderGoogleButton(host, clampGoogleButtonWidth(width))
 
-    // O GIS monta o iframe de forma assíncrona: quando aparecer, tira o skeleton.
-    // Se nada aparecer em 5s, considera quebrado e some (não deixa um buraco).
-    const observer = new MutationObserver(() => {
+    // BUG REAL corrigido 19/09/2026 (achado em produção, com Client ID real): o
+    // GIS monta o botão (div + iframe) de forma SÍNCRONA dentro de
+    // `renderButton`. Antes, o observer era ligado DEPOIS do render — a
+    // mutação já tinha acontecido, ele nunca disparava, e o botão real ficava
+    // com `opacity-0` por baixo do skeleton para sempre (o double de teste
+    // montava de forma assíncrona e escondeu isso). Agora: liga o observer
+    // ANTES de renderizar E confere no frame seguinte (cobre o caso do GIS
+    // ter montado antes de qualquer observer existir).
+    const markRendered = () => {
       if (host.childElementCount > 0) {
         setRendered(true)
         observer.disconnect()
       }
-    })
+    }
+    const observer = new MutationObserver(markRendered)
     observer.observe(host, { childList: true })
+
+    host.replaceChildren()
+    renderGoogleButton(host, clampGoogleButtonWidth(width))
+    const frame = requestAnimationFrame(markRendered)
+
+    // Se nada aparecer em 5s, considera quebrado e some (não deixa um buraco).
     const timer = setTimeout(() => {
       if (host.childElementCount === 0) setFailed(true)
     }, 5_000)
     return () => {
       observer.disconnect()
+      cancelAnimationFrame(frame)
       clearTimeout(timer)
     }
   }, [scriptReady, clientId, width])
