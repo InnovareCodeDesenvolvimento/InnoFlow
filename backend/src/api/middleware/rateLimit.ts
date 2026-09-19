@@ -45,6 +45,13 @@ export const publicRateLimit = buildLimiter(60 * 1000, 300, 'RATE_LIMITED')
 export const changePasswordRateLimit = buildLimiter(15 * 60 * 1000, 8, 'RATE_LIMITED_PASSWORD', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
 
 /**
+ * ABERTURA de stream SSE (`/api/admin/events`, `/api/me/events`): 20 aberturas/min por USUÁRIO
+ * (loop de reconexão de cliente quebrado / abuso). O teto de streams SIMULTÂNEOS é outro mecanismo
+ * (`core/realtime/streamLimiter.ts`) — este limita a TAXA de abrir. Roda DEPOIS de `authenticate`.
+ */
+export const sseConnectRateLimit = buildLimiter(60 * 1000, 20, 'RATE_LIMITED_SSE', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
  * `POST /api/me/sessions/start` — mais apertado que o público geral e
  * escopado por MOTORISTA (não por IP, ver `keyGenerator`): um motorista
  * sozinho não tem por que iniciar mais de 10 recargas por minuto, e escopar

@@ -115,7 +115,7 @@ export function createApp(): Express {
   app.use('/api/admin/sessions', adminRateLimit, adminSessionsRoutes)
   app.use('/api/admin/drivers', adminRateLimit, adminDriversRoutes)
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
-  app.use('/api/admin/events', adminEventsRoutes) // SSE — sem adminRateLimit (conexão longa, não uma rajada de requests)
+  app.use('/api/admin/events', adminRateLimit, adminEventsRoutes) // SSE — teto por IP aqui; abertura por usuário e teto de streams dentro da rota
 
   // 404 — nenhuma rota bateu.
   app.use((_req, res) => {

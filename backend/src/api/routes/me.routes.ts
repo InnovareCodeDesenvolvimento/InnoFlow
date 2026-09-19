@@ -16,10 +16,11 @@ import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate, requireRole } from '../middleware/auth'
 import { validateBody, validateQuery } from '../middleware/validate'
-import { meStartSessionRateLimit } from '../middleware/rateLimit'
+import { meStartSessionRateLimit, sseConnectRateLimit } from '../middleware/rateLimit'
 import { meStartSessionSchema, meListQuerySchema, type MeStartSessionInput, type MeListQuery } from '../schemas/me.schema'
 import { STATIONS_CHANNEL, userChannel } from '../../realtime/bus'
-import { startSseStream } from './events.routes'
+import { openSseStream } from '../lib/sseStream'
+import { sseDeps } from '../lib/sseDefaultDeps'
 
 /**
  * PWA do motorista (F6, 2026-09-17) — ver `.claude/agent-memory/nova/
@@ -473,8 +474,8 @@ router.get(
  * não são tocados aqui. Mesma mecânica de heartbeat/headers do painel admin
  * (`events.routes.ts`).
  */
-router.get('/events', (req, res) => {
-  startSseStream(req, res, [userChannel(req.user!.userId), STATIONS_CHANNEL])
+router.get('/events', sseConnectRateLimit, (req, res) => {
+  openSseStream(sseDeps, req, res, [userChannel(req.user!.userId), STATIONS_CHANNEL])
 })
 
 export default router

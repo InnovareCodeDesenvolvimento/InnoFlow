@@ -1,6 +1,7 @@
 import type Redis from 'ioredis'
 import { createRedisConnection } from '../lib/redis'
 import { logger } from '../lib/logger'
+import { createChannelHub, type ChannelHub } from '../core/realtime/channelHub'
 import type { RealtimeEvent } from './events'
 
 /**
@@ -86,35 +87,24 @@ export function publishToStations(event: RealtimeEvent): Promise<void> {
   return publish(STATIONS_CHANNEL, event)
 }
 
-/**
- * Assina um conjunto de canais numa conexão Redis DEDICADA (uma por conexão
- * SSE — mesmo padrão de `sendCommand()` em `ocpp/commands.ts`: uma conexão
- * em modo subscriber não pode ser reaproveitada para outros comandos).
- * Retorna uma função de limpeza — SEMPRE chamar quando o `Response` fechar
- * (`req.on('close', ...)`), senão a conexão Redis vaza.
- */
-export function subscribeChannels(channels: string[], onEvent: (event: RealtimeEvent) => void): () => void {
-  const subscriber = createRedisConnection()
-  let closed = false
-
-  subscriber.on('message', (channel, message) => {
-    if (closed || !channels.includes(channel)) return
-    try {
-      onEvent(JSON.parse(message) as RealtimeEvent)
-    } catch (err) {
-      logger.error({ err, channel }, '[realtime] evento malformado recebido — ignorado')
-    }
-  })
-
-  if (channels.length > 0) {
-    subscriber.subscribe(...channels).catch((err) => {
-      logger.error({ err, channels }, '[realtime] falha ao assinar canais')
+let hub: ChannelHub<RealtimeEvent> | undefined
+function getHub(): ChannelHub<RealtimeEvent> {
+  // Lazy: o gateway OCPP/worker importam este módulo só para PUBLICAR e não devem abrir um assinante.
+  if (!hub) {
+    hub = createChannelHub<RealtimeEvent>(createRedisConnection(), {
+      onError: (err, context) => logger.error({ err }, `[realtime] ${context}`),
     })
   }
+  return hub
+}
 
-  return () => {
-    if (closed) return
-    closed = true
-    subscriber.disconnect()
-  }
+/**
+ * Assina um conjunto de canais no assinante Redis COMPARTILHADO do processo (Órion A2): um único
+ * cliente Redis para todas as conexões SSE, com fan-out em memória (`core/realtime/channelHub.ts`).
+ * Antes era uma conexão Redis por stream — 1000 abas = 1000 conexões. O ouvinte recebe o evento já
+ * parseado E o texto cru (para o SSE não re-serializar por conexão). Retorna o "cancelar" —
+ * SEMPRE chamar quando o `Response` fechar, senão o ouvinte vaza.
+ */
+export function subscribeChannels(channels: string[], listener: (event: RealtimeEvent, raw: string) => void): () => void {
+  return getHub().subscribe(channels, listener)
 }

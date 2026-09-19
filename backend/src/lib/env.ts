@@ -129,6 +129,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
+  // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem
+  // trocou de rede); por IP e total REJEITAM o novo. Ver `core/realtime/streamLimiter.ts`.
+  SSE_MAX_STREAMS_PER_USER: z.coerce.number().int().positive().default(5),
+  SSE_MAX_STREAMS_PER_IP: z.coerce.number().int().positive().default(50),
+  SSE_MAX_STREAMS_TOTAL: z.coerce.number().int().positive().default(2000),
   DASHBOARD_DIRTY_THROTTLE_MS: z.coerce.number().int().positive().default(5000),
 })
 
