@@ -91,6 +91,12 @@ describe('Conciliação financeira (cartão + carteira + dívida simultâneos)',
         userId: driverCard.id,
         chargingSessionId: sessionCard.id,
         status: 'CAPTURED',
+        // CHECK `payment_intent_return_code_required` (migration
+        // 20260917130000): cartão AUTHORIZED/CAPTURED exige o ReturnCode da
+        // Cielo ('00' = aprovado). Este fixture nasceu antes da constraint e
+        // nunca tinha rodado contra um Postgres real — a 1ª execução real
+        // (2026-09-19) falhou aqui, não na conciliação.
+        returnCode: '00',
         amountRequestedCents: 1000,
         amountCapturedCents: 1000,
         capturedAt: now,
