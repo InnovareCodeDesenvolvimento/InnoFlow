@@ -79,10 +79,18 @@ export const PUBLISH_TIMEOUT_MS = 500
 export const MAX_PUBLISHES_IN_FLIGHT = 100
 
 /**
- * Disjuntor para o Redis "mudo" (partição de rede: a conexão parece de pé, mas não responde): depois
- * de UM publish estourar o prazo, os seguintes são descartados na hora por este tempo, em vez de cada
- * um pagar os 500ms de novo. Curto para o Redis que volta ser notado logo. Com o Redis DERRUBADO (a
- * conexão sabe que caiu) nem precisa: ver `connectionIsDown`.
+ * Disjuntor de ESPERA (não de envio) para o Redis lento ou mudo: depois de UM publish estourar o prazo,
+ * os seguintes por este tempo AINDA SÃO ENVIADOS (o comando vai para a conexão), mas o chamador não
+ * espera por eles — em vez de cada um pagar os 500ms de novo (vários `await publish` em sequência
+ * dentro de um mesmo fluxo de negócio somariam segundos). Curto para o Redis que volta ser notado logo.
+ *
+ * Por que NÃO descartar: com a conexão `ready` o Redis está vivo — lento (fork de BGSAVE, disco, CPU
+ * disputada), mas entrega. Descartar o envio perdia evento que ele entregaria: o `session.stopped`
+ * estourava o prazo, abria o disjuntor e o `wallet.updated` seguinte era jogado fora — o motorista via a
+ * sessão encerrada com o saldo velho (o frontend só invalida a carteira no `wallet.updated`). Quem
+ * protege a fila de eventos velhos é o teto `MAX_PUBLISHES_IN_FLIGHT`; com o Redis DERRUBADO (a conexão
+ * sabe que caiu) o descarte é imediato: ver `connectionIsDown`. (Nome antigo mantido: o teste de
+ * resiliência importa esta constante.)
  */
 export const PUBLISH_CIRCUIT_OPEN_MS = 1_000
 
@@ -92,7 +100,7 @@ function connectionIsDown(connection: Redis): boolean {
 }
 
 let publishesInFlight = 0
-let circuitOpenUntil = 0
+let waitSkippedUntil = 0
 const logPublishFailure = createLogGate(10_000)
 
 /**
@@ -102,28 +110,46 @@ const logPublishFailure = createLogGate(10_000)
  * caso é a tela não atualizar sozinha, e o polling de segurança cobre isso — ver decisão 7 da Nova).
  *
  * O `.catch` sozinho NÃO bastava: com `maxRetriesPerRequest: null` (exigência do BullMQ) o ioredis
- * não rejeita com o Redis fora — enfileira e espera reconectar, então o `await` nunca voltava. Por
- * isso: não enfileira com a conexão sabidamente fora, e no resto dá prazo (`PUBLISH_TIMEOUT_MS`),
- * disjuntor (`PUBLISH_CIRCUIT_OPEN_MS`) e teto de pendentes (`MAX_PUBLISHES_IN_FLIGHT`).
+ * não rejeita com o Redis fora — enfileira e espera reconectar, então o `await` nunca voltava. Duas
+ * decisões separadas, que antes eram uma só:
+ *  - ENVIAR: sempre, com a conexão de pé. Só descarta com a conexão sabidamente fora
+ *    (`connectionIsDown`) ou com o teto de pendentes cheio (`MAX_PUBLISHES_IN_FLIGHT`).
+ *  - ESPERAR: até `PUBLISH_TIMEOUT_MS`; se estourar, por `PUBLISH_CIRCUIT_OPEN_MS` os seguintes são
+ *    enviados sem espera. O comando abandonado pelo prazo segue na conexão e o Redis o entrega quando
+ *    responder (a ordem de envio é preservada).
  */
 export async function publish(channel: string, event: RealtimeEvent): Promise<void> {
+  let pending: Promise<number>
   try {
     const connection = getPublisher()
-    if (connectionIsDown(connection) || Date.now() < circuitOpenUntil || publishesInFlight >= MAX_PUBLISHES_IN_FLIGHT) {
+    if (connectionIsDown(connection) || publishesInFlight >= MAX_PUBLISHES_IN_FLIGHT) {
       logPublishFailure((suppressed) => logger.warn({ channel, type: event.type, status: connection.status, suppressed }, '[realtime] Redis indisponível — evento de UI descartado (best-effort)'))
       return
     }
-    const pending = connection.publish(channel, JSON.stringify(event))
-    publishesInFlight++
-    // O contador desce quando o comando de fato liquida (não no prazo): é ele que mede a fila do ioredis.
-    pending.then(
-      () => publishesInFlight--,
-      () => publishesInFlight--,
-    )
+    pending = connection.publish(channel, JSON.stringify(event))
+  } catch (err) {
+    logPublishFailure((suppressed) => logger.error({ err, channel, type: event.type, suppressed }, '[realtime] falha ao publicar evento (best-effort, não propaga)'))
+    return
+  }
+
+  publishesInFlight++
+  // O contador desce quando o comando de fato liquida (não no prazo): é ele que mede a fila do ioredis.
+  // É também quem registra a falha do comando, aguardado ou não (o `await` abaixo não loga erro do Redis: seria em dobro).
+  pending.then(
+    () => publishesInFlight--,
+    (err: unknown) => {
+      publishesInFlight--
+      logPublishFailure((suppressed) => logger.error({ err, channel, type: event.type, suppressed }, '[realtime] falha ao publicar evento (best-effort, não propaga)'))
+    },
+  )
+
+  if (Date.now() < waitSkippedUntil) return // Redis lento há pouco: o comando já foi, mas este fluxo não paga o prazo de novo
+  try {
     await withDeadline(pending, PUBLISH_TIMEOUT_MS, 'publish no Redis')
   } catch (err) {
-    if (err instanceof DeadlineExceededError) circuitOpenUntil = Date.now() + PUBLISH_CIRCUIT_OPEN_MS
-    logPublishFailure((suppressed) => logger.error({ err, channel, type: event.type, suppressed }, '[realtime] falha ao publicar evento (best-effort, não propaga)'))
+    if (!(err instanceof DeadlineExceededError)) return // falha do próprio comando: já registrada acima
+    waitSkippedUntil = Date.now() + PUBLISH_CIRCUIT_OPEN_MS
+    logPublishFailure((suppressed) => logger.warn({ err, channel, type: event.type, suppressed }, '[realtime] Redis lento — não esperando a confirmação do publish (o comando segue e é entregue quando o Redis responder)'))
   }
 }
 

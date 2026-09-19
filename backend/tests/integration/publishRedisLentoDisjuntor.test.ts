@@ -108,18 +108,18 @@ describe('Redis LENTO (vivo) — pico de latência acima do prazo do publish', (
   }, 60_000)
 
   /**
-   * ACHADO (Íris, 2026-09-19 — NÃO corrigido aqui, é código de produção): `finalizarSessao` (StopTransaction)
+   * ACHADO (Íris, 2026-09-19) — CORRIGIDO por Vega (2026-09-19): o disjuntor passou a pular só a ESPERA, não o ENVIO. Texto original: `finalizarSessao` (StopTransaction)
    * publica `session.stopped` e, DEPOIS de esperá-lo, `wallet.updated`. Com o Redis vivo mas lento (>500ms), o
    * `session.stopped` estoura o prazo e ABRE o disjuntor, e o `wallet.updated` que vem logo em seguida é
    * DESCARTADO sem nem ser enviado — o Redis o teria entregue. O motorista vê a sessão encerrada mas o saldo
    * antigo (o handler de `session.stopped` do frontend não invalida a carteira; só o `wallet.updated` invalida,
    * e a carteira tem staleTime de 60s e nenhum polling). Antes da correção, os dois eram entregues, só
    * atrasados. Causa raiz: o disjuntor pula o ENVIO (não só a ESPERA) enquanto a conexão está de pé.
-   * `it.fails` = comportamento DESEJADO (o Redis está vivo: os dois eventos chegam); vire `it` ao corrigir
-   * (ex.: com a conexão `ready`, enviar sempre e só não esperar; descartar apenas com a conexão caída ou o
-   * teto de pendentes cheio).
+   * Era `it.fails` (comportamento DESEJADO: o Redis está vivo, os dois eventos chegam); virou `it` com a correção
+   * (com a conexão `ready`, enviar sempre e só não esperar; descartar apenas com a conexão caída ou o teto de
+   * pendentes cheio). A asserção não mudou.
    */
-  it.fails('Redis lento (700ms, vivo) no StopTransaction: o motorista recebe session.stopped E wallet.updated (ACHADO: o wallet.updated é descartado pelo disjuntor)', async () => {
+  it('Redis lento (700ms, vivo) no StopTransaction: o motorista recebe session.stopped E wallet.updated (era ACHADO: o wallet.updated era descartado pelo disjuntor)', async () => {
     await aguardarRedisPronto()
     await sleep(PUBLISH_CIRCUIT_OPEN_MS + 100)
     const t = await createTenant({ suffix, label: 'lento-stop' })
