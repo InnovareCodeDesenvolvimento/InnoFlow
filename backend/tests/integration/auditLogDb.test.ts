@@ -131,25 +131,18 @@ describe('AuditLog — garantias de banco (trigger append-only + retenção 24 m
   })
 
   /**
-   * ACHADO (Íris, 2026-09-19): os dois triggers são `FOR EACH ROW` — o
-   * Postgres NÃO dispara trigger de linha em `TRUNCATE`. Quem tem o privilégio
-   * TRUNCATE na tabela (o dono — e em produção a aplicação conecta como dono)
-   * apaga o log de auditoria inteiro, inclusive linhas dentro dos 24 meses,
-   * sem erro nenhum.
+   * ACHADO E FECHADO (Íris achou em 2026-09-19; Órion A4 / migration
+   * `20260919170000_audit_hardening` fechou no mesmo dia): os triggers
+   * originais eram `FOR EACH ROW` e o Postgres NÃO dispara trigger de linha em
+   * `TRUNCATE` — quem tinha o privilégio TRUNCATE (o dono; em produção a
+   * aplicação conecta como dono) apagava o log inteiro sem erro. Este teste
+   * descreve o comportamento correto (TRUNCATE recusado) e era `it.fails`
+   * enquanto o furo existia; agora é `it` normal e trava a regressão.
    *
-   * O teste descreve o comportamento DESEJADO (TRUNCATE tem que ser recusado)
-   * e por isso está como `it.fails`: hoje o TRUNCATE passa (a asserção falha =
-   * o teste "passa" como esperado). Quando o Cronos/Órion fecharem o furo
-   * (ex.: trigger `BEFORE TRUNCATE ... FOR EACH STATEMENT` que levanta
-   * exceção, e/ou papel de aplicação sem privilégio TRUNCATE), o Vitest vai
-   * reclamar que o teste "deveria falhar mas passou" — é o sinal para trocar
-   * `it.fails` por `it`.
-   *
-   * O TRUNCATE roda dentro de uma transação que é DESFEITA no final (o
-   * `throw` propositado) — nenhuma linha de auditoria de outras suítes que
-   * rodam em paralelo é perdida.
+   * O TRUNCATE roda dentro de uma transação que é DESFEITA no final — nenhuma
+   * linha de auditoria de outras suítes que rodam em paralelo é perdida.
    */
-  it.fails('TRUNCATE "AuditLog" deveria ser recusado ao papel da aplicação (FURO CONHECIDO: hoje é aceito)', async () => {
+  it('TRUNCATE "AuditLog" é recusado ao papel da aplicação (trigger de statement, Órion A4)', async () => {
     class Rollback extends Error {
       constructor(public rowsAfterTruncate: number) {
         super('rollback proposital')
@@ -176,6 +169,6 @@ describe('AuditLog — garantias de banco (trigger append-only + retenção 24 m
     // A linha recente da vítima sobreviveu (a transação foi desfeita) — o teste não estraga o banco.
     expect(await prisma.auditLog.count({ where: { id: recentId } })).toBe(1)
     // Comportamento DESEJADO: o TRUNCATE não pode ter sido aceito.
-    expect(truncateAccepted, `TRUNCATE foi aceito e esvaziou a tabela (linhas após o TRUNCATE: ${rowsAfter}) — trigger de linha não cobre TRUNCATE`).toBe(false)
+    expect(truncateAccepted, `TRUNCATE foi aceito e esvaziou a tabela (linhas após o TRUNCATE: ${rowsAfter}) — falta o trigger BEFORE TRUNCATE`).toBe(false)
   })
 })
