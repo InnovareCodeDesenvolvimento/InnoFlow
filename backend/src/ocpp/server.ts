@@ -4,9 +4,18 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '../lib/prisma'
 import { logger } from '../lib/logger'
 import { registerOcppHandlers } from './handlers'
-import { acquireChargePointLock, releaseChargePointLock, registerConnection, unregisterConnection } from './registry'
+import {
+  acquireChargePointLock,
+  getChargePointLockOwner,
+  getConnection,
+  getNodeId,
+  releaseChargePointLock,
+  registerConnection,
+  unregisterConnection,
+} from './registry'
 import { startCommandListener } from './commands'
 import { isAuthRateLimited, registerAuthFailure } from './authRateLimit'
+import { registrarConexao, registrarDesconexao } from '../services/estacoes/presencaCarregador'
 import type { OcppHandlerCtx } from './context'
 
 type AuthResult = { ok: true; ctx: OcppHandlerCtx } | { ok: false; reason: 'rate_limited' | 'invalid' }
@@ -128,16 +137,53 @@ async function onClientConnected(client: RpcServerClient): Promise<void> {
       { err, chargePointId: ctx.chargePointId, ocppIdentity: ctx.ocppIdentity },
       '[ocpp] falha ao inicializar conexão (lock/handlers) — fechando para o charge point reconectar',
     )
-    unregisterConnection(ctx.chargePointId)
+    unregisterConnection(ctx.chargePointId, client) // só remove se ESTA conexão for a registrada (não apaga a de uma conexão anterior)
     await client.close({ code: 1011, reason: 'internal error during connection setup' }).catch(() => {})
     return
   }
 
   client.on('close', () => {
-    void (async () => {
-      logger.info({ chargePointId: ctx.chargePointId }, '[ocpp] charge point desconectado')
-      unregisterConnection(ctx.chargePointId)
-      await releaseChargePointLock(ctx.chargePointId)
-    })()
+    void onClientClosed(client, ctx).catch((err) => logger.error({ err, chargePointId: ctx.chargePointId }, '[ocpp] falha ao tratar desconexão (não bloqueante)'))
   })
+
+  // Conexão autenticada e com handlers no ar = prova de presença: marca
+  // "visto agora" e avisa o mapa (canal público de estações) para o carregador
+  // voltar a verde NA HORA — sem depender do BootNotification, que um carregador
+  // que só reconectou o socket (sem reiniciar) não é obrigado a mandar.
+  void registrarConexao(ctx)
+}
+
+/**
+ * `close` do WebSocket. Três coisas, nesta ordem, cada uma protegida contra a
+ * corrida de reconexão (o carregador reconecta ANTES de o `close` da conexão
+ * velha chegar — timeout de TCP/ping pode levar dezenas de segundos):
+ *  1. se esta conexão já NÃO é a registrada neste processo, outra mais nova
+ *     assumiu — não mexe em registro, lock nem presença (antes, o `close` da
+ *     velha apagava a entrada e o lock da NOVA: conexão viva e invisível para
+ *     comandos remotos);
+ *  2. senão, libera o registro e o lock (compare-and-delete, só se for nosso);
+ *  3. registra a queda (`disconnectedAt`) e avisa o mapa — exceto se OUTRO nó
+ *     já tomou o lock (multi-réplica: o carregador reconectou em outro nó e a
+ *     evicção fechou esta conexão; marcar offline aí seria mentira).
+ * `Connector.status` nunca é tocado: desconexão não implica status de conector.
+ */
+async function onClientClosed(client: RpcServerClient, ctx: OcppHandlerCtx): Promise<void> {
+  logger.info({ chargePointId: ctx.chargePointId }, '[ocpp] charge point desconectado')
+
+  if (getConnection(ctx.chargePointId) !== client) {
+    logger.info({ chargePointId: ctx.chargePointId }, '[ocpp] close de conexão substituída por uma mais nova — registro, lock e presença ficam como estão')
+    return
+  }
+
+  unregisterConnection(ctx.chargePointId, client)
+
+  const lockOwner = await getChargePointLockOwner(ctx.chargePointId).catch(() => null)
+  await releaseChargePointLock(ctx.chargePointId)
+
+  if (lockOwner !== null && lockOwner !== getNodeId()) {
+    logger.info({ chargePointId: ctx.chargePointId, lockOwner }, '[ocpp] carregador já foi assumido por outro nó — não registra queda')
+    return
+  }
+
+  await registrarDesconexao(ctx)
 }

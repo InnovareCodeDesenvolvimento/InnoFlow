@@ -18,7 +18,7 @@ import { authenticate, requireRole } from '../middleware/auth'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { meStartSessionRateLimit } from '../middleware/rateLimit'
 import { meStartSessionSchema, meListQuerySchema, type MeStartSessionInput, type MeListQuery } from '../schemas/me.schema'
-import { userChannel } from '../../realtime/bus'
+import { STATIONS_CHANNEL, userChannel } from '../../realtime/bus'
 import { startSseStream } from './events.routes'
 
 /**
@@ -462,14 +462,19 @@ router.get(
 )
 
 /**
- * `GET /api/me/events` — canal SSE do motorista. Assina SÓ o próprio canal
+ * `GET /api/me/events` — canal SSE do motorista. Assina o PRÓPRIO canal
  * (`ui:ev:user:{userId}`) — `wallet.updated`/`session.metrics`/
  * `session.started`/`session.stopped` do próprio motorista, nunca de outro
- * (fronteira multi-tenant na assinatura, ver `realtime/bus.ts`). Mesma
- * mecânica de heartbeat/headers do painel admin (`events.routes.ts`).
+ * (fronteira multi-tenant na assinatura, ver `realtime/bus.ts`) — E o canal
+ * PÚBLICO de estações (`ui:ev:stations`, `chargepoint.status` de qualquer
+ * carregador, para o mapa "eletropostos perto de mim" atualizar sozinho).
+ * Este stream continua exigindo login (`authenticate` + `requireRole('DRIVER')`
+ * do router): NÃO existe SSE público sem autenticação. Os canais op/admin
+ * não são tocados aqui. Mesma mecânica de heartbeat/headers do painel admin
+ * (`events.routes.ts`).
  */
 router.get('/events', (req, res) => {
-  startSseStream(req, res, [userChannel(req.user!.userId)])
+  startSseStream(req, res, [userChannel(req.user!.userId), STATIONS_CHANNEL])
 })
 
 export default router

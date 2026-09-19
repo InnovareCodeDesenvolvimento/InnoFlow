@@ -2,6 +2,7 @@ import type { ZodType, ZodTypeDef } from 'zod'
 import type { IHandlersOption } from 'ocpp-rpc'
 import { parseOcppParams } from '../schemas/common'
 import { withIdempotency } from '../idempotency'
+import { registrarMensagemRecebida } from '../../services/estacoes/presencaCarregador'
 import type { OcppHandlerCtx } from '../context'
 
 /**
@@ -22,6 +23,10 @@ export function defineOcppHandler<TParams, TResult extends Record<string, unknow
     if (!messageId) {
       throw new Error(`[ocpp] mensagem ${action} chegou sem messageId — impossível garantir idempotência`)
     }
+
+    // Qualquer mensagem recebida prova que o carregador está vivo (throttle
+    // interno — ver presencaCarregador.ts). Fire-and-forget: nunca atrasa o ack.
+    registrarMensagemRecebida(ctx.chargePointId)
 
     return withIdempotency<TResult>({
       chargePointId: ctx.chargePointId,

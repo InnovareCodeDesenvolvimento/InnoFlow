@@ -1,4 +1,6 @@
 import { env } from '../lib/env'
+import { logger } from '../lib/logger'
+import { createLastWinsThrottle } from '../core/estacoes/lastWinsThrottle'
 import {
   adminEntityChangedEvent,
   chargePointStatusEvent,
@@ -6,8 +8,9 @@ import {
   sessionMetricsEvent,
   sessionStatusEvent,
   walletUpdatedEvent,
+  type ChargePointStatusEvent,
 } from './events'
-import { publishToAdmin, publishToOperator, publishToUser } from './bus'
+import { publishToAdmin, publishToOperator, publishToStations, publishToUser } from './bus'
 
 /**
  * Camada "o que publicar" (em cima de `bus.ts`, que só sabe "publicar em um
@@ -102,8 +105,29 @@ export async function emitWalletUpdated(userId: string, balanceCents: number): P
 // chargepoint.status
 // ------------------------------------------------------------
 
+/**
+ * Canal público `ui:ev:stations` (mapa "eletropostos perto de mim"):
+ * coalescência de ~2s por (chargePointId, connectorId), o último estado
+ * vence (`core/estacoes/lastWinsThrottle.ts`). Sem isto, todo motorista logado
+ * refaria o fetch da lista a cada oscilação de status de QUALQUER carregador
+ * da plataforma. In-memory por processo: o `StatusNotification` de um
+ * carregador sempre chega no processo do gateway que segura a conexão dele
+ * (lock de `registry.ts`), então a chave nunca é dividida entre processos.
+ * op/admin NÃO passam por aqui — continuam imediatos.
+ */
+const STATIONS_STATUS_COALESCE_MS = 2_000
+const stationsStatusThrottle = createLastWinsThrottle<ChargePointStatusEvent>(STATIONS_STATUS_COALESCE_MS, (_key, event) => publishToStations(event), {
+  onError: (err, key) => logger.error({ err, key }, '[realtime] falha ao publicar chargepoint.status no canal público (best-effort)'),
+})
+
 export async function emitChargePointStatus(operatorId: string, chargePointId: string, connectorId: number, status: string): Promise<void> {
   const event = chargePointStatusEvent({ chargePointId, connectorId, status })
+
+  // REGRA DO CANAL PÚBLICO (ver `bus.ts`): só o que já está na resposta REST
+  // pública. `event` tem exatamente chargePointId/connectorId/status — não
+  // acrescentar operatorId/userId/nada de sessão aqui.
+  stationsStatusThrottle.push(`${chargePointId}:${connectorId}`, event)
+
   await Promise.all([publishToOperator(operatorId, event), publishToAdmin(event)])
 }
 

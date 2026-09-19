@@ -5,8 +5,12 @@ import type { PeriodWindow } from '../lib/reportingWindow'
 import { deltaPct } from '../lib/reportingWindow'
 import { chargePointTenantConditions, periodConditions, tenantConditions, toNumber, whereSql } from '../lib/reportingSql'
 
-/** "Online" = reportou (`lastSeenAt`) há menos que isto. Constante nomeada — nunca número mágico espalhado pelo código. */
-export const CHARGE_POINT_ONLINE_THRESHOLD_MS = 5 * 60 * 1000
+import { CHARGE_POINT_ONLINE_THRESHOLD_MS } from '../../core/estacoes/disponibilidade'
+
+// A constante e a regra de "online" moram em `core/estacoes/disponibilidade.ts`
+// (fonte única, testável sem banco). Re-exportada aqui só para não quebrar
+// quem já importava daqui.
+export { CHARGE_POINT_ONLINE_THRESHOLD_MS }
 
 interface SessionAggregateRow {
   totalSessions: number
@@ -335,6 +339,11 @@ export async function getDashboardLive(scope: ReportingScope): Promise<Dashboard
   const sessionWhere = whereSql([Prisma.sql`cs.status IN ('STARTED', 'CHARGING', 'FINISHING')`, ...tenantConditions(scope, 'cs')])
   const chargePointWhere = whereSql(chargePointTenantConditions(scope, 'cp'))
   const onlineThreshold = new Date(Date.now() - CHARGE_POINT_ONLINE_THRESHOLD_MS)
+  // MESMA regra de `isChargePointOnline` (core/estacoes/disponibilidade.ts),
+  // escrita em SQL porque aqui é uma agregação no banco: visto dentro do
+  // limiar E não caiu depois da última mensagem (`disconnectedAt` nulo ou
+  // estritamente anterior a `lastSeenAt`). Mudou lá, muda aqui.
+  const isOnlineSql = Prisma.sql`(cp."lastSeenAt" > ${onlineThreshold} AND (cp."disconnectedAt" IS NULL OR cp."disconnectedAt" < cp."lastSeenAt"))`
 
   const [activeSessions, chargePointCounts] = await Promise.all([
     prisma.$queryRaw<LiveSession[]>(Prisma.sql`
@@ -364,11 +373,11 @@ export async function getDashboardLive(scope: ReportingScope): Promise<Dashboard
         COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM "Connector" c WHERE c."chargePointId" = cp.id AND c.status = 'FAULTED'))::int AS "faulted",
         COUNT(*) FILTER (
           WHERE NOT EXISTS (SELECT 1 FROM "Connector" c WHERE c."chargePointId" = cp.id AND c.status = 'FAULTED')
-            AND cp."lastSeenAt" > ${onlineThreshold}
+            AND ${isOnlineSql}
         )::int AS "online",
         COUNT(*) FILTER (
           WHERE NOT EXISTS (SELECT 1 FROM "Connector" c WHERE c."chargePointId" = cp.id AND c.status = 'FAULTED')
-            AND (cp."lastSeenAt" IS NULL OR cp."lastSeenAt" <= ${onlineThreshold})
+            AND NOT COALESCE(${isOnlineSql}, false)
         )::int AS "offline"
       FROM "ChargePoint" cp
       WHERE ${chargePointWhere}

@@ -137,8 +137,26 @@ export function registerConnection(chargePointId: string, client: RpcServerClien
   localConnections.set(chargePointId, client)
 }
 
-export function unregisterConnection(chargePointId: string): void {
-  localConnections.delete(chargePointId)
+/**
+ * Remove a conexão do registro local. Com `client`, só remove se ELE ainda for
+ * a conexão registrada — o `close` de uma conexão VELHA (o carregador já
+ * reconectou e a nova já se registrou) não pode apagar a entrada da nova, senão
+ * comandos remotos deixam de achar o carregador (conexão "zumbi"). Devolve se
+ * removeu.
+ */
+export function unregisterConnection(chargePointId: string, client?: RpcServerClient): boolean {
+  if (client && localConnections.get(chargePointId) !== client) return false
+  return localConnections.delete(chargePointId)
+}
+
+/** `true` se `client` é a conexão atualmente registrada neste processo para o charge point. */
+export function isRegisteredConnection(chargePointId: string, client: RpcServerClient): boolean {
+  return localConnections.get(chargePointId) === client
+}
+
+/** Dono atual do lock de conexão (id do nó) ou `null` se ninguém segura — usado no `close` para saber se OUTRO nó já assumiu o carregador. */
+export async function getChargePointLockOwner(chargePointId: string): Promise<string | null> {
+  return redisCmd.get(lockKey(chargePointId))
 }
 
 export function getConnection(chargePointId: string): RpcServerClient | undefined {

@@ -6,7 +6,7 @@ import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { validateParams } from '../middleware/validate'
 import { resolveActiveTariff } from '../../ocpp/tariffResolution'
-import { CHARGE_POINT_ONLINE_THRESHOLD_MS } from '../services/dashboardService'
+import { isChargePointOnline } from '../../core/estacoes/disponibilidade'
 
 /**
  * `GET /api/public/charge-points/:ocppIdentity` — SEM autenticação, mesmo
@@ -55,6 +55,7 @@ router.get(
         vendor: true,
         model: true,
         lastSeenAt: true,
+        disconnectedAt: true,
         siteId: true,
         operatorId: true,
         site: { select: { id: true, name: true, addressLine: true, city: true, state: true } },
@@ -66,7 +67,7 @@ router.get(
     })
     if (!chargePoint) throw new AppError('Carregador não encontrado.', 404, 'CHARGE_POINT_NOT_FOUND')
 
-    const online = chargePoint.lastSeenAt !== null && Date.now() - chargePoint.lastSeenAt.getTime() < CHARGE_POINT_ONLINE_THRESHOLD_MS
+    const online = isChargePointOnline(chargePoint)
 
     const connectors = await Promise.all(
       chargePoint.connectors.map(async (connector) => {

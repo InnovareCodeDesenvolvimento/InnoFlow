@@ -21,6 +21,25 @@ import type { RealtimeEvent } from './events'
 const CHANNEL_PREFIX = 'ui:ev:'
 export const ADMIN_CHANNEL = `${CHANNEL_PREFIX}admin`
 
+/**
+ * CANAL PÚBLICO de estações ("eletropostos perto de mim" — Nova,
+ * decisoes-mapa-eletropostos.md, decisão 5). Todo motorista LOGADO assina
+ * (`/api/me/events`, junto com o próprio `ui:ev:user:{id}`).
+ *
+ * REGRA: nada pode ser publicado aqui que já não esteja na resposta REST
+ * pública (`GET /api/sites`). Hoje só `chargepoint.status` (chargePointId/
+ * connectorId/status — todos já públicos). NUNCA operatorId, userId, sessão,
+ * saldo, potência instantânea. Como o canal é lido por qualquer motorista de
+ * qualquer operador, um campo a mais aqui vaza para a plataforma inteira —
+ * a fronteira multi-tenant deste canal é "o que ele carrega", não a
+ * assinatura (por isso a regra vale no PUBLICADOR, ver `emit.ts`).
+ *
+ * Não existe SSE público sem login (conexão longa anônima = superfície de
+ * exaustão; o `publicRateLimit` conta requisições, não duração) — visitante
+ * anônimo fica no refetch periódico.
+ */
+export const STATIONS_CHANNEL = `${CHANNEL_PREFIX}stations`
+
 export function operatorChannel(operatorId: string): string {
   return `${CHANNEL_PREFIX}op:${operatorId}`
 }
@@ -60,6 +79,11 @@ export function publishToUser(userId: string, event: RealtimeEvent): Promise<voi
 
 export function publishToAdmin(event: RealtimeEvent): Promise<void> {
   return publish(ADMIN_CHANNEL, event)
+}
+
+/** Ver a regra no comentário de `STATIONS_CHANNEL`: só o que já é público. */
+export function publishToStations(event: RealtimeEvent): Promise<void> {
+  return publish(STATIONS_CHANNEL, event)
 }
 
 /**

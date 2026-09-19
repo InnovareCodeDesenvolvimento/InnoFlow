@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { bootNotificationReqSchema } from '../schemas/bootNotification'
 import { reconciliarSessaoOrfa } from '../../services/carteira/reconciliarSessaoOrfa'
+import { OCPP_HEARTBEAT_INTERVAL_SECONDS } from '../../core/estacoes/disponibilidade'
 import { defineOcppHandler } from './defineHandler'
 import type { OcppHandlerCtx } from '../context'
 
@@ -37,7 +38,11 @@ export const handleBootNotification = defineOcppHandler('BootNotification', boot
 
   return {
     status: 'Accepted',
-    interval: 300, // segundos entre Heartbeats — fixo no MVP, sem config por charge point ainda
+    // Segundos entre Heartbeats — fixo no MVP, sem config por charge point ainda.
+    // Constante ÚNICA (core/estacoes/disponibilidade.ts) porque tem que caber
+    // várias vezes no limiar de "online": com 300s (== limiar) um carregador
+    // saudável e ocioso piscava offline a cada ciclo.
+    interval: OCPP_HEARTBEAT_INTERVAL_SECONDS,
     currentTime: now.toISOString(),
   }
 })

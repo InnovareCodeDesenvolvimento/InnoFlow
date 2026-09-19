@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { env } from '../../lib/env'
 import { AppError } from '../../api/middleware/errorHandler'
-import { CHARGE_POINT_ONLINE_THRESHOLD_MS } from '../../api/services/dashboardService'
+import { isChargePointOnline } from '../../core/estacoes/disponibilidade'
 import { sendCommand, OcppCommandTimeoutError } from '../../ocpp/commands'
 import { resolveActiveTariff } from '../../ocpp/tariffResolution'
 import { avaliarInicioSessao } from '../../core/carteira/avaliarInicioSessao'
@@ -66,7 +66,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   })
   if (!connector) throw new AppError('Conector não encontrado.', 404, 'CONNECTOR_NOT_FOUND')
 
-  const online = chargePoint.lastSeenAt !== null && Date.now() - chargePoint.lastSeenAt.getTime() < CHARGE_POINT_ONLINE_THRESHOLD_MS
+  const online = isChargePointOnline(chargePoint) // `findFirst` sem select traz lastSeenAt e disconnectedAt
   if (!online) throw new AppError('Charge point está offline.', 409, 'CHARGE_POINT_OFFLINE')
 
   if (connector.status !== 'AVAILABLE') {
