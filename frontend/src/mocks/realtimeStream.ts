@@ -8,6 +8,7 @@
  */
 import { mockChargePoints, mockConnectors } from "./data"
 import { getMockActiveSession } from "./meData"
+import { flipNextConnector } from "./stationsData"
 
 const TICK_MS = 5_000
 
@@ -76,13 +77,25 @@ export function createMeEventStream(userId: string): ReadableStream<Uint8Array> 
   // Transições de sessão (`session.started`/`session.stopped`) — o backend real
   // as emite; sem elas o mock só provaria `session.metrics`.
   let announced: { sessionId: string; chargePointId: string } | null = null
+  let tick = 0
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(heartbeatFrame())
       timer = setInterval(() => {
-        const session = getMockActiveSession(userId)
+        tick += 1
         const occurredAt = new Date().toISOString()
+        // Canal PÚBLICO de estações (`ui:ev:stations`, todo motorista logado assina): de vez em
+        // quando um conector da rede vira livre↔ocupado — a lista/mapa mudam sozinhos, sem F5.
+        // Primeira virada no 1º tick (5s), depois a cada 3 ticks (15s).
+        if (tick === 1 || tick % 3 === 0) {
+          const flipped = flipNextConnector()
+          if (flipped) {
+            controller.enqueue(sseFrame({ type: "chargepoint.status", occurredAt, ...flipped }))
+            return
+          }
+        }
+        const session = getMockActiveSession(userId)
         if (!session) {
           if (announced) {
             controller.enqueue(sseFrame({ type: "session.stopped", occurredAt, ...announced }))

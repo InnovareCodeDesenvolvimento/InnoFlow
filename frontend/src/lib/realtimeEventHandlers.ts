@@ -1,11 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { meKeys } from "@/hooks/useMeSessions"
-import { sitesKeys } from "@/hooks/useSites"
+import { publicSitesKeys, sitesKeys } from "@/hooks/useSites"
 import { chargePointsKeys } from "@/hooks/useChargePoints"
 import { connectorsKeys } from "@/hooks/useConnectors"
 import { tariffsKeys } from "@/hooks/useTariffs"
 import { authTokensKeys } from "@/hooks/useAuthTokens"
-import type { MeActiveSessionResponse, RealtimeEvent } from "@/types/api"
+import type { MeActiveSessionResponse, PaginatedResponse, PublicSite, RealtimeEvent } from "@/types/api"
 
 /** `entityType` do evento → raiz da query que precisa ser invalidada (ver `admin.entity.changed`). `TariffAssignment` não tem hook ainda (gap conhecido, ver PROGRESSO.md) — evento chega mas não tem o que invalidar. */
 const ENTITY_QUERY_KEYS: Partial<Record<string, readonly unknown[]>> = {
@@ -14,6 +14,19 @@ const ENTITY_QUERY_KEYS: Partial<Record<string, readonly unknown[]>> = {
   Connector: connectorsKeys.all,
   Tariff: tariffsKeys.all,
   AuthToken: authTokensKeys.all,
+}
+
+/**
+ * `chargepoint.status` chega pra TODO motorista logado (canal público
+ * `ui:ev:stations`) — de qualquer carregador da plataforma. Sem esta guarda,
+ * cada mudança de status em qualquer lugar faria todo motorista refazer o
+ * fetch das estações (`decisoes-mapa-eletropostos.md` item 5). Só invalida se
+ * o carregador estiver numa lista de estações que ESTE cliente carregou.
+ */
+export function isChargePointInLoadedStations(queryClient: QueryClient, chargePointId: string): boolean {
+  return queryClient
+    .getQueriesData<PaginatedResponse<PublicSite>>({ queryKey: publicSitesKeys.all })
+    .some(([, data]) => data?.items.some((site) => site.chargePoints.some((cp) => cp.id === chargePointId)))
 }
 
 /**
@@ -57,6 +70,11 @@ export function handleRealtimeEvent(event: RealtimeEvent, queryClient: QueryClie
     case "chargepoint.status":
       queryClient.invalidateQueries({ queryKey: connectorsKeys.all })
       queryClient.invalidateQueries({ queryKey: ["dashboard", "live"] })
+      if (isChargePointInLoadedStations(queryClient, event.chargePointId)) {
+        queryClient.invalidateQueries({ queryKey: publicSitesKeys.all })
+        // Detalhe aberto de um carregador (preço/conectores) — só refaz o que estiver montado.
+        queryClient.invalidateQueries({ queryKey: ["publicChargePoint"] })
+      }
       return
 
     case "admin.entity.changed": {

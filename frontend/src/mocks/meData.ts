@@ -9,6 +9,7 @@
  * (tudo resolveria no mesmo tick).
  */
 import { mockChargePoints, mockConnectors, mockSites, mockTariffs } from "./data"
+import { extraStations } from "./stationsData"
 import type {
   ChargingSessionStatus,
   ConnectorType,
@@ -46,9 +47,33 @@ function toPublicTariff(tariffId: string): PublicTariffSummary | null {
   }
 }
 
+/** Carregadores das estações EXTRAS do mapa (`stationsData.ts`) — o detalhe da estação busca preço por aqui. DC com a tarifa DC, AC com a do posto. */
+function getExtraStationCard(ocppIdentity: string): PublicChargePointCard | null {
+  for (const station of extraStations) {
+    const cp = station.chargePoints.find((c) => c.ocppIdentity === ocppIdentity)
+    if (!cp) continue
+    return {
+      ocppIdentity: cp.ocppIdentity,
+      vendor: cp.vendor,
+      model: cp.model,
+      online: cp.online,
+      site: { id: station.id, name: station.name, addressLine: station.addressLine, city: station.city, state: station.state },
+      connectors: cp.connectors.map((c) => ({
+        connectorId: c.connectorId,
+        type: c.type,
+        maxPowerKw: String(c.maxPowerKw),
+        status: c.status,
+        tariff: toPublicTariff(c.type === "AC_TYPE2" ? "tariff_3" : "tariff_1"),
+      })),
+      generatedAt: new Date().toISOString(),
+    }
+  }
+  return null
+}
+
 export function getPublicChargePointCard(ocppIdentity: string): PublicChargePointCard | null {
   const cp = mockChargePoints.find((c) => c.ocppIdentity === ocppIdentity && c.active)
-  if (!cp) return null
+  if (!cp) return getExtraStationCard(ocppIdentity)
   const site = mockSites.find((s) => s.id === cp.siteId)
   const connectors: PublicChargePointConnector[] = mockConnectors
     .filter((c) => c.chargePointId === cp.id)

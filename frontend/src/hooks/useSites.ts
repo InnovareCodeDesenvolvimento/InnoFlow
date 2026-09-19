@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { sitesService } from "@/services/sites"
+import { useAuthStore } from "@/store/authStore"
+import { useRealtimeHealthy } from "@/store/realtimeStore"
 import type { CreateSiteInput, PaginationParams, PublicSitesQuery, UpdateSiteInput } from "@/types/api"
 
 export const sitesKeys = {
@@ -12,12 +14,29 @@ export const publicSitesKeys = {
   list: (params: PublicSitesQuery) => [...publicSitesKeys.all, "list", params] as const,
 }
 
-/** `GET /api/sites` — público, usado pela listagem de eletropostos do motorista. */
-export function usePublicSites(params: PublicSitesQuery = {}) {
+/**
+ * `GET /api/sites` — público, ÚNICO caminho de dados das estações (lista
+ * pública, "Perto de você" da Home e a aba Mapa; ver
+ * `decisoes-mapa-eletropostos.md` item 1 — nada de segundo endpoint pro
+ * mesmo número).
+ *
+ * Tempo real: `chargepoint.status` invalida esta query quando o carregador
+ * está na lista carregada (`lib/realtimeEventHandlers.ts`); o polling é a
+ * rede de segurança, função da saúde do stream — motorista logado com stream
+ * fora do ar 20s; stream saudável OU visitante anônimo (não existe SSE
+ * público) 60s.
+ */
+export function usePublicSites(params: PublicSitesQuery = {}, options: { enabled?: boolean } = {}) {
+  const realtimeHealthy = useRealtimeHealthy()
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   return useQuery({
     queryKey: publicSitesKeys.list(params),
     queryFn: () => sitesService.listPublic(params),
     placeholderData: (prev) => prev,
+    enabled: options.enabled ?? true,
+    staleTime: 15_000,
+    refetchInterval: isAuthenticated && !realtimeHealthy ? 20_000 : 60_000,
+    refetchIntervalInBackground: false,
   })
 }
 

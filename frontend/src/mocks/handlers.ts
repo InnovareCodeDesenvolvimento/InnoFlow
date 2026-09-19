@@ -30,6 +30,7 @@ import {
   stopMockSession,
 } from "./meData"
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
+import { buildPublicSites } from "./stationsData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -263,28 +264,23 @@ export const handlers = [
   }),
 
   // ---- Sites públicos ---------------------------------------------------------
+  // `GET /api/sites` no contrato ESTENDIDO (`mocks/stationsData.ts`): `isFree`,
+  // `online`, `ocppIdentity`, `connectorSummary` + bounding box (todos os 4
+  // limites juntos, ou nenhum — igual ao backend). Default de 50 por página.
   http.get("/api/sites", ({ request }) => {
     const url = new URL(request.url)
-    const publicSites = mockSites
-      .filter((s) => s.active)
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        addressLine: s.addressLine,
-        city: s.city,
-        state: s.state,
-        latitude: s.latitude,
-        longitude: s.longitude,
-        chargePoints: mockChargePoints
-          .filter((cp) => cp.siteId === s.id && cp.active)
-          .map((cp) => ({
-            id: cp.id,
-            vendor: cp.vendor,
-            model: cp.model,
-            connectors: mockConnectors.filter((c) => c.chargePointId === cp.id),
-          })),
-      }))
-    return HttpResponse.json(paginate(publicSites, url))
+    const num = (key: string) => (url.searchParams.has(key) ? Number(url.searchParams.get(key)) : undefined)
+    const [minLat, maxLat, minLng, maxLng] = [num("minLat"), num("maxLat"), num("minLng"), num("maxLng")]
+    const box = [minLat, maxLat, minLng, maxLng]
+    if (box.some((v) => v !== undefined) && !box.every((v) => v !== undefined)) {
+      return HttpResponse.json(errorBody("Informe minLat, maxLat, minLng e maxLng juntos, ou nenhum deles.", "VALIDATION_ERROR"), { status: 400 })
+    }
+    let sites = buildPublicSites()
+    if (minLat !== undefined && maxLat !== undefined && minLng !== undefined && maxLng !== undefined) {
+      sites = sites.filter((s) => s.latitude >= minLat && s.latitude <= maxLat && s.longitude >= minLng && s.longitude <= maxLng)
+    }
+    if (!url.searchParams.has("pageSize")) url.searchParams.set("pageSize", "50")
+    return HttpResponse.json(paginate(sites, url))
   }),
 
   // ---- Sites admin -------------------------------------------------------------

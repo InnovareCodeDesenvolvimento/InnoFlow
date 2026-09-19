@@ -3,6 +3,7 @@ import { ChevronRight, History, QrCode, Wallet, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { NearbyStationsSection } from "@/components/estacoes/NearbyStationsSection"
 import { useActiveSession, useMeSessions, useMeWallet } from "@/hooks/useMeSessions"
 import { useAuthStore } from "@/store/authStore"
 import { CHARGING_SESSION_STATUS_LABELS, formatCents, formatDateTime, formatEnergyWh, sessionStatusBadgeVariant } from "@/lib/utils"
@@ -68,6 +69,8 @@ export function Home() {
         <p className="mt-3 text-sm font-bold text-ink">Pronto para carregar?</p>
         <p className="mt-1 text-xs text-ink-softer">Aponte a câmera do seu celular para o QR code no carregador.</p>
       </div>
+
+      <NearbyStationsSection />
 
       <div>
         <div className="mb-2 flex items-center justify-between">

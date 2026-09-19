@@ -1,68 +1,119 @@
-import { MapPin, Zap } from "lucide-react"
-import { Card, CardContent } from "@/components/ui/Card"
+import { MapPin, Navigation, Zap } from "lucide-react"
+import { Card } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
-import { CONNECTOR_TYPE_LABELS, formatPowerKw, toNumber } from "@/lib/utils"
-import type { ConnectorType, PublicSite } from "@/types/api"
+import { buttonVariants } from "@/components/ui/buttonVariants"
+import { formatDistance } from "@/lib/geo"
+import { connectorGroupLabel, directionsLinks, freeSummaryLabel, STATION_STATE_LABELS, stationState, type StationState } from "@/lib/stations"
+import { cn } from "@/lib/utils"
+import type { PublicSite } from "@/types/api"
 
-interface ConnectorSummary {
-  type: ConnectorType
-  total: number
-  available: number
-  maxPowerKw: number
+const STATE_BADGE: Record<StationState, "success" | "warning" | "neutral"> = {
+  free: "success",
+  busy: "warning",
+  offline: "neutral",
 }
 
-/** Agrupa os conectores de todos os pontos de recarga do site por tipo — é o que o motorista decide olhando: quantos livres, de qual tipo, com qual potência. */
-function summarizeConnectors(site: PublicSite): ConnectorSummary[] {
-  const byType = new Map<ConnectorType, ConnectorSummary>()
-  for (const cp of site.chargePoints) {
-    for (const c of cp.connectors) {
-      const entry = byType.get(c.type) ?? { type: c.type, total: 0, available: 0, maxPowerKw: 0 }
-      entry.total += 1
-      if (c.status === "AVAILABLE") entry.available += 1
-      entry.maxPowerKw = Math.max(entry.maxPowerKw, toNumber(c.maxPowerKw))
-      byType.set(c.type, entry)
-    }
-  }
-  return [...byType.values()].sort((a, b) => a.type.localeCompare(b.type))
-}
+/**
+ * Card da estação — o MESMO na lista pública (`Eletropostos`), na aba Mapa e
+ * no "Perto de você" (evoluído, não duplicado: `decisoes-mapa-eletropostos.md`
+ * item 1). Os números "x de y livres" vêm do `connectorSummary` do servidor
+ * (regra única de `isFree`); antes este card contava `status === AVAILABLE` e
+ * mostrava "Disponível" pra conector de carregador OFFLINE.
+ *
+ * Ação primária: "Como chegar" (deep link). NÃO há "Iniciar recarga" aqui — só
+ * na tela vinda do QR (senão dá pra iniciar sessão num carregador a 40 km).
+ *
+ * Com `onSelect`, a área de informação vira um botão (abre o detalhe) — o
+ * "Como chegar" fica FORA dele (link dentro de botão é HTML inválido).
+ */
+export function PublicSiteCard({
+  site,
+  distanceKm,
+  selected = false,
+  onSelect,
+  className,
+}: {
+  site: PublicSite
+  distanceKm?: number | null
+  selected?: boolean
+  onSelect?: () => void
+  className?: string
+}) {
+  const state = stationState(site)
+  const { total, free, groups } = site.connectorSummary
+  const links = directionsLinks(site)
 
-export function PublicSiteCard({ site }: { site: PublicSite }) {
-  const summary = summarizeConnectors(site)
-  const totalAvailable = summary.reduce((acc, s) => acc + s.available, 0)
-  const totalConnectors = summary.reduce((acc, s) => acc + s.total, 0)
+  const info = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold text-ink">{site.name}</h3>
+          <p className="mt-1 flex items-start gap-1.5 text-sm text-ink-softer">
+            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0">
+              {site.addressLine} — {site.city}/{site.state}
+            </span>
+          </p>
+        </div>
+        {distanceKm !== null && distanceKm !== undefined && (
+          <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-black tabular-nums text-primary-700" title="Distância em linha reta">
+            {formatDistance(distanceKm)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <Badge variant={STATE_BADGE[state]}>
+          <Zap className="h-3 w-3" aria-hidden="true" />
+          {STATION_STATE_LABELS[state]}
+        </Badge>
+        <span className="text-sm font-semibold text-ink-soft">{freeSummaryLabel({ total, free })}</span>
+      </div>
+
+      {groups.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {groups.map((g) => (
+            <Badge key={`${g.type}-${g.maxPowerKw}`} variant={g.free > 0 ? "primary" : "neutral"} className="normal-case">
+              {connectorGroupLabel(g)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </>
+  )
 
   return (
-    <Card className="transition-shadow hover:shadow-card-hover">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="truncate text-base font-bold text-ink">{site.name}</h3>
-            <p className="mt-1 flex items-start gap-1.5 text-sm text-ink-softer">
-              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                {site.addressLine} — {site.city}/{site.state}
-              </span>
-            </p>
-          </div>
-          <Badge variant={totalAvailable > 0 ? "success" : "neutral"} className="shrink-0">
-            <Zap className="h-3 w-3" aria-hidden="true" />
-            {totalAvailable}/{totalConnectors} livres
-          </Badge>
-        </div>
+    <Card
+      data-station-id={site.id}
+      data-state={state}
+      // `outline`, não `ring`: `.card-premium` define `box-shadow` fora de @layer e ganharia do anel (que é box-shadow).
+      className={cn("card-premium transition-shadow", selected && "outline outline-2 outline-primary", className)}
+    >
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-label={`${site.name}: ver detalhes`}
+          className="pressable block w-full rounded-t-[1.25rem] p-5 pb-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          {info}
+        </button>
+      ) : (
+        <div className="p-5 pb-3">{info}</div>
+      )}
 
-        {summary.length > 0 ? (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {summary.map((s) => (
-              <Badge key={s.type} variant={s.available > 0 ? "primary" : "neutral"}>
-                {CONNECTOR_TYPE_LABELS[s.type]} · {s.available}/{s.total}
-                {s.maxPowerKw > 0 && <span className="normal-case">· até {formatPowerKw(s.maxPowerKw)}</span>}
-              </Badge>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-4 text-xs text-ink-subtle">Nenhum conector cadastrado ainda.</p>
-        )}
-      </CardContent>
+      <div className="px-5 pb-5">
+        <a
+          href={links.google}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: "outline", className: "min-h-11 w-full" })}
+        >
+          <Navigation className="h-4 w-4" aria-hidden="true" />
+          Como chegar
+          <span className="sr-only"> em {site.name} (abre o Google Maps)</span>
+        </a>
+      </div>
     </Card>
   )
 }

@@ -1,5 +1,5 @@
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { History, Home, LogOut, ShieldAlert, Wallet, Zap } from "lucide-react"
+import { History, Home, LogOut, MapPin, ShieldAlert, Wallet, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/authStore"
 import { useActiveSession } from "@/hooks/useMeSessions"
@@ -9,11 +9,13 @@ import logoIcon from "@/assets/logo-icon-sm.png"
 /**
  * Casca do PWA do motorista — barra de navegação FIXA embaixo (padrão de
  * app mobile, não a topbar do site público/admin): é onde o polegar chega
- * sem esforço segurando o celular em pé do lado do carro. 4 destinos fixos,
- * sem sub-menus.
+ * sem esforço segurando o celular em pé do lado do carro. 5 destinos fixos,
+ * sem sub-menus (em 320px cada aba tem 64px de largura e ~58px de altura — o
+ * alvo de toque passa de 44px; o rótulo mais longo, "Histórico", cabe em 11px).
  */
 const NAV_ITEMS = [
   { href: "/app", label: "Início", icon: Home, exact: true },
+  { href: "/app/mapa", label: "Mapa", icon: MapPin, exact: true },
   { href: "/app/sessao", label: "Sessão", icon: Zap, exact: true },
   { href: "/app/sessoes", label: "Histórico", icon: History, exact: true },
   { href: "/app/carteira", label: "Carteira", icon: Wallet, exact: true },

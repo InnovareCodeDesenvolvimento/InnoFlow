@@ -461,6 +461,25 @@
   animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+/* ---- 7b. Bottom sheet — entrada de baixo pra cima, um-tiro -------------- */
+/* Só o detalhe da estação (`StationDetailSheet`). O sheet é `fixed inset-x-0
+   mx-auto` (sem `translate` de centralização), então a animação de
+   `transform` não briga com posicionamento. Cai no bloco de
+   `prefers-reduced-motion` como todas as outras (vira instantâneo). */
+@keyframes sheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-sheet-up {
+  animation: sheetUp 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 /* ---- 8. Tabela densa (Admin) — sombra tingida no CONTAINER, não na linha */
 /* `components/ui/Table.tsx` é exclusivo do Admin (não é importado por
    nenhuma tela do PWA) — por isso é o único componente-base desta lista que

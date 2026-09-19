@@ -37,6 +37,7 @@ const AppSessao = lazy(() => import("@/pages/App/Sessao").then((m) => ({ default
 const AppSessoes = lazy(() => import("@/pages/App/Sessoes").then((m) => ({ default: m.Sessoes })))
 const AppSessaoDetalhe = lazy(() => import("@/pages/App/SessaoDetalhe").then((m) => ({ default: m.SessaoDetalhe })))
 const AppCarteira = lazy(() => import("@/pages/App/Carteira").then((m) => ({ default: m.Carteira })))
+const AppMapa = lazy(() => import("@/pages/App/Mapa").then((m) => ({ default: m.Mapa })))
 
 function RouteFallback() {
   return (
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="sessao" element={<AppSessao />} />
             <Route path="sessoes" element={<AppSessoes />} />
             <Route path="sessoes/:id" element={<AppSessaoDetalhe />} />
+            <Route path="mapa" element={<AppMapa />} />
             <Route path="carteira" element={<AppCarteira />} />
           </Route>
 
