@@ -93,11 +93,13 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
   const attempt = { identity, ip: handshake.clientIp }
   const logCtx = { identity, clientIp: handshake.clientIp, xForwardedFor: handshake.forwardedFor }
 
-  // Checa ANTES de tocar o banco/bcrypt (Órion A1, 2026-09-19). Dois contadores de FALHAS:
-  // (identidade + IP) — o atacante só trava o SEU par, nunca o carregador legítimo, porque a
-  // identidade é pública (`GET /api/sites`) — e global por IP — o flood de identidades
-  // inexistentes deixa de virar consulta ao banco + bcrypt sem freio.
-  const gate = await ocppAuthRateLimiter.check(attempt)
+  // RESERVA a tentativa ANTES de tocar o banco/bcrypt (Órion A1, 2026-09-19; reserva atômica:
+  // achado da Íris, mesma data). Dois contadores: (identidade + IP) — o atacante só trava o SEU
+  // par, nunca o carregador legítimo, porque a identidade é pública (`GET /api/sites`) — e global
+  // por IP — o flood de identidades inexistentes deixa de virar consulta ao banco + bcrypt sem
+  // freio. Reservar (e não só "checar") é o que faz o limite valer numa rajada paralela: cada
+  // tentativa em andamento já ocupa uma vaga, em vez de todas lerem "0 falhas" ao mesmo tempo.
+  const gate = await ocppAuthRateLimiter.reserve(attempt)
   if (!gate.allowed) {
     if (gate.scope === 'identity_ip') {
       logger.warn({ ...logCtx, scope: gate.scope }, '[ocpp] auth: bloqueado por rate limit (identidade+IP) — tentativas demais nesta janela')
@@ -106,12 +108,39 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
     }
     return { ok: false, reason: 'rate_limited' }
   }
+  const reservation = { identityIpCount: gate.identityIpCount, ipCount: gate.ipCount }
 
+  let result: AuthResult
+  try {
+    result = await avaliarCredenciais(identity, password, logCtx, reservation)
+  } catch (err) {
+    // Erro NOSSO (banco fora do ar, p.ex.), não falha do carregador: devolve a vaga — senão a
+    // indisponibilidade do banco viraria lockout de carregadores legítimos.
+    await ocppAuthRateLimiter.release(attempt).catch((releaseErr) => logger.error({ err: releaseErr, ...logCtx }, '[ocpp] auth: falha ao devolver a reserva do rate limit'))
+    throw err
+  }
+
+  if (result.ok) {
+    // Sucesso: o par (identidade+IP) volta a zero — falhas antigas do carregador real não o
+    // acumulam até um bloqueio — e a vaga do global do IP é devolvida (o sucesso não conta como
+    // falha; o contador global NÃO é zerado, ver authRateLimiter.ts).
+    await ocppAuthRateLimiter.registerSuccess(attempt)
+  }
+  return result
+}
+
+/** Consulta o banco e confere a senha (bcrypt). Falha de credencial = a vaga reservada fica gasta + alerta. */
+async function avaliarCredenciais(
+  identity: string,
+  password: Buffer | undefined,
+  logCtx: Record<string, unknown>,
+  reservation: { identityIpCount: number; ipCount: number },
+): Promise<AuthResult> {
   const chargePoint = await prisma.chargePoint.findUnique({ where: { ocppIdentity: identity } })
 
   if (!chargePoint || !chargePoint.active) {
     logger.warn(logCtx, '[ocpp] auth: charge point desconhecido ou inativo')
-    await registrarFalha(attempt, logCtx, false)
+    alertarFalha(reservation, logCtx, false)
     return { ok: false, reason: 'invalid' }
   }
 
@@ -120,13 +149,9 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
 
   if (!passwordOk) {
     logger.warn(logCtx, '[ocpp] auth: senha incorreta')
-    await registrarFalha(attempt, logCtx, true)
+    alertarFalha(reservation, logCtx, true)
     return { ok: false, reason: 'invalid' }
   }
-
-  // Sucesso: o par (identidade+IP) volta a zero — falhas antigas do carregador real não o
-  // acumulam até um bloqueio. (O contador global do IP NÃO é zerado, ver authRateLimiter.ts.)
-  await ocppAuthRateLimiter.clearFailures(attempt)
 
   return {
     ok: true,
@@ -139,13 +164,13 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
 }
 
 /**
- * Registra a falha e ALERTA (uma vez, no momento em que o bloqueio ativa): bloqueio de uma
+ * ALERTA (uma vez, no momento em que o bloqueio ativa) numa falha de autenticação: bloqueio de uma
  * identidade CONHECIDA é o sinal que interessa — ou é tentativa de adivinhar a senha de um
  * carregador real, ou é o próprio carregador com credencial errada/desatualizada (e aí o
- * operador precisa saber, antes de a frota inteira parar).
+ * operador precisa saber, antes de a frota inteira parar). A vaga já foi gasta na reserva.
  */
-async function registrarFalha(attempt: { identity: string; ip: string }, logCtx: Record<string, unknown>, identityKnown: boolean): Promise<void> {
-  const outcome = await ocppAuthRateLimiter.registerFailure(attempt)
+function alertarFalha(reservation: { identityIpCount: number; ipCount: number }, logCtx: Record<string, unknown>, identityKnown: boolean): void {
+  const outcome = ocppAuthRateLimiter.describeFailure(reservation)
   if (outcome.identityIpBlockedNow) {
     logger.warn(
       { ...logCtx, identityKnown, failures: outcome.identityIpCount, alert: 'ocpp_auth_lockout' },

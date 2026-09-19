@@ -16,15 +16,29 @@ import { createHash } from 'node:crypto'
  * Google). Falha do Redis = FAIL-OPEN (o login segue; a proteção por IP continua) — indisponibilidade
  * do Redis não pode tirar todo mundo do sistema.
  *
+ * RESERVA ANTES DE AVALIAR (achado da Íris, 2026-09-19): o desenho "ler o trancamento -> bcrypt ->
+ * só então contar a falha" decidia sobre um sinal INSTANTÂNEO (o estado de agora) enquanto a
+ * contagem só acontecia depois do bcrypt: 15 logins errados em paralelo liam "não trancada" e os 15
+ * eram avaliados. Agora `reserveAttempt` checa o trancamento E ocupa uma vaga num passo atômico
+ * ANTES do trabalho caro; a falha só confirma (a vaga já foi gasta), o sucesso zera as falhas e um
+ * erro nosso (banco fora do ar) devolve a vaga (`release`). O balde por IP (`loginRateLimit`,
+ * express-rate-limit) já era assim: incrementa na ENTRADA da requisição e devolve no sucesso.
+ *
  * Puro em relação a I/O: o armazenamento entra por injeção (`ThrottleStore`) — testável sem Redis.
  */
 
+export type ReserveResult = { status: 'ok'; count: number } | { status: 'locked'; retryAfterSeconds: number } | { status: 'full' }
+
 export interface ThrottleStore {
-  get(key: string): Promise<number>
+  /**
+   * ATÔMICO: conta trancada -> `locked`; já há `maxFailures` tentativas reservadas na janela ->
+   * `full`; senão INCR (TTL na criação) e devolve a contagem. `locked`/`full` não escrevem nada.
+   */
+  reserve(keys: { lock: string; failures: string }, maxFailures: number, windowSeconds: number): Promise<ReserveResult>
+  /** Devolve UMA reserva da chave (nunca negativa, nunca recria chave ausente). */
+  release(key: string): Promise<void>
   /** INCR atômico que define o TTL na criação da chave. Devolve o novo valor. */
   incrWithTtl(key: string, ttlSeconds: number): Promise<number>
-  /** Segundos restantes (0 se a chave não existe). */
-  ttlSeconds(key: string): Promise<number>
   setWithTtl(key: string, value: number, ttlSeconds: number): Promise<void>
   del(keys: string[]): Promise<void>
 }
@@ -48,7 +62,11 @@ export const DEFAULT_LOGIN_THROTTLE: LoginThrottleConfig = {
   strikesTtlSeconds: 24 * 60 * 60,
 }
 
-export type LoginGate = { allowed: true } | { allowed: false; retryAfterSeconds: number }
+/**
+ * `allowed: true` traz a contagem da vaga RESERVADA (`failures`); ausente = não houve reserva
+ * (Redis fora do ar, fail-open) e a falha, se vier, é contada à moda antiga (`incrWithTtl`).
+ */
+export type LoginGate = { allowed: true; failures?: number } | { allowed: false; retryAfterSeconds: number }
 
 /** Chave da conta: e-mail normalizado (minúsculas — `/login` casa sem distinguir caixa) e hasheado (tamanho fixo, nada de e-mail em claro no Redis). */
 function accountId(email: string): string {
@@ -66,15 +84,28 @@ export function lockDurationSeconds(strike: number, config: LoginThrottleConfig)
 
 export function createLoginThrottle(store: ThrottleStore, config: LoginThrottleConfig = DEFAULT_LOGIN_THROTTLE) {
   return {
-    /** ANTES de verificar a senha: conta trancada = recusa (com o tempo restante para o `Retry-After`). */
-    async check(email: string): Promise<LoginGate> {
-      const remaining = await store.ttlSeconds(lockKey(email))
-      return remaining > 0 ? { allowed: false, retryAfterSeconds: remaining } : { allowed: true }
+    /**
+     * ANTES de verificar a senha: RESERVA uma vaga de tentativa (atômico). Conta trancada = recusa
+     * (com o tempo restante para o `Retry-After`) mesmo com a senha certa. Já há `maxFailures`
+     * tentativas em andamento e a conta ainda não trancou (a última está no bcrypt) = recusa
+     * também, com `baseLockSeconds` de sugestão — sem isto uma rajada paralela lia "não trancada"
+     * em todas as tentativas e as N eram avaliadas (a decisão era sobre um sinal instantâneo; a
+     * contagem só vinha depois do bcrypt). Recusa NÃO escreve nada no Redis.
+     */
+    async reserveAttempt(email: string): Promise<LoginGate> {
+      const result = await store.reserve({ lock: lockKey(email), failures: failKey(email) }, config.maxFailures, config.windowSeconds)
+      if (result.status === 'locked') return { allowed: false, retryAfterSeconds: result.retryAfterSeconds }
+      if (result.status === 'full') return { allowed: false, retryAfterSeconds: config.baseLockSeconds }
+      return { allowed: true, failures: result.count }
     },
 
-    /** Falha de autenticação de uma conta que EXISTE. Devolve se esta falha ATIVOU um trancamento (e por quanto) — para alertar. */
-    async registerFailure(email: string): Promise<{ lockedNow: boolean; lockSeconds: number; failures: number }> {
-      const failures = await store.incrWithTtl(failKey(email), config.windowSeconds)
+    /**
+     * Falha de autenticação (conta que EXISTE ou não — a resposta é uniforme). A vaga já foi gasta
+     * na reserva (`reservedFailures`); sem reserva (fail-open) conta agora. Devolve se esta falha
+     * ATIVOU um trancamento (e por quanto) — para alertar.
+     */
+    async registerFailure(email: string, reservedFailures?: number): Promise<{ lockedNow: boolean; lockSeconds: number; failures: number }> {
+      const failures = reservedFailures ?? (await store.incrWithTtl(failKey(email), config.windowSeconds))
       if (failures < config.maxFailures) return { lockedNow: false, lockSeconds: 0, failures }
 
       const strike = await store.incrWithTtl(strikesKey(email), config.strikesTtlSeconds)
@@ -84,9 +115,14 @@ export function createLoginThrottle(store: ThrottleStore, config: LoginThrottleC
       return { lockedNow: true, lockSeconds, failures }
     },
 
-    /** Login OK: zera as falhas recentes (as reincidências continuam lembradas — não vale "limpar" o histórico acertando uma vez). */
+    /** Login OK: zera as falhas recentes (as reincidências continuam lembradas — não vale "limpar" o histórico acertando uma vez). Zera também a vaga desta tentativa. */
     async registerSuccess(email: string): Promise<void> {
       await store.del([failKey(email)])
+    },
+
+    /** Erro NOSSO no meio da avaliação (banco fora do ar, p.ex.) — não é falha do usuário: devolve a vaga. */
+    async release(email: string): Promise<void> {
+      await store.release(failKey(email))
     },
   }
 }

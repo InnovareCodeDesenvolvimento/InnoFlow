@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createHash, randomInt } from 'node:crypto'
 import request from 'supertest'
 import bcrypt from 'bcryptjs'
@@ -331,21 +331,74 @@ describe('FAIL-OPEN: Redis fora do ar não derruba nem pendura o login', () => {
   }, 40_000)
 })
 
-describe('rajada paralela de logins errados contra UMA conta (check-then-act)', () => {
+describe('rajada paralela de logins errados contra UMA conta (reserva ANTES de avaliar)', () => {
+  // Os testes de queda acima terminam com o proxy voltando, mas o ioredis ainda está reconectando (backoff): sem esperar, o
+  // throttle estaria em fail-open (por desenho) e a rajada seria toda avaliada por motivo alheio ao que este bloco prova.
+  beforeAll(async () => {
+    await waitFor(async () => redis.status === 'ready', { timeoutMs: 15_000, what: 'conexão do throttle com o Redis pronta' })
+  })
+
   /**
-   * FURO CONHECIDO (achado da Íris, 2026-09-19 — NÃO corrigido aqui): `/login` faz `throttle.check()`
-   * (lê a chave de trancamento) -> bcrypt -> SÓ DEPOIS `registerFailure()` (em segundo plano, depois da
-   * resposta). Uma rajada paralela lê "não trancada" em todas as tentativas e as N são avaliadas: o
-   * limite de 5 vira o tamanho da rajada. O contador conta certo (Lua atômico); o buraco é o portão.
-   * `loginRateLimit` (por IP) tem o mesmo desenho (conta na RESPOSTA). Desejado: reservar a tentativa
-   * antes de avaliar. `it.fails` = comportamento desejado descrito; vire `it` ao corrigir.
+   * Achado da Íris (2026-09-19), corrigido: `/login` fazia `throttle.check()` (lia a chave de trancamento) ->
+   * bcrypt -> SÓ DEPOIS `registerFailure()` (em segundo plano, depois da resposta). Uma rajada paralela
+   * lia "não trancada" em todas as tentativas e as N eram avaliadas (15 de 15). Causa raiz: decisão sobre
+   * um sinal instantâneo. Agora `reserveAttempt` checa o trancamento E ocupa uma vaga num passo atômico
+   * (Lua) antes do banco/bcrypt.
+   *
+   * O balde por IP (`loginRateLimit`, express-rate-limit) NÃO tinha o furo: ele incrementa na ENTRADA da
+   * requisição e só devolve no sucesso — o último teste desta suíte prova isso.
    */
-  it.fails('15 senhas erradas EM PARALELO contra a mesma conta: só ~o limite de falhas chega a ser avaliado (FURO CONHECIDO: hoje todas são avaliadas)', async () => {
+  it('15 senhas erradas EM PARALELO contra a mesma conta: EXATAMENTE o limite (5) é avaliado (401); o resto leva 429 RATE_LIMITED_ACCOUNT com Retry-After', async () => {
     const u = await novaConta('rajada')
     const ip = freshIp()
     const N = 15 // abaixo dos 20 do limite por IP, para o teste medir SÓ o throttle por conta
     const respostas = await Promise.all(Array.from({ length: N }, (_, i) => login(u.email, `rajada-${i}`, ip)))
-    const avaliadas = respostas.filter((r) => r.status === 401).length
-    expect(avaliadas).toBeLessThanOrEqual(10) // limite 5, tolerância 2x
+
+    expect(respostas.filter((r) => r.status === 401)).toHaveLength(5)
+    const barradas = respostas.filter((r) => r.status === 429)
+    expect(barradas).toHaveLength(N - 5)
+    for (const r of barradas) {
+      expect(r.body.code).toBe('RATE_LIMITED_ACCOUNT')
+      expect(Number(r.headers['retry-after'])).toBeGreaterThan(0)
+    }
+
+    // A 5ª falha confirmada tranca a conta (60s) — e a rajada não inflou o contador: barradas não escrevem.
+    await aguardarLock(u.email)
+    expect(await direct.ttl(lockKey(u.email))).toBeLessThanOrEqual(60)
+    expect(Number(await direct.get(strikesKey(u.email)))).toBe(1) // UM trancamento, não vários
+    expect((await login(u.email, SENHA, ip)).status).toBe(429) // trancada: nem a senha certa entra
   }, 60_000)
+
+  it('rajada com a senha CERTA no meio: a certa que passa do portão entra (200) e zera as falhas — o portão não recusa quem tem a senha só porque há gente errando ao lado', async () => {
+    const u = await novaConta('rajada-mista')
+    const ip = freshIp()
+    const respostas = await Promise.all([login(u.email, 'x1', ip), login(u.email, 'x2', ip), login(u.email, SENHA, ip), login(u.email, 'x3', ip)]) // 4 vagas de 5
+    expect(respostas.map((r) => r.status).sort()).toEqual([200, 401, 401, 401])
+    await waitFor(async () => (await direct.get(failKey(u.email))) === null, { what: 'sucesso zerar as falhas da conta' })
+    expect(await direct.ttl(lockKey(u.email))).toBe(-2) // sem trancamento
+    expect((await login(u.email, SENHA, ip)).status).toBe(200)
+  }, 60_000)
+
+  it('erro NOSSO no meio (banco fora do ar) devolve a vaga: 8 logins com o banco quebrado não trancam a conta', async () => {
+    const u = await novaConta('erro-banco')
+    const ip = freshIp()
+    const espionado = vi.spyOn(prisma.user, 'findUnique').mockRejectedValue(new Error('banco indisponível (simulado)') as never)
+    try {
+      for (let i = 0; i < 8; i++) expect((await login(u.email, SENHA, ip)).status).toBe(500) // nenhum vira 429
+    } finally {
+      espionado.mockRestore()
+    }
+    expect(await direct.get(failKey(u.email))).toBeNull() // nenhuma vaga ficou reservada
+    expect((await login(u.email, SENHA, ip)).status).toBe(200)
+  }, 60_000)
+
+  it('o balde por IP (loginRateLimit) já vale sob rajada: 25 senhas erradas paralelas do MESMO IP, contas diferentes -> 20 avaliadas (401) e 5 barradas (429 RATE_LIMITED_AUTH)', async () => {
+    const ip = freshIp()
+    const N = 25
+    const respostas = await Promise.all(Array.from({ length: N }, (_, i) => login(`inexistente-${i}-${suffix}@example.com`, 'errada', ip)))
+    expect(respostas.filter((r) => r.status === 401)).toHaveLength(20)
+    const barradas = respostas.filter((r) => r.status === 429)
+    expect(barradas).toHaveLength(N - 20)
+    for (const r of barradas) expect(r.body.code).toBe('RATE_LIMITED_AUTH')
+  }, 90_000)
 })

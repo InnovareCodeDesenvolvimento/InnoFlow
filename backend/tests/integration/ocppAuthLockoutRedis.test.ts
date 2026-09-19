@@ -284,28 +284,70 @@ describe('atomicidade do script Lua (INCR + EXPIRE) no Redis real', () => {
   })
 })
 
-describe('rajada paralela de tentativas contra o mesmo par (check-then-act)', () => {
+describe('rajada paralela de tentativas contra o mesmo par (reserva ANTES de avaliar)', () => {
   /**
-   * FURO CONHECIDO (achado da Íris, 2026-09-19 — NÃO corrigido aqui, é código de produção):
-   * `authenticateChargePoint` faz `check()` (lê o contador) -> consulta o banco -> `bcrypt.compare` ->
-   * SÓ ENTÃO `registerFailure()` (INCR). Uma rajada de N handshakes paralelos lê o contador em 0 nas
-   * N tentativas, todas passam pelo `check` e todas são avaliadas — o limite de 5 vira o tamanho da
-   * rajada. Medido: 40 paralelos = 40 avaliadas, 0 barradas (o contador em si fecha em 40: o Lua é
-   * exato; o buraco é o portão, não o contador). Correção esperada: reservar a tentativa ANTES de
-   * avaliar (INCR primeiro, comparar com o limite; devolver/zerar no sucesso). `it.fails` = o
-   * comportamento DESEJADO descrito; troque por `it` quando o Vega corrigir.
+   * Achado da Íris (2026-09-19), corrigido: `authenticateChargePoint` fazia `check()` (lia o contador) ->
+   * banco -> `bcrypt.compare` -> SÓ ENTÃO `registerFailure()` (INCR). Uma rajada de N handshakes paralelos
+   * lia 0 nas N tentativas e as N eram avaliadas (medido: 40 paralelos = 40 avaliadas, 0 barradas). Causa
+   * raiz: decisão tomada sobre um sinal instantâneo. Agora `reserve` decide E conta num passo atômico
+   * (Lua) ANTES do trabalho caro: cada tentativa em andamento já ocupa uma vaga.
    */
-  it.fails('rajada de 40 handshakes paralelos com senha errada: só ~o limite do par chega a ser avaliado, o resto é barrado (FURO CONHECIDO: hoje TODAS são avaliadas)', async () => {
+  it('rajada de 40 handshakes paralelos com senha errada: EXATAMENTE o limite do par (5) é avaliado (401) e o resto é barrado (429)', async () => {
     const cp = await createChargePoint(tenant, 'rajada')
     const ip = freshIp()
     const N = 40
     const status = await Promise.all(Array.from({ length: N }, (_, i) => handshake(cp.identity, `rajada-${i}`, ip)))
     const avaliadas = status.filter((s) => s === 401).length
+    const barradas = status.filter((s) => s === 429).length
 
-    // Parte que já vale hoje: o contador de falhas conta exatamente as avaliadas (Lua atômico), nenhuma se perde.
-    const par = (await failKeysOf(ip)).find((k) => k.key.startsWith('ocpp:auth:fail:id:'))!
-    expect(par.value).toBe(avaliadas)
+    expect(avaliadas).toBe(MAX_PAR)
+    expect(barradas).toBe(N - MAX_PAR)
 
-    expect(avaliadas).toBeLessThanOrEqual(MAX_PAR * 2) // tolerância: 2x o limite
+    // O contador fecha exato no limite (a tentativa barrada não incrementa nada) e o global do IP conta as mesmas vagas.
+    const chaves = await failKeysOf(ip)
+    expect(chaves.find((k) => k.key.startsWith('ocpp:auth:fail:id:'))!.value).toBe(MAX_PAR)
+    expect(chaves.find((k) => k.key.startsWith('ocpp:auth:fail:ip:'))!.value).toBe(MAX_PAR)
+  })
+
+  it('a rajada trava só o par do atacante: o carregador real, de OUTRO IP, conecta durante e depois dela', async () => {
+    const cp = await createChargePoint(tenant, 'rajada-legitimo')
+    const atacante = freshIp()
+    const legitimo = freshIp()
+    const [aposRajada, legitimoDuranteRajada] = await Promise.all([
+      Promise.all(Array.from({ length: 30 }, (_, i) => handshake(cp.identity, `errada-${i}`, atacante))),
+      handshake(cp.identity, SEGREDO, legitimo),
+    ])
+    expect(aposRajada.filter((s) => s === 401)).toHaveLength(MAX_PAR)
+    expect(legitimoDuranteRajada).toBe(101)
+    expect(await handshake(cp.identity, SEGREDO, legitimo)).toBe(101)
+    expect(await handshake(cp.identity, SEGREDO, atacante)).toBe(429) // o par do atacante segue trancado, até com a senha certa
+  })
+
+  it('rajada MISTA (senhas erradas + a certa, em paralelo, mesmo par): a certa que passa do portão conecta e ZERA o par; nenhuma vaga fica vazada', async () => {
+    const cp = await createChargePoint(tenant, 'rajada-mista')
+    const ip = freshIp()
+    // 3 erradas + 1 certa: cabem nas 5 vagas, nada é barrado
+    const status = await Promise.all([handshake(cp.identity, 'x1', ip), handshake(cp.identity, 'x2', ip), handshake(cp.identity, 'x3', ip), handshake(cp.identity, SEGREDO, ip)])
+    expect(status.sort()).toEqual([101, 401, 401, 401])
+    // Depois do sucesso o par volta a zero (mesmo que a certa tenha terminado antes de alguma errada)
+    const par = (await failKeysOf(ip)).find((k) => k.key.startsWith('ocpp:auth:fail:id:'))
+    expect(par === undefined || par.value <= 3).toBe(true)
+    // O global do IP guarda só as FALHAS (o sucesso devolveu a vaga dele): 3, não 4
+    expect((await failKeysOf(ip)).find((k) => k.key.startsWith('ocpp:auth:fail:ip:'))!.value).toBe(3)
+  })
+
+  it('erro NOSSO no meio (banco fora do ar) devolve as vagas: o carregador não é bloqueado por indisponibilidade do servidor', async () => {
+    const cp = await createChargePoint(tenant, 'erro-banco')
+    const ip = freshIp()
+    const espionado = vi.spyOn(prisma.chargePoint, 'findUnique').mockRejectedValue(new Error('banco indisponível (simulado)') as never)
+    try {
+      const status: number[] = []
+      for (let i = 0; i < MAX_PAR + 3; i++) status.push(await handshake(cp.identity, SEGREDO, ip)) // em sequência: cada uma devolve a vaga antes da próxima
+      expect(status).toEqual(Array(MAX_PAR + 3).fill(500)) // nenhum virou 429: as reservas foram devolvidas
+    } finally {
+      espionado.mockRestore()
+    }
+    expect(await failKeysOf(ip)).toEqual([]) // nem chave sobrou
+    expect(await handshake(cp.identity, SEGREDO, ip)).toBe(101) // e o carregador conecta assim que o banco volta
   })
 })

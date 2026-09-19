@@ -101,6 +101,10 @@ async function throttleSafely<T>(action: () => Promise<T>, fallback: T): Promise
   }
 }
 
+function findLoginUser(email: string) {
+  return prisma.user.findUnique({ where: { email }, include: { operator: { select: { name: true } } } })
+}
+
 function toUserDTO(user: { id: string; name: string; email: string; role: string; operatorId: string | null; operatorName?: string | null; hasPassword: boolean }) {
   return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId, operatorName: user.operatorName ?? null, hasPassword: user.hasPassword }
 }
@@ -137,22 +141,33 @@ router.post(
     // Throttle por CONTA com backoff (Órion M7) — vale para e-mail existente OU não (resposta
     // uniforme: um 429 só para contas reais denunciaria quais e-mails existem). Conta trancada =
     // recusa mesmo com a senha certa. Falha do Redis = fail-open (ver core/auth/loginThrottle.ts).
-    const gate = await throttleSafely(() => loginThrottle.check(email), { allowed: true as const })
+    // A vaga é RESERVADA aqui (atômico), antes do banco/bcrypt: uma rajada paralela não passa toda
+    // pelo portão lendo "0 falhas" ao mesmo tempo (ver `reserveAttempt`).
+    const gate = await throttleSafely(() => loginThrottle.reserveAttempt(email), { allowed: true as const })
     if (!gate.allowed) {
       res.setHeader('Retry-After', String(gate.retryAfterSeconds))
       throw new AppError('Muitas tentativas de login para esta conta. Tente novamente mais tarde.', 429, 'RATE_LIMITED_ACCOUNT')
     }
 
-    const user = await prisma.user.findUnique({ where: { email }, include: { operator: { select: { name: true } } } })
+    let user: Awaited<ReturnType<typeof findLoginUser>>
+    let usableHash: string | null
+    let passwordOk: boolean
+    try {
+      user = await findLoginUser(email)
 
-    // TEMPO CONSTANTE (Órion M7): SEMPRE um bcrypt.compare, exista ou não a conta, esteja ou não
-    // ativa, tenha ou não senha (conta só-Google). Antes, e-mail inexistente/inativo/só-Google
-    // respondia em ~0ms e o resto em ~110ms — o tempo revelava quais e-mails têm conta.
-    const usableHash = user?.active && user.passwordHash ? user.passwordHash : null
-    const passwordOk = await bcrypt.compare(password, usableHash ?? (await getDummyHash()))
+      // TEMPO CONSTANTE (Órion M7): SEMPRE um bcrypt.compare, exista ou não a conta, esteja ou não
+      // ativa, tenha ou não senha (conta só-Google). Antes, e-mail inexistente/inativo/só-Google
+      // respondia em ~0ms e o resto em ~110ms — o tempo revelava quais e-mails têm conta.
+      usableHash = user?.active && user.passwordHash ? user.passwordHash : null
+      passwordOk = await bcrypt.compare(password, usableHash ?? (await getDummyHash()))
+    } catch (err) {
+      // Erro NOSSO (banco fora do ar), não falha do usuário: devolve a vaga reservada.
+      if (gate.failures !== undefined) void throttleSafely(() => loginThrottle.release(email), undefined)
+      throw err
+    }
 
     if (!user || !usableHash || !passwordOk) {
-      void throttleSafely(() => loginThrottle.registerFailure(email), null).then((outcome) => {
+      void throttleSafely(() => loginThrottle.registerFailure(email, gate.failures), null).then((outcome) => {
         if (outcome?.lockedNow) {
           logger.warn({ lockSeconds: outcome.lockSeconds, alert: 'login_account_locked' }, '[auth] conta trancada por falhas repetidas de login (throttle por conta)')
         }
