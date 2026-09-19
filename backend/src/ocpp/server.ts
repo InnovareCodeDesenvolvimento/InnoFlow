@@ -14,7 +14,10 @@ import {
   unregisterConnection,
 } from './registry'
 import { startCommandListener } from './commands'
-import { isAuthRateLimited, registerAuthFailure } from './authRateLimit'
+import { ipKeyGenerator } from 'express-rate-limit'
+import { ocppAuthRateLimiter } from './authRateLimit'
+import { resolveHandshakeIp } from '../core/ocpp/clientIp'
+import { env } from '../lib/env'
 import { registrarConexao, registrarDesconexao } from '../services/estacoes/presencaCarregador'
 import type { OcppHandlerCtx } from './context'
 
@@ -36,7 +39,13 @@ export async function startOcppServer(port: number) {
   })
 
   server.auth((accept, reject, handshake) => {
-    void authenticateChargePoint(handshake.identity, handshake.password)
+    // IP do cliente com a mesma semântica de "hops" do `trust proxy` (env própria do gateway,
+    // default 0 = só o socket — ver `core/ocpp/clientIp.ts`). IPv6 vira a chave de sub-rede (/56)
+    // da própria lib de rate limit: um cliente IPv6 não foge do limite trocando o sufixo.
+    const rawIp = resolveHandshakeIp(handshake.remoteAddress, handshake.headers['x-forwarded-for'], env.OCPP_TRUST_PROXY_HOPS)
+    const clientIp = rawIp === 'unknown' ? rawIp : ipKeyGenerator(rawIp)
+
+    void authenticateChargePoint(handshake.identity, handshake.password, { clientIp, forwardedFor: String(handshake.headers['x-forwarded-for'] ?? '').slice(0, 200) })
       .then((result) => {
         if (!result.ok) {
           if (result.reason === 'rate_limited') {
@@ -74,20 +83,35 @@ export async function startOcppServer(port: number) {
   return server
 }
 
-async function authenticateChargePoint(identity: string, password: Buffer | undefined): Promise<AuthResult> {
-  // Checa ANTES de tocar o banco/bcrypt — rate limit é achado "importante"
-  // da auditoria do Órion (2026-09-17): sem isto, tentativas de Basic Auth
-  // contra uma `ocppIdentity` eram ilimitadas.
-  if (await isAuthRateLimited(identity)) {
-    logger.warn({ identity }, '[ocpp] auth: bloqueado por rate limit — tentativas demais nesta janela')
+interface HandshakeInfo {
+  clientIp: string
+  /** Header cru, só para diagnóstico de log (conferir `OCPP_TRUST_PROXY_HOPS`) — nunca usado como decisão. */
+  forwardedFor: string
+}
+
+async function authenticateChargePoint(identity: string, password: Buffer | undefined, handshake: HandshakeInfo): Promise<AuthResult> {
+  const attempt = { identity, ip: handshake.clientIp }
+  const logCtx = { identity, clientIp: handshake.clientIp, xForwardedFor: handshake.forwardedFor }
+
+  // Checa ANTES de tocar o banco/bcrypt (Órion A1, 2026-09-19). Dois contadores de FALHAS:
+  // (identidade + IP) — o atacante só trava o SEU par, nunca o carregador legítimo, porque a
+  // identidade é pública (`GET /api/sites`) — e global por IP — o flood de identidades
+  // inexistentes deixa de virar consulta ao banco + bcrypt sem freio.
+  const gate = await ocppAuthRateLimiter.check(attempt)
+  if (!gate.allowed) {
+    if (gate.scope === 'identity_ip') {
+      logger.warn({ ...logCtx, scope: gate.scope }, '[ocpp] auth: bloqueado por rate limit (identidade+IP) — tentativas demais nesta janela')
+    } else {
+      logger.debug({ ...logCtx, scope: gate.scope }, '[ocpp] auth: bloqueado por rate limit global do IP')
+    }
     return { ok: false, reason: 'rate_limited' }
   }
 
   const chargePoint = await prisma.chargePoint.findUnique({ where: { ocppIdentity: identity } })
 
   if (!chargePoint || !chargePoint.active) {
-    logger.warn({ identity }, '[ocpp] auth: charge point desconhecido ou inativo')
-    await registerAuthFailure(identity)
+    logger.warn(logCtx, '[ocpp] auth: charge point desconhecido ou inativo')
+    await registrarFalha(attempt, logCtx, false)
     return { ok: false, reason: 'invalid' }
   }
 
@@ -95,10 +119,14 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
   const passwordOk = await bcrypt.compare(providedPassword, chargePoint.basicAuthSecretHash)
 
   if (!passwordOk) {
-    logger.warn({ identity }, '[ocpp] auth: senha incorreta')
-    await registerAuthFailure(identity)
+    logger.warn(logCtx, '[ocpp] auth: senha incorreta')
+    await registrarFalha(attempt, logCtx, true)
     return { ok: false, reason: 'invalid' }
   }
+
+  // Sucesso: o par (identidade+IP) volta a zero — falhas antigas do carregador real não o
+  // acumulam até um bloqueio. (O contador global do IP NÃO é zerado, ver authRateLimiter.ts.)
+  await ocppAuthRateLimiter.clearFailures(attempt)
 
   return {
     ok: true,
@@ -107,6 +135,27 @@ async function authenticateChargePoint(identity: string, password: Buffer | unde
       operatorId: chargePoint.operatorId,
       ocppIdentity: chargePoint.ocppIdentity,
     },
+  }
+}
+
+/**
+ * Registra a falha e ALERTA (uma vez, no momento em que o bloqueio ativa): bloqueio de uma
+ * identidade CONHECIDA é o sinal que interessa — ou é tentativa de adivinhar a senha de um
+ * carregador real, ou é o próprio carregador com credencial errada/desatualizada (e aí o
+ * operador precisa saber, antes de a frota inteira parar).
+ */
+async function registrarFalha(attempt: { identity: string; ip: string }, logCtx: Record<string, unknown>, identityKnown: boolean): Promise<void> {
+  const outcome = await ocppAuthRateLimiter.registerFailure(attempt)
+  if (outcome.identityIpBlockedNow) {
+    logger.warn(
+      { ...logCtx, identityKnown, failures: outcome.identityIpCount, alert: 'ocpp_auth_lockout' },
+      identityKnown
+        ? '[ocpp] ALERTA: identidade CONHECIDA bloqueada por falhas repetidas de autenticação (adivinhação de senha ou carregador com credencial errada)'
+        : '[ocpp] auth: par identidade inexistente+IP bloqueado por falhas repetidas',
+    )
+  }
+  if (outcome.ipBlockedNow) {
+    logger.warn({ ...logCtx, failures: outcome.ipCount, alert: 'ocpp_auth_ip_flood' }, '[ocpp] ALERTA: IP bloqueado por excesso de falhas de autenticação (possível flood/varredura)')
   }
 }
 

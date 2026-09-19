@@ -1,48 +1,45 @@
+import type Redis from 'ioredis'
 import { createRedisConnection } from '../lib/redis'
 import { env } from '../lib/env'
+import { createOcppAuthRateLimiter, type AuthCounterStore } from '../core/ocpp/authRateLimiter'
 
 /**
- * Rate limit de tentativas de autenticação do gateway OCPP — achado
- * "importante" da auditoria do Órion (2026-09-17): `authenticateChargePoint`
- * (`server.ts`) não tinha nenhum limite, então um atacante podia tentar
- * senhas Basic Auth infinitamente contra qualquer `ocppIdentity` conhecida.
+ * Binding do limite de tentativas de autenticação do gateway OCPP ao Redis. A regra (dois
+ * contadores de FALHAS — identidade+IP e global por IP —, zerar o par no sucesso) está em
+ * `core/ocpp/authRateLimiter.ts`; aqui só o armazenamento.
  *
- * Contador em REDIS (não em memória do processo) pelo mesmo motivo do lock
- * anti-split-brain de `registry.ts`: o gateway não tem por que continuar
- * limitado a 1 réplica para sempre, e o estado de tentativas precisa
- * sobreviver a um restart do processo (reiniciar o gateway não pode zerar
- * o contador de um ataque em andamento).
- *
- * Escopo: por IDENTITY, não por IP — o handshake do `ocpp-rpc` já entrega
- * `handshake.identity` antes de qualquer verificação de senha, e escopar por
- * IP puniria uma frota inteira atrás do mesmo NAT/proxy por causa de UM
- * carregador com credencial comprometida. Trade-off aceito (documentado
- * para a próxima auditoria): um atacante que enumera identidades novas a
- * cada tentativa contorna o limite por identity — mitigar isso exigiria um
- * limite GLOBAL adicional por IP, fora de escopo desta correção.
+ * Contadores em REDIS (não em memória do processo) pelo mesmo motivo do lock de `registry.ts`:
+ * sobrevivem a restart do gateway (reiniciar não zera um ataque em andamento) e valem com mais
+ * de uma réplica.
  */
-
-const redisCmd = createRedisConnection()
-
-const rateLimitKey = (identity: string): string => `ocpp:auth:fail:${identity}`
-
-/** Verifica ANTES de gastar um bcrypt.compare — bloqueia mesmo tentativas com senha certa se a janela já estourou (a credencial pode ter vazado). */
-export async function isAuthRateLimited(identity: string): Promise<boolean> {
-  const count = await redisCmd.get(rateLimitKey(identity))
-  return count !== null && Number(count) >= env.OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS
-}
 
 /**
- * Chamar só quando a autenticação FALHOU (identity desconhecida/inativa OU
- * senha incorreta) — sucesso não reseta o contador de propósito: um
- * atacante que acerta a senha depois de várias tentativas erradas não devia
- * "limpar" o histórico dentro da mesma janela.
+ * `INCR` + `EXPIRE` na criação, ATÔMICOS (script Lua). A versão antiga fazia os dois comandos
+ * separados: uma queda entre eles deixava a chave SEM TTL para sempre = bloqueio permanente.
  */
-export async function registerAuthFailure(identity: string): Promise<number> {
-  const key = rateLimitKey(identity)
-  const count = await redisCmd.incr(key)
-  if (count === 1) {
-    await redisCmd.expire(key, env.OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS)
+const INCR_WITH_TTL_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return count
+`
+
+function redisCounterStore(redis: Redis): AuthCounterStore {
+  return {
+    async getMany(keys) {
+      const values = await redis.mget(...keys)
+      return values.map((v) => (v === null ? 0 : Number(v)))
+    },
+    async incrWithTtl(key, ttlSeconds) {
+      return Number(await redis.eval(INCR_WITH_TTL_SCRIPT, 1, key, String(ttlSeconds)))
+    },
+    async del(keys) {
+      if (keys.length > 0) await redis.del(...keys)
+    },
   }
-  return count
 }
+
+export const ocppAuthRateLimiter = createOcppAuthRateLimiter(redisCounterStore(createRedisConnection()), {
+  maxAttemptsPerIdentityIp: env.OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS,
+  maxFailuresPerIp: env.OCPP_AUTH_IP_MAX_FAILURES,
+  windowSeconds: env.OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS,
+})

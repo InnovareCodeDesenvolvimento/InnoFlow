@@ -76,6 +76,18 @@ const envSchema = z.object({
   // roda em processo separado da API, precisa de estado compartilhado).
   OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
+  // Órion A1 (2026-09-19): o contador por identidade sozinho deixava um atacante TRAVAR o carregador
+  // real (identidade é pública em `GET /api/sites`). Agora: `OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS` vale
+  // por (identidade + IP) e este é o limite GLOBAL de falhas por IP (cobre identidade inexistente).
+  // Alto de propósito: um IP legítimo (frota atrás de NAT) quase não falha.
+  OCPP_AUTH_IP_MAX_FAILURES: z.coerce.number().int().positive().default(30),
+  // Quantos proxies reversos há entre o carregador e a porta do gateway (9000) — resolve o IP do
+  // handshake a partir do X-Forwarded-For (mesma semântica de `TRUST_PROXY_HOPS` da API, mas o
+  // caminho até a porta 9000 é OUTRO). Default 0 = confia só no endereço do socket (seguro se a
+  // porta é exposta direto; o X-Forwarded-For seria forjável). Atrás de proxy, sem configurar, todos
+  // os carregadores compartilham o IP do proxy — ver o log `[ocpp] auth` (clientIp/xForwardedFor)
+  // para conferir o valor certo ANTES de confiar em hops > 0.
+  OCPP_TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
 
   // Achado da Nova (log de auditoria, 2026-09-17): `app.set('trust proxy')`
   // nunca existiu neste backend. Sem isto, `req.ip` em produção é sempre o

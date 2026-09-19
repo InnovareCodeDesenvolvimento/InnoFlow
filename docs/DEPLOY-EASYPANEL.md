@@ -129,6 +129,30 @@ chegava como `cliente, 10.11.0.16` e o IP gravado era `10.11.0.16`. Só mexer se
 entrar um proxy/CDN/LB novo na frente — e conferindo um log real antes: hops a
 MAIS deixa o cliente forjar o próprio IP.
 
+⚠️ **Autenticação do gateway OCPP (Órion A1, 19/09/2026).** A identidade do carregador é
+PÚBLICA (`GET /api/sites` devolve `ocppIdentity`), então a única credencial dele é o
+`basicAuthSecret` — agora **16 a 40 caracteres** na criação/edição (era 8). O limite de
+tentativas passou a contar FALHAS por **(identidade + IP)** e por **IP** (antes só por
+identidade: qualquer um trancava o carregador real errando 5 senhas). Envs do App
+`ocpp-gateway` (todas com default):
+
+```
+OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS=5     # falhas do par identidade+IP na janela
+OCPP_AUTH_IP_MAX_FAILURES=30            # falhas de um IP (qualquer identidade) na janela
+OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS=300
+OCPP_TRUST_PROXY_HOPS=0                 # proxies reversos entre o carregador e a porta 9000
+```
+
+`OCPP_TRUST_PROXY_HOPS` **não é** o `TRUST_PROXY_HOPS` da API (o caminho até a porta 9000 é
+outro). Default `0` = usa só o endereço do socket — correto se a porta for exposta direto;
+**atrás de um proxy, sem configurar, todos os carregadores compartilham o IP do proxy** e o
+limite por IP passa a valer para a frota inteira. Para acertar: conecte UM carregador e leia o
+log `[ocpp] auth: ...` (campos `clientIp` e `xForwardedFor`); só então ajuste os hops —
+**hops a mais deixam o cliente forjar o próprio IP**. Bloqueio de uma identidade CONHECIDA gera
+um `warn` com `alert: "ocpp_auth_lockout"` (procure por ele nos logs). Pergunta em aberto
+(Vulcano): a porta 9000 é publicada crua ou atrás de TLS (WSS)? Basic Auth em `ws://` trafega a
+senha em claro; o ideal é WSS obrigatório e a porta crua não exposta.
+
 ## 1.1 Frontend
 
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
