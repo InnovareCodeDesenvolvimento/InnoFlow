@@ -6,6 +6,8 @@ import { AppError } from '../middleware/errorHandler'
 import { requireOperatorOrAdmin } from '../middleware/tenantScope'
 import { ADMIN_CHANNEL, operatorChannel, subscribeChannels } from '../../realtime/bus'
 import type { RealtimeEvent } from '../../realtime/events'
+import { sessionValidator } from '../lib/sessionValidatorInstance'
+import { tokenExpirado } from '../../core/auth/sessaoValida'
 
 /**
  * `GET /api/admin/events` — canal SSE do painel admin/operador. Auth
@@ -60,15 +62,30 @@ export function startSseStream(req: Request, res: Response, channels: string[]):
     res.write(`data: ${JSON.stringify(event)}\n\n`)
   })
 
-  const heartbeat = setInterval(() => {
-    res.write(': ping\n\n')
-  }, env.SSE_HEARTBEAT_INTERVAL_SECONDS * 1000)
-  heartbeat.unref?.()
-
   const cleanup = (): void => {
     clearInterval(heartbeat)
     unsubscribe()
   }
+
+  // O JWT só é verificado ao ABRIR a conexão — sem re-checagem, um stream aberto sobrevive a
+  // `exp`, conta desativada e senha trocada (Órion M1). A cada heartbeat: `exp` vencido ou
+  // sessão revogada (cache de ~30s de `sessionValidator`) => encerra o stream. Falha TRANSITÓRIA
+  // do banco não derruba o stream (fica para a próxima checagem).
+  const user = req.user
+  const heartbeat = setInterval(() => {
+    void (async () => {
+      if (user) {
+        const validacao = await sessionValidator.validate(user.userId, user).catch(() => ({ ok: true as const }))
+        if (tokenExpirado(user.exp, Date.now()) || !validacao.ok) {
+          cleanup()
+          res.end()
+          return
+        }
+      }
+      res.write(': ping\n\n')
+    })()
+  }, env.SSE_HEARTBEAT_INTERVAL_SECONDS * 1000)
+  heartbeat.unref?.()
 
   req.on('close', cleanup)
   res.on('error', (err) => {

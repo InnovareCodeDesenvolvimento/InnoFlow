@@ -30,8 +30,8 @@ async function main() {
   if (!user) throw new Error(`Usuário não encontrado: ${email}`)
 
   if (deactivate) {
-    await prisma.user.update({ where: { id: user.id }, data: { active: false } })
-    console.log(`[user:set-password] ${user.email} (${user.role}) DESATIVADO.`)
+    await prisma.user.update({ where: { id: user.id }, data: { active: false, sessionsValidAfter: new Date() } })
+    console.log(`[user:set-password] ${user.email} (${user.role}) DESATIVADO. Sessões abertas caem em até ~30s (cache do authenticate na API).`)
     return
   }
 
@@ -41,8 +41,11 @@ async function main() {
   if (SEED_PASSWORDS.has(password)) throw new Error('Essa é uma senha conhecida do seed — escolha outra.')
 
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash, active: true } })
-  console.log(`[user:set-password] senha de ${user.email} (${user.role}) atualizada. Tokens JWT já emitidos continuam válidos até expirar (12h).`)
+  // `sessionsValidAfter = agora` revoga TODOS os JWT emitidos até aqui (Órion A3/M1) — é o ponto
+  // da rotação: quem estiver logado com a senha antiga do seed cai. O cache do `authenticate`
+  // na API vence em até ~30s (este script roda em outro processo e não consegue invalidá-lo).
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash, active: true, sessionsValidAfter: new Date() } })
+  console.log(`[user:set-password] senha de ${user.email} (${user.role}) atualizada. Sessões antigas caem em até ~30s (cache do authenticate na API).`)
 }
 
 main()

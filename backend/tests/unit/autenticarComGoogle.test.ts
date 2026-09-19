@@ -12,6 +12,7 @@ const usuario = (over: Partial<UsuarioGoogle> = {}): UsuarioGoogle => ({
   operatorId: null,
   active: true,
   googleSub: null,
+  hasPassword: true,
   ...over,
 })
 

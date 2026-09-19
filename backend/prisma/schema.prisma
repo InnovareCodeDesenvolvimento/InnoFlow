@@ -356,6 +356,12 @@ model User {
   // NULL para quem nunca usou. UNIQUE parcial natural: Postgres trata NULLs
   // como distintos, então vários usuários sem Google não colidem.
   googleSub    String? @unique
+  // Revogação de sessão (Órion A3/M1, 2026-09-19): JWT cujo `iat` (em segundos) seja
+  // ANTERIOR a este instante é recusado por `authenticate`. Bump em: troca/definição de
+  // senha, vínculo do Google (que também zera `passwordHash`) e rotação por script.
+  // NULL = nunca revogado. Junto com `active`, é o que faz "desativar/trocar a senha" cortar
+  // o token de 12h e o stream SSE (cache de ~30s no processo da API).
+  sessionsValidAfter DateTime? @db.Timestamptz(3)
 
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz(3)

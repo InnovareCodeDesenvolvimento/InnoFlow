@@ -7,9 +7,11 @@ import { issueToken } from '../../lib/jwt'
 import { logger } from '../../lib/logger'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
-import { authRateLimit } from '../middleware/rateLimit'
+import { authRateLimit, changePasswordRateLimit } from '../middleware/rateLimit'
+import { authenticate } from '../middleware/auth'
+import { sessionValidator } from '../lib/sessionValidatorInstance'
 import { validateBody } from '../middleware/validate'
-import { googleAuthSchema, loginSchema, registerSchema, type GoogleAuthInput, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
+import { changePasswordSchema, googleAuthSchema, loginSchema, registerSchema, type ChangePasswordInput, type GoogleAuthInput, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
 import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
 import { autenticarComGoogle } from '../../services/auth/autenticarComGoogle'
 import { createGoogleTokenVerifier } from '../../services/auth/googleTokenVerifier'
@@ -64,12 +66,14 @@ async function recordLoginAudit(
   })
 }
 
-const BCRYPT_ROUNDS = 10
+// 12 rounds (Órion: 10 é o piso; o custo extra só pesa em login/cadastro/troca de senha, nunca em
+// request autenticada). Hashes antigos (10) continuam válidos — o custo vem embutido no hash.
+const BCRYPT_ROUNDS = 12
 
 const router = Router()
 
-function toUserDTO(user: { id: string; name: string; email: string; role: string; operatorId: string | null; operatorName?: string | null }) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId, operatorName: user.operatorName ?? null }
+function toUserDTO(user: { id: string; name: string; email: string; role: string; operatorId: string | null; operatorName?: string | null; hasPassword: boolean }) {
+  return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId, operatorName: user.operatorName ?? null, hasPassword: user.hasPassword }
 }
 
 router.post(
@@ -90,7 +94,7 @@ router.post(
     await prisma.wallet.create({ data: { userId: user.id } })
 
     const token = issueToken(user)
-    res.status(201).json({ token, user: toUserDTO(user) })
+    res.status(201).json({ token, user: toUserDTO({ ...user, hasPassword: true }) })
   }),
 )
 
@@ -121,7 +125,7 @@ router.post(
     }
 
     const token = issueToken(user)
-    res.json({ token, user: toUserDTO({ ...user, operatorName: user.operator?.name }) })
+    res.json({ token, user: toUserDTO({ ...user, operatorName: user.operator?.name, hasPassword: true }) })
 
     void recordLoginAudit(req, user, 'LOGIN_SUCCESS', 200).catch((err) => logger.error({ err, userId: user.id }, '[audit] falha ao gravar LOGIN_SUCCESS (fire-and-forget)'))
   }),
@@ -172,8 +176,67 @@ router.post(
         // Mesma resposta que `/login` dá para conta inativa.
         throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
       case 'OK':
+        // Vínculo zerou a senha e bumpou `sessionsValidAfter` — o cache de sessão deste processo
+        // tem que soltar o usuário JÁ, senão as sessões antigas valeriam até 30s (ver sessionValidator).
+        if (resultado.linked) sessionValidator.invalidate(resultado.user.id)
         res.status(resultado.created ? 201 : 200).json({ token: issueToken(resultado.user), user: toUserDTO({ ...resultado.user, operatorName: null }) })
         return
+    }
+  }),
+)
+
+/**
+ * `POST /api/auth/password` — troca/definição da PRÓPRIA senha (qualquer papel). Autenticada +
+ * limite por USUÁRIO. Conta COM senha exige a atual; conta só-Google (sem `passwordHash`, ver
+ * o vínculo em `prismaGoogleUserRepository`) define a primeira sem a atual. Sucesso: hash novo
+ * (12 rounds), `sessionsValidAfter = agora` (mata TODAS as sessões anteriores, inclusive a que
+ * fez a chamada) e um TOKEN NOVO na resposta. NUNCA loga/audita o corpo (senhas); só o EVENTO
+ * é auditado para ADMIN/OPERATOR (`action=OTHER`, `actionDetail=password_changed`).
+ * Senha atual errada = 403 (não 401: o interceptor do frontend deslogaria por 401).
+ */
+router.post(
+  '/password',
+  authenticate,
+  changePasswordRateLimit,
+  validateBody(changePasswordSchema),
+  asyncHandler(async (req, res) => {
+    const { currentPassword, newPassword } = req.body as ChangePasswordInput
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, include: { operator: { select: { name: true } } } })
+    if (!user) throw new AppError('Token inválido ou expirado.', 401, 'UNAUTHORIZED')
+
+    if (user.passwordHash) {
+      if (!currentPassword) throw new AppError('Informe a senha atual.', 400, 'CURRENT_PASSWORD_REQUIRED')
+      const ok = await bcrypt.compare(currentPassword, user.passwordHash)
+      if (!ok) throw new AppError('Senha atual incorreta.', 403, 'INVALID_CURRENT_PASSWORD')
+      if (currentPassword === newPassword) throw new AppError('A nova senha precisa ser diferente da atual.', 400, 'PASSWORD_UNCHANGED')
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+    const updated = await prisma.user.update({ where: { id: user.id }, data: { passwordHash, sessionsValidAfter: new Date() } })
+    sessionValidator.invalidate(user.id)
+
+    const token = issueToken(updated)
+    res.json({ token, user: toUserDTO({ ...updated, operatorName: user.operator?.name, hasPassword: true }) })
+
+    if (AUDITABLE_LOGIN_ROLES.has(updated.role)) {
+      void writeAuditLog({
+        actorUserId: updated.id,
+        actorRole: updated.role,
+        actorEmail: updated.email,
+        actorName: updated.name,
+        actorOperatorId: updated.operatorId,
+        action: 'OTHER',
+        actionDetail: 'password_changed',
+        outcome: 'SUCCESS',
+        httpStatus: 200,
+        entityType: 'User',
+        entityId: updated.id,
+        targetOperatorId: updated.operatorId,
+        method: 'POST',
+        path: '/api/auth/password',
+        ...requestMeta(req),
+      }).catch((err) => logger.error({ err, userId: updated.id }, '[audit] falha ao gravar password_changed (fire-and-forget)'))
     }
   }),
 )

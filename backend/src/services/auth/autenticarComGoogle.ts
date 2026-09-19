@@ -17,6 +17,8 @@ export interface UsuarioGoogle extends ContaCandidata {
   email: string
   role: PapelConta
   operatorId: string | null
+  /** A conta tem senha (`passwordHash` não nulo)? Só o booleano — o hash nunca sai do repositório. */
+  hasPassword: boolean
 }
 
 /** Lançada pelo repositório quando um INSERT/UPDATE bate numa unique (`googleSub`/`email`) — colisão esperada de dois requests simultâneos, NUNCA um 500. */

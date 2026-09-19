@@ -25,6 +25,17 @@ export const googleAuthSchema = z.object({
   credential: z.string().min(1).max(4096),
 })
 
+// `POST /api/auth/password`. `newPassword`: mínimo 10 (Órion) e máximo 72 BYTES — o bcrypt
+// TRUNCA em silêncio acima disso (senhas longas diferindo só depois do byte 72 valeriam igual).
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().max(200).optional(),
+  newPassword: z
+    .string()
+    .min(10)
+    .refine((p) => Buffer.byteLength(p, 'utf8') <= 72, { message: 'no máximo 72 bytes' }),
+})
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>
