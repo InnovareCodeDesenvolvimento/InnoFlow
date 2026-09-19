@@ -13,7 +13,8 @@ export const registerSchema = z.object({
 
 export const loginSchema = z.object({
   email: z.string().trim().email(),
-  password: z.string().min(1),
+  // Teto de 200: bcrypt só lê 72 bytes; acima disso é só carga (hash de entrada gigante) sem ganho.
+  password: z.string().min(1).max(200),
 })
 
 // `POST /api/auth/google` — só o ID token (JWT) do Google Identity Services;

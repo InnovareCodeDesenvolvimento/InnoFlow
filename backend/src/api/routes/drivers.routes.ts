@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { toNumber } from '../lib/reportingSql'
+import { escapeLike } from '../lib/sqlLike'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate, requireRole } from '../middleware/auth'
@@ -55,7 +56,9 @@ router.get(
 
     // Nome: fuzzy (ILIKE com wildcard). E-mail: exato, mas case-insensitive
     // (ILIKE sem wildcard = igualdade sem diferenciar maiúsculas).
-    const searchCondition = search ? Prisma.sql`AND (u.name ILIKE ${`%${search}%`} OR u.email ILIKE ${search})` : Prisma.empty
+    // O termo é ESCAPADO (`%`, `_` e a barra invertida): sem isso `?search=%%%` era um curinga e o
+    // OPERATOR listava a rede inteira, contornando o mínimo de 3 caracteres (Órion M9).
+    const searchCondition = search ? Prisma.sql`AND (u.name ILIKE ${`%${escapeLike(search)}%`} OR u.email ILIKE ${escapeLike(search)})` : Prisma.empty
 
     const [items, countRows] = await Promise.all([
       prisma.$queryRaw<DriverListSqlRow[]>(Prisma.sql`

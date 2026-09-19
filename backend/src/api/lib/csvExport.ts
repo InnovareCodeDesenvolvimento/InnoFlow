@@ -10,9 +10,24 @@ import type { Response } from 'express'
 export const CSV_MAX_ROWS = 50_000
 export const CSV_BATCH_SIZE = 1_000
 
+/** Inícios que o Excel/LibreOffice interpretam como FÓRMULA (OWASP "CSV Injection"): `= + - @`, tab e CR. */
+const FORMULA_TRIGGER = /^[=+\-@\t\r]/
+/** Número puro (`-5`, `+12,50`, `-1234.56`) começa com `-`/`+` mas NÃO é fórmula — prefixar quebraria as colunas de dinheiro/energia negativas. */
+const PLAIN_NUMBER = /^[+-]?\d+(?:[.,]\d+)?$/
+
+/**
+ * Neutraliza fórmula (Órion M2, 2026-09-19): uma célula que começa com `= + - @` tab ou CR ganha
+ * um `'` na frente — a planilha passa a tratar como TEXTO. Sem isto, `driverName`/`actorName`/
+ * `entityId` (controláveis por um motorista/atacante) como `=HYPERLINK("http://evil","x")` saíam
+ * INTACTOS no CSV e executavam na planilha de quem exporta o relatório. Só o CSV: o JSON não muda.
+ */
+export function neutralizeFormula(str: string): string {
+  return FORMULA_TRIGGER.test(str) && !PLAIN_NUMBER.test(str) ? `'${str}` : str
+}
+
 export function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return ''
-  const str = String(value)
+  const str = neutralizeFormula(String(value))
   if (/[;"\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`
   return str
 }

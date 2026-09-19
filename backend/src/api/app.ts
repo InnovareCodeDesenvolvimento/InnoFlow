@@ -45,7 +45,11 @@ export function createApp(): Express {
   // (`TRUST_PROXY_HOPS`, default 1), nunca `true` cego.
   app.set('trust proxy', env.TRUST_PROXY_HOPS)
 
-  app.use(helmet())
+  // `hsts: false`: o HSTS é do nginx do frontend (borda do site). Sem isto a API mandava
+  // `max-age=15552000; includeSubDomains` e o nginx repassava e ACRESCENTAVA o dele —
+  // dois Strict-Transport-Security na mesma resposta, com `includeSubDomains` que o nginx
+  // deliberadamente não usa (Órion, 19/09/2026). Um dono só para a política.
+  app.use(helmet({ hsts: false }))
   // Allowlist explícita via `CORS_ALLOWED_ORIGINS` (env, ver env.ts) — achado
   // "importante" da auditoria do Órion: `cors()` sem args aceitava qualquer
   // origem. Requisições sem header `Origin` (curl, health check, apps

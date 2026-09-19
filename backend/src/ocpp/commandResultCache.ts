@@ -19,14 +19,32 @@ const TTL_MS = 120_000
 
 export type CommandResultStatus = 'ACCEPTED' | 'REJECTED' | 'TIMEOUT'
 
-export async function recordCommandResult(correlationId: string, status: CommandResultStatus): Promise<void> {
-  await redis.set(`${KEY_PREFIX}${correlationId}`, status, 'PX', TTL_MS)
+/**
+ * O resultado fica VINCULADO ao usuário que disparou o comando (Órion, 19/09/2026): o valor gravado
+ * é `<userId>|<status>`. Sem isso, `GET /api/me/commands/:correlationId` respondia o status de
+ * QUALQUER correlationId para qualquer motorista logado (o UUID é imprevisível, mas vaza em log e
+ * em resposta 202 — defesa em profundidade). `userId` é um cuid (sem `|`).
+ */
+export function encodeCommandResult(userId: string, status: CommandResultStatus): string {
+  return `${userId}|${status}`
 }
 
-/** `null` = comando ainda em andamento OU a chave já expirou/nunca existiu — a rota trata as duas coisas como `PENDING`, não dá para distinguir e não precisa. */
-export async function getCommandResult(correlationId: string): Promise<CommandResultStatus | null> {
-  const value = await redis.get(`${KEY_PREFIX}${correlationId}`)
-  return value as CommandResultStatus | null
+/** `null` quando o valor é de OUTRO usuário, está malformado ou não existe — a rota trata como `PENDING` (indistinguível de "ainda em andamento": não confirma que o correlationId existe). */
+export function decodeCommandResult(raw: string | null, userId: string): CommandResultStatus | null {
+  if (!raw) return null
+  const separator = raw.indexOf('|')
+  if (separator < 0 || raw.slice(0, separator) !== userId) return null
+  const status = raw.slice(separator + 1)
+  return status === 'ACCEPTED' || status === 'REJECTED' || status === 'TIMEOUT' ? status : null
+}
+
+export async function recordCommandResult(correlationId: string, status: CommandResultStatus, userId: string): Promise<void> {
+  await redis.set(`${KEY_PREFIX}${correlationId}`, encodeCommandResult(userId, status), 'PX', TTL_MS)
+}
+
+/** `null` = comando ainda em andamento, a chave já expirou/nunca existiu OU pertence a outro usuário — a rota trata tudo como `PENDING`. */
+export async function getCommandResult(correlationId: string, userId: string): Promise<CommandResultStatus | null> {
+  return decodeCommandResult(await redis.get(`${KEY_PREFIX}${correlationId}`), userId)
 }
 
 /**

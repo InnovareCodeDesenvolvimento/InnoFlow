@@ -380,7 +380,7 @@ router.post(
             logger.error({ err, sessionId: session.id, correlationId }, '[api][me] falha ao reconciliar sessão após stop rejeitado'),
           )
         }
-        return recordCommandResult(correlationId, accepted ? 'ACCEPTED' : 'REJECTED')
+        return recordCommandResult(correlationId, accepted ? 'ACCEPTED' : 'REJECTED', userId)
       })
       .catch(async (err) => {
         logger.error({ err, sessionId: session.id, correlationId }, '[api][me] stop de sessão falhou')
@@ -393,7 +393,7 @@ router.post(
             logger.error({ err: reconcileErr, sessionId: session.id, correlationId }, '[api][me] falha ao reconciliar sessão após stop com erro'),
           )
         }
-        return recordCommandResult(correlationId, timedOut ? 'TIMEOUT' : 'REJECTED')
+        return recordCommandResult(correlationId, timedOut ? 'TIMEOUT' : 'REJECTED', userId)
       })
       .catch((err) => logger.error({ err, correlationId }, '[api][me] falha ao gravar resultado do comando em Redis (não bloqueante)'))
 
@@ -408,7 +408,7 @@ router.post(
 router.get(
   '/commands/:correlationId',
   asyncHandler(async (req, res) => {
-    const status = (await getCommandResult(req.params.correlationId)) ?? 'PENDING'
+    const status = (await getCommandResult(req.params.correlationId, req.user!.userId)) ?? 'PENDING'
     res.json({ status })
   }),
 )

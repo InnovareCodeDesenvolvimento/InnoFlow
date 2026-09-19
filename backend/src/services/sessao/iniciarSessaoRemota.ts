@@ -122,11 +122,11 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   sendCommand(chargePoint.id, 'RemoteStartTransaction', { connectorId, idTag }, { timeoutMs: COMMAND_TIMEOUT_MS })
     .then((result) => {
       logger.info({ chargePointId: chargePoint.id, correlationId, result }, '[sessao] remote-start concluído')
-      return recordCommandResult(correlationId, isAcceptedCommandResult(result) ? 'ACCEPTED' : 'REJECTED')
+      return recordCommandResult(correlationId, isAcceptedCommandResult(result) ? 'ACCEPTED' : 'REJECTED', userId)
     })
     .catch((err) => {
       logger.error({ err, chargePointId: chargePoint.id, correlationId }, '[sessao] remote-start falhou')
-      return recordCommandResult(correlationId, err instanceof OcppCommandTimeoutError ? 'TIMEOUT' : 'REJECTED')
+      return recordCommandResult(correlationId, err instanceof OcppCommandTimeoutError ? 'TIMEOUT' : 'REJECTED', userId)
     })
     .catch((err) => logger.error({ err, correlationId }, '[sessao] falha ao gravar resultado do comando em Redis (não bloqueante)'))
 

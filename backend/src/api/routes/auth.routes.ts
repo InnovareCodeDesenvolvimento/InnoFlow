@@ -7,9 +7,10 @@ import { issueToken } from '../../lib/jwt'
 import { logger } from '../../lib/logger'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
-import { authRateLimit, changePasswordRateLimit } from '../middleware/rateLimit'
+import { changePasswordRateLimit, googleAuthRateLimit, loginRateLimit, registerRateLimit } from '../middleware/rateLimit'
 import { authenticate } from '../middleware/auth'
 import { sessionValidator } from '../lib/sessionValidatorInstance'
+import { loginThrottle } from '../lib/loginThrottleInstance'
 import { validateBody } from '../middleware/validate'
 import { changePasswordSchema, googleAuthSchema, loginSchema, registerSchema, type ChangePasswordInput, type GoogleAuthInput, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
 import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
@@ -72,13 +73,41 @@ const BCRYPT_ROUNDS = 12
 
 const router = Router()
 
+/**
+ * Hash "falso" para o `bcrypt.compare` de tempo constante do login (mesmo custo dos hashes reais
+ * novos, 12 rounds). Lazy + memorizado: uma única geração (~250ms) na primeira necessidade.
+ */
+let dummyHash: Promise<string> | undefined
+function getDummyHash(): Promise<string> {
+  dummyHash ??= bcrypt.hash('senha-falsa-para-tempo-constante', BCRYPT_ROUNDS)
+  return dummyHash
+}
+
+/**
+ * O throttle de login usa o Redis; se ele falhar, o login CONTINUA (fail-open, decisão documentada
+ * em `core/auth/loginThrottle.ts`) — só perde a proteção por conta até o Redis voltar. Erro logado.
+ */
+const THROTTLE_TIMEOUT_MS = 500
+
+async function throttleSafely<T>(action: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    // Com o Redis FORA do ar o ioredis não falha: ele ENFILEIRA o comando e espera reconectar
+    // (necessário para o BullMQ) — sem o timeout, o login penduraria junto. O comando abandonado
+    // fica na fila e é inofensivo.
+    return await Promise.race([action(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout consultando o Redis')), THROTTLE_TIMEOUT_MS).unref())])
+  } catch (err) {
+    logger.error({ err }, '[auth] throttle de login por conta indisponível (Redis) — seguindo sem ele (fail-open)')
+    return fallback
+  }
+}
+
 function toUserDTO(user: { id: string; name: string; email: string; role: string; operatorId: string | null; operatorName?: string | null; hasPassword: boolean }) {
   return { id: user.id, name: user.name, email: user.email, role: user.role, operatorId: user.operatorId, operatorName: user.operatorName ?? null, hasPassword: user.hasPassword }
 }
 
 router.post(
   '/register',
-  authRateLimit,
+  registerRateLimit,
   validateBody(registerSchema),
   asyncHandler(async (req, res) => {
     const { name, email, password, phone } = req.body as RegisterInput
@@ -100,29 +129,43 @@ router.post(
 
 router.post(
   '/login',
-  authRateLimit,
+  loginRateLimit,
   validateBody(loginSchema),
   asyncHandler(async (req, res) => {
     const { email, password } = req.body as LoginInput
 
+    // Throttle por CONTA com backoff (Órion M7) — vale para e-mail existente OU não (resposta
+    // uniforme: um 429 só para contas reais denunciaria quais e-mails existem). Conta trancada =
+    // recusa mesmo com a senha certa. Falha do Redis = fail-open (ver core/auth/loginThrottle.ts).
+    const gate = await throttleSafely(() => loginThrottle.check(email), { allowed: true as const })
+    if (!gate.allowed) {
+      res.setHeader('Retry-After', String(gate.retryAfterSeconds))
+      throw new AppError('Muitas tentativas de login para esta conta. Tente novamente mais tarde.', 429, 'RATE_LIMITED_ACCOUNT')
+    }
+
     const user = await prisma.user.findUnique({ where: { email }, include: { operator: { select: { name: true } } } })
-    // E-mail desconhecido: NUNCA audita (ruído de bot — ver cabeçalho do
-    // arquivo) e responde igual a qualquer outra credencial inválida (não
-    // vaza se o e-mail existe ou não).
-    if (!user) throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
 
-    if (!user.active || !user.passwordHash) {
-      void recordLoginAudit(req, { ...user, operatorId: user.operatorId }, 'LOGIN_FAILED', 401).catch((err) =>
-        logger.error({ err, userId: user.id }, '[audit] falha ao gravar LOGIN_FAILED (fire-and-forget)'),
-      )
+    // TEMPO CONSTANTE (Órion M7): SEMPRE um bcrypt.compare, exista ou não a conta, esteja ou não
+    // ativa, tenha ou não senha (conta só-Google). Antes, e-mail inexistente/inativo/só-Google
+    // respondia em ~0ms e o resto em ~110ms — o tempo revelava quais e-mails têm conta.
+    const usableHash = user?.active && user.passwordHash ? user.passwordHash : null
+    const passwordOk = await bcrypt.compare(password, usableHash ?? (await getDummyHash()))
+
+    if (!user || !usableHash || !passwordOk) {
+      void throttleSafely(() => loginThrottle.registerFailure(email), null).then((outcome) => {
+        if (outcome?.lockedNow) {
+          logger.warn({ lockSeconds: outcome.lockSeconds, alert: 'login_account_locked' }, '[auth] conta trancada por falhas repetidas de login (throttle por conta)')
+        }
+      })
+      // E-mail desconhecido: NUNCA audita (ruído de bot — ver cabeçalho do arquivo) e responde
+      // igual a qualquer outra credencial inválida (não vaza se o e-mail existe ou não).
+      if (user) {
+        void recordLoginAudit(req, user, 'LOGIN_FAILED', 401).catch((err) => logger.error({ err, userId: user.id }, '[audit] falha ao gravar LOGIN_FAILED (fire-and-forget)'))
+      }
       throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
     }
 
-    const passwordOk = await bcrypt.compare(password, user.passwordHash)
-    if (!passwordOk) {
-      void recordLoginAudit(req, user, 'LOGIN_FAILED', 401).catch((err) => logger.error({ err, userId: user.id }, '[audit] falha ao gravar LOGIN_FAILED (fire-and-forget)'))
-      throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
-    }
+    void throttleSafely(() => loginThrottle.registerSuccess(email), undefined)
 
     const token = issueToken(user)
     res.json({ token, user: toUserDTO({ ...user, operatorName: user.operator?.name, hasPassword: true }) })
@@ -147,7 +190,7 @@ router.post(
  */
 router.post(
   '/google',
-  authRateLimit,
+  googleAuthRateLimit,
   validateBody(googleAuthSchema),
   asyncHandler(async (req, res) => {
     const clientId = env.GOOGLE_CLIENT_ID

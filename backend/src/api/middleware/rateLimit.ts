@@ -10,10 +10,12 @@ import { AppError } from './errorHandler'
  * de erro `{ error, code }` do resto da API em vez do texto solto padrão da
  * lib.
  */
-function buildLimiter(windowMs: number, max: number, code: string, keyGenerator?: (req: Request) => string) {
+function buildLimiter(windowMs: number, max: number, code: string, keyGenerator?: (req: Request) => string, options: { skipSuccessfulRequests?: boolean } = {}) {
   return rateLimit({
     windowMs,
     max,
+    // Conta só as respostas de ERRO (>= 400) quando pedido — sucesso legítimo não gasta o balde.
+    ...(options.skipSuccessfulRequests ? { skipSuccessfulRequests: true } : {}),
     standardHeaders: true,
     legacyHeaders: false,
     ...(keyGenerator ? { keyGenerator } : {}),
@@ -27,8 +29,18 @@ function buildLimiter(windowMs: number, max: number, code: string, keyGenerator?
   })
 }
 
-/** Login/registro: alvo clássico de força bruta — limite apertado por IP. */
-export const authRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH')
+/**
+ * Login/cadastro/Google: alvo clássico de força bruta — limite apertado por IP. Órion M7
+ * (2026-09-19): antes era UMA instância compartilhada (20/15min por IP) contando SUCESSOS e
+ * misturando as três rotas — motoristas legítimos atrás do mesmo NAT (garagem, empresa) gastavam o
+ * balde uns dos outros só por entrar. Agora: uma instância por rota, e login/Google só contam
+ * FALHAS (`skipSuccessfulRequests`). Cadastro conta tudo (cada 201 é uma conta criada: o limite ali
+ * é anti-cadastro em massa). O risco real — brute-force DISTRIBUÍDO de uma conta — é coberto por
+ * `core/auth/loginThrottle.ts` (por conta, com backoff).
+ */
+export const loginRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH', undefined, { skipSuccessfulRequests: true })
+export const registerRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH')
+export const googleAuthRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH', undefined, { skipSuccessfulRequests: true })
 
 /** Rotas administrativas em geral: limite mais folgado, só contra abuso/loop de cliente quebrado. */
 export const adminRateLimit = buildLimiter(60 * 1000, 300, 'RATE_LIMITED')

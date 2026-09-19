@@ -58,7 +58,9 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   if (typeof err === 'object' && err !== null && (err as { constructor?: { name?: string } }).constructor?.name === 'PrismaClientKnownRequestError') {
     const prismaErr = err as { code?: string; meta?: Record<string, unknown> }
     if (prismaErr.code === 'P2002') {
-      res.status(409).json({ error: 'Registro duplicado. Verifique os dados informados.', code: 'DUPLICATE', details: [{ meta: prismaErr.meta }] })
+      // Sem `meta` do Prisma na resposta (Órion): ele traz o NOME da constraint/colunas (`target`) —
+      // estrutura interna do banco que o cliente não precisa (e ajuda a enumerar o schema).
+      res.status(409).json({ error: 'Registro duplicado. Verifique os dados informados.', code: 'DUPLICATE' })
       return
     }
     if (prismaErr.code === 'P2025') {

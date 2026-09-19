@@ -145,6 +145,13 @@ function loadEnv(): Env {
     console.error('[env] configuração inválida:', parsed.error.flatten().fieldErrors)
     process.exit(1)
   }
+  // Órion: JWT_SECRET assina TODAS as sessões (HS256) — abaixo de 32 caracteres é fraco demais para
+  // um segredo de assinatura. Só AVISO, de propósito: o schema continua aceitando >= 16 (um boot
+  // derrubado por um segredo que já está em produção seria pior que o aviso). Gere um novo com
+  // `openssl rand -base64 48` e troque quando puder — trocar o segredo derruba todas as sessões.
+  if (parsed.data.JWT_SECRET.length < 32) {
+    console.warn(`[env] AVISO: JWT_SECRET tem ${parsed.data.JWT_SECRET.length} caracteres — recomendado >= 32 (openssl rand -base64 48). Trocar derruba as sessões abertas.`)
+  }
   return parsed.data
 }
 
