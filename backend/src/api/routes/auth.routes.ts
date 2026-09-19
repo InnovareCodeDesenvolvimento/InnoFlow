@@ -2,14 +2,18 @@ import { Router, type Request } from 'express'
 import bcrypt from 'bcryptjs'
 import type { Role } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
+import { env } from '../../lib/env'
 import { issueToken } from '../../lib/jwt'
 import { logger } from '../../lib/logger'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authRateLimit } from '../middleware/rateLimit'
 import { validateBody } from '../middleware/validate'
-import { loginSchema, registerSchema, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
+import { googleAuthSchema, loginSchema, registerSchema, type GoogleAuthInput, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
 import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
+import { autenticarComGoogle } from '../../services/auth/autenticarComGoogle'
+import { createGoogleTokenVerifier } from '../../services/auth/googleTokenVerifier'
+import { prismaGoogleUserRepository } from '../../services/auth/prismaGoogleUserRepository'
 
 /**
  * Log de auditoria de LOGIN — fora do middleware genérico (`auditTrail()`,
@@ -38,6 +42,7 @@ async function recordLoginAudit(
   user: { id: string; role: Role; email: string; name: string; operatorId: string | null },
   outcome: 'LOGIN_SUCCESS' | 'LOGIN_FAILED',
   httpStatus: number,
+  extra: { actionDetail?: string; path?: string } = {},
 ): Promise<void> {
   if (!AUDITABLE_LOGIN_ROLES.has(user.role)) return
   await writeAuditLog({
@@ -47,13 +52,14 @@ async function recordLoginAudit(
     actorName: user.name,
     actorOperatorId: user.operatorId,
     action: outcome,
+    actionDetail: extra.actionDetail ?? null,
     outcome: outcome === 'LOGIN_SUCCESS' ? 'SUCCESS' : 'FAILED',
     httpStatus,
     entityType: 'User',
     entityId: user.id,
     targetOperatorId: user.operatorId,
     method: 'POST',
-    path: '/api/auth/login',
+    path: extra.path ?? '/api/auth/login',
     ...requestMeta(req),
   })
 }
@@ -118,6 +124,57 @@ router.post(
     res.json({ token, user: toUserDTO({ ...user, operatorName: user.operator?.name }) })
 
     void recordLoginAudit(req, user, 'LOGIN_SUCCESS', 200).catch((err) => logger.error({ err, userId: user.id }, '[audit] falha ao gravar LOGIN_SUCCESS (fire-and-forget)'))
+  }),
+)
+
+/**
+ * `POST /api/auth/google` — login/cadastro de MOTORISTA com Google (Google
+ * Identity Services). Toda a decisão mora em `autenticarComGoogle`/
+ * `decidirAcaoGoogle` (testáveis sem banco); aqui só o mapeamento para HTTP.
+ *
+ * NÃO logar o `credential` (é um JWT — mesma classe de vazamento que o Órion
+ * achou no pino): esta rota nunca passa o body nem o erro da lib do Google
+ * para o logger. O `pino-http` também não serializa `req.body`.
+ *
+ * Só DRIVER entra por aqui — ADMIN/OPERATOR NUNCA (nem são vinculados): a
+ * tentativa em conta de staff é sinal de segurança e grava `LOGIN_FAILED`
+ * (`actionDetail: 'google_login_blocked'`). O resto (sucesso/falha de
+ * motorista) não audita, mesma regra do `/login`.
+ */
+router.post(
+  '/google',
+  authRateLimit,
+  validateBody(googleAuthSchema),
+  asyncHandler(async (req, res) => {
+    const clientId = env.GOOGLE_CLIENT_ID
+    if (!clientId) throw new AppError('Login com Google não está configurado.', 503, 'GOOGLE_NOT_CONFIGURED')
+
+    const { credential } = req.body as GoogleAuthInput
+    const resultado = await autenticarComGoogle(credential, { verifyIdToken: createGoogleTokenVerifier(clientId), users: prismaGoogleUserRepository })
+
+    switch (resultado.status) {
+      case 'INVALID_TOKEN':
+        throw new AppError('Token do Google inválido.', 401, 'INVALID_GOOGLE_TOKEN')
+      case 'EMAIL_NOT_VERIFIED':
+        throw new AppError('O e-mail da conta Google não está verificado.', 403, 'GOOGLE_EMAIL_NOT_VERIFIED')
+      case 'STAFF_NOT_ALLOWED': {
+        const staff = resultado.staff
+        void recordLoginAudit(req, staff, 'LOGIN_FAILED', 403, { actionDetail: 'google_login_blocked', path: '/api/auth/google' }).catch((err) =>
+          logger.error({ err, userId: staff.id }, '[audit] falha ao gravar LOGIN_FAILED do Google (fire-and-forget)'),
+        )
+        throw new AppError('Esta conta não pode entrar com Google.', 403, 'GOOGLE_LOGIN_NOT_ALLOWED')
+      }
+      case 'ACCOUNT_MISMATCH':
+        // Contrato só tem `GOOGLE_LOGIN_NOT_ALLOWED` para "esta conta não pode
+        // entrar por Google" — reaproveitado (nenhum código novo inventado).
+        throw new AppError('Esta conta não pode entrar com Google.', 403, 'GOOGLE_LOGIN_NOT_ALLOWED')
+      case 'INACTIVE':
+        // Mesma resposta que `/login` dá para conta inativa.
+        throw new AppError('E-mail ou senha inválidos.', 401, 'INVALID_CREDENTIALS')
+      case 'OK':
+        res.status(resultado.created ? 201 : 200).json({ token: issueToken(resultado.user), user: toUserDTO({ ...resultado.user, operatorName: null }) })
+        return
+    }
   }),
 )
 

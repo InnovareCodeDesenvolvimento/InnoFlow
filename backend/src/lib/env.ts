@@ -98,6 +98,16 @@ const envSchema = z.object({
   // não vale deixar a conexão muda por tanto tempo) e throttle mínimo do
   // evento `dashboard.dirty` (nunca recalcula agregado por evento — só
   // invalida a query no máximo nesta cadência).
+  // Login/cadastro de motorista com Google (2026-09-19). OPCIONAL: sem ele o
+  // login com Google fica desligado (`GET /api/public/config` devolve `null`,
+  // `POST /api/auth/google` responde 503 `GOOGLE_NOT_CONFIGURED`). O client ID
+  // é PÚBLICO por desenho do Google — mora aqui (não no build do frontend)
+  // para dar pra ligar/desligar sem rebuild. `preprocess` transforma string
+  // vazia em `undefined`: o EasyPanel guarda uma env "em branco" como `""`, e
+  // `.min(1)` puro derrubaria o boot dos 3 entrypoints por causa de uma
+  // feature opcional (mesma lição de bug-env-eager-todos-entrypoints.md).
+  GOOGLE_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
+
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   DASHBOARD_DIRTY_THROTTLE_MS: z.coerce.number().int().positive().default(5000),
 })

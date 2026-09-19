@@ -86,6 +86,20 @@ Formato: lista separada por vírgula, sem barra final.
 CORS_ALLOWED_ORIGINS=https://<dominio-real-do-frontend>.easypanel.host
 ```
 
+**`GOOGLE_CLIENT_ID` (opcional, só o App `api` usa):** login/cadastro de
+motorista com Google (2026-09-19). É o "ID do cliente OAuth" (tipo *Aplicativo
+da Web*) criado no Google Cloud Console — público por desenho do Google, por
+isso mora aqui e não no build do frontend: dá para ligar/desligar sem rebuild.
+Sem a env (ou em branco), o botão "Entrar com Google" simplesmente não aparece
+(`GET /api/public/config` devolve `googleClientId: null`) e
+`POST /api/auth/google` responde 503 `GOOGLE_NOT_CONFIGURED`. No Google Cloud
+Console, cadastre o domínio público do frontend em **"Origens JavaScript
+autorizadas"** (sem isso o botão do Google recusa abrir).
+
+```
+GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com
+```
+
 ⚠️ **`TRUST_PROXY_HOPS` (default `1`, só o App `api` usa de verdade):** log
 de auditoria (2026-09-17) — sem `app.set('trust proxy', ...)`, `req.ip`
 sempre foi o IP do container do nginx do frontend, nunca o do cliente real.

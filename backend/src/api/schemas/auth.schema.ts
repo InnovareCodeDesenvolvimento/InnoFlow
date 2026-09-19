@@ -16,5 +16,15 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 })
 
+// `POST /api/auth/google` — só o ID token (JWT) do Google Identity Services;
+// nome/e-mail/sub NUNCA vêm do cliente, saem do payload verificado. ID tokens
+// reais têm ~1-1,5 KB; 4096 é folga razoável e barra lixo antes de gastar CPU
+// na verificação. Falha de formato aqui é 400 (validação); um JWT bem-formado
+// mas inválido é 401 `INVALID_GOOGLE_TOKEN`, decidido pelo verificador.
+export const googleAuthSchema = z.object({
+  credential: z.string().min(1).max(4096),
+})
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
+export type GoogleAuthInput = z.infer<typeof googleAuthSchema>
