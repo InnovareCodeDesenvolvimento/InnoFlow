@@ -164,13 +164,32 @@ describe('Google — banco e rota (Postgres real)', () => {
 
       const after = await prisma.user.findUniqueOrThrow({ where: { id: driver.id }, include: { wallet: true } })
       expect(after.googleSub).toBe(id.sub)
-      expect(after.passwordHash).toBe('hash') // login por senha continua valendo
       expect(after.wallet?.id).toBe(driver.wallet?.id)
       expect(await prisma.wallet.count({ where: { userId: driver.id } })).toBe(1)
 
       // Segunda entrada: agora pelo sub — LOGIN puro, nada muda.
       const again = await autenticarComGoogle('c', deps(id))
       expect(again).toMatchObject({ status: 'OK', created: false, linked: false })
+    })
+
+    /**
+     * Pré-sequestro de conta (Órion A3, decisão do dono/Atlas 2026-09-19): `/register` não
+     * verifica o e-mail, então quem cadastrou o e-mail da VÍTIMA tem a senha (e talvez sessões
+     * abertas). Vincular o Google — que PROVA a posse do e-mail — passa o controle ao dono
+     * legítimo: a senha do atacante é apagada e as sessões antigas morrem (`sessionsValidAfter`).
+     * Depende da mudança em `prismaGoogleUserRepository.linkGoogleSub` (coluna
+     * `User.sessionsValidAfter`, migration 20260919160000).
+     */
+    it('vincular o Google APAGA a senha pré-existente e invalida as sessões emitidas antes (anti pré-sequestro)', async () => {
+      const driver = await prisma.user.create({ data: { role: 'DRIVER', name: 'Driver pré-sequestrado', email: `presequestro-${suffix}@example.com`, passwordHash: 'senha-do-atacante' } })
+      const before = new Date()
+      const r = await autenticarComGoogle('c', deps(identity('presequestro', { email: driver.email })))
+      expect(r).toMatchObject({ status: 'OK', linked: true })
+
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: driver.id } })
+      expect(after.passwordHash).toBeNull()
+      expect(after.sessionsValidAfter).not.toBeNull()
+      expect(after.sessionsValidAfter!.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000)
     })
 
     it('DRIVER já vinculado a OUTRO sub do Google -> ACCOUNT_MISMATCH e o vínculo original NÃO é sobrescrito', async () => {
