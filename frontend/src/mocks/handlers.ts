@@ -189,10 +189,36 @@ function csvResponse(csv: string, filename: string) {
   })
 }
 
+/**
+ * Mesma regra do backend (`createChargePointSchema`, Órion A1): `basicAuthSecret`
+ * de 16 a 40 caracteres e no máximo 72 bytes (limite do bcrypt). Obrigatório
+ * na criação, opcional na edição. Devolve o 400 `VALIDATION_ERROR` ou `null`.
+ */
+function invalidBasicAuthSecret(secret: string | undefined, required: boolean) {
+  if (secret === undefined) {
+    return required ? HttpResponse.json(errorBody("basicAuthSecret: obrigatório.", "VALIDATION_ERROR"), { status: 400 }) : null
+  }
+  const ok = secret.length >= 16 && secret.length <= 40 && new TextEncoder().encode(secret).length <= 72
+  return ok ? null : HttpResponse.json(errorBody("basicAuthSecret: de 16 a 40 caracteres (até 72 bytes).", "VALIDATION_ERROR"), { status: 400 })
+}
+
 export const handlers = [
   // ---- Auth -----------------------------------------------------------------
+  // Limites de tentativa (contrato: 429 com `code`, ver `lib/authErrors.ts`).
+  // Disparados por e-mail para dar pra provar a tela sem esperar 20 falhas:
+  //  - "conta-bloqueada@..." → 429 RATE_LIMITED_ACCOUNT (throttle por conta; tranca mesmo com a senha certa)
+  //  - "ip-bloqueado@..."    → 429 RATE_LIMITED_AUTH (limite por IP)
   http.post("/api/auth/login", async ({ request }) => {
     const body = (await request.json()) as { email: string; password: string }
+    if (body.email.startsWith("conta-bloqueada@")) {
+      return HttpResponse.json(errorBody("Muitas tentativas de login para esta conta. Tente novamente mais tarde.", "RATE_LIMITED_ACCOUNT"), {
+        status: 429,
+        headers: { "Retry-After": "300" },
+      })
+    }
+    if (body.email.startsWith("ip-bloqueado@")) {
+      return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429 })
+    }
     const user = mockUsers.find((u) => u.email === body.email)
     if (!user || user.password !== body.password) {
       return HttpResponse.json(errorBody("E-mail ou senha inválidos.", "INVALID_CREDENTIALS"), { status: 401 })
@@ -228,6 +254,8 @@ export const handlers = [
   //  - "nao-verificado" → 403 GOOGLE_EMAIL_NOT_VERIFIED
   //  - "novo"           → 201, cria motorista novo
   //  - qualquer outra   → 200, entra no motorista de sempre (mesmo do e-mail/senha)
+  // `mock:google-rate-limited=1` (localStorage) → QUALQUER credential responde 429
+  // RATE_LIMITED_AUTH (limite por IP; o Google só tem esse, não o por conta).
   // Config controlável por localStorage (os handlers rodam na página, não no
   // service worker): `mock:google-disabled=1` → `googleClientId: null`, pra
   // provar a tela SEM o botão (usado no E2E e na validação visual).
@@ -239,6 +267,9 @@ export const handlers = [
   http.post("/api/auth/google", async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { credential?: string }
     const credential = body.credential?.trim() ?? ""
+    if (localStorage.getItem("mock:google-rate-limited") === "1") {
+      return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429 })
+    }
     if (!credential) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
     if (credential === "bloqueado") {
       return HttpResponse.json(errorBody("Esta conta não pode entrar com o Google.", "GOOGLE_LOGIN_NOT_ALLOWED"), { status: 403 })
@@ -353,7 +384,9 @@ export const handlers = [
   http.post("/api/admin/charge-points", async ({ request }) => {
     const scope = requireStaff(request)
     if ("error" in scope) return scope.error
-    const body = (await request.json()) as Partial<ChargePoint> & { siteId: string }
+    const body = (await request.json()) as Partial<ChargePoint> & { siteId: string; basicAuthSecret?: string }
+    const secretError = invalidBasicAuthSecret(body.basicAuthSecret, true)
+    if (secretError) return secretError
     const site = scopedByOperator(mockSites, scope.user).find((s) => s.id === body.siteId)
     if (!site) return HttpResponse.json(errorBody("Site não encontrado.", "NOT_FOUND"), { status: 404 })
     const cp: ChargePoint = {
@@ -379,6 +412,8 @@ export const handlers = [
     const cp = scopedByOperator(mockChargePoints, scope.user).find((c) => c.id === params.id)
     if (!cp) return HttpResponse.json(errorBody("Charge point não encontrado.", "NOT_FOUND"), { status: 404 })
     const body = (await request.json()) as Record<string, unknown>
+    const secretError = invalidBasicAuthSecret(body.basicAuthSecret as string | undefined, false)
+    if (secretError) return secretError
     delete body.basicAuthSecret // nunca persistido em claro — mesma regra do backend real (vira hash lá; aqui nem guardamos)
     Object.assign(cp, body, { updatedAt: new Date().toISOString() })
     return HttpResponse.json(cp)

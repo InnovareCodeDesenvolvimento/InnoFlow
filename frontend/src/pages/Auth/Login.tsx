@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
 import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { useAuthStore } from "@/store/authStore"
-import { getApiErrorMessage } from "@/services/api"
+import { authErrorMessage } from "@/lib/authErrors"
 import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
 import { loginSchema, type LoginFormValues } from "@/schemas/auth.schema"
 import type { User } from "@/types/api"
@@ -47,7 +47,7 @@ export function Login() {
     try {
       goAfterAuth(await login(values))
     } catch (err) {
-      setFormError(getApiErrorMessage(err, "E-mail ou senha inválidos."))
+      setFormError(authErrorMessage(err, "E-mail ou senha inválidos."))
     }
   }
 

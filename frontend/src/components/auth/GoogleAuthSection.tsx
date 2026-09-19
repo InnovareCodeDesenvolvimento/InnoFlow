@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { usePublicConfig } from "@/hooks/usePublicConfig"
 import { useAuthStore } from "@/store/authStore"
-import { getApiErrorCode } from "@/services/api"
+import { getApiErrorCode, getApiErrorStatus } from "@/services/api"
 import { clampGoogleButtonWidth, googleErrorMessageForCode, shouldShowGoogleButton } from "@/lib/googleAuth"
 import { initGoogleIdentity, loadGoogleScript, releaseGoogleHandler, renderGoogleButton } from "@/lib/googleIdentity"
 import { cn } from "@/lib/utils"
@@ -64,7 +64,7 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
         const user = await googleLogin(credential)
         onSuccess(user)
       } catch (err) {
-        setError(googleErrorMessageForCode(getApiErrorCode(err)))
+        setError(googleErrorMessageForCode(getApiErrorCode(err), getApiErrorStatus(err)))
       } finally {
         setSubmitting(false)
       }

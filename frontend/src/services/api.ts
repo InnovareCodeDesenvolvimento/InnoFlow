@@ -28,6 +28,15 @@ api.interceptors.request.use((config) => {
 // sempre "sessão inválida/expirada" de verdade, não algo a tentar renovar.
 // Limpa a sessão e manda para o login, exceto quando o 401 já é da PRÓPRIA
 // tentativa de login (senha errada não deve expulsar ninguém de lugar nenhum).
+//
+// SÓ o 401 desloga. Isto é contrato, não acaso — o backend escolhe o status
+// de propósito para não expulsar ninguém por erro "de formulário":
+//  - 429 (`RATE_LIMITED_AUTH` por IP, `RATE_LIMITED_ACCOUNT` por conta,
+//    `RATE_LIMITED_PASSWORD` por usuário): "espere um pouco", a sessão segue
+//    válida — NUNCA limpar token nem redirecionar.
+//  - 403 `INVALID_CURRENT_PASSWORD` (`POST /api/auth/password`): senha atual
+//    errada é 403 e não 401 justamente para passar por aqui sem deslogar.
+// Coberto por `api.test.ts`.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -53,6 +62,14 @@ export function getApiErrorMessage(err: unknown, fallback = "Não foi possível 
     return err.response?.data?.error ?? fallback
   }
   return fallback
+}
+
+/** Status HTTP do erro (`undefined` = sem resposta: rede caiu, timeout, CORS). */
+export function getApiErrorStatus(err: unknown): number | undefined {
+  if (axios.isAxiosError(err)) {
+    return err.response?.status
+  }
+  return undefined
 }
 
 /** Código do erro (`err.response.data.code`), para tratar casos específicos por código em vez de por texto. */

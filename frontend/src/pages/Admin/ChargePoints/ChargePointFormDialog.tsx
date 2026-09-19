@@ -10,7 +10,12 @@ import { Button } from "@/components/ui/Button"
 import { useSites } from "@/hooks/useSites"
 import { useCreateChargePoint, useUpdateChargePoint } from "@/hooks/useChargePoints"
 import { getApiErrorMessage } from "@/services/api"
-import { chargePointFormSchema, type ChargePointFormValues } from "@/schemas/chargePoint.schema"
+import {
+  BASIC_AUTH_SECRET_MAX,
+  BASIC_AUTH_SECRET_MIN,
+  chargePointFormSchema,
+  type ChargePointFormValues,
+} from "@/schemas/chargePoint.schema"
 import type { ChargePoint } from "@/types/api"
 
 export function ChargePointFormDialog({
@@ -33,6 +38,7 @@ export function ChargePointFormDialog({
     register,
     handleSubmit,
     reset,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ChargePointFormValues>({ resolver: zodResolver(chargePointFormSchema) })
 
@@ -70,7 +76,8 @@ export function ChargePointFormDialog({
         toast.success("Ponto de recarga atualizado.")
       } else {
         if (!values.basicAuthSecret) {
-          toast.error("Informe o segredo de autenticação (Basic Auth) do carregador.")
+          // Erro no próprio campo (aria-invalid + foco), não só um toast que some.
+          setError("basicAuthSecret", { message: "Informe o segredo de autenticação (Basic Auth) do carregador." }, { shouldFocus: true })
           return
         }
         await createChargePoint.mutateAsync({ ...values, basicAuthSecret: values.basicAuthSecret })
@@ -125,7 +132,12 @@ export function ChargePointFormDialog({
           <Input
             type="password"
             label={isEdit ? "Novo segredo Basic Auth (opcional)" : "Segredo Basic Auth"}
-            hint={isEdit ? "Deixe em branco para manter o segredo atual." : "Mínimo de 8 caracteres — usado pelo carregador para autenticar no gateway."}
+            hint={
+              isEdit
+                ? `Deixe em branco para manter o segredo atual. Se trocar: de ${BASIC_AUTH_SECRET_MIN} a ${BASIC_AUTH_SECRET_MAX} caracteres.`
+                : `De ${BASIC_AUTH_SECRET_MIN} a ${BASIC_AUTH_SECRET_MAX} caracteres — usado pelo carregador para autenticar no gateway.`
+            }
+            autoComplete="new-password"
             required={!isEdit}
             error={errors.basicAuthSecret?.message}
             {...register("basicAuthSecret")}

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
 import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { useAuthStore } from "@/store/authStore"
-import { getApiErrorMessage } from "@/services/api"
+import { authErrorMessage } from "@/lib/authErrors"
 import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
 import { registerSchema, type RegisterFormValues } from "@/schemas/auth.schema"
 import logoIcon from "@/assets/logo-icon.png"
@@ -49,7 +49,7 @@ export function Register() {
       await register_({ ...values, phone: values.phone || undefined })
       navigate(safeRedirect(redirect) ?? "/", { replace: true })
     } catch (err) {
-      setFormError(getApiErrorMessage(err, "Não foi possível criar sua conta."))
+      setFormError(authErrorMessage(err, "Não foi possível criar sua conta."))
     }
   }
 

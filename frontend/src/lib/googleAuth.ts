@@ -1,3 +1,4 @@
+import { authRateLimitMessage } from "@/lib/authErrors"
 import type { PublicClientConfig } from "@/types/api"
 
 /**
@@ -28,9 +29,14 @@ export function clampGoogleButtonWidth(measured: number): number {
 /**
  * Códigos de erro do `POST /api/auth/google` (ver `GoogleAuthRequest` em
  * `types/api.ts`) → mensagem em português. Trata por `code`, nunca pelo texto
- * do backend. Qualquer outro caso (rede, 5xx, código novo) cai no genérico.
+ * do backend. Limite de tentativas (429) tem texto próprio, compartilhado com o
+ * login (`lib/authErrors.ts`) — por isso o `status` opcional: um 429 sem `code`
+ * (proxy na frente) também cai lá. Qualquer outro caso (rede, 5xx, código novo)
+ * cai no genérico.
  */
-export function googleErrorMessageForCode(code: string | undefined): string {
+export function googleErrorMessageForCode(code: string | undefined, status?: number): string {
+  const rateLimited = authRateLimitMessage(status, code)
+  if (rateLimited) return rateLimited
   switch (code) {
     case "GOOGLE_LOGIN_NOT_ALLOWED":
       return "Esta conta é de operação/administração e não pode entrar com o Google — use e-mail e senha."
