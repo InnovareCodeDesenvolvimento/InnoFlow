@@ -18,6 +18,8 @@ export class RedisProxy {
   private server: Server | undefined
   private readonly sockets = new Set<Socket>()
   private mode: 'up' | 'down' | 'blackhole' = 'up'
+  private latencyMs = 0
+  private readonly lanes = new Set<DelayLane>()
   port = 0
 
   constructor(private readonly target: { host: string; port: number }) {}
@@ -61,9 +63,15 @@ export class RedisProxy {
     upstream.on('error', () => client.destroy())
     client.on('close', () => upstream.destroy())
 
+    const toUpstream = new DelayLane((chunk) => upstream.write(chunk))
+    this.lanes.add(toUpstream)
+    client.on('close', () => {
+      toUpstream.clear()
+      this.lanes.delete(toUpstream)
+    })
     client.on('data', (chunk) => {
       if (this.mode === 'blackhole') return
-      upstream.write(chunk)
+      toUpstream.push(chunk, this.latencyMs)
     })
     upstream.on('data', (chunk) => {
       if (this.mode === 'blackhole') return
@@ -72,6 +80,8 @@ export class RedisProxy {
   }
 
   private killSockets(): void {
+    for (const lane of this.lanes) lane.clear()
+    this.lanes.clear()
     for (const s of this.sockets) s.destroy()
     this.sockets.clear()
   }
@@ -91,14 +101,58 @@ export class RedisProxy {
     this.mode = 'blackhole'
   }
 
+  /**
+   * Redis "LENTO" (vivo, mas cada comando so chega ao Redis `ms` milissegundos depois: fork de BGSAVE, disco, CPU
+   * disputada): NAO da erro e NAO trava, so demora. A ordem dos bytes e preservada. `0` volta ao normal (os
+   * comandos ja atrasados ainda sao entregues, na ordem).
+   */
+  latency(ms: number): void {
+    this.latencyMs = ms
+  }
+
   /** Volta ao normal. Conexões enterradas no blackhole são derrubadas (o cliente reconecta limpo). */
   async up(): Promise<void> {
     if (this.mode === 'blackhole') this.killSockets()
     this.mode = 'up'
+    this.latencyMs = 0
     if (!this.server) await this.listen(this.port)
   }
 
   async stop(): Promise<void> {
     await this.down()
+  }
+}
+
+/** Fila ordenada com atraso: cada chunk sai em max(agora + atraso, saida do anterior) — nunca reordena. */
+class DelayLane {
+  private queue: Array<{ at: number; chunk: Buffer }> = []
+  private timer: NodeJS.Timeout | undefined
+
+  constructor(private readonly write: (chunk: Buffer) => void) {}
+
+  push(chunk: Buffer, delayMs: number): void {
+    if (delayMs <= 0 && this.queue.length === 0) return this.write(chunk) // caminho normal: sem custo
+    const at = Math.max(Date.now() + delayMs, this.queue.at(-1)?.at ?? 0)
+    this.queue.push({ at, chunk })
+    this.schedule()
+  }
+
+  private schedule(): void {
+    if (this.timer || this.queue.length === 0) return
+    this.timer = setTimeout(
+      () => {
+        this.timer = undefined
+        const now = Date.now()
+        while (this.queue.length > 0 && this.queue[0].at <= now) this.write(this.queue.shift()!.chunk)
+        this.schedule()
+      },
+      Math.max(0, this.queue[0].at - Date.now()),
+    )
+  }
+
+  clear(): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    this.queue = []
   }
 }
