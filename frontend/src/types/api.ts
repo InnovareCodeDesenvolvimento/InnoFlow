@@ -25,6 +25,30 @@ export interface AuthResponse {
   user: User
 }
 
+/**
+ * `GET /api/public/config` (sem auth) — configuração pública que o cliente
+ * precisa para montar a tela de login. `googleClientId` é PÚBLICO por
+ * desenho (Google exige que ele apareça no front); `null` = login com Google
+ * não configurado neste ambiente → o botão simplesmente NÃO é renderizado.
+ */
+export interface PublicClientConfig {
+  googleClientId: string | null
+}
+
+/**
+ * `POST /api/auth/google` (sem auth) — `credential` é o ID token (JWT) que o
+ * Google Identity Services entrega no callback do botão. Resposta: `AuthResponse`
+ * (mesmo formato de login/registro) — 201 se criou conta nova de motorista,
+ * 200 se entrou numa conta existente (ou vinculou o Google a uma conta de
+ * motorista já cadastrada com o mesmo e-mail verificado). Só `DRIVER`: e-mail
+ * que pertence a ADMIN/OPERATOR responde 403 `GOOGLE_LOGIN_NOT_ALLOWED`.
+ * Códigos de erro: `GOOGLE_NOT_CONFIGURED` (503), `INVALID_GOOGLE_TOKEN` (401),
+ * `GOOGLE_EMAIL_NOT_VERIFIED` (403), `GOOGLE_LOGIN_NOT_ALLOWED` (403).
+ */
+export interface GoogleAuthRequest {
+  credential: string
+}
+
 /** Envelope de erro da API: `{ error, code, details? }` — sempre trate por `code`. */
 export interface ApiErrorBody {
   error: string

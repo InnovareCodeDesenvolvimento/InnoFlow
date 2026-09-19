@@ -341,6 +341,11 @@ model User {
   email        String  @unique
   phone        String?
   passwordHash String?
+  // Identificador ESTÁVEL do Google (claim `sub` do ID token) — não o e-mail, que
+  // pode mudar do lado do Google. Só motoristas (DRIVER) entram por Google;
+  // NULL para quem nunca usou. UNIQUE parcial natural: Postgres trata NULLs
+  // como distintos, então vários usuários sem Google não colidem.
+  googleSub    String? @unique
 
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz(3)
