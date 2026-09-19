@@ -37,16 +37,17 @@ server {
     # inline) + fonts.googleapis.com (ver index.html, Inter via <link>);
     # font-src libera fonts.gstatic.com (onde o arquivo da fonte realmente
     # baixa). connect-src só 'self' — API e SSE são mesma origem, sem CORS
-    # externo. Permissions-Policy desliga geolocation/camera/microphone: a
-    # app não usa nenhuma (o scanner de QR é a câmera NATIVA do celular,
-    # fora do navegador — se um dia existir scanner DENTRO do app, câmera
-    # precisa ser liberada aqui). Não foi possível testar contra nginx real
+    # externo. Permissions-Policy: geolocation=(self) ("eletropostos perto de
+    # mim", 19/09/2026 — só a própria origem pode pedir, nunca iframe de
+    # terceiro); camera/microphone continuam desligados (o scanner de QR é a
+    # câmera NATIVA do celular, fora do navegador — se um dia existir scanner
+    # DENTRO do app, câmera precisa ser liberada aqui). Não foi possível testar contra nginx real
     # neste ambiente (sem Docker) — conferir o console do navegador por
     # violação de CSP depois do primeiro deploy.
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+    add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
 
@@ -93,7 +94,7 @@ server {
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
@@ -131,7 +132,7 @@ server {
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
         try_files $uri =404;
@@ -143,7 +144,7 @@ server {
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
@@ -154,7 +155,7 @@ server {
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
