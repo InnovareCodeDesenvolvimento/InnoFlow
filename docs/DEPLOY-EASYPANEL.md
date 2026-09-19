@@ -119,12 +119,15 @@ domínio antigo `*.easypanel.host`.
 GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com
 ```
 
-⚠️ **`TRUST_PROXY_HOPS` (default `1`, só o App `api` usa de verdade):** log
-de auditoria (2026-09-17) — sem `app.set('trust proxy', ...)`, `req.ip`
-sempre foi o IP do container do nginx do frontend, nunca o do cliente real.
-O default `1` já assume a topologia atual (nginx do frontend → rede interna
-do EasyPanel → container da API, um único hop) — só mexer se um proxy/LB
-novo entrar na frente disso.
+⚠️ **`TRUST_PROXY_HOPS` (default `2`, só o App `api` usa de verdade):** sem
+`app.set('trust proxy', ...)`, `req.ip` seria sempre o IP de um proxy, nunca
+o do cliente — o `ipAddress` do audit log ficaria inútil e o rate limit de
+login por IP contaria todos os usuários num balde só. São **2 proxies** entre o
+cliente e a API (edge do EasyPanel + nginx do frontend) — o valor `1` que
+estava aqui antes era um erro, medido em produção (19/09/2026): `x-forwarded-for`
+chegava como `cliente, 10.11.0.16` e o IP gravado era `10.11.0.16`. Só mexer se
+entrar um proxy/CDN/LB novo na frente — e conferindo um log real antes: hops a
+MAIS deixa o cliente forjar o próprio IP.
 
 ## 1.1 Frontend
 

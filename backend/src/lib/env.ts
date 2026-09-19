@@ -82,11 +82,19 @@ const envSchema = z.object({
   // IP do container do proxy do EasyPanel (nginx do frontend -> rede interna
   // -> container da API) — o campo `ipAddress` do audit log nasceria sempre
   // igual (inútil) e o rate limit de login por IP conta a internet inteira
-  // num balde só. Número de hops (não `true` cego): 1 hop confirmado (nginx
-  // do frontend é o único proxy reverso entre o cliente e o Express nesta
-  // topologia — EasyPanel roteia direto por rede interna, sem LB extra na
-  // frente). Ajustável por env se a topologia mudar.
-  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
+  // num balde só. Número de hops (não `true` cego).
+  //
+  // CORRIGIDO 19/09/2026 (evidência de produção): o default era 1 ("nginx do
+  // frontend é o único proxy") e estava ERRADO — são 2 proxies entre o
+  // cliente e o Express: o edge do EasyPanel e o nginx do frontend. Log real:
+  // `x-forwarded-for: "179.104.42.35, 10.11.0.16"` + socket `10.11.0.16`, e o
+  // audit log gravou `ipAddress: "10.11.0.16"` (IP do proxy, não do cliente)
+  // — com isso o rate limit de login por IP continuava contando TODOS os
+  // usuários num balde só. Reproduzido: hops=1 -> 10.11.0.16; hops=2 ->
+  // 179.104.42.35 (e um cliente forjando X-Forwarded-For NÃO vira o IP dele).
+  // Se a topologia mudar (CDN/LB novo na frente), reconfira com um log real
+  // antes de mexer: hops a MAIS deixa o cliente forjar o próprio IP.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(2),
 
   // Log de auditoria (Nova, 2026-09-17) — teto de tamanho do diff gravado em
   // `AuditLog.changes` (allowlist por entidade, nunca payload cru). Acima
