@@ -97,7 +97,10 @@ describe('Isolamento multi-tenant (escopo de operador)', () => {
   })
 
   it('ADMIN enxerga charge points dos dois operadores (sem filtro de tenant)', async () => {
-    const res = await request(app).get('/api/admin/charge-points').set('Authorization', `Bearer ${adminToken}`)
+    // pageSize 100: as suítes de integração rodam EM PARALELO no mesmo banco e a listagem do ADMIN é global
+    // (createdAt desc) — com a página padrão de 20, charge points criados por outras suítes logo depois deste
+    // fixture podiam empurrá-lo para fora da 1ª página (flake, não bug).
+    const res = await request(app).get('/api/admin/charge-points').query({ pageSize: 100 }).set('Authorization', `Bearer ${adminToken}`)
     expect(res.status).toBe(200)
     const ids = (res.body.items as Array<{ id: string }>).map((i) => i.id)
     expect(ids).toContain(chargePointA.id)
