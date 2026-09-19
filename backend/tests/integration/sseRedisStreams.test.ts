@@ -363,39 +363,27 @@ describe('backpressure: cliente que não lê', () => {
   }, 90_000)
 
   /**
-   * FURO LATENTE (achado da Íris, 2026-09-19 — NÃO corrigido aqui): `openSseStream` fecha o stream
-   * quando `res.write(...) === false`. Mas `write()` devolve false sempre que o que acabou de ser
-   * escrito sozinho já passa do `highWaterMark` (16KB), MESMO com o cliente lendo normalmente — não
-   * significa "o cliente não está lendo". Um único evento acima desse tamanho derruba um cliente
-   * saudável (medido: 256KB e o stream do saudável foi fechado por 'backpressure' no 1º evento).
-   * Hoje os eventos reais são minúsculos (<1KB, contrato fixo), então não dispara em produção —
-   * mas a heurística é frágil: o critério correto é esperar o `drain` com prazo (ou olhar
-   * `res.writableLength` acumulado). `it.fails` = comportamento DESEJADO; vire `it` ao corrigir.
+   * Achado da Íris (2026-09-19), corrigido: `openSseStream` fechava o stream quando `res.write(...) === false`,
+   * mas isso só diz "há mais de 16KB pendentes no buffer" — não "o cliente parou de ler". Um único evento
+   * acima de 16KB (medido: 100KB e 256KB) ou uma RAJADA de eventos pequenos entregue no mesmo tick pelo
+   * assinante Redis (~50 x 330B) derrubava um cliente saudável, que estava lendo normalmente. Causa raiz:
+   * decisão de "cliente parado" tomada sobre um sinal instantâneo. Agora `false` abre um prazo para o
+   * `drain` (5s) e só o cliente que não drena nesse prazo — ou que estoura o teto duro de 1 MiB
+   * pendente — é derrubado. Cenário real da rajada: o canal do ADMIN (`ui:ev:admin`) recebe TODO evento do
+   * sistema; o gateway voltando com dezenas de carregadores derrubaria todos os painéis abertos.
    */
-  it.fails('um ÚNICO evento grande (100KB) NÃO derruba um cliente saudável que está lendo (FURO LATENTE: hoje fecha por "backpressure")', async () => {
+  it('um ÚNICO evento grande (100KB) NÃO derruba um cliente saudável que está lendo', async () => {
     const saudavel = await openSse('/api/admin/events', tenant.staff.token)
     const marca = `grande-${suffix}`
     await publishToOperator(tenant.operatorId, eventoGordo(marca, 100))
     await waitFor(async () => saudavel.text().includes(marca) || saudavel.ended, { timeoutMs: 5_000, what: 'evento grande chegar' })
     await new Promise((r) => setTimeout(r, 300)) // dá tempo ao servidor de fechar, se for fechar
+    expect(saudavel.text()).toContain(marca)
     expect(saudavel.ended).toBe(false)
     expect(streamsAbertos()).toBe(1)
   })
 
-  /**
-   * FURO (achado da Íris, 2026-09-19 — NÃO corrigido aqui), mesma causa do teste acima e MAIS
-   * realista: o assinante Redis entrega uma RAJADA de mensagens de uma vez (o parser do ioredis emite
-   * todas as que vieram no mesmo pacote TCP, no mesmo tick), e `openSseStream` escreve todas antes de
-   * o socket ter chance de drenar. Assim que o que está pendente passa de 16KB, o `write()` devolve
-   * false e o stream é fechado como "backpressure" — com um cliente saudável, lendo normalmente.
-   * Medido: ~50 eventos de ~330 bytes publicados em rajada bastam. Cenário real: o canal do ADMIN
-   * (`ui:ev:admin`) recebe TODO evento do sistema; uma queda/volta do gateway com dezenas de carregadores
-   * reconectando de uma vez gera exatamente essa rajada e derruba todos os painéis abertos (que
-   * reconectam e refazem o fetch — o polling de segurança cobre, mas é uma tempestade de reconexões).
-   * Correção esperada: `false` => esperar `drain` com prazo e só então fechar (ou olhar
-   * `res.writableLength` acumulado por tempo). `it.fails` = comportamento DESEJADO; vire `it` ao corrigir.
-   */
-  it.fails('rajada de 300 eventos PEQUENOS (~330B, ~100KB no total) chegando juntos NÃO derruba um cliente saudável que está lendo (FURO: hoje fecha por "backpressure")', async () => {
+  it('rajada de 300 eventos PEQUENOS (~330B, ~100KB no total) chegando juntos NÃO derruba um cliente saudável que está lendo — e ele recebe TODOS', async () => {
     const saudavel = await openSse('/api/admin/events', tenant.staff.token)
     const pipeline = redis.pipeline()
     const canal = operatorChannel(tenant.operatorId)
@@ -407,5 +395,31 @@ describe('backpressure: cliente que não lê', () => {
     await new Promise((r) => setTimeout(r, 300)) // dá tempo ao servidor de fechar, se for fechar
     expect(saudavel.ended).toBe(false)
     expect(streamsAbertos()).toBe(1)
+    for (let i = 0; i < 300; i += 37) expect(saudavel.text()).toContain(`rajada-${suffix}-${i}`) // nada foi perdido no meio
   })
+
+  it('cliente PARADO no mesmo canal de um saudável continua sendo derrubado (o teto/prazo vale só para quem não drena); o saudável segue recebendo', async () => {
+    const parado = await openSse('/api/admin/events', tenant.staff.token)
+    const usuarioSaudavel = await createUser({ role: 'OPERATOR', label: 'saudavel-rajada', suffix, operatorId: tenant.operatorId })
+    const saudavel = await openSse('/api/admin/events', usuarioSaudavel.token)
+    parado.response.pause()
+    parado.response.socket.pause()
+
+    const canal = operatorChannel(tenant.operatorId)
+    let lotes = 0
+    for (; lotes < 40 && streamsAbertos() === 2; lotes++) {
+      const pipeline = redis.pipeline()
+      for (let i = 0; i < 50; i++) pipeline.publish(canal, JSON.stringify(eventoGordo(`par-${suffix}-${lotes}-${i}`, 8)))
+      await pipeline.exec() // 50 x 8KB de uma vez por lote (~400KB): rajada que o saudável drena entre um lote e outro
+      await new Promise((r) => setTimeout(r, 150))
+    }
+
+    await waitFor(async () => streamsAbertos() === 1, { timeoutMs: 15_000, what: 'servidor derrubar o cliente parado' })
+    console.log(`[medicao] cliente parado derrubado depois de ${lotes} lote(s) de 50 eventos de 8KB (~${Math.round((lotes * 50 * 8) / 1024)}MB publicados)`)
+    const final = `par-final-${suffix}`
+    await publishToOperator(tenant.operatorId, eventoMarcado(final))
+    await waitFor(async () => saudavel.text().includes(final), { timeoutMs: 15_000, what: 'saudável receber o último evento' })
+    expect(saudavel.ended).toBe(false)
+    expect(saudavel.text()).toContain(`par-${suffix}-0-0`) // e recebeu a rajada inteira, desde o início
+  }, 90_000)
 })

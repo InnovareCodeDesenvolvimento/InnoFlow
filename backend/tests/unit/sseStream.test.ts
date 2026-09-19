@@ -15,15 +15,20 @@ function fakeRes(writeReturns: () => boolean = () => true) {
     headers: Record<string, string>
     written: string[]
     writableEnded: boolean
+    writableLength: number
+    destroyed: boolean
     status(c: number): unknown
     setHeader(k: string, v: string): void
     flushHeaders(): void
     write(chunk: string): boolean
     end(): void
+    destroy(): void
   }
   res.headers = {}
   res.written = []
   res.writableEnded = false
+  res.writableLength = 0
+  res.destroyed = false
   res.status = (c) => {
     res.statusCode = c
     return res
@@ -38,6 +43,10 @@ function fakeRes(writeReturns: () => boolean = () => true) {
   }
   res.end = () => {
     res.writableEnded = true
+    res.emit('close')
+  }
+  res.destroy = () => {
+    res.destroyed = true
     res.emit('close')
   }
   return res
@@ -90,19 +99,107 @@ describe('openSseStream', () => {
     expect(res.written[1]).toBe('event: wallet.updated\ndata: {"type":"wallet.updated"}\n\n')
   })
 
-  it('BACKPRESSURE: write() devolvendo false fecha o stream e solta assinatura e vaga (cliente que não lê não acumula memória)', () => {
-    let saturado = false
-    const t = setup()
-    const res = fakeRes(() => !saturado)
-    open(t, res)
+  describe('backpressure: `write() === false` NÃO é "cliente parado" (Íris/Vega, 2026-09-19)', () => {
+    it('REGRESSÃO: write() false e o cliente DRENA dentro do prazo -> o stream continua aberto e recebendo (antes: fechava na hora)', () => {
+      vi.useFakeTimers()
+      let saturado = false
+      const t = setup({ drainTimeoutMs: 5_000 })
+      const res = fakeRes(() => !saturado)
+      open(t, res)
 
-    saturado = true
-    t.emit({ type: 'session.metrics' })
+      saturado = true
+      t.emit({ type: 'session.metrics' }) // buffer passou dos 16KB (rajada/evento grande) -> false
+      vi.advanceTimersByTime(2_000)
+      saturado = false
+      res.emit('drain') // o cliente leu: buffer esvaziou
+      vi.advanceTimersByTime(60_000) // passa MUITO além do prazo original: o prazo foi cancelado pelo drain
 
-    expect(t.closes).toEqual(['backpressure'])
-    expect(res.writableEnded).toBe(true)
-    expect(t.unsubscribedCount()).toBe(1)
-    expect(t.deps.limiter.stats().total).toBe(0)
+      expect(t.closes).toEqual([])
+      t.emit({ type: 'wallet.updated' })
+      expect(res.written.at(-1)).toBe('event: wallet.updated\ndata: {"type":"wallet.updated"}\n\n') // segue entregando
+      expect(res.listenerCount('drain')).toBe(0)
+    })
+
+    it('cliente PARADO (não drena dentro do prazo) é derrubado: fecha, destrói o socket, solta assinatura e vaga', () => {
+      vi.useFakeTimers()
+      let saturado = false
+      const t = setup({ drainTimeoutMs: 5_000 })
+      const res = fakeRes(() => !saturado)
+      open(t, res)
+
+      saturado = true
+      t.emit({ type: 'session.metrics' })
+      vi.advanceTimersByTime(4_999)
+      expect(t.closes).toEqual([]) // ainda dentro do prazo
+      vi.advanceTimersByTime(2)
+
+      expect(t.closes).toEqual(['backpressure'])
+      expect(res.destroyed).toBe(true) // descarta o buffer pendente: um end() num socket que ninguém lê o deixaria preso
+      expect(t.unsubscribedCount()).toBe(1)
+      expect(t.deps.limiter.stats().total).toBe(0)
+      expect(res.listenerCount('drain')).toBe(0)
+    })
+
+    it('rajada: 300 escritas com false seguidas abrem UM prazo só (não um por evento) e um único drain o encerra', () => {
+      vi.useFakeTimers()
+      const t = setup({ drainTimeoutMs: 5_000 })
+      const res = fakeRes(() => false)
+      open(t, res)
+      for (let i = 0; i < 300; i++) t.emit({ type: 'chargepoint.status' })
+
+      expect(res.listenerCount('drain')).toBe(1)
+      res.emit('drain')
+      vi.advanceTimersByTime(60_000)
+      expect(t.closes).toEqual([])
+    })
+
+    it('TETO duro de bytes pendentes derruba NA HORA, sem esperar o prazo (o cliente parado não acumula memória enquanto o prazo corre)', () => {
+      vi.useFakeTimers()
+      const t = setup({ drainTimeoutMs: 60_000, maxBufferedBytes: 1_000 })
+      const res = fakeRes(() => false)
+      open(t, res)
+
+      res.writableLength = 999
+      t.emit({ type: 'session.metrics' })
+      expect(t.closes).toEqual([]) // abaixo do teto: só espera o prazo
+      res.writableLength = 1_001
+      t.emit({ type: 'session.metrics' })
+
+      expect(t.closes).toEqual(['backpressure'])
+      expect(res.destroyed).toBe(true)
+    })
+
+    it('evento GRANDE (acima do highWaterMark de 16KB) com o cliente lendo NÃO derruba: write() false + drain logo em seguida', () => {
+      vi.useFakeTimers()
+      let saturado = false
+      const t = setup()
+      const res = fakeRes(() => !saturado)
+      open(t, res)
+
+      saturado = true
+      res.writableLength = 100 * 1024 // 100KB escritos de uma vez, abaixo do teto de 1 MiB
+      t.emit({ type: 'admin.entity.changed' })
+      res.writableLength = 0
+      saturado = false
+      res.emit('drain')
+      vi.advanceTimersByTime(60_000)
+
+      expect(t.closes).toEqual([])
+    })
+
+    it('fechar o stream com o prazo em curso não deixa timer nem ouvinte de drain pendurados', () => {
+      vi.useFakeTimers()
+      const t = setup({ drainTimeoutMs: 5_000 })
+      const res = fakeRes(() => false)
+      open(t, res)
+      t.emit({ type: 'session.metrics' })
+
+      res.emit('close') // o cliente foi embora no meio do prazo
+
+      expect(t.closes).toEqual(['client_closed'])
+      expect(res.listenerCount('drain')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    })
   })
 
   it('cliente desconectou (close da resposta): solta assinatura e vaga, sem chamar end()', () => {
