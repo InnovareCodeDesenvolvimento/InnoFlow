@@ -194,7 +194,14 @@ router.post(
           path: req.originalUrl.split('?')[0],
           ipAddress: req.ip ?? null,
           userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
-          requestId: (req as { id?: string }).id ?? null,
+          // `req.id` do pino-http é NÚMERO, mas `AuditLog.requestId` é `String?`:
+          // passar o número cru faz o Prisma rejeitar o INSERT da auditoria
+          // (PrismaClientValidationError) — e como esta gravação é FAIL-CLOSED
+          // (mesma transação do WalletEntry), o ajuste manual de saldo dava
+          // 500 SEMPRE e revertia tudo. Mesmo bug já corrigido em
+          // `auditTrail.ts` e `auth.routes.ts` (17/09); este ponto ficou de
+          // fora e só apareceu na 1ª execução contra Postgres real (19/09).
+          requestId: (req as { id?: string | number }).id != null ? String((req as { id?: string | number }).id) : null,
         },
       })
 
