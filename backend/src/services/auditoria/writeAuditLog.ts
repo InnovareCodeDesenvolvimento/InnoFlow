@@ -2,6 +2,7 @@ import type { AuditAction, AuditOutcome, Prisma, Role } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { env } from '../../lib/env'
 import { clampDiffSize, type EntityDiff } from '../../core/auditoria/diffEntity'
+import { limitarCamposDeAuditoria } from '../../core/auditoria/limitesDeCampos'
 
 /**
  * Escritor único do `AuditLog` — usado pelo middleware genérico
@@ -36,7 +37,10 @@ export interface WriteAuditLogInput {
 
 type Tx = Prisma.TransactionClient | typeof prisma
 
-export async function writeAuditLog(input: WriteAuditLogInput, tx: Tx = prisma): Promise<void> {
+export async function writeAuditLog(rawInput: WriteAuditLogInput, tx: Tx = prisma): Promise<void> {
+  // Teto de `path`/`userAgent`/`entityId` (Órion A4): a tabela é imutável por 24 meses — campo sem
+  // teto deixa um atacante encher o disco para sempre. Mesmos limites como CHECK no banco.
+  const input = limitarCamposDeAuditoria(rawInput)
   const changes = clampDiffSize(input.changes ?? null, env.AUDIT_LOG_CHANGES_MAX_BYTES)
 
   await tx.auditLog.create({

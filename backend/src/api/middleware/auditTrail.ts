@@ -5,6 +5,7 @@ import { logger } from '../../lib/logger'
 import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
 import { emitAdminEntityChanged, emitDashboardDirty } from '../../realtime/emit'
 import type { EntityDiff } from '../../core/auditoria/diffEntity'
+import { deveGravarAuditoria } from '../../core/auditoria/limitesDeCampos'
 
 /**
  * Middleware de auditoria — montado UMA vez em `app.use('/api/admin',
@@ -135,6 +136,9 @@ async function recordAuditEntry(req: Request, res: Response): Promise<void> {
 
   const outcome = resolveOutcome(res.statusCode)
   if (outcome === null) return
+  // DRIVER batendo em /api/admin/* (403 garantido) não vira linha na tabela imutável (Órion A4).
+  // `DENIED` de ADMIN/OPERATOR — o sinal de segurança valioso — continua sendo gravado.
+  if (!deveGravarAuditoria(user.role, outcome)) return
 
   const entityType = described?.entityType ?? inferEntityType(pathname)
   const entityId = described?.entityId ?? (typeof req.params?.id === 'string' ? req.params.id : null)
