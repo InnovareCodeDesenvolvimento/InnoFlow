@@ -616,14 +616,17 @@ async function main(): Promise<void> {
 
   // Site matriz: reaproveita CP-INNOELEKTRON-001 (2 conectores já existem no
   // seed base) + 1 CP novo demo-.
-  const baseChargePoint = await prisma.chargePoint.findUniqueOrThrow({
+  // Em PRODUÇÃO o seed base só cria este carregador se `SEED_CHARGEPOINT_SECRET` estiver definida
+  // (Órion C1) — sem ele, o demo segue sem reaproveitá-lo em vez de falhar.
+  const baseChargePoint = await prisma.chargePoint.findUnique({
     where: { ocppIdentity: 'CP-INNOELEKTRON-001' },
     include: { connectors: true },
   })
-  for (const connector of baseChargePoint.connectors) {
+  if (!baseChargePoint) console.warn('[seed-demo] CP-INNOELEKTRON-001 não existe (seed base sem SEED_CHARGEPOINT_SECRET) — seguindo sem ele.')
+  for (const connector of baseChargePoint?.connectors ?? []) {
     allConnectors.push({
       id: connector.id,
-      chargePointId: baseChargePoint.id,
+      chargePointId: baseChargePoint!.id,
       siteId: baseSite.id,
       operatorId: baseOperator.id,
       type: connector.type,

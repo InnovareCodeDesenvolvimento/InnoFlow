@@ -181,6 +181,29 @@ npm run prisma:seed        # opcional — cria dados de teste (operator, site,
 npm run db:test-partitioning   # confirma que a partição mensal está funcionando
 ```
 
+⚠️ **Credenciais do seed em PRODUÇÃO (Órion C1, 19/09/2026).** Com
+`NODE_ENV=production` o seed **nunca** usa senha padrão (as antigas —
+`admin123456`, `staff123456`, `driver123456`, `changeme-basic-auth-secret` —
+estão públicas no repositório). Cada credencial vem de uma env, e o que não
+tiver env é **pulado com um aviso** (o usuário/carregador simplesmente não é
+criado):
+
+| Env | Cria | Regra |
+|---|---|---|
+| `SEED_ADMIN_PASSWORD` | `admin@innoelektron.example.com` (ADMIN) | mínimo 12 caracteres |
+| `SEED_STAFF_PASSWORD` | `staff@innoelektron-operacoes.example.com` (OPERATOR) | mínimo 12 |
+| `SEED_DRIVER_PASSWORD` | `motorista.teste@innoelektron.example.com` (DRIVER, com R$ 50 de teste) | mínimo 12 |
+| `SEED_CHARGEPOINT_SECRET` | carregador `CP-INNOELEKTRON-001` (+ conectores e vínculo de tarifa) | 16 a 40 caracteres |
+
+Passe-as só na linha do comando (não como env permanente do serviço) e nunca
+as repita em log/chat: `SEED_ADMIN_PASSWORD='...' npm run prisma:seed`. Valores
+por env **nunca são impressos**. O seed é idempotente e **não troca a senha de
+uma conta que já existe** — para uma base que já foi semeada com as senhas
+antigas, ROTACIONE com `NEW_PASSWORD='...' npm run user:set-password --
+<e-mail>` (ou `--deactivate` para desativar a conta) e troque o segredo do
+carregador com `PATCH /api/admin/charge-points/:id` (`basicAuthSecret`, 16 a 40
+caracteres). Rotacionar também derruba as sessões abertas (`sessionsValidAfter`).
+
 Se qualquer um desses falhar, é a primeira vez que a base é testada de
 verdade contra um Postgres real — reporte o erro, não é esperado que passe
 "quase".
@@ -213,8 +236,10 @@ Detalhes técnicos completos em `docs/PROXY-REVERSO.md`.
 
 - [ ] `GET https://<domínio-da-api>/health` responde `ok` e confirma conexão
       com Postgres e Redis.
-- [ ] `POST /api/auth/login` com um dos usuários do seed (senhas impressas no
-      log do `npm run prisma:seed`) devolve um JWT.
+- [ ] `POST /api/auth/login` com um usuário do seed devolve um JWT — em produção
+      com a senha que VOCÊ passou em `SEED_ADMIN_PASSWORD` (nunca a padrão; ver
+      o aviso sobre credenciais do seed acima). Depois, troque-a pela tela/rota de
+      senha (`POST /api/auth/password`).
 - [ ] `GET /api/admin/charge-points` (com o JWT do ADMIN) mostra o
       `CP-INNOELEKTRON-001` do seed.
 - [ ] Se subiu o simulador: ele conecta no `ocpp-gateway` e o `StatusNotification`
