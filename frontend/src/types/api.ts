@@ -18,11 +18,39 @@ export interface User {
   operatorId: string | null
   /** Nome do operador (empresa) dono do usuário — `null` para `ADMIN`/`DRIVER`, que não pertencem a um único operador. Join feito pelo backend em `/api/auth/login`. */
   operatorName: string | null
+  /**
+   * `true` se a conta TEM senha (login por e-mail+senha possível); `false` para conta que
+   * só entra pelo Google (criada por lá, ou cuja senha foi zerada ao vincular o Google —
+   * ver `ChangePasswordRequest`). Decide se a tela de senha pede a senha atual. Sempre
+   * enviado pelo servidor (login/cadastro/google/troca de senha); opcional no tipo só para
+   * não quebrar mocks antigos.
+   */
+  hasPassword?: boolean
 }
 
 export interface AuthResponse {
   token: string
   user: User
+}
+
+/**
+ * `POST /api/auth/password` (AUTENTICADO — qualquer papel troca a PRÓPRIA senha). Resposta:
+ * `AuthResponse` com um token NOVO — a troca revoga todas as sessões anteriores (inclusive a
+ * atual), então o cliente precisa SUBSTITUIR o token guardado pelo devolvido.
+ *
+ * - Conta COM senha (`user.hasPassword`): `currentPassword` é obrigatória.
+ * - Conta só-Google (sem senha): `currentPassword` é ignorada — pode DEFINIR a primeira senha
+ *   direto (a identidade já foi provada pelo token de sessão).
+ * - `newPassword`: 10 a 72 bytes (limite do bcrypt).
+ *
+ * Erros (trate por `code`): 400 `VALIDATION_ERROR` (ex. senha curta), 400
+ * `CURRENT_PASSWORD_REQUIRED`, 403 `INVALID_CURRENT_PASSWORD` (**403 de propósito, não 401**:
+ * o interceptor global trata 401 como sessão expirada e deslogaria quem só errou a senha
+ * atual), 429 `RATE_LIMITED_PASSWORD` (limite por usuário, não por IP).
+ */
+export interface ChangePasswordRequest {
+  currentPassword?: string
+  newPassword: string
 }
 
 /**
