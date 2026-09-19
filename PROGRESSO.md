@@ -729,3 +729,35 @@ Portão de saída (Íris): repetir a mesma validação contra a API real (troca
 de `VITE_USE_MOCKS`), incluindo os 3 testes de integração da F4 que ainda
 não rodaram contra Postgres, e conferir que o service worker de fato nunca
 serve `/api/**` do cache em produção.
+
+## Marco 2026-09-17 → 2026-09-19: auditoria, tempo real, Google, mapa, endurecimento de segurança, Carteiras
+
+**Estado:** F4 e PWA fechados; **F5 (Cielo) NÃO iniciada e continua bloqueada até o Órion
+re-auditar** o endurecimento abaixo (achados Crítico + A1–A4). Domínio oficial:
+`https://innoflow.innovarecode.com.br` (o antigo `...easypanel.host` segue no CORS na transição).
+
+**Entregue e em produção (validado):**
+- **Log de auditoria** (admin-only): `AuditLog` append-only, middleware `res.on('finish')`, fail-open exceto ajuste de saldo (fail-closed na mesma transação). Migrations agora rodam sozinhas no boot dos 3 Dockerfiles.
+- **Tempo real (SSE)**: `ui:ev:{op|user|admin|stations}`, Bearer (nunca JWT na querystring), polling virou rede de segurança.
+- **Login com Google (só motorista)**: ID-token GIS, `googleSub`, staff bloqueado+auditado; `GET /api/public/config`.
+- **Mapa "eletropostos perto de mim"**: posição nunca sai do aparelho (Haversine no cliente, bbox arredondada); online por `lastSeenAt` + `disconnectedAt`; `isFree = online && AVAILABLE`.
+  **Provado em produção em 2026-09-19** pelo dono: recarga no `CP-INNOELEKTRON-001` → mapa mostrou conector 1 ocupado ("1 de 2 livres") sem F5; queda do carregador → "0 de 2 livres"; volta → "2 de 2".
+- **Endurecimento de segurança (Vega, validado pela Íris com PG18+Redis reais)**: sessão revogável (`sessionsValidAfter`), `POST /api/auth/password`, vínculo Google que apaga a senha, seed sem senha fixa em produção, lockout OCPP identidade+IP (Lua atômico), SSE com teto de streams/backpressure, auditoria com CHECK de tamanho + `BEFORE TRUNCATE` (AuditLog e WalletEntry), throttle de login por conta, CSV/LIKE. Depois: reserva atômica sob rajada, drain do SSE, `publish()` com prazo/teto (nunca pendura), teto de concorrência OCPP separado do de falhas.
+- **Tela Carteiras (Lyra)**: Financeiro > Carteiras; ADMIN e OPERATOR consultam (OPERATOR só buscando, sem e-mail), ajuste de saldo ADMIN-only em 2 passos.
+- **Simulador de carregador** (`backend/scripts/simulate-charger.ts`, `verify-realtime-stations.ts`): só localhost, senha por `OCPP_PASSWORD`.
+
+**Pendente de push (2026-09-19):** 7 commits locais (`fd247cb`…`3b97103`: lockout sob rajada, SSE drain, publish com prazo, listener de erro do Redis, testes da Íris, disjuntor que envia sempre, teto de concorrência OCPP). Bloqueio: credencial do GitHub (Git Credential Manager) expirou — o dono precisa rodar `git push` no terminal dele.
+Validação: Íris aprovou os 3 primeiros (480 verdes ×6, 26 mutações mortas, mapa sem regressão). Os 2 últimos (`c8073a2`, `3b97103`) foram validados pelo Vega (495 verdes ×2) e revisados pelo Atlas (asserções da Íris intactas, tsc/lint/272 unit) — **sem 2ª rodada independente da Íris**.
+
+**Ações do dono no deploy do endurecimento:** rotacionar contas seedadas (`npm run user:set-password`; o seed não troca senha existente); trocar o segredo do `CP-INNOELEKTRON-001` (16–40 caracteres, via PATCH); calibrar `OCPP_TRUST_PROXY_HOPS` lendo `[ocpp] auth` (default 0; se o gateway estiver atrás de proxy e ficar em 0, o limite global trava a frota); duas roles de banco (migração vs aplicação sem TRUNCATE/DROP) com o Vulcano.
+
+**Decisões em aberto (dependem do dono):**
+1. Porta 9000 do OCPP: publicada crua ou atrás de TLS? Basic Auth em `ws://` manda a senha em claro — o ideal é WSS obrigatório e porta crua fechada.
+2. `OCPP_AUTH_IP_MAX_CONCURRENT` (default 100) é palpite: dimensionar pelo maior site atrás de um NAT. Custo aceito: numa rajada de falhas o IP admite até 100 avaliações antes de o teto de 30 falhas valer (o limite por identidade+IP segue exato).
+3. Throttle público do mapa (2 s, "o último vence") atrasa o "livre" em ~2,3 s após Parar; queda silenciosa leva ~58 s (`pingIntervalMs` 30 s do gateway). Encurtar? (recomendado o primeiro).
+4. Mapa: manter SEM botão "Iniciar recarga" (só pela tela do QR) — assumido, aguardando objeção.
+5. Provedor de tiles: OSM só serve tráfego leve; para produção, provedor pago (host precisa entrar na CSP).
+6. Política de privacidade/termos: faltam dados da empresa (CNPJ, DPO).
+7. Nota fiscal/tributação: adiada pelo dono, revisitar ANTES da F8.
+
+**Backlog técnico (sem dono):** job de criação mensal de partições (existem só até 2027-02); `entityId` NULL em linhas DENIED da auditoria; `liquidarSessao` reprocessado reportando `debited:true`; `db:seed:demo` idempotência; site fixture `[test-partitioning]` em produção; bcryptjs (JS puro) trava o event loop com muitos handshakes simultâneos → `bcrypt` nativo; API/gateway escutam em 0.0.0.0 (sem opção de bind); pacote Vulcano (Node 22/24 LTS, `USER node`, `server_tokens off`, `mockServiceWorker.js` fora do build, COOP `same-origin-allow-popups`); UI de TariffAssignment + hook de query; UI de remote-start; tela de troca de senha (contrato pronto); erro de rede no login mostra "E-mail ou senha inválidos"; `Select` de site trunca "São Paulo/SP" em 390px; `Retry-After` não exposto no CORS.
