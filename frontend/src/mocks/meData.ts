@@ -12,9 +12,12 @@ import QRCode from "qrcode"
 import { mockChargePoints, mockConnectors, mockSites, mockTariffs } from "./data"
 import { extraStations } from "./stationsData"
 import type {
+  CardBrand,
   ChargingSessionStatus,
   ConnectorType,
   MeActiveSession,
+  MeCardTokenizationSessionResponse,
+  MePaymentMethodDTO,
   MeSessionDetail,
   MeSessionListItem,
   MeTopupDTO,
@@ -613,4 +616,147 @@ export function getMockTopup(id: string): MeTopupDTO | null {
   if (!t) return null
   resolveTopupStatus(t)
   return toTopupDTO(t)
+}
+
+// ---------------------------------------------------------------------------
+// Cartão salvo (F5.3) — a rota real já existe no backend (Vega,
+// `backend/src/api/routes/mePaymentMethods.routes.ts`, contrato espelhado em
+// `types/api.ts`), mas este mock deixa o fluxo testável sem ele (sem
+// Postgres/Redis no ambiente da Lyra, mesma limitação recorrente do
+// projeto). Mesmo teto (`MAX_PAYMENT_METHODS_PER_USER = 5`) e mesma regra de
+// "promove o mais recente a padrão ao remover o padrão" do backend real —
+// ver `mePaymentMethods.routes.ts` — para o comportamento observado aqui não
+// enganar ninguém sobre o que a API real faz.
+// ---------------------------------------------------------------------------
+
+const MAX_PAYMENT_METHODS_PER_USER = 5
+
+interface MockPaymentMethod {
+  id: string
+  driverId: string
+  brand: string
+  last4: string | null
+  holderName: string | null
+  expiryMonth: number | null
+  expiryYear: number | null
+  isDefault: boolean
+  createdAt: string
+}
+
+const paymentMethodsByDriver = new Map<string, MockPaymentMethod[]>()
+let paymentMethodCounter = 1
+
+function getPaymentMethods(driverId: string): MockPaymentMethod[] {
+  if (!paymentMethodsByDriver.has(driverId)) paymentMethodsByDriver.set(driverId, [])
+  return paymentMethodsByDriver.get(driverId) as MockPaymentMethod[]
+}
+
+/**
+ * Decodifica o token que `pagamento-cartao/sopClient.ts` gera no caminho
+ * mock (`mocktok.<last4>.<mmYYYY>.<holderB64>.<selo>`) — espelha, no
+ * frontend, o que a Cielo faria de verdade via `GET /1/card/{token}` num
+ * ambiente real (mesmo raciocínio do `FakeAdapter.consultarCartaoTokenizado`
+ * no backend). Token que não bate no formato = `null` (vira
+ * `INVALID_CARD_TOKEN`, exercitando esse código de erro também aqui).
+ */
+function decodeMockCardToken(cardToken: string): { last4: string; expiryMonth: number; expiryYear: number; holderName: string | null } | null {
+  const match = /^mocktok\.(\d{4})\.(\d{2})(\d{4})\.([^.]*)\./.exec(cardToken)
+  if (!match) return null
+  const [, last4, month, year, holderB64] = match
+  let holderName: string | null = null
+  try {
+    // TextDecoder em vez de escape/unescape (descontinuados) — espelha o encode de `sopClient.ts`.
+    const bytes = Uint8Array.from(atob(holderB64), (c) => c.charCodeAt(0))
+    holderName = new TextDecoder().decode(bytes) || null
+  } catch {
+    holderName = null
+  }
+  return { last4, expiryMonth: Number(month), expiryYear: Number(year), holderName }
+}
+
+export function createMockTokenizationSession(): MeCardTokenizationSessionResponse {
+  return {
+    accessToken: `mock_access_${Date.now()}`,
+    merchantId: "mock_merchant",
+    environment: "sandbox",
+    // Contém "mock" de propósito — é o marcador que `pagamento-cartao/sopClient.ts` reconhece para nunca tentar uma chamada de rede real.
+    scriptUrl: "https://mock.local/sop/script.js",
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+  }
+}
+
+function toPaymentMethodDTO(m: MockPaymentMethod): MePaymentMethodDTO {
+  return {
+    id: m.id,
+    brand: m.brand,
+    last4: m.last4,
+    holderName: m.holderName,
+    expiryMonth: m.expiryMonth,
+    expiryYear: m.expiryYear,
+    isDefault: m.isDefault,
+    createdAt: m.createdAt,
+  }
+}
+
+export function listMockPaymentMethods(driverId: string): MePaymentMethodDTO[] {
+  return [...getPaymentMethods(driverId)]
+    .sort((a, b) => (a.isDefault === b.isDefault ? b.createdAt.localeCompare(a.createdAt) : a.isDefault ? -1 : 1))
+    .map(toPaymentMethodDTO)
+}
+
+export function createMockPaymentMethod(
+  driverId: string,
+  cardToken: unknown,
+  brand: unknown,
+  makeDefault: boolean,
+): { ok: true; method: MePaymentMethodDTO } | { ok: false; code: "INVALID_CARD_TOKEN" | "TOO_MANY_PAYMENT_METHODS"; message: string } {
+  const methods = getPaymentMethods(driverId)
+  if (methods.length >= MAX_PAYMENT_METHODS_PER_USER) {
+    return { ok: false, code: "TOO_MANY_PAYMENT_METHODS", message: "Você já tem o número máximo de cartões cadastrados." }
+  }
+  if (typeof cardToken !== "string" || typeof brand !== "string") {
+    return { ok: false, code: "INVALID_CARD_TOKEN", message: "Cartão inválido ou não reconhecido." }
+  }
+  const decoded = decodeMockCardToken(cardToken)
+  if (!decoded) {
+    return { ok: false, code: "INVALID_CARD_TOKEN", message: "Cartão inválido ou não reconhecido." }
+  }
+
+  const shouldBeDefault = makeDefault || methods.length === 0
+  if (shouldBeDefault) methods.forEach((m) => (m.isDefault = false))
+
+  const method: MockPaymentMethod = {
+    id: `pm_${paymentMethodCounter++}`,
+    driverId,
+    brand: brand as CardBrand,
+    last4: decoded.last4,
+    holderName: decoded.holderName,
+    expiryMonth: decoded.expiryMonth,
+    expiryYear: decoded.expiryYear,
+    isDefault: shouldBeDefault,
+    createdAt: new Date().toISOString(),
+  }
+  methods.push(method)
+  return { ok: true, method: toPaymentMethodDTO(method) }
+}
+
+export function setDefaultMockPaymentMethod(driverId: string, id: string): { ok: true; method: MePaymentMethodDTO } | { ok: false } {
+  const methods = getPaymentMethods(driverId)
+  const target = methods.find((m) => m.id === id)
+  if (!target) return { ok: false }
+  methods.forEach((m) => (m.isDefault = m.id === id))
+  return { ok: true, method: toPaymentMethodDTO(target) }
+}
+
+/** Soft-delete — se o removido era o padrão, promove o mais recente restante (mesma UX do backend real, ver comentário no topo desta seção). */
+export function removeMockPaymentMethod(driverId: string, id: string): boolean {
+  const methods = getPaymentMethods(driverId)
+  const index = methods.findIndex((m) => m.id === id)
+  if (index === -1) return false
+  const [removed] = methods.splice(index, 1)
+  if (removed.isDefault && methods.length > 0) {
+    const mostRecent = [...methods].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+    mostRecent.isDefault = true
+  }
+  return true
 }

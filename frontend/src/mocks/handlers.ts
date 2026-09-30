@@ -20,6 +20,8 @@ import {
   type Scope,
 } from "./reportsAggregate"
 import {
+  createMockPaymentMethod,
+  createMockTokenizationSession,
   createMockTopup,
   getCommandStatus,
   getMockActiveSession,
@@ -27,7 +29,10 @@ import {
   getMockTopup,
   getMockWallet,
   getPublicChargePointCard,
+  listMockPaymentMethods,
   listMockSessions,
+  removeMockPaymentMethod,
+  setDefaultMockPaymentMethod,
   startMockSession,
   stopMockSession,
 } from "./meData"
@@ -955,5 +960,48 @@ export const handlers = [
     const topup = getMockTopup(String(params.id))
     if (!topup) return HttpResponse.json(errorBody("Recarga não encontrada.", "TOPUP_NOT_FOUND"), { status: 404 })
     return HttpResponse.json(topup)
+  }),
+
+  // ---- Cartão salvo (F5.3) — contrato espelhado de `backend/src/api/routes/mePaymentMethods.routes.ts` (Vega) ----
+
+  http.get("/api/me/payment-methods", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    return HttpResponse.json({ items: listMockPaymentMethods(scope.user.userId) })
+  }),
+
+  http.post("/api/me/payment-methods/tokenization-session", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    return HttpResponse.json(createMockTokenizationSession())
+  }),
+
+  http.post("/api/me/payment-methods", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const body = (await request.json().catch(() => ({}))) as { cardToken?: unknown; brand?: unknown; makeDefault?: unknown }
+    const result = createMockPaymentMethod(scope.user.userId, body.cardToken, body.brand, body.makeDefault === true)
+    if (!result.ok) {
+      const status = result.code === "TOO_MANY_PAYMENT_METHODS" ? 409 : 400
+      return HttpResponse.json(errorBody(result.message, result.code), { status })
+    }
+    return HttpResponse.json(result.method, { status: 201 })
+  }),
+
+  // Contrato literal (Vega, `meUpdatePaymentMethodSchema`): só aceita `{ isDefault: true }`.
+  http.patch("/api/me/payment-methods/:id", ({ request, params }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const result = setDefaultMockPaymentMethod(scope.user.userId, String(params.id))
+    if (!result.ok) return HttpResponse.json(errorBody("Cartão não encontrado.", "PAYMENT_METHOD_NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(result.method)
+  }),
+
+  http.delete("/api/me/payment-methods/:id", ({ request, params }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const removed = removeMockPaymentMethod(scope.user.userId, String(params.id))
+    if (!removed) return HttpResponse.json(errorBody("Cartão não encontrado.", "PAYMENT_METHOD_NOT_FOUND"), { status: 404 })
+    return new HttpResponse(null, { status: 204 })
   }),
 ]

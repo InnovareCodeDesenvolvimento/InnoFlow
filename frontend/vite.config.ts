@@ -20,10 +20,22 @@ export default defineConfig({
       workbox: {
         skipWaiting: true,
         clientsClaim: true,
-        // Sem isto, o service worker tenta servir index.html (fallback de
-        // SPA) para qualquer chamada de API que falhe offline — quem chama
-        // `/api/me/wallet` offline receberia HTML em vez de erro de rede.
-        navigateFallbackDenylist: [/^\/api/],
+        // Sem a 1ª entrada, o service worker tenta servir index.html
+        // (fallback de SPA) para qualquer chamada de API que falhe offline —
+        // quem chama `/api/me/wallet` offline receberia HTML em vez de erro
+        // de rede. A 2ª entrada é F5.3 (cadastro de cartão, SAQ A-EP, ver
+        // `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md` §2):
+        // `navigateFallback` do Workbox intercepta TODA navegação (não só as
+        // que "parecem" SPA) e serve `index.html` — sem este denylist, abrir
+        // `/pagamento-cartao.html` com o PWA instalado (service worker já
+        // ativo) devolveria a home do site em vez do documento isolado,
+        // quebrando a isolação de CSP inteira em silêncio. CONFIRMADO
+        // empiricamente (não só lido na doc do Workbox): `vite build` +
+        // `vite preview` + Service Worker registrado de verdade — sem esta
+        // linha, `navigator.serviceWorker.controller` ativo e a navegação
+        // pra `/pagamento-cartao.html` voltava o HTML/título/conteúdo da
+        // Home (`index.html` precacheado), não o formulário de cartão.
+        navigateFallbackDenylist: [/^\/api/, /^\/pagamento-cartao\.html$/],
         runtimeCaching: [
           {
             // CRÍTICO: saldo de carteira e status de sessão NUNCA podem vir
@@ -71,6 +83,17 @@ export default defineConfig({
   define: buildDefine,
   build: {
     rollupOptions: {
+      // SÓ `index.html` (SPA principal) — de propósito. `pagamento-cartao.html`
+      // (documento isolado do cadastro de cartão, F5.3, SAQ A-EP) NÃO entra
+      // como uma 2ª entry aqui: build própria em `vite.pagamento-cartao.config.ts`
+      // (ver esse arquivo para o porquê — resumo: com as duas entries no
+      // MESMO build, o bundler (rolldown/Vite 8) fundia o próprio React para
+      // dentro de um chunk do app principal, "app-hooks", mesmo com
+      // `manualChunks` explícito tentando isolar — medido com `vite build` +
+      // inspeção de `dist/pagamento-cartao.html`, não resolvido por 2
+      // tentativas de bucket manual diferentes). Build separada elimina o
+      // problema pela raiz: grafos de dependência inteiramente distintos,
+      // sem chance de um bundler fundir os dois.
       output: {
         // Sem isto, o code-splitting automático fragmenta em dezenas de
         // chunks de poucos bytes cada (um ícone lucide-react por arquivo,

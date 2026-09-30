@@ -1,8 +1,12 @@
 import { api } from "./api"
 import type {
   MeActiveSessionResponse,
+  MeCardTokenizationSessionResponse,
   MeCommandStatusResponse,
+  MeCreatePaymentMethodRequest,
   MeCreateTopupRequest,
+  MePaymentMethodDTO,
+  MePaymentMethodsResponse,
   MeSessionDetail,
   MeSessionsListResponse,
   MeSessionsQuery,
@@ -70,5 +74,35 @@ export const meService = {
   async getTopup(id: string): Promise<MeTopupDTO> {
     const { data } = await api.get<MeTopupDTO>(`/api/me/wallet/topups/${id}`)
     return data
+  },
+
+  // ---- Cartão salvo (F5.3 — ver types/api.ts e pagamento-cartao/) -----------
+
+  async listPaymentMethods(): Promise<MePaymentMethodsResponse> {
+    const { data } = await api.get<MePaymentMethodsResponse>("/api/me/payment-methods")
+    return data
+  },
+
+  /** Autenticado normalmente (JWT) — o resultado é repassado ao documento isolado por `postMessage`, nunca por querystring (ver `types/cardTokenizationChannel.ts`). */
+  async createTokenizationSession(): Promise<MeCardTokenizationSessionResponse> {
+    const { data } = await api.post<MeCardTokenizationSessionResponse>("/api/me/payment-methods/tokenization-session")
+    return data
+  },
+
+  /** Recebe SÓ `cardToken`+`brand` — nunca PAN/CVV (ver `MeCreatePaymentMethodRequest`). */
+  async createPaymentMethod(payload: MeCreatePaymentMethodRequest): Promise<MePaymentMethodDTO> {
+    const { data } = await api.post<MePaymentMethodDTO>("/api/me/payment-methods", payload)
+    return data
+  },
+
+  /** Corpo `{ isDefault: true }` — contrato literal do Vega (`meUpdatePaymentMethodSchema`, `z.literal(true)`); não existe "desmarcar sem marcar outro". */
+  async setDefaultPaymentMethod(id: string): Promise<MePaymentMethodDTO> {
+    const { data } = await api.patch<MePaymentMethodDTO>(`/api/me/payment-methods/${id}`, { isDefault: true })
+    return data
+  },
+
+  /** Soft-delete (204) — mesmo padrão do resto da API (ver memória da Lyra). */
+  async deletePaymentMethod(id: string): Promise<void> {
+    await api.delete(`/api/me/payment-methods/${id}`)
   },
 }

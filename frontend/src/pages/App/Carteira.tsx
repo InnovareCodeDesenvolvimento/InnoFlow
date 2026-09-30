@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { AlertTriangle, ChevronRight, QrCode, Wallet } from "lucide-react"
+import { AlertTriangle, ChevronRight, CreditCard, QrCode, Wallet } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
@@ -74,6 +74,20 @@ export function Carteira() {
               <p className="text-xs text-ink-softer">Recarregue via Pix — o saldo cai na hora.</p>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-accent-700" aria-hidden="true" />
+          </Link>
+
+          <Link
+            to="/app/carteira/cartoes"
+            className="pressable mt-2.5 flex items-center gap-3 rounded-2xl bg-primary/10 p-4 ring-1 ring-primary/30 transition-colors hover:bg-primary/15"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary-700">
+              <CreditCard className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-primary-700">Meus cartões</p>
+              <p className="text-xs text-ink-softer">Cadastre um cartão para pagar a recarga sem digitar toda vez.</p>
+            </div>
+            <ChevronRight className="h-5 w-5 shrink-0 text-primary-700" aria-hidden="true" />
           </Link>
 
           <h2 className="mb-2 mt-6 text-sm font-bold text-ink">Extrato</h2>

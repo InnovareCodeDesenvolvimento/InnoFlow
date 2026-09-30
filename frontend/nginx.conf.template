@@ -57,6 +57,45 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
 
+    # ---- CADASTRO DE CARTÃO (F5.3, 30/09/2026) — documento ISOLADO --------
+    # SAQ A-EP (ver `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md`
+    # §2 e `frontend/src/pagamento-cartao/`): CSP PRÓPRIA e MUITO mais rígida
+    # que a do resto do site — nenhuma das exceções acima (Google Fonts/GIS,
+    # tiles OSM) se aplica aqui, porque esta página não deveria precisar de
+    # NENHUMA delas.
+    #
+    # `script-src`/`connect-src`/`frame-src` ainda são só 'self' porque a URL
+    # real do script de tokenização (Silent Order Post) da Cielo NÃO foi
+    # confirmada ainda (3 perguntas em aberto pro comercial, ver
+    # PROGRESSO.md §F5) — o app usa um mock local enquanto isso
+    # (`pagamento-cartao/sopClient.ts`), que nunca bate em rede nenhuma.
+    # QUANDO a Cielo confirmar: adicionar SÓ esse host exato em `script-src`
+    # (o script em si) E em `connect-src`/`frame-src` se o SDK abrir XHR ou
+    # iframe próprio para o POST de tokenização — NUNCA um wildcard amplo tipo
+    # `*.cielo.com.br`. Sem isso o SDK real não carrega nem consegue enviar o
+    # cartão — e é exatamente esse bloqueio que garante que, até lá, nenhum
+    # dado de cartão pode vazar para fora desta origem por engano.
+    #
+    # `frame-ancestors 'none'` + `X-Frame-Options: DENY`: esta página NUNCA
+    # deve ser embutida em iframe, nem pelo nosso próprio site — é aba/janela
+    # própria de propósito (ver `useAddCardFlow.ts`: um iframe mesma-origem
+    # continuaria acessível via DOM/JS pela SPA, o que anularia o ponto da
+    # isolação). `Cache-Control: no-store`: a página carrega um formulário de
+    # cartão e um `accessToken` de sessão — nunca pode ficar em cache de
+    # disco/proxy. `Referrer-Policy: no-referrer`: nem a própria URL desta
+    # página (que não leva segredo nenhum, mas por princípio) vaza para
+    # quem quer que seja referenciado a partir daqui.
+    location = /pagamento-cartao.html {
+        add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'none'" always;
+        try_files $uri =404;
+    }
+
     # ---- Qualquer stream SSE sob /api/ — buffering OFF, timeout longo ----
     # Genérico por DESENHO: casa qualquer endpoint que termine em "/events"
     # dentro de /api/ (ex.: /api/admin/events, /api/me/events, e o que vier

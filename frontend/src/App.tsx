@@ -39,6 +39,7 @@ const AppSessoes = lazy(() => import("@/pages/App/Sessoes").then((m) => ({ defau
 const AppSessaoDetalhe = lazy(() => import("@/pages/App/SessaoDetalhe").then((m) => ({ default: m.SessaoDetalhe })))
 const AppCarteira = lazy(() => import("@/pages/App/Carteira").then((m) => ({ default: m.Carteira })))
 const AppCarteiraAdicionar = lazy(() => import("@/pages/App/CarteiraAdicionar").then((m) => ({ default: m.CarteiraAdicionar })))
+const AppCartoes = lazy(() => import("@/pages/App/Cartoes").then((m) => ({ default: m.Cartoes })))
 const AppMapa = lazy(() => import("@/pages/App/Mapa").then((m) => ({ default: m.Mapa })))
 
 function RouteFallback() {
@@ -77,6 +78,8 @@ export default function App() {
             <Route path="mapa" element={<AppMapa />} />
             <Route path="carteira" element={<AppCarteira />} />
             <Route path="carteira/adicionar" element={<AppCarteiraAdicionar />} />
+            {/* Cartão salvo (F5.3) — formulário de cartão em si NÃO mora aqui, vive isolado em pagamento-cartao.html (ver useAddCardFlow). */}
+            <Route path="carteira/cartoes" element={<AppCartoes />} />
           </Route>
 
           {/* Painel admin (ADMIN/OPERATOR) */}

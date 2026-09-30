@@ -1,0 +1,219 @@
+/**
+ * CSS escrito à mão, de propósito — NÃO importa `src/index.css` (Tailwind)
+ * do app principal. Duas razões: (1) manter esta pasta 100% auto-contida
+ * (poucos arquivos, fácil de auditar, sem acoplar ao pipeline de build do
+ * app principal); (2) os valores de cor abaixo são uma cópia INTENCIONAL
+ * (não um import) dos tokens de `src/index.css` — se a paleta mudar lá, agir
+ * aqui é uma decisão separada, não um efeito colateral automático de uma
+ * mudança no app principal.
+ *
+ * Fonte do sistema (sem Google Fonts) — o documento isolado não deveria
+ * precisar de NENHUMA requisição de rede além da tokenização em si.
+ */
+
+:root {
+  --pc-primary: #29698e;
+  --pc-primary-dark: #0e2a3a;
+  --pc-primary-50: #f4f8fb;
+  --pc-accent: #248829;
+  --pc-danger: #dc2626;
+  --pc-danger-50: #fef2f2;
+  --pc-ink: #111827;
+  --pc-ink-soft: #374151;
+  --pc-ink-softer: #6b7280;
+  --pc-border: #e4e7eb;
+  --pc-surface: #ffffff;
+  --pc-background: #f9fafb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--pc-background);
+  color: var(--pc-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.pc-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 40px;
+}
+
+.pc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 380px;
+}
+
+.pc-header img {
+  height: 28px;
+  width: 28px;
+}
+
+.pc-header strong {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--pc-primary-dark);
+}
+
+.pc-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--pc-surface);
+  border: 1px solid var(--pc-border);
+  border-radius: 20px;
+  padding: 24px 20px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+}
+
+.pc-title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+  color: var(--pc-ink);
+}
+
+.pc-subtitle {
+  font-size: 13px;
+  color: var(--pc-ink-softer);
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+
+.pc-field {
+  margin-bottom: 14px;
+}
+
+.pc-field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pc-ink-soft);
+  margin-bottom: 5px;
+}
+
+.pc-field input {
+  width: 100%;
+  border: 1px solid var(--pc-border);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 16px; /* evita zoom automático do iOS ao focar */
+  color: var(--pc-ink);
+  background: var(--pc-surface);
+}
+
+.pc-field input:focus {
+  outline: none;
+  border-color: var(--pc-primary);
+  box-shadow: 0 0 0 3px rgba(41, 105, 142, 0.18);
+}
+
+.pc-field input[aria-invalid="true"] {
+  border-color: var(--pc-danger);
+}
+
+.pc-field-error {
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pc-danger);
+}
+
+.pc-row {
+  display: flex;
+  gap: 10px;
+}
+
+.pc-row .pc-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.pc-button {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 13px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--pc-primary);
+  color: #ffffff;
+  transition: background-color 0.15s ease;
+}
+
+.pc-button:hover:not(:disabled) {
+  background: #1b506f;
+}
+
+.pc-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pc-alert {
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.pc-alert-danger {
+  background: var(--pc-danger-50);
+  color: #991b1b;
+}
+
+.pc-center {
+  text-align: center;
+  padding: 24px 4px;
+}
+
+.pc-center p {
+  color: var(--pc-ink-softer);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pc-badge-secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pc-accent);
+  margin-top: 16px;
+}
+
+.pc-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: pc-spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+@keyframes pc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
