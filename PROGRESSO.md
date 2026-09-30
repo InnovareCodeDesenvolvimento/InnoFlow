@@ -939,3 +939,39 @@ ainda não existe no schema (trava plugar a pré-autorização no início da ses
 
 **Nada testado contra a Cielo de verdade** — segue tudo contra `FakeAdapter`, sem credencial
 de sandbox.
+
+## F5.4 entregue, validada e publicada (2026-09-30) — sessão de recarga paga com cartão
+
+Última peça grande da F5 (pagamento real Cielo): motorista pode pagar a recarga direto no
+cartão salvo, com pré-autorização antes de ligar o carregador e cobrança só do que foi
+consumido de verdade.
+
+- **Cronos** (`737ca70`): `PaymentIntent.authTokenId` (FK única), `captureAmountCents`
+  (distinto de `amountCapturedCents`), `ChargingSession.paymentMode`. Primeira FK deste
+  projeto usando `NOT VALID`+`VALIDATE` (mesma disciplina sem-downtime já usada em CHECK).
+- **Vega** (`0625dc7`): pré-auth na API antes do RemoteStart, vínculo no StartTransaction,
+  guarda do MeterValues pelo teto autorizado, captura parcial via worker (com dívida se
+  sobrar), cancelamento (total=0, RemoteStart rejeitado, varredor), conciliação com 2 termos
+  novos — e fechou de caminho uma dívida técnica esquecida da F5.2 (dívida quitada via Pix
+  não aparecia em nenhum relatório).
+- **Lyra** (`8cc9174`): seletor Carteira/Cartão na tela de iniciar recarga, status de
+  cobrança na sessão e no recibo com atualização automática. **Validado ao vivo pelo Atlas
+  no navegador**: recarga completa com cartão, status mudando sozinho de "em processamento"
+  para "Cobrado", sem F5.
+- **Íris**: **aprovado com ressalvas** contra Postgres+Redis reais (639 testes). Achou 2
+  bugs reais de dinheiro, não corrigidos por ela (documentados com `it.fails`):
+  - **Crítico**: uma corrida rara podia debitar a carteira E capturar o cartão pela mesma
+    sessão (cobrança dupla).
+  - **Médio**: se cancelar uma pré-autorização sem consumo falhasse silenciosamente, não
+    havia rede de segurança automática para destravar.
+- **Vega corrigiu os dois** (`e6aab4d`), trocando os `it.fails` da Íris por `it` sem alterar
+  nenhuma asserção — validado por mim linha a linha. Rodou a suíte completa contra
+  Postgres+Redis reais pela primeira vez nesta fase (641 testes).
+- **Atlas**: corrigiu no caminho um mock de relatório desatualizado (quebrava a compilação)
+  e um texto de confirmação que dizia "cobrado da carteira" mesmo pagando com cartão.
+
+**F5 tecnicamente completa** (Pix real + cartão salvo + sessão paga com cartão), tudo contra
+`FakeAdapter` — **nada foi testado contra a Cielo de verdade ainda**, por falta de
+credenciais de sandbox. Pendências conhecidas, nenhuma bloqueante: CI não define
+`PAYMENT_SECRETS_KEY` (achado da Íris); tela de configuração do gateway (`PaymentGatewayConfig`
+via admin) ainda não existe — hoje tudo usa env.
