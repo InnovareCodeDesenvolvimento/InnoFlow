@@ -24,7 +24,46 @@ export const logger = pino({
   // pra quem tiver acesso aos logs do EasyPanel. Bloqueante antes da F5
   // (pagamento real), corrigido antes de prosseguir.
   redact: {
-    paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+    // F5.1 (30/09/2026, recomendação do Órion — prioridade alta): segredos e
+    // dado sensível do fluxo de pagamento (Cielo). `fast-redact` (motor do
+    // pino) NÃO tem wildcard de profundidade arbitrária (`**`) — só um nível
+    // por `*` (`*.CardNumber` casa `payload.CardNumber`, NÃO
+    // `a.b.CardNumber` nem um `CardNumber` solto na raiz). Por isso cada
+    // campo aparece 2x: a forma "solta" (raiz do objeto logado) e a forma
+    // `*.campo` (um nível de aninhamento, o formato mais comum de log real
+    // — ex. `logger.info({ cielo: { CardNumber } })`). Comportamento
+    // verificado com um script Node ad-hoc nesta tarefa, não só suposto —
+    // ver teste `logger.redact.test.ts`.
+    //
+    // A defesa de VERDADE contra vazar corpo de request/response da Cielo
+    // é o cliente HTTP nunca logar o corpo inteiro (só PaymentId/Status/
+    // ReturnCode/valores — ver `services/pagamentos/cieloHttpClient.ts`).
+    // Isto aqui é rede de segurança para o dia em que alguém logar um objeto
+    // por engano.
+    paths: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      'res.headers["set-cookie"]',
+      'req.headers.merchantkey',
+      'CardNumber',
+      '*.CardNumber',
+      'SecurityCode',
+      '*.SecurityCode',
+      'CardToken',
+      '*.CardToken',
+      'cieloCardToken',
+      '*.cieloCardToken',
+      'PaymentToken',
+      '*.PaymentToken',
+      'MerchantKey',
+      '*.MerchantKey',
+      'ClientSecret',
+      '*.ClientSecret',
+      'access_token',
+      '*.access_token',
+      'cpf',
+      '*.cpf',
+    ],
     censor: '[redacted]',
   },
   transport: {

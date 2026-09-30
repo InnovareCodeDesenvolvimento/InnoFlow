@@ -135,6 +135,32 @@ const envSchema = z.object({
   // feature opcional (mesma lição de bug-env-eager-todos-entrypoints.md).
   GOOGLE_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
+  // F5.1 (30/09/2026) — cliente Cielo (gateway de pagamento real, ver
+  // .claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md). Credenciais
+  // OPCIONAIS de propósito (mesma lição de bug-env-eager-todos-entrypoints.md):
+  // sem elas, o `CieloAdapter` falha ao ser CONSTRUÍDO/USADO (erro explícito
+  // no ponto de uso), não no boot dos 3 entrypoints — a F5.1 não pluga isto
+  // em nenhuma rota ainda. Hosts default apontam para o SANDBOX oficial da
+  // Cielo (API 3.0); produção troca só a env, sem rebuild.
+  CIELO_MERCHANT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
+  CIELO_MERCHANT_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
+  CIELO_API_BASE_URL: z.string().trim().min(1).default('https://apisandbox.cieloecommerce.cielo.com.br'),
+  CIELO_API_QUERY_BASE_URL: z.string().trim().min(1).default('https://apiquerysandbox.cieloecommerce.cielo.com.br'),
+  CIELO_SANDBOX: z.coerce.boolean().default(true),
+  // URL de destino do Silent Order Post (D1: cartão salvo, SAQ A-EP) — o
+  // navegador do motorista posta o cartão DIRETO aqui, nunca pelo nosso
+  // backend. OPCIONAL: não confirmada contra a doc oficial nesta tarefa
+  // (F5.1) — `CieloAdapter.sessaoTokenizacao()` lança erro claro se ausente
+  // em vez de devolver uma URL adivinhada. Confirmar antes de plugar na
+  // rota (F5.2).
+  CIELO_SOP_POST_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+  // Timeout de chamada — curto de propósito: o motorista está esperando num
+  // HTTP síncrono (`POST /api/me/sessions/start`, decisão #2 da Nova), não
+  // faz sentido segurá-lo por dezenas de segundos. Timeout NÃO deve disparar
+  // retry cego — a API 3.0 da Cielo não tem chave de idempotência; o
+  // caminho certo é reconsultar por `MerchantOrderId` (ver `PagamentoPort`).
+  CIELO_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem
   // trocou de rede); por IP e total REJEITAM o novo. Ver `core/realtime/streamLimiter.ts`.
