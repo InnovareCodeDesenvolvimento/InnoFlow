@@ -108,13 +108,16 @@ router.post(
         chargePointScope: {}, // motorista é conta de rede — carrega em qualquer operador, sem isolamento por operatorId aqui
         connectorId: body.connectorId,
         userId,
+        payment: body.payment,
       })
 
       res.status(202).json({
         correlationId: resultado.correlationId,
         status: 'PENDING',
+        paymentMode: resultado.paymentMode,
         walletBalanceCents: resultado.walletBalanceCents,
         estimatedMaxCostCents: resultado.estimatedMaxCostCents,
+        authorizedCents: resultado.authorizedCents,
         minChargeCents: resultado.minChargeCents,
       })
     } finally {
@@ -151,6 +154,35 @@ interface ActiveSessionRow {
   tariffName: string
   tariffCurrency: string
   energyDeliveredWh: number
+  paymentMode: 'WALLET' | 'CARD'
+  cardBrand: string | null
+  cardLast4: string | null
+  cardAuthorizedCents: number | null
+  cardCapturedCents: number | null
+  cardStatus: string | null
+}
+
+/**
+ * `payment` (F5.4) — `card` só existe (não-null) quando `paymentMode ===
+ * 'CARD'` E o `PaymentIntent` de captura já foi achado (sempre deveria
+ * existir nesse caso — `StartTransaction` liga os dois na mesma escrita).
+ * Contrato LITERAL de `frontend/src/types/api.ts` (`MeSessionPaymentInfo`,
+ * escrito pela Lyra em paralelo — reconciliado, ver
+ * `.claude/agent-memory/vega/padrao-reconciliar-contrato-compartilhado-em-paralelo.md`).
+ */
+function toSessionPaymentInfo(row: {
+  paymentMode: 'WALLET' | 'CARD'
+  cardBrand: string | null
+  cardLast4: string | null
+  cardAuthorizedCents: number | null
+  cardCapturedCents: number | null
+  cardStatus: string | null
+}) {
+  const card =
+    row.paymentMode === 'CARD' && row.cardStatus
+      ? { brand: row.cardBrand ?? '', last4: row.cardLast4, authorizedCents: row.cardAuthorizedCents ?? 0, capturedCents: row.cardCapturedCents, status: row.cardStatus }
+      : null
+  return { mode: row.paymentMode, card }
 }
 
 router.get(
@@ -166,7 +198,10 @@ router.get(
         cs."meterStartWh" AS "meterStartWh", cs."chargingEndedAt" AS "chargingEndedAt", cs."tariffSnapshot" AS "tariffSnapshot",
         cs."lastPowerW" AS "lastPowerW", cs."lastSoc" AS "lastSoc", cs."lastSampleAt" AS "lastSampleAt",
         t.name AS "tariffName", t.currency AS "tariffCurrency",
-        GREATEST(0, ROUND(COALESCE(latest_meter.value, cs."meterStartWh") - cs."meterStartWh"))::int AS "energyDeliveredWh"
+        GREATEST(0, ROUND(COALESCE(latest_meter.value, cs."meterStartWh") - cs."meterStartWh"))::int AS "energyDeliveredWh",
+        cs."paymentMode" AS "paymentMode",
+        card_payment.brand AS "cardBrand", card_payment.last4 AS "cardLast4",
+        card_payment."authorizedCents" AS "cardAuthorizedCents", card_payment."capturedCents" AS "cardCapturedCents", card_payment.status AS "cardStatus"
       FROM "ChargingSession" cs
       JOIN "ChargePoint" cp ON cp.id = cs."chargePointId"
       JOIN "Site" s ON s.id = cs."siteId"
@@ -177,6 +212,13 @@ router.get(
         WHERE ms."sessionId" = cs.id AND ms.measurand = 'Energy.Active.Import.Register'
         ORDER BY ms.ts DESC LIMIT 1
       ) latest_meter ON true
+      LEFT JOIN LATERAL (
+        SELECT pi.status AS status, pi."amountAuthorizedCents" AS "authorizedCents", pi."amountCapturedCents" AS "capturedCents", pm.brand AS brand, pm.last4 AS last4
+        FROM "PaymentIntent" pi
+        LEFT JOIN "PaymentMethod" pm ON pm.id = pi."paymentMethodId"
+        WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE'
+        LIMIT 1
+      ) card_payment ON true
       WHERE cs."userId" = ${userId} AND cs.status IN ('STARTED', 'CHARGING', 'FINISHING')
       ORDER BY cs."startedAt" DESC
       LIMIT 1
@@ -226,6 +268,8 @@ router.get(
         estimatedMaxCostCents,
         minChargeCents: tariffSnapshot.minChargeCents ?? null,
         tariff: toTariffSummaryFromSnapshot(tariffSnapshot, row.tariffName, row.tariffCurrency),
+        paymentMode: row.paymentMode,
+        payment: toSessionPaymentInfo(row),
       },
       walletBalanceCents,
       generatedAt: new Date().toISOString(),
@@ -311,7 +355,7 @@ router.get(
     })
     if (!session) throw new AppError('Sessão não encontrada.', 404, 'SESSION_NOT_FOUND')
 
-    const [walletEntry, debt] = await Promise.all([
+    const [walletEntry, debt, cardIntent] = await Promise.all([
       prisma.walletEntry.findFirst({
         where: { type: 'CHARGE_DEBIT', referenceType: 'CHARGING_SESSION', referenceId: session.id },
         select: { id: true, amountCents: true, balanceAfterCents: true, createdAt: true },
@@ -321,9 +365,23 @@ router.get(
         orderBy: { createdAt: 'desc' },
         select: { id: true, amountCents: true },
       }),
+      session.paymentMode === 'CARD'
+        ? prisma.paymentIntent.findFirst({
+            where: { chargingSessionId: session.id, purpose: 'SESSION_CARD_CAPTURE' },
+            select: { status: true, amountAuthorizedCents: true, amountCapturedCents: true, paymentMethod: { select: { brand: true, last4: true } } },
+          })
+        : Promise.resolve(null),
     ])
 
     const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
+    const payment = toSessionPaymentInfo({
+      paymentMode: session.paymentMode,
+      cardBrand: cardIntent?.paymentMethod?.brand ?? null,
+      cardLast4: cardIntent?.paymentMethod?.last4 ?? null,
+      cardAuthorizedCents: cardIntent?.amountAuthorizedCents ?? null,
+      cardCapturedCents: cardIntent?.amountCapturedCents ?? null,
+      cardStatus: cardIntent?.status ?? null,
+    })
 
     res.json({
       id: session.id,
@@ -345,6 +403,8 @@ router.get(
       tariff: toTariffSummaryFromSnapshot(tariffSnapshot, session.tariff.name, session.tariff.currency),
       walletEntry: walletEntry ?? null,
       debt: debt ?? null,
+      paymentMode: session.paymentMode,
+      payment,
     })
   }),
 )

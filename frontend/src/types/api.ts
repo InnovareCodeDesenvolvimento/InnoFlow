@@ -680,18 +680,30 @@ export interface SessionDetail {
 /**
  * Identidade de conciliação (regra 3 da Nova):
  * `expectedCents` (= faturamento) deve bater com `accountedCents` (= capturas
- * de cartão + débitos de carteira + dívida aberta). `differenceCents !== 0` é
- * sinal de bug real no backend — a tela nunca esconde isso.
+ * de cartão + capturas de cartão PENDENTES + débitos de carteira + quitações
+ * de dívida + dívida aberta). `differenceCents !== 0` é sinal de bug real no
+ * backend — a tela nunca esconde isso.
+ *
+ * F5.4 (2026-09-30): `cardCapturePendingCents`/`debtSettledCents` novos —
+ * sem eles a identidade ficava errada nos minutos entre o Stop de uma sessão
+ * CARD e o worker confirmar a captura, e quando uma dívida era quitada via
+ * Pix (o valor saía de `openDebtCents` e não reaparecia em lugar nenhum).
  */
 export interface PaymentsReconciliation {
   revenueCents: number
   cardCapturedCents: number
+  /** Σ totalCostCents das sessões CARD com intent ainda em CAPTURE_PENDING — a captura confirmada chega depois, via worker. */
+  cardCapturePendingCents: number
   walletDebitCents: number
+  /** Σ dívidas quitadas automaticamente por crédito de Pix no período/escopo (ligadas à sessão via Debt.chargingSessionId). */
+  debtSettledCents: number
   /** Só ADMIN — é o float Pix da REDE, não da operação de um operador (ver schema Wallet). `null` para OPERATOR. */
   walletTopupPixCents: number | null
   openDebtCents: number
   /** Informativo: valor de tentativas de pagamento que falharam (algumas foram pagas de novo com sucesso, outras viraram `openDebtCents`). */
   failedAttemptsCents: number
+  /** Informativo — estorno/chargeback de cartão. NUNCA entra em `accountedCents` (o intent continua CAPTURED mesmo estornado, senão a identidade quebra de novo). */
+  cardRefundedCents: number
   expectedCents: number
   accountedCents: number
   differenceCents: number

@@ -8,18 +8,41 @@ import type { PaymentsReportQuery } from '../schemas/reporting.schema'
 /**
  * Identidade de conciliação (regra 6 da Nova, ver memória de retaguarda):
  * `expectedCents` (= faturamento) DEVE bater com `accountedCents` (=
- * capturas de cartão + débitos de carteira + dívida aberta). NUNCA
- * ajustado — `differenceCents !== 0` é bug real, exposto no número.
+ * capturas de cartão + capturas de cartão PENDENTES + débitos de carteira +
+ * quitações de dívida + dívida aberta). NUNCA ajustado — `differenceCents
+ * !== 0` é bug real, exposto no número.
+ *
+ * F5.4 (2026-09-30, decisão §4 da Nova): dois termos novos fecham a
+ * identidade nos casos que faltavam —
+ *   - `cardCapturePendingCents`: sem isto, a tela fica "vermelha" nos
+ *     minutos entre o `Stop` (sessão já virou receita) e o worker capturar
+ *     de fato (`amountCapturedCents` só existe depois).
+ *   - `debtSettledCents`: dívida técnica deixada pela F5.2 — quitar uma
+ *     `Debt` via crédito de Pix (`WalletEntry` tipo `DEBT_SETTLEMENT`) tira o
+ *     valor de `openDebtCents` mas ninguém somava de volta em lugar nenhum,
+ *     quebrando a identidade. Resolvido agora, já que a conciliação estava
+ *     sendo mexida de qualquer forma.
  */
 export interface PaymentsReconciliation {
   revenueCents: number
   cardCapturedCents: number
+  /** Σ totalCostCents das sessões CARD com intent em CAPTURE_PENDING (captura ainda não confirmada pelo worker). */
+  cardCapturePendingCents: number
   walletDebitCents: number
+  /** Σ -WalletEntry tipo DEBT_SETTLEMENT ligado a Debt→sessão do período/escopo. */
+  debtSettledCents: number
   /** Rede inteira, NUNCA escopado por operador — `WALLET_TOPUP_PIX` não tem operatorId no schema. `null` para OPERATOR. */
   walletTopupPixCents: number | null
   openDebtCents: number
   /** Informativo — NÃO entra em `accountedCents`. Ver `fetchFailedAttemptsCents`. */
   failedAttemptsCents: number
+  /**
+   * Informativo — estorno/chargeback de cartão (`PaymentIntent.amountRefundedCents`).
+   * NUNCA entra em `accountedCents`: o status do intent continua `CAPTURED`
+   * mesmo estornado (decisão §4 da Nova — trocar o status tiraria o valor de
+   * `cardCapturedCents` e quebraria a identidade de novo).
+   */
+  cardRefundedCents: number
   expectedCents: number
   accountedCents: number
   differenceCents: number
@@ -34,7 +57,7 @@ export async function getPaymentsReconciliation(scope: ReportingScope, window: P
   const sessionWhere = whereSql([...tenantConditions(scope, 'cs'), ...periodConditions('cs', window.from, window.to)])
   const stoppedSessionWhere = whereSql([Prisma.sql`cs.status = 'STOPPED'`, ...tenantConditions(scope, 'cs'), ...periodConditions('cs', window.from, window.to)])
 
-  const [revenueCents, cardCapturedCents, walletDebitCents, openDebtCents, failedAttemptsCents] = await Promise.all([
+  const [revenueCents, cardCapturedCents, cardCapturePendingCents, walletDebitCents, debtSettledCents, openDebtCents, failedAttemptsCents, cardRefundedCents] = await Promise.all([
     scalarFloat(Prisma.sql`SELECT COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "v" FROM "ChargingSession" cs WHERE ${stoppedSessionWhere}`, 'v'),
     scalarFloat(
       Prisma.sql`
@@ -44,11 +67,35 @@ export async function getPaymentsReconciliation(scope: ReportingScope, window: P
       `,
       'v',
     ),
+    // CAPTURE_PENDING: a receita (`revenueCents`) já contou `totalCostCents`
+    // no Stop, mas `amountCapturedCents` só existe depois do worker capturar
+    // — soma o `totalCostCents` da SESSÃO (não o `captureAmountCents` do
+    // intent) pra fechar exatamente com o que `revenueCents` já contou.
+    scalarFloat(
+      Prisma.sql`
+        SELECT COALESCE(SUM(cs."totalCostCents"), 0)::float8 AS "v"
+        FROM "PaymentIntent" pi JOIN "ChargingSession" cs ON cs.id = pi."chargingSessionId"
+        WHERE pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status = 'CAPTURE_PENDING' AND ${sessionWhere}
+      `,
+      'v',
+    ),
     scalarFloat(
       Prisma.sql`
         SELECT COALESCE(SUM(-we."amountCents"), 0)::float8 AS "v"
         FROM "WalletEntry" we JOIN "ChargingSession" cs ON cs.id = we."referenceId"
         WHERE we.type = 'CHARGE_DEBIT' AND we."referenceType" = 'CHARGING_SESSION' AND ${sessionWhere}
+      `,
+      'v',
+    ),
+    // Dívida quitada via crédito de Pix (`DEBT_SETTLEMENT`, F5.2) — ligada à
+    // SESSÃO via Debt.chargingSessionId, escopada/periodada pela sessão (não
+    // por quando a quitação aconteceu — mesmo raciocínio de `openDebtCents`
+    // abaixo: o dinheiro pertence ao período em que a receita foi gerada).
+    scalarFloat(
+      Prisma.sql`
+        SELECT COALESCE(SUM(-we."amountCents"), 0)::float8 AS "v"
+        FROM "WalletEntry" we JOIN "Debt" d ON d.id = we."referenceId" JOIN "ChargingSession" cs ON cs.id = d."chargingSessionId"
+        WHERE we.type = 'DEBT_SETTLEMENT' AND we."referenceType" = 'DEBT' AND ${sessionWhere}
       `,
       'v',
     ),
@@ -90,10 +137,19 @@ export async function getPaymentsReconciliation(scope: ReportingScope, window: P
       ])
       return failedRequestedCents + refundedCents
     })(),
+    // Estorno/chargeback de cartão — informativo (ver comentário do campo na interface).
+    scalarFloat(
+      Prisma.sql`
+        SELECT COALESCE(SUM(pi."amountRefundedCents"), 0)::float8 AS "v"
+        FROM "PaymentIntent" pi JOIN "ChargingSession" cs ON cs.id = pi."chargingSessionId"
+        WHERE pi.purpose = 'SESSION_CARD_CAPTURE' AND ${sessionWhere}
+      `,
+      'v',
+    ),
   ])
 
   const expectedCents = revenueCents
-  const accountedCents = cardCapturedCents + walletDebitCents + openDebtCents
+  const accountedCents = cardCapturedCents + cardCapturePendingCents + walletDebitCents + debtSettledCents + openDebtCents
   const differenceCents = expectedCents - accountedCents
 
   let walletTopupPixCents: number | null = null
@@ -110,10 +166,13 @@ export async function getPaymentsReconciliation(scope: ReportingScope, window: P
   return {
     revenueCents,
     cardCapturedCents,
+    cardCapturePendingCents,
     walletDebitCents,
+    debtSettledCents,
     walletTopupPixCents,
     openDebtCents,
     failedAttemptsCents,
+    cardRefundedCents,
     expectedCents,
     accountedCents,
     differenceCents,

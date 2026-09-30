@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import type { Prisma, ChargingSessionPaymentMode } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { redis } from '../../lib/redis'
 import { env } from '../../lib/env'
@@ -46,6 +46,7 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
           tariffSnapshot: true,
           ocppTransactionId: true,
           status: true,
+          paymentMode: true,
           site: { select: { timezone: true } },
         },
       })
@@ -163,16 +164,28 @@ interface GuardSession {
   chargingEndedAt: Date | null
   tariffSnapshot: Prisma.JsonValue
   ocppTransactionId: number
+  paymentMode: ChargingSessionPaymentMode
   site: { timezone: string }
 }
 
 /**
  * Se o custo parcial da sessão (estimado com o que já foi medido + tempo
- * decorrido até AGORA) atingir o menor entre o saldo disponível e o teto
- * calculado (`calcularTetoReserva`), dispara `RemoteStopTransaction` pelo
- * barramento Redis que já existe (`ocpp/commands.ts`) — fire-and-forget,
- * marcando a sessão (chave Redis com TTL) para não redisparar a cada nova
- * amostra enquanto o carregador ainda não obedeceu ao comando.
+ * decorrido até AGORA) atingir o limite disponível, dispara
+ * `RemoteStopTransaction` pelo barramento Redis que já existe
+ * (`ocpp/commands.ts`) — fire-and-forget, marcando a sessão (chave Redis com
+ * TTL) para não redisparar a cada nova amostra enquanto o carregador ainda
+ * não obedeceu ao comando.
+ *
+ * F5.4 (2026-09-30): o LIMITE depende do `paymentMode`. WALLET continua
+ * exatamente como antes (`min(saldo disponível, teto calculado)` — nunca
+ * reservado/debitado antecipadamente). CARD usa
+ * `PaymentIntent.amountAuthorizedCents` diretamente — não existe
+ * autorização incremental na Cielo (fato documentado desde a F5.1), então o
+ * limite É o valor que a Cielo já garantiu na pré-autorização, ponto. Se por
+ * algum motivo não achar o intent AUTHORIZED vinculado a esta sessão (não
+ * deveria acontecer — `StartTransaction` sempre liga os dois na mesma
+ * escrita), falha FECHADO: limite = 0, a próxima amostra já dispara o stop
+ * (preferível a deixar a sessão consumir sem limite nenhum).
  */
 async function runBalanceGuard(ctx: OcppHandlerCtx, session: GuardSession, latestEnergyWh: number): Promise<void> {
   const dedupeKey = `ocpp:autostop:${session.id}`
@@ -181,26 +194,40 @@ async function runBalanceGuard(ctx: OcppHandlerCtx, session: GuardSession, lates
 
   const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
 
-  const [connector, wallet] = await Promise.all([
-    prisma.connector.findUnique({ where: { id: session.connectorId }, select: { maxPowerKw: true } }),
-    prisma.wallet.findUnique({ where: { userId: session.userId }, select: { id: true } }),
-  ])
-
-  let saldoDisponivelCents = 0
-  if (wallet) {
-    const lastEntry = await prisma.walletEntry.findFirst({
-      where: { walletId: wallet.id },
-      orderBy: { createdAt: 'desc' },
-      select: { balanceAfterCents: true },
+  let limiteCents: number
+  if (session.paymentMode === 'CARD') {
+    const intent = await prisma.paymentIntent.findFirst({
+      where: { chargingSessionId: session.id, purpose: 'SESSION_CARD_CAPTURE', status: 'AUTHORIZED' },
+      select: { amountAuthorizedCents: true },
     })
-    saldoDisponivelCents = lastEntry?.balanceAfterCents ?? 0
-  }
+    if (!intent) {
+      logger.warn({ sessionId: session.id }, '[ocpp][guard] sessão CARD sem PaymentIntent AUTHORIZED vinculado — limite fail-closed (0)')
+    }
+    limiteCents = intent?.amountAuthorizedCents ?? 0
+  } else {
+    const [connector, wallet] = await Promise.all([
+      prisma.connector.findUnique({ where: { id: session.connectorId }, select: { maxPowerKw: true } }),
+      prisma.wallet.findUnique({ where: { userId: session.userId }, select: { id: true } }),
+    ])
 
-  const tetoEfetivoCents = calcularTetoReserva(
-    { pricePerKwh: tariffSnapshot.pricePerKwh, pricePerMinute: tariffSnapshot.pricePerMinute, sessionFeeCents: tariffSnapshot.sessionFeeCents },
-    { maxPowerKw: connector?.maxPowerKw?.toString() ?? null },
-    { pisoCents: env.RESERVA_PISO_CENTS, tetoCents: env.RESERVA_TETO_CENTS },
-  )
+    let saldoDisponivelCents = 0
+    if (wallet) {
+      const lastEntry = await prisma.walletEntry.findFirst({
+        where: { walletId: wallet.id },
+        orderBy: { createdAt: 'desc' },
+        select: { balanceAfterCents: true },
+      })
+      saldoDisponivelCents = lastEntry?.balanceAfterCents ?? 0
+    }
+
+    const tetoEfetivoCents = calcularTetoReserva(
+      { pricePerKwh: tariffSnapshot.pricePerKwh, pricePerMinute: tariffSnapshot.pricePerMinute, sessionFeeCents: tariffSnapshot.sessionFeeCents },
+      { maxPowerKw: connector?.maxPowerKw?.toString() ?? null },
+      { pisoCents: env.RESERVA_PISO_CENTS, tetoCents: env.RESERVA_TETO_CENTS },
+    )
+
+    limiteCents = Math.min(saldoDisponivelCents, tetoEfetivoCents)
+  }
 
   const energyDeliveredWh = Math.max(0, latestEnergyWh - session.meterStartWh)
   const { totalCostCents } = calcularCustoSessao(tariffSnapshot, {
@@ -211,14 +238,13 @@ async function runBalanceGuard(ctx: OcppHandlerCtx, session: GuardSession, lates
     timezone: session.site.timezone,
   })
 
-  const limiteCents = Math.min(saldoDisponivelCents, tetoEfetivoCents)
   if (totalCostCents < limiteCents) return
 
   const dispatched = await redis.set(dedupeKey, '1', 'EX', AUTOSTOP_DEDUPE_TTL_SECONDS, 'NX')
   if (!dispatched) return // outra amostra concorrente já disparou o stop
 
   logger.warn(
-    { sessionId: session.id, chargePointId: ctx.chargePointId, totalCostCents, limiteCents, saldoDisponivelCents, tetoEfetivoCents },
+    { sessionId: session.id, chargePointId: ctx.chargePointId, paymentMode: session.paymentMode, totalCostCents, limiteCents },
     '[ocpp][guard] custo parcial atingiu o limite disponível — disparando RemoteStopTransaction',
   )
 

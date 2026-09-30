@@ -18,6 +18,13 @@ import { emitSessionStarted } from '../../realtime/emit'
  * `Connector.status` aqui — a fonte de verdade do conector passa a ser só o
  * `StatusNotification` real (o write forçado aqui mentia quando o
  * carregador demorava a confirmar `Charging`).
+ *
+ * F5.4 (2026-09-30): quando o idTag é de um `AuthToken` VIRTUAL vinculado a
+ * uma pré-autorização de cartão AUTHORIZED (`checkAuthorization` devolve
+ * `cardPaymentIntent`), a MESMA escrita que cria a sessão liga
+ * `PaymentIntent.chargingSessionId` e grava `paymentMode: 'CARD'` — sem
+ * nenhuma chamada à Cielo aqui (decisão §2 da Nova: Authorize/StartTransaction
+ * nunca chamam o gateway, só leem o que a API já deixou gravado).
  */
 export const handleStartTransaction = defineOcppHandler('StartTransaction', startTransactionReqSchema, async (data, ctx) => {
   const chargePoint = await prisma.chargePoint.findUniqueOrThrow({ where: { id: ctx.chargePointId } })
@@ -29,7 +36,7 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
     throw createRPCError('PropertyConstraintViolation', `Conector ${data.connectorId} não está cadastrado neste charge point.`)
   }
 
-  const { resultado, token } = await checkAuthorization(data.idTag, data.timestamp)
+  const { resultado, token, cardPaymentIntent } = await checkAuthorization(data.idTag, data.timestamp)
   if (resultado.decision !== 'Accepted' || !token?.userId) {
     logger.warn(
       { chargePointId: ctx.chargePointId, idTag: data.idTag, decision: resultado.decision, reason: 'reason' in resultado ? resultado.reason : undefined },
@@ -41,37 +48,58 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
   }
 
   const tariff = await resolveActiveTariff(connector, chargePoint)
+  // Capturado numa const FORA do callback da transação: narrowing de
+  // `token.userId` (via `!token?.userId` acima) não atravessa o limite de
+  // uma função aninhada (`prisma.$transaction(async (tx) => ...)`) — TS
+  // trata a closure como podendo ver outro valor, mesmo sendo `const`.
+  const userId = token.userId
 
-  const session = await prisma.chargingSession.create({
-    data: {
-      // operatorId é reescrito por trigger a partir de connector.operatorId
-      // de qualquer forma (ver schema-innoelektron.md do Cronos) — mandamos
-      // ctx.operatorId (o mesmo valor, já resolvido no handshake) só para
-      // satisfazer o tipo obrigatório do Prisma, não por precisar acertar.
-      operatorId: ctx.operatorId,
-      siteId: chargePoint.siteId,
-      chargePointId: chargePoint.id,
-      connectorId: connector.id,
-      authTokenId: token.id,
-      userId: token.userId,
-      status: 'STARTED',
-      meterStartWh: data.meterStart,
-      startedAt: data.timestamp,
-      tariffId: tariff.id,
-      // Congela a tarifa vigente (com as janelas ponta/fora-ponta) — sessão
-      // antiga nunca recalcula com a tarifa de hoje.
-      tariffSnapshot: serializeTariffSnapshot(tariff, tariff.windows) as unknown as Prisma.InputJsonValue,
-    },
+  const session = await prisma.$transaction(async (tx) => {
+    const created = await tx.chargingSession.create({
+      data: {
+        // operatorId é reescrito por trigger a partir de connector.operatorId
+        // de qualquer forma (ver schema-innoelektron.md do Cronos) — mandamos
+        // ctx.operatorId (o mesmo valor, já resolvido no handshake) só para
+        // satisfazer o tipo obrigatório do Prisma, não por precisar acertar.
+        operatorId: ctx.operatorId,
+        siteId: chargePoint.siteId,
+        chargePointId: chargePoint.id,
+        connectorId: connector.id,
+        authTokenId: token.id,
+        userId,
+        status: 'STARTED',
+        meterStartWh: data.meterStart,
+        startedAt: data.timestamp,
+        tariffId: tariff.id,
+        // Congela a tarifa vigente (com as janelas ponta/fora-ponta) — sessão
+        // antiga nunca recalcula com a tarifa de hoje.
+        tariffSnapshot: serializeTariffSnapshot(tariff, tariff.windows) as unknown as Prisma.InputJsonValue,
+        paymentMode: cardPaymentIntent ? 'CARD' : 'WALLET',
+      },
+    })
+
+    if (cardPaymentIntent) {
+      // Vínculo reverso: o trigger `set_payment_intent_operator_id` dispara
+      // nesta mesma UPDATE (BEFORE UPDATE OF "chargingSessionId") e deriva o
+      // operatorId do intent a partir desta sessão — nada a fazer aqui além
+      // do UPDATE. CHECK `payment_intent_purpose_consistency` permite
+      // chargingSessionId null enquanto status=AUTHORIZED, então não há
+      // corrida possível aqui (o intent já está AUTHORIZED desde antes do
+      // RemoteStart).
+      await tx.paymentIntent.update({ where: { id: cardPaymentIntent.id }, data: { chargingSessionId: created.id } })
+    }
+
+    return created
   })
 
   logger.info(
-    { chargePointId: ctx.chargePointId, connectorId: data.connectorId, transactionId: session.ocppTransactionId, userId: token.userId },
+    { chargePointId: ctx.chargePointId, connectorId: data.connectorId, transactionId: session.ocppTransactionId, userId },
     '[ocpp] StartTransaction aceito',
   )
 
   // Publicado DEPOIS do `create()` já ter resolvido (commit implícito de um
   // único INSERT) — nunca antes de a linha existir de verdade.
-  void emitSessionStarted({ operatorId: ctx.operatorId, userId: token.userId, sessionId: session.id, chargePointId: chargePoint.id }).catch((err) =>
+  void emitSessionStarted({ operatorId: ctx.operatorId, userId, sessionId: session.id, chargePointId: chargePoint.id }).catch((err) =>
     logger.error({ err, sessionId: session.id }, '[realtime] falha ao publicar session.started (não bloqueante)'),
   )
 

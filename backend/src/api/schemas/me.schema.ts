@@ -8,10 +8,22 @@ import { z } from 'zod'
  * em memória: `.cuid()` num campo que não é cuid rejeita entrada legítima
  * (mesmo erro que bateu em `seed-site-matriz` e em
  * `remoteStartCommandSchema.userId`).
+ *
+ * `payment` (F5.4, 2026-09-30) — ausente = WALLET (retrocompatível, campo
+ * novo opcional). `paymentMethodId` AQUI é `.cuid()` de verdade
+ * (`PaymentMethod.id`, gerado pelo Prisma) — não confundir com o caso do
+ * `ocppIdentity` acima.
  */
+export const meStartSessionPaymentSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('WALLET') }),
+  z.object({ mode: z.literal('CARD'), paymentMethodId: z.string().cuid() }),
+])
+export type MeStartSessionPaymentInput = z.infer<typeof meStartSessionPaymentSchema>
+
 export const meStartSessionSchema = z.object({
   ocppIdentity: z.string().trim().min(1),
   connectorId: z.number().int().min(1),
+  payment: meStartSessionPaymentSchema.optional(),
 })
 export type MeStartSessionInput = z.infer<typeof meStartSessionSchema>
 

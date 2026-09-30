@@ -3,6 +3,9 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { liquidarSessao } from './liquidarSessao'
+import { prepararFechamentoCartao } from '../pagamentos/fecharSessaoCartao'
+import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
+import { enqueueCapturarSessaoCartao } from '../pagamentos/capturarSessaoCartao'
 import { emitSessionStopped, emitWalletUpdated } from '../../realtime/emit'
 
 const ZERO_CUSTOS: CustoSessaoResultado = {
@@ -46,6 +49,13 @@ export interface FinalizarSessaoInput {
  * `StopTransaction` real responde `Accepted` mesmo assim e enfileira retry
  * via `enqueueLiquidarSessaoRetry`; a reconciliação de boot loga e segue para
  * a próxima sessão órfã, sem travar o processamento do `BootNotification`).
+ *
+ * F5.4 (2026-09-30): sessão `paymentMode === 'CARD'` NÃO passa por
+ * `liquidarSessao` (isso é só WALLET) — em vez disso, `prepararFechamentoCartao`
+ * decide (dentro da MESMA transação, sem I/O de rede) se a pré-autorização
+ * deve ser capturada (`CAPTURE_PENDING`) ou cancelada (sessão sem consumo,
+ * `totalCostCents <= 0`). A chamada de rede de verdade (capturar/cancelar na
+ * Cielo) acontece DEPOIS do commit — rede nunca entra em transação de banco.
  */
 export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput): Promise<void> {
   const resultado = await prisma.$transaction(async (tx) => {
@@ -63,6 +73,7 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
         startedAt: true,
         chargingEndedAt: true,
         tariffSnapshot: true,
+        paymentMode: true,
         site: { select: { timezone: true } },
       },
     })
@@ -121,14 +132,19 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       },
     })
 
-    // Débito atômico da carteira — MESMA função usada pelo job de retry
-    // (`liquidarSessao`), aqui reaproveitando a transação já aberta (nunca
-    // abre uma transação aninhada). NÃO publica aqui dentro — `tx` fornecido
-    // faz `liquidarSessao` só retornar o resultado, sem publicar (a
+    // WALLET: débito atômico da carteira — MESMA função usada pelo job de
+    // retry (`liquidarSessao`), aqui reaproveitando a transação já aberta
+    // (nunca abre uma transação aninhada). NÃO publica aqui dentro — `tx`
+    // fornecido faz `liquidarSessao` só retornar o resultado, sem publicar (a
     // transação desta função ainda não commitou).
-    const walletResultado = await liquidarSessao(session.id, tx)
+    //
+    // CARD: `prepararFechamentoCartao` só decide a ação (CAPTURE/VOID/NONE) e
+    // grava CAPTURE_PENDING quando aplicável — sem chamar a Cielo daqui
+    // dentro (ver nota F5.4 no cabeçalho).
+    const walletResultado = session.paymentMode === 'CARD' ? null : await liquidarSessao(session.id, tx)
+    const cardResultado = session.paymentMode === 'CARD' ? await prepararFechamentoCartao(tx, session.id, custos.totalCostCents) : null
 
-    return { userId: session.userId, chargePointId: session.chargePointId, operatorId: session.operatorId, walletResultado }
+    return { userId: session.userId, chargePointId: session.chargePointId, operatorId: session.operatorId, walletResultado, cardResultado }
   })
 
   // Publicado DEPOIS do `$transaction` acima ter resolvido (= commit real) —
@@ -144,6 +160,20 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
   if (resultado.walletResultado?.debited) {
     await emitWalletUpdated(resultado.walletResultado.userId, resultado.walletResultado.balanceAfterCents).catch((err) =>
       logger.error({ err, sessionId }, '[realtime] falha ao publicar wallet.updated (não bloqueante)'),
+    )
+  }
+
+  // CARD: a chamada de rede de verdade acontece só AGORA (depois do commit) —
+  // nunca bloqueia o ack ao carregador (o `StopTransaction` já respondeu
+  // `Accepted` antes disto — ver `stopTransaction.ts`) nem prende o lock da
+  // sessão durante a chamada à Cielo.
+  if (resultado.cardResultado?.action === 'CAPTURE' && resultado.cardResultado.paymentIntentId) {
+    await enqueueCapturarSessaoCartao(resultado.cardResultado.paymentIntentId).catch((err) =>
+      logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao enfileirar captura de sessão CARD (não bloqueante — o varredor não cobre CAPTURE_PENDING nunca criado; reavaliar se isto acontecer na prática)'),
+    )
+  } else if (resultado.cardResultado?.action === 'VOID' && resultado.cardResultado.paymentIntentId) {
+    await cancelarPreAutorizacaoCartao(resultado.cardResultado.paymentIntentId).catch((err) =>
+      logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao cancelar pré-autorização de sessão sem consumo (não bloqueante — varredor não cobre AUTHORIZED com sessão vinculada; reavaliar se isto acontecer na prática)'),
     )
   }
 }

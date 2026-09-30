@@ -207,6 +207,19 @@ const envSchema = z.object({
   // (precisa decodificar para exatos 32 bytes — AES-256).
   PAYMENT_SECRETS_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
+  // F5.4 (30/09/2026) — sessão de recarga cobrando de cartão (pré-auth +
+  // captura parcial via PaymentIntent). Cadência do varredor de
+  // pré-autorizações (`worker/jobs/varrerPreAutorizacoesCartaoJob.ts`) — mesmo
+  // padrão/default de `TOPUP_PIX_EXPIRY_SCAN_INTERVAL_MS`.
+  CARD_PREAUTH_SCAN_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  // Quanto tempo uma pré-autorização AUTHORIZED pode ficar sem `StartTransaction`
+  // vinculado antes do varredor cancelá-la (VOIDED) — decisão do dono,
+  // 2026-09-17, documentada em decisoes-f5-pagamento-cielo.md (mesma premissa
+  // de "sessão longa típica" usada em `calcularTetoReserva`). Também usado
+  // como o primeiro horizonte de desistência de um intent `CREATED` que nunca
+  // recebeu resposta da Cielo (reconsultado antes; ver `varrerPreAutorizacoesCartao.ts`).
+  CARD_PREAUTH_ABANDON_MINUTES: z.coerce.number().int().positive().default(5),
+
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem
   // trocou de rede); por IP e total REJEITAM o novo. Ver `core/realtime/streamLimiter.ts`.

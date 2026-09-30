@@ -45,3 +45,27 @@ export const EXPIRAR_TOPUPS_PIX_QUEUE_NAME = 'expirar-topups-pix'
 
 /** Sem dado próprio: cada disparo varre tudo que estiver vencido NO MOMENTO em que roda (nunca usa dado fixado no agendamento). */
 export type ExpirarTopupsPixJobData = Record<string, never>
+
+/**
+ * Captura de sessão CARD (F5.4, 2026-09-30) — enfileirada por
+ * `finalizarSessao.ts` DEPOIS do commit que marca `CAPTURE_PENDING` (rede não
+ * entra em transação de banco). Ver `services/pagamentos/capturarSessaoCartao.ts`.
+ */
+export const CAPTURAR_SESSAO_CARTAO_QUEUE_NAME = 'capturar-sessao-cartao'
+
+export interface CapturarSessaoCartaoJobData {
+  paymentIntentId: string
+}
+
+/**
+ * Varredor periódico de pré-autorizações de cartão (F5.4) — job REPEATABLE
+ * (mesmo padrão de `expirarTopupsPixJob.ts`): cancela pré-auth abandonada
+ * sem sessão (+`CARD_PREAUTH_ABANDON_MINUTES`), reconsulta intents `CREATED`
+ * que nunca resolveram, e alerta sobre `CAPTURE_PENDING` antigo demais (a
+ * Cielo pode levar até 5 dias úteis para capturar — não é erro automático).
+ * Ver `services/pagamentos/varrerPreAutorizacoesCartao.ts`.
+ */
+export const VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME = 'varrer-preautorizacoes-cartao'
+
+/** Sem dado próprio — mesmo espírito de `ExpirarTopupsPixJobData`. */
+export type VarrerPreAutorizacoesCartaoJobData = Record<string, never>
