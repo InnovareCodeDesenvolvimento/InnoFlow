@@ -15,7 +15,11 @@ function truncar(value: string | null | undefined, max: number): string | null |
 }
 
 export interface CamposLimitaveis {
-  path: string
+  // Opcional desde a F5 (2026-09-30): eventos de ator SYSTEM (crédito de Pix
+  // pelo worker) não têm requisição HTTP por trás — ver
+  // `services/auditoria/writeAuditLog.ts` e o CHECK
+  // `audit_log_http_fields_required_unless_system` no banco.
+  path?: string | null
   userAgent?: string | null
   entityId?: string | null
 }
@@ -23,7 +27,7 @@ export interface CamposLimitaveis {
 export function limitarCamposDeAuditoria<T extends CamposLimitaveis>(input: T): T {
   return {
     ...input,
-    path: truncar(input.path, AUDIT_FIELD_LIMITS.path) as string,
+    path: truncar(input.path, AUDIT_FIELD_LIMITS.path),
     userAgent: truncar(input.userAgent, AUDIT_FIELD_LIMITS.userAgent),
     entityId: truncar(input.entityId, AUDIT_FIELD_LIMITS.entityId),
   }

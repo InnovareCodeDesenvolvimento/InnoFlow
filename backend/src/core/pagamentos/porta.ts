@@ -59,6 +59,25 @@ export interface ResultadoPix {
 }
 
 /**
+ * Consulta de um pagamento PIX — GAP achado na F5.2 (Vega, 2026-09-30):
+ * `consultar()`/`consultarPorPedido()` abaixo só existiam para CARTÃO
+ * (devolvem `CardPaymentStatus`, normalizados por
+ * `normalizarStatusCartaoCielo`). Reconsultar um pagamento Pix por ali
+ * interpretaria `Status=2 PaymentConfirmed` como `CAPTURED` (vocabulário de
+ * cartão) em vez de `PAID` — bug silencioso. `consultarPix` usa o
+ * normalizador PRÓPRIO do Pix (`normalizarStatusPixCielo`) — mesmo endpoint
+ * HTTP da Cielo (`GET /1/sales/{PaymentId}`), leitura diferente.
+ */
+export interface ResultadoConsultaPix {
+  providerPaymentId: string
+  merchantOrderId: string
+  status: PixPaymentStatus
+  returnCode: string | null
+  /** Valor efetivamente pago, quando a Cielo devolve — `null` se ainda não há confirmação. */
+  amountCents: number | null
+}
+
+/**
  * Dados para o frontend chamar o Silent Order Post da Cielo DIRETO (o campo
  * de cartão nunca passa pelo nosso backend — SAQ A-EP). Não faz chamada HTTP
  * à Cielo: é configuração pública nossa (merchantId, ambiente).
@@ -85,5 +104,7 @@ export interface PagamentoPort {
   /** Reconciliação pós-timeout (fato da Cielo: API 3.0 não tem chave de idempotência) — busca por `merchantOrderId` = `PaymentIntent.id`. */
   consultarPorPedido(merchantOrderId: string): Promise<ResultadoConsultaPagamento | null>
   criarPix(pedido: PedidoPix): Promise<ResultadoPix>
+  /** Reconsulta OBRIGATÓRIA antes de creditar (webhook nunca é verdade, ver decisão §3 da Nova) — usa `providerPaymentId` = `PaymentIntent.cieloPaymentId`. */
+  consultarPix(providerPaymentId: string): Promise<ResultadoConsultaPix>
   sessaoTokenizacao(cliente?: DadosCliente): SessaoTokenizacao
 }

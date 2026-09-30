@@ -1,7 +1,7 @@
 import type { DadosCliente, PedidoAutorizacaoCartao, PedidoPix } from '../../core/pagamentos/tipos'
 import type { CardPaymentStatus, PixPaymentStatus } from '../../core/pagamentos/tipos'
 import { normalizarStatusCartaoCielo, normalizarStatusPixCielo, type StatusCartaoNormalizado, type StatusPixNormalizado } from '../../core/pagamentos/normalizarStatusCielo'
-import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaPagamento, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
+import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
 import { CieloHttpClient, CieloTimeoutError } from './cieloHttpClient'
 import { extrairCamposPagamento, extrairPagamentoMaisRecenteDaConsulta, montarPayloadAutorizacaoCartao, montarPayloadPix, type CamposPagamentoCielo } from './cieloPayloads'
 import { logger } from '../../lib/logger'
@@ -116,6 +116,24 @@ export class CieloAdapter implements PagamentoPort {
       qrCodeString,
       qrCodeBase64Image,
       expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+    }
+  }
+
+  /**
+   * GAP fechado na F5.2 (ver comentário de `ResultadoConsultaPix`): mesmo
+   * endpoint de consulta de cartão (`GET /1/sales/{PaymentId}` no host de
+   * query), mas normalizado com o vocabulário PIX
+   * (`normalizarStatusPixCielo`), nunca com `normalizarStatusCartaoCielo`.
+   */
+  async consultarPix(providerPaymentId: string): Promise<ResultadoConsultaPix> {
+    const body = await this.client.getByPaymentId(providerPaymentId)
+    const campos = extrairCamposPagamento(body)
+    return {
+      providerPaymentId: campos.paymentId ?? providerPaymentId,
+      merchantOrderId: campos.merchantOrderId ?? '',
+      status: mapStatusPixParaDominio(normalizarStatusPixCielo(campos)),
+      returnCode: campos.returnCode,
+      amountCents: campos.amountAuthorizedCents,
     }
   }
 

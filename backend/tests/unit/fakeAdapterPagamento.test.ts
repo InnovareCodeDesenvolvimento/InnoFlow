@@ -94,4 +94,46 @@ describe('FakeAdapter', () => {
     const resultado = await adapter.autorizar(pedidoCartao())
     expect(resultado.providerPaymentId).toBe('id-1')
   })
+
+  describe('Pix — consultarPix (F5.2)', () => {
+    function pedidoPix(overrides: Partial<PedidoPix> = {}): PedidoPix {
+      return { merchantOrderId: 'pix-intent-1', amountRequestedCents: 5000, cliente: { name: 'Motorista Pix' }, ...overrides }
+    }
+
+    it('consultarPix logo após criarPix devolve PENDING (ainda não foi "pago")', async () => {
+      const adapter = new FakeAdapter()
+      const criado = await adapter.criarPix(pedidoPix())
+      const consulta = await adapter.consultarPix(criado.providerPaymentId)
+      expect(consulta.status).toBe('PENDING')
+      expect(consulta.amountCents).toBeNull()
+    })
+
+    it('marcarPixComoPago (helper SÓ de teste) faz consultarPix devolver PAID com o valor', async () => {
+      const adapter = new FakeAdapter()
+      const criado = await adapter.criarPix(pedidoPix({ amountRequestedCents: 3500 }))
+      adapter.marcarPixComoPago(criado.providerPaymentId)
+      const consulta = await adapter.consultarPix(criado.providerPaymentId)
+      expect(consulta.status).toBe('PAID')
+      expect(consulta.amountCents).toBe(3500)
+      expect(consulta.merchantOrderId).toBe('pix-intent-1')
+    })
+
+    it('marcarPixComoExpirado faz consultarPix devolver EXPIRED', async () => {
+      const adapter = new FakeAdapter()
+      const criado = await adapter.criarPix(pedidoPix())
+      adapter.marcarPixComoExpirado(criado.providerPaymentId)
+      const consulta = await adapter.consultarPix(criado.providerPaymentId)
+      expect(consulta.status).toBe('EXPIRED')
+    })
+
+    it('consultarPix com providerPaymentId desconhecido lança (nunca inventa um resultado)', async () => {
+      const adapter = new FakeAdapter()
+      await expect(adapter.consultarPix('nunca-existiu')).rejects.toThrow(/desconhecido/)
+    })
+
+    it('marcarPixComoPago em providerPaymentId desconhecido lança (protege o teste de um erro de digitação silencioso)', () => {
+      const adapter = new FakeAdapter()
+      expect(() => adapter.marcarPixComoPago('nunca-existiu')).toThrow(/desconhecido/)
+    })
+  })
 })
