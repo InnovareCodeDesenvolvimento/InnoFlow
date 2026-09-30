@@ -92,11 +92,22 @@ describe('AuditLog — garantias de banco (trigger append-only + retenção 24 m
   describe('colunas NOT NULL (o banco recusa, não só o TypeScript)', () => {
     // INSERT cru: o Prisma nem deixaria omitir/`null`ar estes campos no client
     // tipado, então a garantia de BANCO só se prova por SQL direto.
-    const NOT_NULL_COLUMNS = ['occurredAt', 'actorUserId', 'actorRole', 'actorEmail', 'actorName', 'action', 'outcome', 'httpStatus', 'method', 'path'] as const
+    //
+    // REGRESSÃO fechada (Íris, 30/09/2026, achada rodando contra Postgres real
+    // pela 1ª vez desde a F5.1/Cronos): `httpStatus`/`method`/`path` SAÍRAM
+    // desta lista — a migration `20260930120100_payment_gateway_foundation`
+    // (F5, ator SYSTEM) tornou as 3 colunas ANULÁVEIS de propósito
+    // (`DROP NOT NULL`) e passou a exigi-las só condicionalmente, via CHECK
+    // `audit_log_http_fields_required_unless_system` (NULL só é aceito quando
+    // `actorRole = 'SYSTEM'`). Testar "= NULL é rejeitado (23502)" para essas
+    // 3 colunas não é mais verdade no nível de coluna — o teste original
+    // (escrito antes da F5) quebrava aqui. A garantia de banco correta agora é
+    // a CHECK, coberta nos 2 testes logo abaixo deste describe.
+    const NOT_NULL_COLUMNS = ['occurredAt', 'actorUserId', 'actorRole', 'actorEmail', 'actorName', 'action', 'outcome'] as const
 
     for (const column of NOT_NULL_COLUMNS) {
       it(`${column} = NULL é rejeitado (23502 not_null_violation)`, async () => {
-        const values: Record<(typeof NOT_NULL_COLUMNS)[number], unknown> = {
+  const values: Record<(typeof NOT_NULL_COLUMNS)[number], unknown> = {
           occurredAt: new Date(),
           actorUserId: `audit-db-${suffix}-nn-${column}`,
           actorRole: 'ADMIN',
@@ -104,16 +115,16 @@ describe('AuditLog — garantias de banco (trigger append-only + retenção 24 m
           actorName: 'NN',
           action: 'OTHER',
           outcome: 'SUCCESS',
-          httpStatus: 200,
-          method: 'GET',
-          path: '/nn',
         }
         values[column] = null
 
+        // httpStatus/method/path preenchidos (não são o alvo deste teste) —
+        // sem eles o INSERT falharia pela CHECK, não pela coluna NOT NULL que
+        // este teste está verificando.
         const attempt = prisma.$executeRaw(Prisma.sql`
           INSERT INTO "AuditLog" ("id", "occurredAt", "actorUserId", "actorRole", "actorEmail", "actorName", "action", "outcome", "httpStatus", "method", "path")
-          VALUES (${`nn-${suffix}-${column}`}, ${values.occurredAt}::timestamptz, ${values.actorUserId}, ${values.actorRole}::"Role", ${values.actorEmail}, ${values.actorName},
-                  ${values.action}::"AuditAction", ${values.outcome}::"AuditOutcome", ${values.httpStatus}::int, ${values.method}, ${values.path})
+          VALUES (${`nn-${suffix}-${column}`}, ${values.occurredAt}::timestamptz, ${values.actorUserId}, ${values.actorRole}::"AuditActorRole", ${values.actorEmail}, ${values.actorName},
+                  ${values.action}::"AuditAction", ${values.outcome}::"AuditOutcome", 200, 'GET', '/nn')
         `)
         await expect(attempt).rejects.toThrow(/23502|null value|not-null|violates not-null/i)
         expect(await prisma.auditLog.count({ where: { id: `nn-${suffix}-${column}` } })).toBe(0)
@@ -124,7 +135,26 @@ describe('AuditLog — garantias de banco (trigger append-only + retenção 24 m
       const id = `nn-${suffix}-controle`
       await prisma.$executeRaw(Prisma.sql`
         INSERT INTO "AuditLog" ("id", "occurredAt", "actorUserId", "actorRole", "actorEmail", "actorName", "action", "outcome", "httpStatus", "method", "path")
-        VALUES (${id}, now(), ${`audit-db-${suffix}-controle`}, 'ADMIN'::"Role", 'c@example.com', 'C', 'OTHER'::"AuditAction", 'SUCCESS'::"AuditOutcome", 200, 'GET', '/c')
+        VALUES (${id}, now(), ${`audit-db-${suffix}-controle`}, 'ADMIN'::"AuditActorRole", 'c@example.com', 'C', 'OTHER'::"AuditAction", 'SUCCESS'::"AuditOutcome", 200, 'GET', '/c')
+      `)
+      expect(await prisma.auditLog.count({ where: { id } })).toBe(1)
+    })
+
+    it('ator ADMIN com httpStatus/method/path NULL é rejeitado pela CHECK audit_log_http_fields_required_unless_system (23514)', async () => {
+      const id = `nn-${suffix}-check-admin-no-http`
+      const attempt = prisma.$executeRaw(Prisma.sql`
+        INSERT INTO "AuditLog" ("id", "occurredAt", "actorUserId", "actorRole", "actorEmail", "actorName", "action", "outcome", "httpStatus", "method", "path")
+        VALUES (${id}, now(), ${`audit-db-${suffix}-check-admin`}, 'ADMIN'::"AuditActorRole", 'c@example.com', 'C', 'OTHER'::"AuditAction", 'SUCCESS'::"AuditOutcome", NULL, NULL, NULL)
+      `)
+      await expect(attempt).rejects.toThrow(/23514|violates check constraint|audit_log_http_fields_required_unless_system/i)
+      expect(await prisma.auditLog.count({ where: { id } })).toBe(0)
+    })
+
+    it('ator SYSTEM com httpStatus/method/path NULL é ACEITO pela mesma CHECK (evento automático sem requisição HTTP por trás)', async () => {
+      const id = `nn-${suffix}-check-system-no-http`
+      await prisma.$executeRaw(Prisma.sql`
+        INSERT INTO "AuditLog" ("id", "occurredAt", "actorUserId", "actorRole", "actorEmail", "actorName", "action", "outcome", "httpStatus", "method", "path")
+        VALUES (${id}, now(), ${`audit-db-${suffix}-check-system`}, 'SYSTEM'::"AuditActorRole", 'system@innoelektron.local', 'Sistema', 'PAYMENT_CREDIT'::"AuditAction", 'SUCCESS'::"AuditOutcome", NULL, NULL, NULL)
       `)
       expect(await prisma.auditLog.count({ where: { id } })).toBe(1)
     })
