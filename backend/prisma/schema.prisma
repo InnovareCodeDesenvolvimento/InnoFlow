@@ -154,6 +154,7 @@ enum WalletEntryType {
   ADJUSTMENT_CREDIT
   ADJUSTMENT_DEBIT
   REFUND
+  DEBT_SETTLEMENT // quitação automática de Debt pelo crédito Pix (F5) — ver ux_wallet_entry_debt_settlement_once
 }
 
 enum DebtStatus {
@@ -187,6 +188,8 @@ enum AuditAction {
   LOGIN_SUCCESS
   LOGIN_FAILED
   EXPORT
+  PAYMENT_CREDIT // crédito de Pix processado pelo worker (ator SYSTEM), F5
+  PAYMENT_CONFIG_CHANGE // ADMIN altera PaymentGatewayConfig (segredos nunca em `changes`), F5
   OTHER // rota não mapeada ainda gera linha (nunca silêncio) — decisão da Nova
 }
 
@@ -194,6 +197,20 @@ enum AuditOutcome {
   SUCCESS
   DENIED
   FAILED
+}
+
+// Ator de uma linha de AuditLog. Enum SEPARADO de `Role` (decisão da Nova,
+// F5, 2026-09-30): SYSTEM cobre eventos automáticos (ex.: crédito de Pix
+// processado pelo worker, sem usuário logado) e NUNCA pode existir como
+// role de um `User` de verdade — se SYSTEM entrasse em `Role`, nada
+// impediria criar um User com essa role por engano. `actorRole` do
+// AuditLog usa este enum; o snapshot do ator continua sem FK (ver
+// comentário do model AuditLog).
+enum AuditActorRole {
+  ADMIN
+  OPERATOR
+  DRIVER
+  SYSTEM
 }
 
 // ------------------------------------------------------------
@@ -275,8 +292,8 @@ model ChargePoint {
   basicAuthSecretHash String // hash — NUNCA o segredo em claro
   configSnapshot      Json?
 
-  lastBootAt DateTime? @db.Timestamptz(3)
-  lastSeenAt DateTime? @db.Timestamptz(3)
+  lastBootAt     DateTime? @db.Timestamptz(3)
+  lastSeenAt     DateTime? @db.Timestamptz(3)
   // Instante em que o WebSocket deste carregador FECHOU (gateway OCPP,
   // `client.on('close')`). Só vale enquanto `disconnectedAt >= lastSeenAt` —
   // qualquer mensagem/conexão posterior atualiza `lastSeenAt` e o carregador
@@ -347,15 +364,20 @@ model User {
   operatorId String?
   operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: Restrict)
 
-  name         String
-  email        String  @unique
-  phone        String?
-  passwordHash String?
+  name               String
+  email              String    @unique
+  phone              String?
+  passwordHash       String?
   // Identificador ESTÁVEL do Google (claim `sub` do ID token) — não o e-mail, que
   // pode mudar do lado do Google. Só motoristas (DRIVER) entram por Google;
   // NULL para quem nunca usou. UNIQUE parcial natural: Postgres trata NULLs
   // como distintos, então vários usuários sem Google não colidem.
-  googleSub    String? @unique
+  googleSub          String?   @unique
+  // CPF — dado pessoal (LGPD), coletado OPCIONALMENTE para pagamento via Pix
+  // (F5). Nunca obrigatório no cadastro. 11 dígitos numéricos (CHECK na
+  // migration) e índice único PARCIAL (WHERE cpf IS NOT NULL) — vários
+  // usuários sem CPF não colidem entre si.
+  cpf                String?   @db.VarChar(11)
   // Revogação de sessão (Órion A3/M1, 2026-09-19): JWT cujo `iat` (em segundos) seja
   // ANTERIOR a este instante é recusado por `authenticate`. Bump em: troca/definição de
   // senha, vínculo do Google (que também zera `passwordHash`) e rotação por script.
@@ -735,6 +757,17 @@ model PaymentIntent {
   amountRequestedCents  Int
   amountAuthorizedCents Int?
   amountCapturedCents   Int?
+  // Estorno/chargeback de cartão (F5, ChangeType 7/25 do webhook Cielo): o
+  // status NUNCA muda para "reembolsado" (ficaria CAPTURED para sempre) —
+  // só informativo, mesmo espírito do REFUND da carteira. Trocar o status
+  // tiraria o valor do `cardCaptured` na conciliação e quebraria a
+  // identidade `accounted = cardCaptured + ... `. Ver decisão §4 da Nova.
+  amountRefundedCents   Int       @default(0)
+  chargebackAt          DateTime? @db.Timestamptz(3)
+
+  // Motivo de falha/negação — para a tela do motorista e para o varredor
+  // decidir se vale retentar consulta. Nunca dado sensível de cartão.
+  failureReason String?
 
   pixQrCode    String?
   pixExpiresAt DateTime? @db.Timestamptz(3)
@@ -758,6 +791,10 @@ model PaymentIntent {
   // período de captura.
   @@index([operatorId, status, capturedAt])
   @@index([purpose, status, capturedAt])
+  // Varredor de conciliação (F5) — reconsulta intents "vivos" há mais tempo
+  // (CREATED/AUTHORIZED/CAPTURE_PENDING) ordenando por quando pararam de
+  // mudar, sem precisar varrer a tabela inteira por status.
+  @@index([status, updatedAt])
 }
 
 // Carteira pré-paga (Pix). Saldo = SOMA das entradas — nunca
@@ -839,8 +876,16 @@ model Debt {
   @@index([operatorId, status, createdAt])
 }
 
-// Idempotência dos webhooks da Cielo: retries reenviam o mesmo
-// (provider, externalId, changeType) — UNIQUE dedupe isso na escrita.
+// Caixa de entrada do webhook da Cielo — NUNCA fonte de verdade (a Cielo não
+// assina o corpo, só até 3 headers estáticos como segredo compartilhado).
+// O worker grava aqui, responde 200 e RECONSULTA `apiquery` com nossa
+// credencial antes de agir (ver decisão §3 da Nova). Por isso o dedupe de
+// (provider, externalId, changeType) NÃO pode ser UNIQUE de escrita: um Pix
+// pendente→pago é a MESMA (provider, externalId) com changeType diferente
+// (mais de uma mudança de status legítima para o mesmo PaymentId) — um
+// UNIQUE aqui descartaria a 2ª notificação. A idempotência real fica no
+// EFEITO (ux_wallet_entry_topup_once / ux_wallet_entry_debt_settlement_once),
+// não no evento; este índice é só para consulta/depuração.
 model WebhookEvent {
   id String @id @default(cuid())
 
@@ -855,9 +900,47 @@ model WebhookEvent {
   receivedAt      DateTime  @default(now()) @db.Timestamptz(3)
   processedAt     DateTime? @db.Timestamptz(3)
   processingError String?
+  // Quantas vezes o worker tentou reconsultar/processar este evento —
+  // observabilidade e critério de "desistir e deixar para o varredor de
+  // PaymentIntent" em vez de reprocessar para sempre um evento quebrado.
+  attempts        Int       @default(0)
 
-  @@unique([provider, externalId, changeType])
+  @@index([provider, externalId, changeType])
   @@index([paymentIntentId])
+}
+
+// Config ÚNICA (singleton) do gateway de pagamento — é a NOSSA conta
+// comercial na Cielo (plataforma inteira, não por operador — a porta é do
+// gateway, não de carteira, ver decisão §1 da Nova). Singleton reforçado
+// por CHECK (id = 1) na migration, não só por convenção da aplicação.
+//
+// SEGREDOS: os três campos *Ciphertext guardam o texto CIFRADO (AES-256-GCM,
+// base64 de iv+authTag+ciphertext) — nunca o segredo em claro. A CHAVE de
+// cifragem (env `PAYMENT_SECRETS_KEY`) vive SÓ em variável de ambiente,
+// NUNCA no banco — se o banco vazar sozinho, os segredos continuam
+// ilegíveis. Rotação de chave é operação de aplicação (decifra com a chave
+// antiga, recifra com a nova), fora do escopo desta migration.
+model PaymentGatewayConfig {
+  id Int @id @default(1)
+
+  environment String // "sandbox" | "production"
+
+  merchantId            String?
+  merchantKeyCiphertext String? // cifrado — ver comentário do model
+
+  sopClientId               String?
+  sopClientSecretCiphertext String? // cifrado — ver comentário do model
+
+  // Segredo compartilhado (até 3 headers estáticos) que a Cielo ecoa no Post
+  // de Notificação — não é assinatura, é o que valida "isto veio de quem
+  // conhece o segredo combinado no Site Cielo". Cifrado.
+  webhookHeaderSecretCiphertext String?
+
+  cardEnabled Boolean @default(false)
+  pixEnabled  Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 }
 
 // ------------------------------------------------------------
@@ -880,6 +963,15 @@ model WebhookEvent {
 //   Motivo: a linha precisa sobreviver a um User apagado/anonimizado (LGPD)
 //   ou a mudança de role/operador depois do fato — uma FK obrigaria manter
 //   o registro pai vivo para sempre, o que contradiz o propósito do log.
+// - F5 (2026-09-30, crédito de Pix processado pelo worker, sem ator
+//   humano): `actorRole` usa o enum SEPARADO `AuditActorRole` (inclui
+//   SYSTEM), não `Role` — nunca deve existir um `User` com role SYSTEM.
+//   `method`/`path`/`httpStatus` viram anuláveis, mas SÓ para
+//   `actorRole = 'SYSTEM'` — reforçado por CHECK na migration
+//   (`audit_log_http_fields_required_unless_system`), não só por convenção
+//   da aplicação. `actorUserId`/`actorEmail`/`actorName` continuam
+//   obrigatórios mesmo para SYSTEM (worker usa um id/e-mail sentinela fixo,
+//   ex. "system@innoelektron", para o ator nunca aparecer "vazio" no log).
 model AuditLog {
   id String @id @default(cuid())
 
@@ -887,12 +979,13 @@ model AuditLog {
 
   // Ator — snapshot no momento do evento, sem FK (ver comentário acima).
   // userId/role/email/name são NOT NULL de propósito (Nova, §1.1): todo
-  // caminho que gera uma linha de auditoria já tem um ator autenticado
-  // conhecido (LOGIN_FAILED só loga quando o e-mail já é de uma conta
-  // existente — nunca tentativa de e-mail desconhecido). Só operatorId é
-  // opcional (ADMIN não tem operador próprio).
+  // caminho que gera uma linha de auditoria já tem um ator conhecido — um
+  // humano autenticado, ou o sentinela SYSTEM para eventos automáticos
+  // (LOGIN_FAILED só loga quando o e-mail já é de uma conta existente —
+  // nunca tentativa de e-mail desconhecido). Só operatorId é opcional
+  // (ADMIN/SYSTEM não têm operador próprio).
   actorUserId     String
-  actorRole       Role
+  actorRole       AuditActorRole
   actorEmail      String
   actorName       String
   actorOperatorId String?
@@ -900,7 +993,9 @@ model AuditLog {
   action       AuditAction
   actionDetail String? // texto livre curto, ex.: "ajuste manual de saldo"
   outcome      AuditOutcome
-  httpStatus   Int // toda linha nasce de uma requisição HTTP (Nova, §1.1)
+  // NULL só quando actorRole = 'SYSTEM' (evento automático, sem requisição
+  // HTTP por trás) — CHECK na migration reforça isso.
+  httpStatus   Int?
 
   entityType String? // ex.: "Tariff", "ChargePoint", "Wallet"
   entityId   String?
@@ -908,8 +1003,9 @@ model AuditLog {
   // Operador afetado pela ação — também snapshot, sem FK (mesmo motivo).
   targetOperatorId String?
 
-  method String // verbo HTTP — NOT NULL, mesmo motivo do httpStatus acima
-  path   String // rota, ex.: "/api/admin/drivers/:id/wallet"
+  // NULL só quando actorRole = 'SYSTEM' — mesmo CHECK do httpStatus acima.
+  method String? // verbo HTTP
+  path   String? // rota, ex.: "/api/admin/drivers/:id/wallet"
 
   ipAddress String?
   userAgent String?
