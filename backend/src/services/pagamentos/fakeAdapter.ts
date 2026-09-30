@@ -40,14 +40,20 @@ export class FakeAdapter implements PagamentoPort {
   private readonly intents = new Map<string, IntentSimulado>()
   private readonly porMerchantOrderId = new Map<string, string>()
   private readonly pixIntents = new Map<string, IntentPixSimulado>()
-  private contador = 0
 
   constructor(private readonly options: FakeAdapterOptions = {}) {}
 
   private proximoId(): string {
-    if (this.options.gerarId) return this.options.gerarId()
-    this.contador += 1
-    return `fake-payment-${this.contador}`
+    // Achado real da Íris (F5.2, 30/09/2026): o default aqui documentava
+    // `crypto.randomUUID()` (comentário acima) mas gerava
+    // `fake-payment-${contador}` sequencial de verdade — `cieloPaymentId` é
+    // UNIQUE no banco, então dois `FakeAdapter` sem `gerarId` customizado
+    // (arquivos de teste diferentes, ou duas execuções sucessivas contra o
+    // mesmo Postgres persistente) colidiam no mesmo `fake-payment-1`.
+    // Reproduzido em 4 de 5 rodadas da suíte. `randomUUID()` é o default de
+    // verdade agora — passe `gerarId` só quando o teste precisar de um ID
+    // PREVISÍVEL para asserção.
+    return this.options.gerarId?.() ?? crypto.randomUUID()
   }
 
   async autorizar(pedido: PedidoAutorizacaoCartao): Promise<ResultadoAutorizacao> {
