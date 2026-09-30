@@ -910,3 +910,32 @@ Vega, documentada — quem configurar a conta real da Cielo precisa usar esse no
 
 **Ainda pendente do dono:** credenciais de sandbox da Cielo (nada foi testado contra a API
 real ainda, só `FakeAdapter`).
+
+## F5.3 entregue, revisada pelo Órion e publicada (2026-09-30)
+
+Cadastro de cartão salvo (D1 do dono: SAQ A-EP), entregue e revisado ponta a ponta:
+- **Cronos** (`ba9a2f8`): `PaymentMethod.cieloCardToken` → `cieloCardTokenCiphertext`.
+- **Atlas**: achou e corrigiu, no mesmo ciclo, o redact do logger desatualizado após o
+  rename (`6239e6f`) — regressão de segurança silenciosa que ninguém tinha notado ainda.
+- **Vega** (`bcdbced`, `118a07c`, `57ca119`): cifragem AES-256-GCM própria (chave só em
+  `PAYMENT_SECRETS_KEY`), rotas `POST/GET/PATCH/DELETE /api/me/payment-methods` (sempre 404
+  para cartão de outro motorista, nunca 403), teto de 5 cartões, token nunca logado. Achou e
+  corrigiu 2 divergências reais no contrato compartilhado com a Lyra, trabalhando em paralelo.
+- **Lyra** (`a009894`): documento HTML **isolado** (`pagamento-cartao.html`, build própria do
+  Vite, zero dependência do app principal — CSP rígida own no nginx, regra eslint que bloqueia
+  import do app principal de dentro da pasta isolada), handshake por `postMessage` entre a aba
+  principal e a isolada, tela "Meus cartões" no PWA. Achou e corrigiu um sequestro real do
+  Service Worker sobre a página isolada (só aparece com SW de produção real, não em dev).
+- **Órion**: **LIBERADO**, 0 crítico/alto. 1 achado médio (corrida TOCTOU no teto de 5
+  cartões — mitigação antifraude, não controle de acesso, não bloqueia) e 2 sugestões baixas
+  (evitar `unsafe-inline` no CSS da página isolada; bloquear `localStorage`/cookie por lint
+  na mesma pasta, defesa em profundidade). Confirmou com o próprio build que o bundle isolado
+  não carrega nada do app principal.
+
+**Gaps reais para a F5.4 (sessão de recarga com cartão), marcados "a confirmar" pelo Vega, não
+inventados:** endpoint OAuth do Silent Order Post da Cielo não confirmado (usa `client_credentials`
+por suposição razoável); formato de `GET /1/card/{token}` não confirmado; `PaymentIntent.authTokenId`
+ainda não existe no schema (trava plugar a pré-autorização no início da sessão).
+
+**Nada testado contra a Cielo de verdade** — segue tudo contra `FakeAdapter`, sem credencial
+de sandbox.
