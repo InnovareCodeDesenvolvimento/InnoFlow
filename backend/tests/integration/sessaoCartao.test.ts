@@ -302,6 +302,10 @@ describe('Sessão de recarga com cartão (F5.4, Postgres + Redis reais)', () => 
           authTokenId: token.id,
           status: 'AUTHORIZED',
           cieloPaymentId: autorizacao.providerPaymentId,
+          // CHECK payment_intent_return_code_required (migration 20260917130000) exige
+          // returnCode para SESSION_CARD_CAPTURE em AUTHORIZED/CAPTURED — faltava aqui,
+          // a fixture nunca tinha rodado contra Postgres real (achado da Íris, 30/09/2026).
+          returnCode: autorizacao.returnCode,
           amountRequestedCents: 3000,
           amountAuthorizedCents: autorizacao.amountAuthorizedCents,
           // "timeout"/abandono: autorizado há muito mais que CARD_PREAUTH_ABANDON_MINUTES (default 5min).
