@@ -853,3 +853,29 @@ Git remoto mudou de `github.com/InnovareCode/InnoElektron` para
 App do EasyPanel (api, ocpp-gateway, worker, frontend) para a URL nova** — enquanto não
 fizer isso, o deploy automático por push não vai mais disparar. `docs/DEPLOY-EASYPANEL.md`
 já atualizado com a URL nova.
+
+## F5.1 entregue e publicada (2026-09-30)
+
+Fundação completa da F5, três frentes validadas independentemente:
+- **Cronos** (`4453864`): schema do banco (WebhookEvent sem unique cedo demais, índices
+  parciais de idempotência, PaymentGatewayConfig cifrado, AuditActorRole SYSTEM, CPF
+  opcional, 3ª armadilha corrigida — dívida agora tem caminho de quitação). Achado real:
+  `ALTER TYPE ... ADD VALUE` não pode ser usado na mesma transação de migration em que foi
+  criado — precisou de 2 migrations.
+- **Vega** (`fa8add3`): `core/pagamentos/` puro (máquina de estados, normalizador Cielo,
+  porta), cliente Cielo sandbox + FakeAdapter para os outros times testarem, redact do
+  logger estendido para nunca vazar dado de cartão. 333 testes unitários.
+- **Lyra** (`050c977`): tela "Adicionar saldo" via Pix no PWA (`/app/carteira/adicionar`),
+  só contra mock — QR real, copia-e-cola, quitação automática de dívida em tempo real
+  (validada visualmente pelo Atlas: R$50 pago → R$38,50 quita dívida → R$11,50 de saldo
+  novo). 43 E2E, incluindo toda a suíte anterior sem quebrar nada.
+- **Atlas**: achou e corrigiu um teste que duplicava a lista de redact à mão em vez de
+  importar a real (`86859e5`) — risco de ficar verde testando lista desatualizada.
+
+**Gaps reais para a próxima etapa (F5.2/F5.3/F5.4), não são dívida técnica, são o esperado
+numa fundação:** `PaymentIntentStatus` do Prisma ainda não tem `PENDING`/`PAID` (Pix);
+`PaymentIntent.authTokenId` ainda não existe (trava plugar a pré-autorização no início da
+sessão); URL do Silent Order Post da Cielo não confirmada; `writeAuditLog.ts` ainda não
+aceita ator SYSTEM; evento `topup.updated` só existe no frontend, backend ainda não emite.
+
+**Nenhum código real bate na Cielo ainda** — tudo isolado atrás de adaptador Fake/mock.
