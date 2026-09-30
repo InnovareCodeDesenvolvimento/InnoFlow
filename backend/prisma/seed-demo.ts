@@ -776,7 +776,7 @@ async function main(): Promise<void> {
         id: paymentMethodId,
         userId,
         type: 'CREDIT_CARD',
-        cieloCardToken: `demo-card-token-${i + 1}`,
+        cieloCardTokenCiphertext: `demo-card-token-${i + 1}`,
         brand: pick(['Visa', 'Mastercard', 'Elo']),
         last4: String(randInt(1000, 9999)),
         isDefault: true,

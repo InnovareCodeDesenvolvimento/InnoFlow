@@ -1,0 +1,29 @@
+-- ============================================================
+-- F5.3 (Cronos, 2026-09-30): PaymentMethod.cieloCardToken vira
+-- cieloCardTokenCiphertext (metadata-only, sem downtime).
+-- ============================================================
+-- Ninguém implementou o cadastro de cartão de verdade ainda (D1 do dono,
+-- Silent Order Post / SAQ A-EP, ver
+-- .claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md) — a coluna só
+-- existe desde a migration inicial (20260916120000), guardada como TEXT
+-- puro. Renomear ANTES de existir cadastro real evita expand/contract (não
+-- há linha de produção com token Cielo de verdade para migrar).
+--
+-- Por quê: o nome do campo passa a deixar explícito, no próprio schema, que
+-- o valor é SEMPRE cifrado (AES-256-GCM) — nunca texto puro, nunca PAN/CVV.
+-- Mesma convenção de nomenclatura já usada em PaymentGatewayConfig
+-- (merchantKeyCiphertext/sopClientSecretCiphertext/
+-- webhookHeaderSecretCiphertext, ver 20260930120100_payment_gateway_foundation).
+-- A cifragem/decifragem em si (encrypt/decrypt com PAYMENT_SECRETS_KEY) é
+-- do Vega, próxima etapa — esta migration só prepara a coluna; o valor
+-- gravado aqui continua TEXT simples até o Vega implementar o AES-256-GCM.
+--
+-- RENAME COLUMN é metadata-only no Postgres (não reescreve a tabela, sem
+-- lock longo, mesma classe de operação que ADD COLUMN nullable/com DEFAULT
+-- constante já documentada nas migrations anteriores desta F5).
+ALTER TABLE "PaymentMethod" RENAME COLUMN "cieloCardToken" TO "cieloCardTokenCiphertext";
+
+-- ============================================================
+-- Rollback (manual, Prisma não tem "down"):
+-- ============================================================
+-- ALTER TABLE "PaymentMethod" RENAME COLUMN "cieloCardTokenCiphertext" TO "cieloCardToken";

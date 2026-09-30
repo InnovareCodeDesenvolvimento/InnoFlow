@@ -707,8 +707,12 @@ model PaymentMethod {
 
   type PaymentMethodType @default(CREDIT_CARD)
 
-  // Token da Cielo — NUNCA PAN, NUNCA CVV.
-  cieloCardToken String
+  // Token da Cielo — NUNCA PAN, NUNCA CVV. Nome do campo deixa explícito
+  // que o valor é sempre cifrado (AES-256-GCM) — nunca texto puro. Cifra e
+  // decifra são do Vega (fora deste escopo); a chave fica só em env
+  // (PAYMENT_SECRETS_KEY), nunca no banco — mesmo padrão de
+  // PaymentGatewayConfig.*Ciphertext.
+  cieloCardTokenCiphertext String
   brand          String?
   last4          String?
   holderName     String?
