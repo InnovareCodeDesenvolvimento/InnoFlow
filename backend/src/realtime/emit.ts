@@ -7,8 +7,10 @@ import {
   dashboardDirtyEvent,
   sessionMetricsEvent,
   sessionStatusEvent,
+  topupUpdatedEvent,
   walletUpdatedEvent,
   type ChargePointStatusEvent,
+  type TopupUpdatedEvent,
 } from './events'
 import { publishToAdmin, publishToOperator, publishToStations, publishToUser } from './bus'
 
@@ -99,6 +101,18 @@ export async function emitSessionStopped(input: EmitSessionStatusInput): Promise
 
 export async function emitWalletUpdated(userId: string, balanceCents: number): Promise<void> {
   await publishToUser(userId, walletUpdatedEvent({ userId, balanceCents }))
+}
+
+// ------------------------------------------------------------
+// topup.updated — F5.2 (crédito Pix). PREPARADO desde a F5.1 no frontend
+// (`TopupUpdatedEvent`), agora emitido de verdade pelo worker
+// (`services/pagamentos/creditarTopupPix.ts`, `varrerTopupsPixExpirados.ts`)
+// SEMPRE depois do commit da transação que mudou o status, mesma regra de
+// `wallet.updated`.
+// ------------------------------------------------------------
+
+export async function emitTopupUpdated(userId: string, topupId: string, status: TopupUpdatedEvent['status']): Promise<void> {
+  await publishToUser(userId, topupUpdatedEvent({ topupId, status }))
 }
 
 // ------------------------------------------------------------

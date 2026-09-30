@@ -8,12 +8,13 @@ import { logger } from '../lib/logger'
 import { prisma } from '../lib/prisma'
 import { redis } from '../lib/redis'
 import { AppError, errorHandler } from './middleware/errorHandler'
-import { adminRateLimit, publicRateLimit } from './middleware/rateLimit'
+import { adminRateLimit, publicRateLimit, webhookCieloRateLimit } from './middleware/rateLimit'
 import { auditTrail } from './middleware/auditTrail'
 import authRoutes from './routes/auth.routes'
 import publicSitesRoutes from './routes/publicSites.routes'
 import publicChargePointsRoutes from './routes/publicChargePoints.routes'
 import publicConfigRoutes from './routes/publicConfig.routes'
+import webhooksCieloRoutes from './routes/webhooksCielo.routes'
 import meRoutes from './routes/me.routes'
 import adminSitesRoutes from './routes/sites.routes'
 import adminChargePointsRoutes from './routes/chargePoints.routes'
@@ -98,7 +99,8 @@ export function createApp(): Express {
   app.use('/api/sites', publicRateLimit, publicSitesRoutes) // público — app do motorista
   app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
   app.use('/api/public/config', publicRateLimit, publicConfigRoutes) // público — configuração da tela de login (Google client ID)
-  app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start é mais apertado, aplicado na própria rota
+  app.use('/api/webhooks/cielo', webhookCieloRateLimit, webhooksCieloRoutes) // público, SEM JWT (a Cielo não manda Bearer) — segredo próprio (pathToken + header estático), ver F5.2
+  app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start e /wallet/topups é mais apertado, aplicado na própria rota
 
   // Log de auditoria (Nova, 2026-09-17) — montado ANTES de todo router
   // admin: registra o listener de `res.on('finish')` cedo, mas o listener só

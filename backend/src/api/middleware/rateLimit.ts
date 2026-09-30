@@ -80,3 +80,23 @@ export const sseConnectRateLimit = buildLimiter(60 * 1000, 20, 'RATE_LIMITED_SSE
 // keyGenerator DEFAULT, que já faz isso sozinho — só o customizado precisa
 // chamar na mão).
 export const meStartSessionRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_SESSION_START', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/me/wallet/topups` (F5.2) — escopado por MOTORISTA, mesmo
+ * raciocínio de `meStartSessionRateLimit`. Mais folgado (gerar um Pix é bem
+ * mais barato que iniciar uma recarga), mas ainda limitado: sem isto, um
+ * motorista poderia gerar dezenas de QR por minuto (cada um é uma chamada
+ * paga à Cielo do nosso lado) — `TOO_MANY_PENDING_TOPUPS` já cobre "vários
+ * QR vivos ao mesmo tempo", isto cobre "gerar e deixar expirar em loop".
+ */
+export const meCreateTopupRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_TOPUP', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/webhooks/cielo/:pathToken` (F5.2) — rota PÚBLICA (sem JWT, sem
+ * `req.user`), então a chave é por IP. Folgado o bastante para a Cielo
+ * reenviar notificações legítimas em rajada (retry dela própria em caso de
+ * 5xx nosso), apertado o bastante para não virar superfície de negação de
+ * serviço contra o worker (cada request grava uma linha em `WebhookEvent` e
+ * enfileira um job).
+ */
+export const webhookCieloRateLimit = buildLimiter(60 * 1000, 60, 'RATE_LIMITED_WEBHOOK')

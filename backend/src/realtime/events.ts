@@ -33,6 +33,13 @@ export interface WalletUpdatedEvent extends RealtimeEventBase {
   balanceCents: number
 }
 
+/** F5.2 — crédito de Pix confirmado (worker, ver `services/pagamentos/creditarTopupPix.ts`) ou expirado (varredor). Roteado pelo canal PRIVADO do motorista (`publishToUser`) — `userId` não entra no payload por desenho, mesmo formato de `frontend/src/types/api.ts` (`TopupUpdatedEvent`). */
+export interface TopupUpdatedEvent extends RealtimeEventBase {
+  type: 'topup.updated'
+  topupId: string
+  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED'
+}
+
 export interface ChargePointStatusEvent extends RealtimeEventBase {
   type: 'chargepoint.status'
   chargePointId: string
@@ -55,6 +62,7 @@ export type RealtimeEvent =
   | SessionMetricsEvent
   | SessionStatusEvent
   | WalletUpdatedEvent
+  | TopupUpdatedEvent
   | ChargePointStatusEvent
   | AdminEntityChangedEvent
   | DashboardDirtyEvent
@@ -73,6 +81,10 @@ export function sessionStatusEvent(type: 'session.started' | 'session.stopped', 
 
 export function walletUpdatedEvent(input: Omit<WalletUpdatedEvent, 'type' | 'occurredAt'>): WalletUpdatedEvent {
   return { type: 'wallet.updated', occurredAt: nowIso(), ...input }
+}
+
+export function topupUpdatedEvent(input: Omit<TopupUpdatedEvent, 'type' | 'occurredAt'>): TopupUpdatedEvent {
+  return { type: 'topup.updated', occurredAt: nowIso(), ...input }
 }
 
 export function chargePointStatusEvent(input: Omit<ChargePointStatusEvent, 'type' | 'occurredAt'>): ChargePointStatusEvent {

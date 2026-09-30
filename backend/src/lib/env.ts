@@ -161,6 +161,33 @@ const envSchema = z.object({
   // caminho certo é reconsultar por `MerchantOrderId` (ver `PagamentoPort`).
   CIELO_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
 
+  // F5.2 (30/09/2026) — recarga de carteira via Pix real. Expiração do QR:
+  // Nova recomendou 30 min (NÃO o default de 86400s/24h da própria Cielo) —
+  // ver decisoes-f5-pagamento-cielo.md. Configurável por env sem redeploy.
+  PIX_TOPUP_EXPIRES_MINUTES: z.coerce.number().int().positive().default(30),
+  // Quantas recargas Pix PENDING um motorista pode ter em aberto ao mesmo
+  // tempo — 1 por padrão (gerar um novo Pix enquanto o anterior ainda pode
+  // ser pago seria confuso: qual QR o motorista deveria pagar?).
+  TOPUP_PIX_MAX_PENDING_PER_USER: z.coerce.number().int().positive().default(1),
+  // Cadência do varredor de expiração (BullMQ repeatable, `worker/jobs/
+  // expirarTopupsPixJob.ts`) — reconsulta a Cielo ANTES de marcar EXPIRED
+  // (decisão da tarefa: pagamento que chega depois do prazo do QR ainda
+  // credita, o dinheiro entrou e não dá pra recusar).
+  TOPUP_PIX_EXPIRY_SCAN_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+
+  // Webhook da Cielo (`POST /api/webhooks/cielo/:pathToken`, público, sem
+  // JWT — F5.2). OPCIONAIS com default GERADO por processo (mesmo padrão de
+  // `OCPP_NODE_ID` já usado neste projeto: `env.X || randomUUID()` no ponto
+  // de uso, não aqui) — sem configurar em produção, o segredo vira um UUID
+  // novo a cada boot, o que na prática significa "ninguém de fora consegue
+  // chamar esta rota até alguém configurar de verdade" (fail-CLOSED por
+  // desenho, mesmo espírito de CORS_ALLOWED_ORIGINS). `pathToken` é só
+  // ROTEAMENTO (comparado por igualdade simples); `webhookHeaderSecret` é o
+  // segredo de verdade (comparado em tempo constante, ver
+  // `core/pagamentos/verificarSegredoWebhook.ts`).
+  CIELO_WEBHOOK_PATH_TOKEN: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(8).optional()),
+  CIELO_WEBHOOK_HEADER_SECRET: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(8).optional()),
+
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem
   // trocou de rede); por IP e total REJEITAM o novo. Ver `core/realtime/streamLimiter.ts`.

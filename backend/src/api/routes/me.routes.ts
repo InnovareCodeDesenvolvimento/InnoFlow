@@ -10,14 +10,19 @@ import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
 import { reconciliarSessaoOrfa } from '../../services/carteira/reconciliarSessaoOrfa'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
+import { apenasDigitos, isValidCpf } from '../../core/pagamentos/validarCpf'
+import { valorTopupDentroDoLimite, TOPUP_MIN_AMOUNT_CENTS, TOPUP_MAX_AMOUNT_CENTS } from '../../core/pagamentos/validarValorTopup'
+import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
+import { toMeTopupDto } from '../../services/pagamentos/topupDto'
+import { cacheTopupQrImage, getTopupDebtSettledCents, getTopupQrImage } from '../../services/pagamentos/topupEphemeralCache'
 import { env } from '../../lib/env'
 import { toNumber } from '../lib/reportingSql'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate, requireRole } from '../middleware/auth'
 import { validateBody, validateQuery } from '../middleware/validate'
-import { meStartSessionRateLimit, sseConnectRateLimit } from '../middleware/rateLimit'
-import { meStartSessionSchema, meListQuerySchema, type MeStartSessionInput, type MeListQuery } from '../schemas/me.schema'
+import { meStartSessionRateLimit, meCreateTopupRateLimit, sseConnectRateLimit } from '../middleware/rateLimit'
+import { meStartSessionSchema, meListQuerySchema, meCreateTopupSchema, type MeStartSessionInput, type MeListQuery, type MeCreateTopupInput } from '../schemas/me.schema'
 import { STATIONS_CHANNEL, userChannel } from '../../realtime/bus'
 import { openSseStream } from '../lib/sseStream'
 import { sseDeps } from '../lib/sseDefaultDeps'
@@ -459,6 +464,102 @@ router.get(
       page,
       pageSize,
     })
+  }),
+)
+
+// ------------------------------------------------------------
+// POST /wallet/topups — gera um Pix real (F5.2, 2026-09-30)
+// ------------------------------------------------------------
+
+router.post(
+  '/wallet/topups',
+  meCreateTopupRateLimit,
+  validateBody(meCreateTopupSchema),
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.userId
+    const { amountCents, cpf } = req.body as MeCreateTopupInput
+
+    // Faixa de valor e CPF respondem com `code` ESPECÍFICO (contrato de
+    // `frontend/src/lib/topupAmount.ts`), por isso são checados aqui — não
+    // no schema Zod, que cairia em `VALIDATION_ERROR` genérico.
+    if (!valorTopupDentroDoLimite(amountCents)) {
+      throw new AppError('Valor fora do permitido para recarga.', 400, 'TOPUP_AMOUNT_OUT_OF_RANGE', [{ minCents: TOPUP_MIN_AMOUNT_CENTS, maxCents: TOPUP_MAX_AMOUNT_CENTS }])
+    }
+    const cpfDigits = cpf ? apenasDigitos(cpf) : undefined
+    if (cpfDigits && !isValidCpf(cpfDigits)) {
+      throw new AppError('CPF inválido.', 400, 'INVALID_CPF')
+    }
+
+    const pendingCount = await prisma.paymentIntent.count({ where: { userId, purpose: 'WALLET_TOPUP_PIX', status: 'PENDING' } })
+    if (pendingCount >= env.TOPUP_PIX_MAX_PENDING_PER_USER) {
+      throw new AppError('Você já tem uma recarga Pix aguardando pagamento.', 409, 'TOO_MANY_PENDING_TOPUPS')
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
+    if (!user) throw new AppError('Usuário não encontrado.', 404, 'NOT_FOUND') // não deveria acontecer com JWT válido
+
+    const wallet = (await prisma.wallet.findUnique({ where: { userId } })) ?? (await prisma.wallet.create({ data: { userId } }))
+
+    const intent = await prisma.paymentIntent.create({
+      data: {
+        purpose: 'WALLET_TOPUP_PIX',
+        provider: 'CIELO_PIX',
+        userId,
+        walletId: wallet.id,
+        amountRequestedCents: amountCents,
+        status: 'CREATED',
+      },
+    })
+
+    const expiresInSeconds = env.PIX_TOPUP_EXPIRES_MINUTES * 60
+    let resultadoPix
+    try {
+      resultadoPix = await getPagamentoPort().criarPix({
+        merchantOrderId: intent.id,
+        amountRequestedCents: amountCents,
+        cliente: { name: user.name, identity: cpfDigits ?? null },
+        expiresInSeconds,
+      })
+    } catch (err) {
+      logger.error({ err, intentId: intent.id }, '[api][me] falha ao criar Pix na Cielo')
+      await prisma.paymentIntent.update({ where: { id: intent.id }, data: { status: 'FAILED', failureReason: 'Falha ao criar cobrança Pix no gateway de pagamento.' } })
+      throw new AppError('O Pix está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+    }
+
+    const updated = await prisma.paymentIntent.update({
+      where: { id: intent.id },
+      data: {
+        cieloPaymentId: resultadoPix.providerPaymentId,
+        pixQrCode: resultadoPix.qrCodeString,
+        pixExpiresAt: resultadoPix.expiresAt,
+        status: 'PENDING',
+      },
+    })
+
+    if (resultadoPix.qrCodeBase64Image) {
+      await cacheTopupQrImage(intent.id, resultadoPix.qrCodeBase64Image).catch((err) => logger.error({ err, intentId: intent.id }, '[api][me] falha ao cachear imagem do QR (não bloqueante)'))
+    }
+
+    logger.info({ intentId: intent.id, amountCents }, '[api][me] Pix de recarga criado')
+    res.status(201).json(toMeTopupDto(updated, resultadoPix.qrCodeBase64Image ?? null, 0))
+  }),
+)
+
+// ------------------------------------------------------------
+// GET /wallet/topups/:id
+// ------------------------------------------------------------
+
+router.get(
+  '/wallet/topups/:id',
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.userId
+
+    const intent = await prisma.paymentIntent.findFirst({ where: { id: req.params.id, userId, purpose: 'WALLET_TOPUP_PIX' } })
+    if (!intent) throw new AppError('Recarga não encontrada.', 404, 'TOPUP_NOT_FOUND')
+
+    const [qrCodeImageBase64, debtSettledCents] = await Promise.all([getTopupQrImage(intent.id), getTopupDebtSettledCents(intent.id)])
+
+    res.json(toMeTopupDto(intent, qrCodeImageBase64, debtSettledCents))
   }),
 )
 
