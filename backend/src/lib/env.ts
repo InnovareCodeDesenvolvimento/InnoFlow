@@ -147,13 +147,21 @@ const envSchema = z.object({
   CIELO_API_BASE_URL: z.string().trim().min(1).default('https://apisandbox.cieloecommerce.cielo.com.br'),
   CIELO_API_QUERY_BASE_URL: z.string().trim().min(1).default('https://apiquerysandbox.cieloecommerce.cielo.com.br'),
   CIELO_SANDBOX: z.coerce.boolean().default(true),
-  // URL de destino do Silent Order Post (D1: cartão salvo, SAQ A-EP) — o
-  // navegador do motorista posta o cartão DIRETO aqui, nunca pelo nosso
-  // backend. OPCIONAL: não confirmada contra a doc oficial nesta tarefa
-  // (F5.1) — `CieloAdapter.sessaoTokenizacao()` lança erro claro se ausente
-  // em vez de devolver uma URL adivinhada. Confirmar antes de plugar na
-  // rota (F5.2).
-  CIELO_SOP_POST_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+  // F5.3 (30/09/2026) — sessão de tokenização de cartão (Silent Order Post,
+  // D1 do dono: cartão salvo, SAQ A-EP). Substitui `CIELO_SOP_POST_URL` da
+  // F5.1 (nunca chegou a ser configurada/usada): o contrato real que o
+  // frontend consome (`MeCardTokenizationSessionResponse`) pede `scriptUrl`
+  // (a página isolada da Lyra carrega o script da Cielo, não faz POST de
+  // formulário pelo nosso backend) + um `accessToken` de sessão. Nenhuma das
+  // 4 envs abaixo foi confirmada contra doc/sandbox real (sem credencial) —
+  // `CieloAdapter.sessaoTokenizacao()` lança erro claro se faltar alguma, em
+  // vez de inventar URL/mecanismo. `sopClientId`/`sopClientSecret` espelham
+  // o par que o Cronos já previu em `PaymentGatewayConfig` (OAuth
+  // client_credentials — ver `services/pagamentos/cieloSopOAuth.ts`).
+  CIELO_SOP_SCRIPT_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+  CIELO_SOP_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
+  CIELO_SOP_CLIENT_SECRET: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
+  CIELO_SOP_OAUTH_TOKEN_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
   // Timeout de chamada — curto de propósito: o motorista está esperando num
   // HTTP síncrono (`POST /api/me/sessions/start`, decisão #2 da Nova), não
   // faz sentido segurá-lo por dezenas de segundos. Timeout NÃO deve disparar
@@ -187,6 +195,17 @@ const envSchema = z.object({
   // `core/pagamentos/verificarSegredoWebhook.ts`).
   CIELO_WEBHOOK_PATH_TOKEN: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(8).optional()),
   CIELO_WEBHOOK_HEADER_SECRET: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(8).optional()),
+
+  // F5.3 (30/09/2026) — chave de cifragem AES-256-GCM dos segredos de
+  // pagamento (`PaymentMethod.cieloCardTokenCiphertext` agora; depois
+  // `PaymentGatewayConfig.*Ciphertext`, F5.5 — ver `lib/crypto/paymentSecrets.ts`
+  // e o comentário do model `PaymentGatewayConfig` no `schema.prisma`,
+  // Cronos). A chave NUNCA vive no banco. OPCIONAL/sem default de propósito
+  // (mesma lição de bug-env-eager-todos-entrypoints.md): ausente não derruba
+  // o boot dos 3 entrypoints — só quem tenta cifrar/decifrar (cadastro de
+  // cartão) falha, com erro claro. Gerar com `openssl rand -base64 32`
+  // (precisa decodificar para exatos 32 bytes — AES-256).
+  PAYMENT_SECRETS_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem

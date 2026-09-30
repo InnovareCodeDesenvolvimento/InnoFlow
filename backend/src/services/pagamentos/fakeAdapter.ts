@@ -1,5 +1,6 @@
-import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
+import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaCartao, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
 import type { CardPaymentStatus, DadosCliente, PedidoAutorizacaoCartao, PedidoPix, PixPaymentStatus } from '../../core/pagamentos/tipos'
+import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
 
 /**
  * `PagamentoPort` em memória — para Íris/Lyra/outros times de F5.2+
@@ -15,6 +16,8 @@ import type { CardPaymentStatus, DadosCliente, PedidoAutorizacaoCartao, PedidoPi
 export interface FakeAdapterOptions {
   /** `cardToken`s que devem ser tratados como recusados pelo emissor (simula `Status=3 Denied`). */
   cardTokensNegados?: string[]
+  /** `cardToken`s que `consultarCartaoTokenizado` deve tratar como desconhecidos/inválidos (F5.3, simula `GET /1/card/{token}` 404). */
+  cardTokensInvalidos?: string[]
   /** Gera IDs previsíveis para asserção em teste (`fake-payment-1`, `fake-payment-2`, ...). Default: `crypto.randomUUID()`. */
   gerarId?: () => string
 }
@@ -140,8 +143,50 @@ export class FakeAdapter implements PagamentoPort {
     }
   }
 
-  sessaoTokenizacao(_cliente?: DadosCliente): SessaoTokenizacao {
-    return { merchantId: 'fake-merchant-id', postUrl: 'https://fake.local/sop', sandbox: true }
+  /**
+   * `scriptUrl` PRECISA conter o marcador `mock-sop` — é o que
+   * `frontend/src/pagamento-cartao/sopClient.ts` (Lyra) usa para decidir
+   * "tokenizar local, nunca bater em rede" em vez de tentar carregar um
+   * script real da Cielo que não existe em dev/CI. Achado coordenando com o
+   * trabalho em paralelo da Lyra (F5.3, 30/09/2026) — sem isto, a página
+   * isolada dela tentaria (e falharia) carregar `session.scriptUrl` de
+   * verdade sempre que o backend cair no `FakeAdapter` (todo ambiente sem
+   * credencial Cielo real, inclusive CI).
+   */
+  async sessaoTokenizacao(_cliente?: DadosCliente): Promise<SessaoTokenizacao> {
+    return {
+      accessToken: `fake-access-token-${this.proximoId()}`,
+      merchantId: 'fake-merchant-id',
+      environment: 'sandbox',
+      scriptUrl: 'https://fake.local/mock-sop/script.js',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    }
+  }
+
+  /**
+   * Determinístico (mesmo `cardToken` -> mesmos dados) — `cardTokensInvalidos`
+   * simula `GET /1/card/{token}` 404. Reconhece o formato `mocktok.*` que o
+   * `tokenizeCardMock` da Lyra gera (`pagamento-cartao/sopClient.ts`) e
+   * decodifica last4/validade/nome de volta — SEM isso, o `FakeAdapter`
+   * devolveria dados genéricos desconectados do que o motorista "digitou" no
+   * formulário mock, e um teste ponta a ponta (Íris) não conseguiria
+   * verificar que o cartão certo foi salvo. Token qualquer fora desse
+   * formato (ex. testes deste próprio arquivo) cai no fallback genérico.
+   */
+  async consultarCartaoTokenizado(cardToken: string): Promise<ResultadoConsultaCartao> {
+    if (this.options.cardTokensInvalidos?.includes(cardToken)) {
+      throw new CartaoTokenInvalidoError(cardToken.length > 4 ? `***${cardToken.slice(-4)}` : '***')
+    }
+    const mock = parseMockCardToken(cardToken)
+    if (mock) {
+      // `brand: null` de propósito — o mock NÃO embute bandeira (ela é
+      // detectada pelo BIN no próprio documento isolado, ver
+      // `pagamento-cartao/cardBrand.ts`); a rota usa o `brand` que o
+      // cliente mandou quando a consulta não devolve um (ver `cieloAdapter.ts`).
+      return { cardToken, brand: null, last4: mock.last4, holderName: mock.holderName || null, expiryMonth: mock.expiryMonth, expiryYear: mock.expiryYear }
+    }
+    const last4 = cardToken.replace(/\D/g, '').slice(-4).padStart(4, '0')
+    return { cardToken, brand: 'Visa', last4, holderName: 'MOTORISTA TESTE', expiryMonth: 12, expiryYear: 2030 }
   }
 
   private exigirIntent(providerPaymentId: string): IntentSimulado {
@@ -171,4 +216,32 @@ export class FakeAdapter implements PagamentoPort {
     if (!intent) throw new Error(`FakeAdapter.marcarPixComoExpirado: providerPaymentId desconhecido: ${providerPaymentId}`)
     intent.status = 'EXPIRED'
   }
+}
+
+/**
+ * Decodifica `mocktok.{last4}.{MMYYYY}.{holderB64}.{timestamp}{seq}` — MESMO
+ * formato que `tokenizeCardMock` (Lyra, `pagamento-cartao/sopClient.ts`)
+ * gera no navegador. `Buffer.from(holderB64, 'base64').toString('utf8')`
+ * decodifica direto (o `btoa(unescape(encodeURIComponent(...)))` do lado do
+ * browser existe só porque `btoa` nativo do navegador só aceita Latin1 —
+ * `Buffer` do Node já lida com UTF-8 sem essa dança). Devolve `null` para
+ * qualquer coisa que não bata no formato exato — NUNCA lança (chamado antes
+ * de decidir se o token é "mock" ou um CardToken normal).
+ */
+function parseMockCardToken(cardToken: string): { last4: string; expiryMonth: number; expiryYear: number; holderName: string } | null {
+  if (!cardToken.startsWith('mocktok.')) return null
+  const parts = cardToken.split('.')
+  if (parts.length < 4) return null
+  const [, last4, mmYYYY, holderB64] = parts
+  if (!/^\d{4}$/.test(last4) || !/^\d{6}$/.test(mmYYYY)) return null
+  const expiryMonth = Number(mmYYYY.slice(0, 2))
+  const expiryYear = Number(mmYYYY.slice(2))
+  if (expiryMonth < 1 || expiryMonth > 12) return null
+  let holderName = ''
+  try {
+    holderName = Buffer.from(holderB64, 'base64').toString('utf8')
+  } catch {
+    holderName = ''
+  }
+  return { last4, expiryMonth, expiryYear, holderName }
 }

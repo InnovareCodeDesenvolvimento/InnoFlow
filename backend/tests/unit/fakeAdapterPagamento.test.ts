@@ -81,11 +81,42 @@ describe('FakeAdapter', () => {
     expect(resultado.expiresAt.getTime()).toBeGreaterThan(Date.now())
   })
 
-  it('sessaoTokenizacao devolve config fake sem exigir credencial', () => {
+  it('sessaoTokenizacao devolve config fake sem exigir credencial', async () => {
     const adapter = new FakeAdapter()
-    const sessao = adapter.sessaoTokenizacao()
-    expect(sessao.sandbox).toBe(true)
+    const sessao = await adapter.sessaoTokenizacao()
+    expect(sessao.environment).toBe('sandbox')
     expect(sessao.merchantId).toBeTruthy()
+    expect(sessao.accessToken).toBeTruthy()
+    expect(sessao.expiresAt.getTime()).toBeGreaterThan(Date.now())
+    // Marcador `mock-sop` — contrato coordenado com `pagamento-cartao/sopClient.ts`
+    // (Lyra): sem ele, a página isolada tentaria carregar um script real
+    // inexistente em vez de cair no mock local. Ver comentário de `sessaoTokenizacao`.
+    expect(sessao.scriptUrl).toContain('mock-sop')
+  })
+
+  describe('consultarCartaoTokenizado (F5.3)', () => {
+    it('token desconhecido -> dados determinísticos (brand/last4/holder/validade)', async () => {
+      const adapter = new FakeAdapter()
+      const resultado = await adapter.consultarCartaoTokenizado('card-token-1234')
+      expect(resultado.cardToken).toBe('card-token-1234')
+      expect(resultado.last4).toBe('1234')
+      expect(resultado.brand).toBeTruthy()
+      expect(resultado.expiryMonth).toBe(12)
+      expect(resultado.expiryYear).toBe(2030)
+    })
+
+    it('token no formato mocktok.* (gerado por pagamento-cartao/sopClient.ts) -> decodifica last4/validade/nome reais, brand null', async () => {
+      const adapter = new FakeAdapter()
+      const holderB64 = Buffer.from('Fulano de Tal', 'utf8').toString('base64')
+      const mockToken = `mocktok.4242.122029.${holderB64}.17591234561`
+      const resultado = await adapter.consultarCartaoTokenizado(mockToken)
+      expect(resultado).toEqual({ cardToken: mockToken, brand: null, last4: '4242', holderName: 'Fulano de Tal', expiryMonth: 12, expiryYear: 2029 })
+    })
+
+    it('cardToken na lista de inválidos -> CartaoTokenInvalidoError', async () => {
+      const adapter = new FakeAdapter({ cardTokensInvalidos: ['card-token-ruim'] })
+      await expect(adapter.consultarCartaoTokenizado('card-token-ruim')).rejects.toThrow(/inválido/)
+    })
   })
 
   it('gerarId customizado é usado como providerPaymentId (para asserção determinística em outros times)', async () => {

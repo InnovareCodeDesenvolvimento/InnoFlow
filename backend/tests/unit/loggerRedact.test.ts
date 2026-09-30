@@ -34,11 +34,17 @@ const VALORES_SENSIVEIS = {
   CardNumber: '4111111111111111',
   SecurityCode: '737',
   CardToken: 'card-token-real-9f8e7d',
+  // F5.3 — nome de campo DIFERENTE do `CardToken` acima (lowercase, corpo de
+  // `POST /api/me/payment-methods` e variável interna antes de cifrar).
+  cardToken: 'card-token-lowercase-corpo-da-requisicao',
   cieloCardTokenCiphertext: 'cielo-card-token-real-abc123',
   PaymentToken: 'payment-token-real-xyz789',
   MerchantKey: 'merchant-key-real-secret',
   ClientSecret: 'client-secret-real-google',
   access_token: 'ya29.real-access-token',
+  // F5.3 — `accessToken` da sessão de tokenização (camelCase, DIFERENTE de `access_token` acima).
+  accessToken: 'fake-access-token-sop-real',
+  clientSecret: 'cielo-sop-client-secret-real',
   cpf: '12345678900',
 }
 

@@ -125,6 +125,17 @@ export class CieloHttpClient {
   postPix(payload: unknown): Promise<unknown> {
     return this.request(this.config.apiBaseUrl, '/1/pix/', { method: 'POST', body: JSON.stringify(payload) })
   }
+
+  /**
+   * `GET /1/card/{CardToken}` — consulta um token do cofre "Cartão
+   * Protegido" (F5.3, cadastro de cartão). Host TRANSACIONAL (`apiBaseUrl`),
+   * não o de consulta — ⚠️ NÃO confirmado contra sandbox real nesta tarefa
+   * (ver `.claude/agent-memory/nova/cielo-fatos-verificados.md`, "ainda não
+   * confirmado: GET /1/card/{token} devolver bandeira/final").
+   */
+  getCard(cardToken: string): Promise<unknown> {
+    return this.request(this.config.apiBaseUrl, `/1/card/${encodeURIComponent(cardToken)}`, { method: 'GET' })
+  }
 }
 
 function safeJsonParse(text: string): unknown {

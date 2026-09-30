@@ -21,6 +21,14 @@ export const REDACT_PATHS = [
   '*.SecurityCode',
   'CardToken',
   '*.CardToken',
+  // F5.3 (cadastro de cartão) — `cardToken` é o nome do campo no CORPO da
+  // requisição (`MeCreatePaymentMethodRequest.cardToken`, lowercase, contrato
+  // de `frontend/src/types/api.ts`) e em variáveis internas ANTES de cifrar
+  // — nome DIFERENTE do `CardToken` (PascalCase) do wire format da Cielo.
+  // `fast-redact` é case-sensitive (achado já registrado da F5.1), por isso
+  // entra separado, não é o mesmo path do de cima.
+  'cardToken',
+  '*.cardToken',
   'cieloCardTokenCiphertext',
   '*.cieloCardTokenCiphertext',
   'PaymentToken',
@@ -31,6 +39,13 @@ export const REDACT_PATHS = [
   '*.ClientSecret',
   'access_token',
   '*.access_token',
+  // F5.3 — `accessToken` da sessão de tokenização (`MeCardTokenizationSessionResponse`,
+  // camelCase — path PRÓPRIO, não o mesmo de `access_token` snake_case acima)
+  // e o `client_secret`/Basic auth do OAuth do SOP (`cieloSopOAuth.ts`).
+  'accessToken',
+  '*.accessToken',
+  'clientSecret',
+  '*.clientSecret',
   'cpf',
   '*.cpf',
 ]
