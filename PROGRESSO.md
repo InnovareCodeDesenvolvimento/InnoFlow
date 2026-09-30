@@ -844,3 +844,12 @@ Pix/cartão) ficam para a Lyra/Vega decidirem no detalhe da implementação.
 **F5.1 (fundação) iniciada**: Cronos (migration 1: WebhookEvent, DEBT_SETTLEMENT,
 PaymentIntent, PaymentGatewayConfig, AuditLog SYSTEM) ‖ Vega (porta de pagamento, cliente
 Cielo, adaptador Fake, redact do pino) ‖ Lyra (fluxo Pix com mocks).
+
+## Repositório migrado (2026-09-30)
+
+Git remoto mudou de `github.com/InnovareCode/InnoElektron` para
+`github.com/InnovareCodeDesenvolvimento/InnoFlow` (mesmo histórico, confirmado por
+`merge-base --is-ancestor` antes do push). **Ação do dono: repointar a origem git de cada
+App do EasyPanel (api, ocpp-gateway, worker, frontend) para a URL nova** — enquanto não
+fizer isso, o deploy automático por push não vai mais disparar. `docs/DEPLOY-EASYPANEL.md`
+já atualizado com a URL nova.

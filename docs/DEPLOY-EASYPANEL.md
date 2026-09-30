@@ -5,7 +5,11 @@ fase F4/F5, ver `PROGRESSO.md`). Este primeiro deploy serve para **validar a
 base** contra Postgres/Redis reais — algo que nenhum agente conseguiu fazer
 ainda por falta de Docker nos ambientes de desenvolvimento.
 
-Repositório: https://github.com/InnovareCode/InnoElektron (branch `main`).
+Repositório: https://github.com/InnovareCodeDesenvolvimento/InnoFlow (branch
+`main`) — migrado de `InnovareCode/InnoElektron` em 2026-09-30. **Os Apps já
+criados no EasyPanel apontam para o repositório antigo**: repointe a origem
+git de cada um (api, ocpp-gateway, worker, frontend) para a URL nova, senão
+o deploy automático por push para de funcionar.
 
 ## 0. Bancos gerenciados
 
@@ -23,8 +27,8 @@ Crie no EasyPanel (como serviços de banco, não como App):
 
 `api`, `ocpp-gateway` e `worker` são o mesmo `backend/Dockerfile` — o que
 muda é só o comando de start. Crie 3 Apps no EasyPanel, todos apontando para
-`github.com/InnovareCode/InnoElektron`, branch `main`, **build context**
-`backend/` (o Dockerfile está em `backend/Dockerfile`):
+`github.com/InnovareCodeDesenvolvimento/InnoFlow`, branch `main`, **build
+context** `backend/` (o Dockerfile está em `backend/Dockerfile`):
 
 | App | Dockerfile (campo "Arquivo") | Porta interna | Exposta publicamente? |
 |---|---|---|---|
