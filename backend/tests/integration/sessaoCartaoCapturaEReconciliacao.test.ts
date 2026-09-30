@@ -40,19 +40,25 @@ import { createTenant, waitFor, uniqueSuffix, type TestTenant } from './helpers/
  *      MESMO intent — nunca captura 2x (mesmo padrão de
  *      `topupPixConcorrenciaEReconsulta.test.ts`, F5.2).
  *
- * Mais dois `it.fails` documentando gaps REAIS encontrados nesta rodada
- * (não corrigidos aqui — fora de `backend/tests`, reportados no handoff):
+ * Mais dois gaps REAIS encontrados nesta rodada (`it.fails` originais,
+ * corrigidos por Vega em 2026-09-30 — trocados por `it`, asserção
+ * inalterada):
  *   A. `liquidarSessao`/`debitarSessao` (caminho do job de retry, SEM `tx`)
- *      não olha `ChargingSession.paymentMode` — uma sessão CARD já STOPPED
- *      que passe por ali (cenário de corrida documentado no handoff) seria
- *      debitada da CARTEIRA por cima da captura do cartão.
- *   B. `prepararFechamentoCartao` (ação VOID) não muda o `status` do intent
- *      dentro da transação — se a chamada de rede pós-commit
- *      (`cancelarPreAutorizacaoCartao`) falhar, o intent fica preso
+ *      não olhava `ChargingSession.paymentMode` — uma sessão CARD já
+ *      STOPPED que passasse por ali (cenário de corrida documentado no
+ *      handoff) seria debitada da CARTEIRA por cima da captura do cartão.
+ *      CORRIGIDO: `liquidarSessaoComTx` agora não-opera (com log de alerta)
+ *      quando `paymentMode !== 'WALLET'`.
+ *   B. `prepararFechamentoCartao` (ação VOID) não mudava o `status` do
+ *      intent dentro da transação — se a chamada de rede pós-commit
+ *      (`cancelarPreAutorizacaoCartao`) falhasse, o intent ficava preso
  *      `AUTHORIZED` com `chargingSessionId` já preenchido, e
- *      `varrerPreAutorizacoesCartao` (caso A) só pega `chargingSessionId
- *      IS NULL` — nunca resolve esse caso. O próprio Vega documentou isto
- *      nos comentários de `finalizarSessao.ts`.
+ *      `varrerPreAutorizacoesCartao` (caso A) só pegava `chargingSessionId
+ *      IS NULL` — nunca resolvia esse caso. CORRIGIDO sem mexer no schema:
+ *      o caso A do varredor agora também cobre AUTHORIZED com sessão
+ *      vinculada já `STOPPED` (ver comentário em
+ *      `varrerPreAutorizacoesCartao.ts`) — mais simples que introduzir um
+ *      estado `VOID_PENDING` novo no enum, e resolve o mesmo gap.
  */
 
 function callHandler<T>(handler: (args: IHandlersOption, ctx: OcppHandlerCtx) => Promise<T>, ctx: OcppHandlerCtx, params: unknown, messageId: string = randomUUID()): Promise<T> {
@@ -395,8 +401,8 @@ describe('Sessão de recarga com cartão — captura parcial real, conciliação
   })
 
   // ---------------------------------------------------------------------------
-  describe('GAP A (it.fails — reportado, não corrigido): job de retry de liquidação não olha paymentMode', () => {
-    it.fails('sessão CARD já STOPPED não deveria ser debitada da CARTEIRA pelo caminho de retry (sem tx) de liquidarSessao', async () => {
+  describe('GAP A (corrigido, Vega 2026-09-30): job de retry de liquidação agora olha paymentMode', () => {
+    it('sessão CARD já STOPPED não deveria ser debitada da CARTEIRA pelo caminho de retry (sem tx) de liquidarSessao', async () => {
       const driver = await newDriverWithCard('gap-liquidar')
       // Pré-condição real: motorista TEM carteira com saldo (senão
       // `debitarSessao` nem chegaria a criar o `WalletEntry` — com saldo 0
@@ -427,17 +433,18 @@ describe('Sessão de recarga com cartão — captura parcial real, conciliação
       await liquidarSessao(session.id)
 
       // Comportamento DESEJADO: uma sessão CARD nunca deveria gerar
-      // CHARGE_DEBIT — quem cobra é a captura do cartão. Hoje
-      // `debitarSessao` não olha `paymentMode` nenhum, então esta asserção
-      // FALHA (e por isso o teste é `it.fails`): a corrida acima duplica a
-      // cobrança (cartão capturado + carteira debitada pela mesma sessão).
+      // CHARGE_DEBIT — quem cobra é a captura do cartão. CORRIGIDO:
+      // `liquidarSessaoComTx` agora olha `paymentMode` e não-opera (com log
+      // de alerta) para sessões CARD — sem a correção, a corrida acima
+      // duplicaria a cobrança (cartão capturado + carteira debitada pela
+      // mesma sessão).
       expect(await prisma.walletEntry.count({ where: { type: 'CHARGE_DEBIT', referenceType: 'CHARGING_SESSION', referenceId: session.id } })).toBe(0)
     })
   })
 
   // ---------------------------------------------------------------------------
-  describe('GAP B (it.fails — reportado, não corrigido): varredor não cobre AUTHORIZED com chargingSessionId já preenchido', () => {
-    it.fails('pré-autorização "presa" AUTHORIZED com sessão STOPPED vinculada (cancelamento pós-commit falhou) deveria ser resolvida pelo varredor', async () => {
+  describe('GAP B (corrigido, Vega 2026-09-30): varredor agora cobre AUTHORIZED com chargingSessionId já preenchido', () => {
+    it('pré-autorização "presa" AUTHORIZED com sessão STOPPED vinculada (cancelamento pós-commit falhou) deveria ser resolvida pelo varredor', async () => {
       const driver = await newDriverWithCard('gap-void-preso')
       const { connectorId } = await newConnector()
       const { authToken, intent } = await startCardSession(driver, connectorId)
@@ -452,9 +459,10 @@ describe('Sessão de recarga com cartão — captura parcial real, conciliação
       // naquele instante) — SEM chamar o handler real (que chamaria a rede
       // de verdade e teria sucesso com o FakeAdapter); em vez disso replica
       // só o efeito que `prepararFechamentoCartao` grava (NADA — a ação VOID
-      // não muda o status dentro da transação, ver `fecharSessaoCartao.ts`)
-      // e o `ChargingSession.status='STOPPED'` que `finalizarSessao` já
-      // teria persistido ANTES de tentar a chamada de rede.
+      // não muda o status do intent dentro da transação, ver
+      // `fecharSessaoCartao.ts`) e o `ChargingSession.status='STOPPED'` que
+      // `finalizarSessao` já teria persistido ANTES de tentar a chamada de
+      // rede.
       await prisma.chargingSession.update({ where: { id: session.id }, data: { status: 'STOPPED', stoppedAt: new Date(), totalCostCents: 0, energyDeliveredWh: 0 } })
       // `intent` continua AUTHORIZED com chargingSessionId preenchido (igual
       // ficaria na vida real se `cancelarPreAutorizacaoCartao` pós-commit
@@ -470,9 +478,10 @@ describe('Sessão de recarga com cartão — captura parcial real, conciliação
 
       // Comportamento DESEJADO: o varredor deveria cancelar esta
       // pré-autorização "presa" (sessão já STOPPED, ninguém nunca vai mais
-      // capturar nem cancelar). Hoje o filtro do caso A exige
-      // `chargingSessionId: null`, então esta asserção FALHA — o intent
-      // fica AUTHORIZED para sempre, sem rede de segurança nenhuma.
+      // capturar nem cancelar). CORRIGIDO: o caso A do varredor agora
+      // também cobre AUTHORIZED com sessão vinculada já STOPPED (antes o
+      // filtro exigia `chargingSessionId: null`, e o intent ficava
+      // AUTHORIZED para sempre, sem rede de segurança nenhuma).
       const intentAfter = await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })
       expect(intentAfter.status).toBe('VOIDED')
     })

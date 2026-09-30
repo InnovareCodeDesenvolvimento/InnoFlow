@@ -11,9 +11,12 @@ import { getPagamentoPort } from './pagamentoPortInstance'
  *      pelo carregador, na hora.
  *   2. `finalizarSessao.ts` (via `prepararFechamentoCartao`) — sessão que
  *      fechou sem consumir nada (`totalCostCents <= 0`).
- *   3. `varrerPreAutorizacoesCartao.ts` — pré-auth AUTHORIZED sem sessão
- *      vinculada há mais de `CARD_PREAUTH_ABANDON_MINUTES` (rede de
- *      segurança: nenhum StartTransaction nunca chegou).
+ *   3. `varrerPreAutorizacoesCartao.ts` caso A — pré-auth AUTHORIZED sem
+ *      sessão vinculada (RemoteStart nunca confirmado) OU com sessão
+ *      vinculada mas já STOPPED (chamador 2 rodou, mas a chamada de rede
+ *      pós-commit falhou — GAP B do handoff F5.4, Íris 2026-09-30: antes só
+ *      o primeiro caso era coberto, um intent "preso" `AUTHORIZED` com
+ *      `chargingSessionId` preenchido nunca era resolvido).
  *
  * Idempotente: se o intent já não estiver mais `AUTHORIZED` (resolvido por
  * outro caminho concorrente), não faz nada. A chamada de rede acontece FORA

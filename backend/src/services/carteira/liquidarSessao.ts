@@ -63,7 +63,7 @@ export async function liquidarSessao(sessionId: string, tx?: Prisma.TransactionC
 async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: string): Promise<LiquidarSessaoResultado | null> {
   const session = await tx.chargingSession.findUnique({
     where: { id: sessionId },
-    select: { id: true, userId: true, ocppTransactionId: true, operatorId: true, status: true, totalCostCents: true, site: { select: { name: true } } },
+    select: { id: true, userId: true, ocppTransactionId: true, operatorId: true, status: true, totalCostCents: true, paymentMode: true, site: { select: { name: true } } },
   })
 
   if (!session) {
@@ -75,6 +75,30 @@ async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: stri
     // tecnicamente finalizada (custo não persistido), não há o que debitar
     // ainda.
     logger.warn({ sessionId, status: session.status, totalCostCents: session.totalCostCents }, '[liquidarSessao] sessão ainda sem custo persistido — pulando esta tentativa')
+    return null
+  }
+  if (session.paymentMode !== 'WALLET') {
+    // BUG CRÍTICO corrigido (Íris, 30/09/2026, GAP A — it.fails do handoff
+    // F5.4): este caminho (chamado pelo job de retry `liquidarSessaoJob.ts`,
+    // SEM `tx` — `finalizarSessao.ts` já filtra por `paymentMode` antes de
+    // chamar esta função com `tx`, então só o job de retry corre risco) não
+    // olhava `paymentMode` — uma sessão CARD já STOPPED que caísse aqui por
+    // corrida (`finalizarSessao` lançou -> `enqueueLiquidarSessaoRetry` ->
+    // ANTES do job rodar, outra chamada — ex.: reconciliação de boot bem-
+    // sucedida — finalizou a MESMA sessão de verdade, criando o
+    // `PaymentIntent` CAPTURE_PENDING/VOID pelo caminho `prepararFechamentoCartao`
+    // — quando o retry enfileirado finalmente rodasse, debitava a CARTEIRA
+    // por cima da captura do cartão: motorista cobrado duas vezes pela
+    // mesma recarga. Quem cobra uma sessão CARD é SÓ o fluxo
+    // `finalizarSessao`/`capturarSessaoCartao` — este job é estritamente
+    // WALLET. No-op com alerta é o mínimo: não criamos um caminho de
+    // reconciliação próprio aqui porque `varrerPreAutorizacoesCartao` já
+    // cobre o lado do cartão (a sessão CARD, quando cai aqui, já foi
+    // finalizada — seu `PaymentIntent` já está CAPTURE_PENDING/VOID(_PENDING)
+    // e o varredor/worker de captura resolvem por conta própria); criar um
+    // segundo caminho duplicaria a responsabilidade sem cobrir nenhum caso
+    // novo.
+    logger.warn({ sessionId, paymentMode: session.paymentMode }, '[liquidarSessao] sessão não é WALLET — job de retry de liquidação (carteira) não se aplica, pulando sem debitar (ver GAP A do handoff F5.4)')
     return null
   }
 

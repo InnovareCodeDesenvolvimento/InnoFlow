@@ -11,10 +11,32 @@ import { cancelarPreAutorizacaoCartao } from './cancelarPreAutorizacaoCartao'
  * casos, todos limitados a um lote por rodada (evita segurar o worker numa
  * varredura gigante):
  *
- * A) AUTHORIZED sem `chargingSessionId` há mais de `CARD_PREAUTH_ABANDON_MINUTES`
- *    — `RemoteStartTransaction` nunca virou `StartTransaction` de verdade
- *    (carregador nunca confirmou, ou o motorista desistiu no meio do
- *    caminho). Cancela (VOIDED) via `cancelarPreAutorizacaoCartao`.
+ * A) AUTHORIZED há mais de `CARD_PREAUTH_ABANDON_MINUTES` E (sem
+ *    `chargingSessionId` OU a sessão vinculada já está STOPPED). Dois
+ *    sub-cenários cobertos pela MESMA query (GAP B do handoff de QA da
+ *    Íris, 2026-09-30, unificado aqui em vez de virar um caso D separado):
+ *      - `chargingSessionId IS NULL` — `RemoteStartTransaction` nunca virou
+ *        `StartTransaction` de verdade (carregador nunca confirmou, ou o
+ *        motorista desistiu no meio do caminho).
+ *      - sessão vinculada já `STOPPED` — só acontece na prática quando a
+ *        sessão fechou SEM consumo (`totalCostCents <= 0` -> ação VOID em
+ *        `prepararFechamentoCartao`, que não muda o status do intent
+ *        dentro da transação — ver `fecharSessaoCartao.ts`) e a chamada de
+ *        rede pós-commit (`cancelarPreAutorizacaoCartao`, disparada por
+ *        `finalizarSessao.ts` logo depois do commit) falhou (ex.: Cielo
+ *        instável naquele instante). Sem este ramo, o intent ficava preso
+ *        `AUTHORIZED` para sempre, sem rede de segurança nenhuma — o caso A
+ *        original só olhava `chargingSessionId IS NULL`.
+ *      SEM falso positivo: uma sessão CARD com intent AUTHORIZED e
+ *      `chargingSessionId` preenchido cuja sessão ainda está EM ANDAMENTO
+ *      (não STOPPED) é o caso NORMAL (carregando há mais de
+ *      `CARD_PREAUTH_ABANDON_MINUTES`) — o filtro `chargingSession.status
+ *      = 'STOPPED'` exclui esse caso explicitamente. E se a sessão
+ *      consumiu algo (`totalCostCents > 0`), o intent já teria virado
+ *      `CAPTURE_PENDING` na MESMA transação que marcou a sessão STOPPED —
+ *      nunca fica `AUTHORIZED` nesse caminho, então este ramo só alcança
+ *      exatamente o cenário VOID travado.
+ *    Cancela (VOIDED) via `cancelarPreAutorizacaoCartao` nos dois casos.
  * B) CREATED há mais de `CARD_PREAUTH_ABANDON_MINUTES` — `autorizar()` deu
  *    timeout/erro de rede na hora (`iniciarSessaoRemota.ts` já devolveu 503
  *    pro motorista, sem nunca emitir idTag). Reconsulta por `merchantOrderId`
@@ -46,9 +68,16 @@ export async function varrerPreAutorizacoesCartao(pagamentoPort: PagamentoPort =
   let canceladasAbandonadas = 0
   let resolvidasCreated = 0
 
-  // A) AUTHORIZED abandonada (sem sessão vinculada)
+  // A) AUTHORIZED abandonada (sem sessão vinculada) OU "presa" (sessão
+  // vinculada já STOPPED, cancelamento pós-commit nunca confirmado — ver
+  // comentário do cabeçalho).
   const abandonadas = await prisma.paymentIntent.findMany({
-    where: { purpose: 'SESSION_CARD_CAPTURE', status: 'AUTHORIZED', chargingSessionId: null, authorizedAt: { lt: limiteAbandono } },
+    where: {
+      purpose: 'SESSION_CARD_CAPTURE',
+      status: 'AUTHORIZED',
+      authorizedAt: { lt: limiteAbandono },
+      OR: [{ chargingSessionId: null }, { chargingSession: { status: 'STOPPED' } }],
+    },
     take: BATCH_SIZE,
   })
   for (const intent of abandonadas) {
@@ -56,7 +85,7 @@ export async function varrerPreAutorizacoesCartao(pagamentoPort: PagamentoPort =
       await cancelarPreAutorizacaoCartao(intent.id, pagamentoPort)
       canceladasAbandonadas++
     } catch (err) {
-      logger.error({ err, intentId: intent.id }, '[varrerPreAutorizacoesCartao] falha ao cancelar pré-autorização abandonada — tentando de novo na próxima rodada')
+      logger.error({ err, intentId: intent.id }, '[varrerPreAutorizacoesCartao] falha ao cancelar pré-autorização abandonada/presa — tentando de novo na próxima rodada')
     }
   }
 

@@ -34,7 +34,12 @@ export async function prepararFechamentoCartao(tx: Prisma.TransactionClient, ses
   if (totalCostCents <= 0) {
     // Recarga que não consumiu nada (ex.: EV desconectado na hora) — nunca
     // chega a CAPTURE_PENDING, cancela a pré-auth direto (VOIDED, fora desta
-    // transação — ver `finalizarSessao.ts`).
+    // transação — ver `finalizarSessao.ts`). Esta função NÃO grava nada aqui
+    // (o intent segue AUTHORIZED até a chamada pós-commit resolver) — a rede
+    // de segurança para o caso da chamada pós-commit falhar é
+    // `varrerPreAutorizacoesCartao` caso A, que junta `ChargingSession.status`
+    // na query para cobrir exatamente este cenário sem precisar de um estado
+    // de intent novo (ver comentário lá, GAP B do handoff F5.4).
     return { action: 'VOID', paymentIntentId: intent.id }
   }
 
