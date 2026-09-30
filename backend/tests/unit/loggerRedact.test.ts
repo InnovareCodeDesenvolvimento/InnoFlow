@@ -1,43 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import pino from 'pino'
 import { Writable } from 'node:stream'
+import { REDACT_PATHS } from '../../src/lib/logRedactPaths'
 
 /**
- * Confere o `redact` de verdade usado por `src/lib/logger.ts` (mesma lista
- * de paths, copiada aqui — não dá para importar `logger` diretamente porque
- * ele já vem acoplado ao `pino-pretty` transport e ao `env`, e o que
- * queremos testar é só a config de `redact`, isolada). Se a lista mudar em
- * `logger.ts`, atualize aqui também.
+ * Confere o `redact` de VERDADE usado por `src/lib/logger.ts` — importa a
+ * MESMA lista de `logRedactPaths.ts` (não uma cópia à mão), então editar a
+ * lista sem atualizar este teste não passa mais em silêncio. Não importa
+ * `logger.ts` inteiro porque ele cria a instância real do pino com
+ * transport `pino-pretty` como efeito colateral do import — pesado e
+ * desnecessário só para testar a config de `redact`.
  *
  * Regra da tarefa (prioridade alta, achado do Órion): nenhum dos valores
  * sensíveis pode aparecer na SAÍDA do logger, nem em campo solto na raiz nem
  * aninhado um nível (o formato mais comum de log real — ex.
  * `logger.info({ cielo: { CardNumber } })`).
  */
-const REDACT_PATHS = [
-  'req.headers.authorization',
-  'req.headers.cookie',
-  'res.headers["set-cookie"]',
-  'req.headers.merchantkey',
-  'CardNumber',
-  '*.CardNumber',
-  'SecurityCode',
-  '*.SecurityCode',
-  'CardToken',
-  '*.CardToken',
-  'cieloCardToken',
-  '*.cieloCardToken',
-  'PaymentToken',
-  '*.PaymentToken',
-  'MerchantKey',
-  '*.MerchantKey',
-  'ClientSecret',
-  '*.ClientSecret',
-  'access_token',
-  '*.access_token',
-  'cpf',
-  '*.cpf',
-]
 
 function capturarSaidaDoLogger(objetoLogado: Record<string, unknown>): string {
   const chunks: string[] = []

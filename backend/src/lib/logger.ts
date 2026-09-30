@@ -1,5 +1,6 @@
 import pino from 'pino'
 import { env } from './env'
+import { REDACT_PATHS } from './logRedactPaths'
 
 /**
  * Logger compartilhado pelos 3 entrypoints. `pino-pretty` roda em TODO
@@ -33,37 +34,16 @@ export const logger = pino({
     // `*.campo` (um nível de aninhamento, o formato mais comum de log real
     // — ex. `logger.info({ cielo: { CardNumber } })`). Comportamento
     // verificado com um script Node ad-hoc nesta tarefa, não só suposto —
-    // ver teste `logger.redact.test.ts`.
+    // ver teste `loggerRedact.test.ts`, que importa a MESMA lista de
+    // `logRedactPaths.ts` (não uma cópia) — sem isso, editar a lista aqui
+    // sem lembrar do teste deixava o teste verde testando uma lista velha.
     //
     // A defesa de VERDADE contra vazar corpo de request/response da Cielo
     // é o cliente HTTP nunca logar o corpo inteiro (só PaymentId/Status/
     // ReturnCode/valores — ver `services/pagamentos/cieloHttpClient.ts`).
     // Isto aqui é rede de segurança para o dia em que alguém logar um objeto
     // por engano.
-    paths: [
-      'req.headers.authorization',
-      'req.headers.cookie',
-      'res.headers["set-cookie"]',
-      'req.headers.merchantkey',
-      'CardNumber',
-      '*.CardNumber',
-      'SecurityCode',
-      '*.SecurityCode',
-      'CardToken',
-      '*.CardToken',
-      'cieloCardToken',
-      '*.cieloCardToken',
-      'PaymentToken',
-      '*.PaymentToken',
-      'MerchantKey',
-      '*.MerchantKey',
-      'ClientSecret',
-      '*.ClientSecret',
-      'access_token',
-      '*.access_token',
-      'cpf',
-      '*.cpf',
-    ],
+    paths: REDACT_PATHS,
     censor: '[redacted]',
   },
   transport: {
