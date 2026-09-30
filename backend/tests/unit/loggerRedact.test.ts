@@ -34,7 +34,7 @@ const VALORES_SENSIVEIS = {
   CardNumber: '4111111111111111',
   SecurityCode: '737',
   CardToken: 'card-token-real-9f8e7d',
-  cieloCardToken: 'cielo-card-token-real-abc123',
+  cieloCardTokenCiphertext: 'cielo-card-token-real-abc123',
   PaymentToken: 'payment-token-real-xyz789',
   MerchantKey: 'merchant-key-real-secret',
   ClientSecret: 'client-secret-real-google',
