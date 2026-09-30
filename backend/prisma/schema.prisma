@@ -80,6 +80,20 @@ enum ChargingSessionStatus {
   FAULTED
 }
 
+// Como esta sessão é cobrada (F5.4, 2026-09-30). Nome segue a convenção
+// Model+Conceito já usada neste schema (PaymentIntentStatus, PaymentMethodType).
+// WALLET é o default histórico (débito direto na carteira no StopTransaction,
+// sem PaymentIntent — ver walletLedger.ts); CARD é o caminho novo da F5
+// (pré-autorização no início via PaymentIntent.authTokenId, captura parcial
+// no fim via captureAmountCents). Guardado na sessão, não derivado do
+// PaymentIntent, porque o modo é decidido ANTES de existir qualquer intent
+// (na escolha do motorista em /sessions/start) e precisa sobreviver mesmo
+// que a pré-autorização falhe antes do RemoteStart.
+enum ChargingSessionPaymentMode {
+  WALLET
+  CARD
+}
+
 enum StopReason {
   LOCAL
   REMOTE
@@ -419,6 +433,10 @@ model AuthToken {
 
   chargingSessions ChargingSession[]
 
+  // Pré-autorização de cartão vinculada a este idTag virtual (F5.4) — ver
+  // PaymentIntent.authTokenId para a direção da FK e o porquê.
+  paymentIntent PaymentIntent?
+
   @@index([userId])
 }
 
@@ -561,6 +579,10 @@ model ChargingSession {
   user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   status ChargingSessionStatus @default(STARTED)
+
+  // Como esta sessão é cobrada — decidido no /sessions/start, antes de
+  // existir qualquer PaymentIntent (ver enum ChargingSessionPaymentMode).
+  paymentMode ChargingSessionPaymentMode @default(WALLET)
 
   meterStartWh      Int
   meterStopWh       Int?
@@ -713,11 +735,11 @@ model PaymentMethod {
   // (PAYMENT_SECRETS_KEY), nunca no banco — mesmo padrão de
   // PaymentGatewayConfig.*Ciphertext.
   cieloCardTokenCiphertext String
-  brand          String?
-  last4          String?
-  holderName     String?
-  expiryMonth    Int?
-  expiryYear     Int?
+  brand                    String?
+  last4                    String?
+  holderName               String?
+  expiryMonth              Int?
+  expiryYear               Int?
 
   isDefault Boolean  @default(false)
   active    Boolean  @default(true)
@@ -753,6 +775,19 @@ model PaymentIntent {
   walletId String?
   wallet   Wallet? @relation(fields: [walletId], references: [id], onDelete: Restrict)
 
+  // Vínculo com a pré-autorização de cartão (F5.4) — preenchido SÓ quando
+  // purpose='SESSION_CARD_CAPTURE' (Pix/WALLET_TOPUP_PIX nunca usa, reforçado
+  // por payment_intent_purpose_consistency). @unique porque cada idTag
+  // virtual autoriza no máximo um PaymentIntent. É o vínculo que o
+  // StartTransaction usa para achar a pré-autorização AUTHORIZED a partir do
+  // idTag que chegou no handshake OCPP: AuthToken.idTag -> AuthToken.id ->
+  // PaymentIntent.authTokenId. Nullable mesmo dentro de SESSION_CARD_CAPTURE
+  // porque sessões demo/históricas (seed-demo.ts) são inseridas já
+  // vinculadas via chargingSessionId, sem nunca ter passado pelo fluxo real
+  // de pré-auth com AuthToken.
+  authTokenId String?    @unique
+  authToken   AuthToken? @relation(fields: [authTokenId], references: [id], onDelete: Restrict)
+
   cieloPaymentId String?             @unique
   status         PaymentIntentStatus @default(CREATED)
 
@@ -762,6 +797,15 @@ model PaymentIntent {
 
   amountRequestedCents  Int
   amountAuthorizedCents Int?
+  // Valor-ALVO da captura, calculado e gravado pelo finalizarSessao ao
+  // entrar em CAPTURE_PENDING: min(total da sessão, amountAuthorizedCents).
+  // DISTINTO de amountCapturedCents (abaixo) — não confundir os dois:
+  // captureAmountCents é o que MANDAMOS cobrar (nosso alvo, gravado antes de
+  // chamar a Cielo); amountCapturedCents é o que a Cielo de fato CONFIRMOU
+  // ter capturado (só preenchido depois do sucesso do PUT /capture). Os dois
+  // convivem — captureAmountCents não é substituído por amountCapturedCents,
+  // fica como registro do que foi pedido mesmo se a captura falhar/retentar.
+  captureAmountCents    Int?
   amountCapturedCents   Int?
   // Estorno/chargeback de cartão (F5, ChangeType 7/25 do webhook Cielo): o
   // status NUNCA muda para "reembolsado" (ficaria CAPTURED para sempre) —
