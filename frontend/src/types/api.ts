@@ -1084,6 +1084,84 @@ export type MeTopupErrorCode =
   | "TOPUP_NOT_FOUND"
 
 // ---------------------------------------------------------------------------
+// Cartão salvo (F5.3, 2026-09-30) — D1 decidida pelo dono: cadastro único via
+// Silent Order Post da Cielo, enquadramento PCI SAQ A-EP. O formulário de
+// cartão vive num DOCUMENTO ISOLADO (`frontend/pagamento-cartao.html`, entry
+// própria do Vite, CSP própria, zero script de terceiro fora da Cielo) — CSP
+// vale por documento, uma SPA não isola nada. Ver
+// `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md` §2. Este app
+// principal NUNCA recebe PAN/CVV — só o `cardToken` que o documento isolado
+// devolve via postMessage (contrato em `types/cardTokenizationChannel.ts`).
+// Bloco abaixo é o contrato LITERAL implementado pelo Vega em
+// `backend/src/api/routes/mePaymentMethods.routes.ts` — reconciliado em
+// paralelo (ver handoff da Lyra em PROGRESSO.md).
+// ---------------------------------------------------------------------------
+
+// ---- Cadastro de cartão (F5.3) — GET/POST/PATCH/DELETE /api/me/payment-methods ----
+
+/**
+ * Cartão salvo do motorista (D1 do dono: SAQ A-EP via Silent Order Post — o
+ * número do cartão nunca passa pelo nosso backend). `id`/`brand`/`last4`/
+ * etc. são só o suficiente para exibir/escolher o cartão; o token
+ * tokenizado nunca é devolvido ao cliente.
+ */
+export interface MePaymentMethodDTO {
+  id: string
+  brand: string
+  last4: string | null
+  holderName: string | null
+  expiryMonth: number | null
+  expiryYear: number | null
+  isDefault: boolean
+  createdAt: string
+}
+
+// ---- GET /api/me/payment-methods ----
+export interface MePaymentMethodsResponse {
+  items: MePaymentMethodDTO[]
+}
+
+// ---- POST /api/me/payment-methods/tokenization-session ----
+/**
+ * Dados para a página ISOLADA de tokenização carregar o script do Silent
+ * Order Post da Cielo e tokenizar o cartão DIRETO no navegador do motorista
+ * — o backend nunca vê o número do cartão. O app principal busca isto
+ * autenticado (JWT normal) e repassa por `postMessage` para o documento
+ * isolado — NUNCA por querystring (ver `types/cardTokenizationChannel.ts`
+ * para o porquê). `scriptUrl` real ainda não foi confirmado pela Cielo
+ * (pergunta em aberto, PROGRESSO.md §F5) — o `FakeAdapter` do backend e o
+ * mock MSW do frontend devolvem cada um o seu marcador reconhecido só por
+ * `pagamento-cartao/sopClient.ts` como "usar o mock local".
+ */
+export interface MeCardTokenizationSessionResponse {
+  accessToken: string
+  merchantId: string
+  environment: "sandbox" | "production"
+  scriptUrl: string
+  expiresAt: string
+}
+
+export type CardBrand = "Visa" | "Master" | "Elo" | "Amex" | "Hipercard" | "Diners"
+
+// ---- POST /api/me/payment-methods -> 201 MePaymentMethodDTO ----
+export interface MeCreatePaymentMethodRequest {
+  /** CardToken PERMANENTE devolvido pelo Silent Order Post — nunca o PAN/CVV. */
+  cardToken: string
+  /** Detectado no documento isolado a partir do BIN do cartão (a sessão de tokenização não devolve bandeira) — ver `pagamento-cartao/cardBrand.ts`. */
+  brand: CardBrand
+  makeDefault?: boolean
+}
+
+export type MePaymentMethodErrorCode = "INVALID_CARD_TOKEN" | "CARD_VERIFICATION_FAILED" | "TOO_MANY_PAYMENT_METHODS" | "PAYMENT_METHOD_NOT_FOUND"
+
+// ---- PATCH /api/me/payment-methods/:id { isDefault: true } -> MePaymentMethodDTO ----
+export interface MeUpdatePaymentMethodRequest {
+  isDefault: true
+}
+
+// ---- DELETE /api/me/payment-methods/:id -> 204 (soft delete) ----
+
+// ---------------------------------------------------------------------------
 // AuditLog (ADMIN-only) — trilha de "quem fez o quê, onde e como" no painel
 // admin. Contrato traduzido do desenho da Nova (2026-09-17), decisões
 // completas em `.claude/agent-memory/nova/decisoes-audit-log.md`: append-only

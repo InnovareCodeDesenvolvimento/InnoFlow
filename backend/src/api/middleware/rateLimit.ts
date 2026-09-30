@@ -92,6 +92,25 @@ export const meStartSessionRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED
 export const meCreateTopupRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_TOPUP', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
 
 /**
+ * `POST /api/me/payment-methods/tokenization-session` (F5.3) — escopado por
+ * MOTORISTA. Emitir um `accessToken` de sessão é barato pro nosso lado, mas
+ * cada chamada bate na Cielo (OAuth) do outro — sem limite, um motorista
+ * poderia gerar dezenas de sessão por minuto (loop de cliente quebrado, ou
+ * reconhecimento de superfície contra o gateway).
+ */
+export const meTokenizationSessionRateLimit = buildLimiter(60 * 1000, 20, 'RATE_LIMITED_TOKENIZATION', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/me/payment-methods` (F5.3, cadastro de cartão) — mais apertado
+ * que o padrão: cada tentativa bate na Cielo (`GET /1/card/{token}`) e é o
+ * tipo de rota que um script tentando "testar" CardTokens roubados/gerados
+ * abusaria primeiro. `PATCH`/`DELETE`/`GET` desta mesma família de rotas
+ * usam o `adminRateLimit` geral (montado em `/api/me`) — não precisam do
+ * mesmo aperto.
+ */
+export const meCreatePaymentMethodRateLimit = buildLimiter(60 * 1000, 8, 'RATE_LIMITED_PAYMENT_METHOD', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
  * `POST /api/webhooks/cielo/:pathToken` (F5.2) — rota PÚBLICA (sem JWT, sem
  * `req.user`), então a chave é por IP. Folgado o bastante para a Cielo
  * reenviar notificações legítimas em rajada (retry dela própria em caso de

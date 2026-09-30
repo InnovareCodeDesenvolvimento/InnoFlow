@@ -26,6 +26,7 @@ import { meStartSessionSchema, meListQuerySchema, meCreateTopupSchema, type MeSt
 import { STATIONS_CHANNEL, userChannel } from '../../realtime/bus'
 import { openSseStream } from '../lib/sseStream'
 import { sseDeps } from '../lib/sseDefaultDeps'
+import mePaymentMethodsRoutes from './mePaymentMethods.routes'
 
 /**
  * PWA do motorista (F6, 2026-09-17) — ver `.claude/agent-memory/nova/
@@ -562,6 +563,14 @@ router.get(
     res.json(toMeTopupDto(intent, qrCodeImageBase64, debtSettledCents))
   }),
 )
+
+// ------------------------------------------------------------
+// /payment-methods — cadastro de cartão (F5.3, D1: SAQ A-EP). Sub-router
+// próprio (`mePaymentMethods.routes.ts`) — este arquivo já estava grande, e
+// o rate limit de cadastro/tokenização é mais apertado que o resto de `/me`
+// (aplicado DENTRO do sub-router, não aqui).
+// ------------------------------------------------------------
+router.use('/payment-methods', mePaymentMethodsRoutes)
 
 /**
  * `GET /api/me/events` — canal SSE do motorista. Assina o PRÓPRIO canal
