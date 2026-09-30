@@ -829,3 +829,18 @@ já pode começar.**
 **3 perguntas técnicas para a própria Cielo** (não dá para responder só pelo código):
 cobrar o CardToken salvo sem pedir CVV de novo é permitido? existe mesmo campo de cartão
 hospedado? o `GET /1/card/{token}` devolve bandeira e final do cartão?
+
+## D1 decidida pelo dono (2026-09-30): cartão salvo (opção B)
+
+Motorista cadastra o cartão uma vez, numa página isolada e protegida (Silent Order Post),
+e depois só toca "Iniciar" — sem digitar o cartão a cada recarga. Enquadramento PCI SAQ A-EP
+(campo de cartão fica numa página nossa isolada, sem nenhum script de terceiros, com CSP
+própria e revisão periódica — nunca no domínio principal). Libera as etapas F5.3 (cadastro
+de cartão) e F5.4 (sessão com cartão) do plano da Nova. D2 (conta Cielo única), D4 (limites
+Pix R$10–R$500/30min) e D5 (quitação automática de dívida) seguem com a recomendação da
+Nova, salvo objeção. D3 (CPF), D6 (forma de pagamento padrão) e D7 (OPERATOR ver origem
+Pix/cartão) ficam para a Lyra/Vega decidirem no detalhe da implementação.
+
+**F5.1 (fundação) iniciada**: Cronos (migration 1: WebhookEvent, DEBT_SETTLEMENT,
+PaymentIntent, PaymentGatewayConfig, AuditLog SYSTEM) ‖ Vega (porta de pagamento, cliente
+Cielo, adaptador Fake, redact do pino) ‖ Lyra (fluxo Pix com mocks).
