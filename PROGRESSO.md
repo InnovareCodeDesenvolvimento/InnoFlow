@@ -761,3 +761,29 @@ Validação: Íris aprovou os 3 primeiros (480 verdes ×6, 26 mutações mortas,
 7. Nota fiscal/tributação: adiada pelo dono, revisitar ANTES da F8.
 
 **Backlog técnico (sem dono):** job de criação mensal de partições (existem só até 2027-02); `entityId` NULL em linhas DENIED da auditoria; `liquidarSessao` reprocessado reportando `debited:true`; `db:seed:demo` idempotência; site fixture `[test-partitioning]` em produção; bcryptjs (JS puro) trava o event loop com muitos handshakes simultâneos → `bcrypt` nativo; API/gateway escutam em 0.0.0.0 (sem opção de bind); pacote Vulcano (Node 22/24 LTS, `USER node`, `server_tokens off`, `mockServiceWorker.js` fora do build, COOP `same-origin-allow-popups`); UI de TariffAssignment + hook de query; UI de remote-start; tela de troca de senha (contrato pronto); erro de rede no login mostra "E-mail ou senha inválidos"; `Select` de site trunca "São Paulo/SP" em 390px; `Retry-After` não exposto no CORS.
+
+## Portão da F5 liberado — Órion re-auditoria (2026-09-30)
+
+**Veredito: LIBERADO COM RESSALVAS.** Nenhum achado crítico novo; os 12 achados das
+auditorias de 17/09 e 19/09 foram reverificados linha a linha no código atual (HEAD
+6616ea4, publicado em `87c92ed..6616ea4` no mesmo dia) — nenhuma correção era superficial.
+`npm audit`: backend 2 moderate inalterado (`ajv` via `ocpp-rpc`, exige já ter passado pelo
+Basic Auth), frontend 0.
+
+**2 pendências, nenhuma bloqueante:**
+1. Porta 9000 (OCPP) crua ou atrás de TLS? Pergunta em aberto há 11 dias em
+   `docs/DEPLOY-EASYPANEL.md` — se for `ws://` cru, o Basic Auth do carregador trafega em
+   claro. Vulcano/dono precisa responder antes de mais carregadores reais entrarem.
+2. `GET /api/admin/drivers/:id/wallet` não escopa por `operatorId` (decisão já deliberada:
+   motorista é conta de rede) — revisitar quando dado de pagamento entrar nessa mesma
+   modelagem.
+
+**4 recomendações preventivas do Órion para o Vega, antes do primeiro código da F5:**
+nunca logar PAN/CVV/token de cartão (mesma classe do achado crítico original do pino);
+se for Checkout Transparente, o campo de cartão precisa ficar num iframe hospedado pela
+Cielo (SAQ A) — decisão de arquitetura da Nova antes de implementar; webhook da Cielo
+validado por assinatura/IP + idempotência por `transactionId`; copiar o padrão fail-closed
+de `walletLedger.ts` (`FOR UPDATE` + auditoria na mesma transação) para o crédito via Cielo.
+
+**F5 iniciada:** Nova desenhando a arquitetura de pagamento (integração Cielo real,
+abstração `PagamentoPort` já prevista desde a arquitetura original).
