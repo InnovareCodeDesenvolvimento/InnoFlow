@@ -879,3 +879,34 @@ sessão); URL do Silent Order Post da Cielo não confirmada; `writeAuditLog.ts` 
 aceita ator SYSTEM; evento `topup.updated` só existe no frontend, backend ainda não emite.
 
 **Nenhum código real bate na Cielo ainda** — tudo isolado atrás de adaptador Fake/mock.
+
+## F5.2 entregue, validada e publicada (2026-09-30)
+
+Pix real de ponta a ponta (ainda contra `FakeAdapter`, sem credencial de sandbox da Cielo):
+- **Cronos** (`07602de`): `PaymentIntentStatus` ganhou `PENDING`/`PAID` (fluxo Pix), migration
+  isolada (mesma armadilha do `ADD VALUE` de enum descoberta na F5.1).
+- **Vega** (`e0ee367`, `4e66951`): `POST/GET /api/me/wallet/topups`, webhook da Cielo (sempre
+  reconsulta, nunca confia no corpo do aviso), worker `creditarTopupPix` fail-closed (uma
+  transação: credita, quita dívida mais antiga primeiro, grava auditoria com ator SYSTEM —
+  se a auditoria falhar, nada é creditado), varredor de expiração (pagamento que chega depois
+  do prazo do QR ainda credita). Achou e corrigiu um gap na própria porta da F5.1 (faltava
+  `consultarPix` — sem isso um Pix confirmado seria lido como pagamento de cartão).
+- **Íris** (`1363e70`): **aprovado com ressalva**, 613 testes contra PG18+Redis reais (610
+  passam + 2 `it.fails` antigos). Revisou os testes do Vega e confirmou que pegam bug de
+  verdade (mutou fail-closed→fail-open e o teste capturou na hora). Achou o gap real que
+  faltava: idempotência só era testada em sequência, nunca em corrida de verdade — 5 testes
+  novos com `Promise.all` provam 1 único crédito mesmo com 30 chamadas concorrentes no mesmo
+  pagamento.
+- **Atlas** (`ab887fc`): corrigiu a ressalva da Íris — `FakeAdapter` gerava ID de teste
+  sequencial e previsível em vez do `randomUUID()` já documentado, colidindo entre arquivos
+  de teste rodando em paralelo (reproduzido em 4 de 5 rodadas da suíte). Era infraestrutura
+  de teste, não bug de produção.
+
+**Gaps conhecidos para a próxima etapa:** `PaymentGatewayConfig` (tela de configuração do
+gateway, F5.5) ainda não existe — por enquanto usa env (`criarCieloAdapterFromEnv`, mais
+`CIELO_WEBHOOK_PATH_TOKEN`/`CIELO_WEBHOOK_HEADER_SECRET`). `writeAuditLog.ts` já aceita ator
+SYSTEM. Nome do header do segredo do webhook (`x-innoelektron-webhook-secret`) é decisão do
+Vega, documentada — quem configurar a conta real da Cielo precisa usar esse nome exato.
+
+**Ainda pendente do dono:** credenciais de sandbox da Cielo (nada foi testado contra a API
+real ainda, só `FakeAdapter`).
