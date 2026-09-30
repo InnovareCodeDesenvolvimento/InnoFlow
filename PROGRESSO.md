@@ -787,3 +787,45 @@ de `walletLedger.ts` (`FOR UPDATE` + auditoria na mesma transação) para o cré
 
 **F5 iniciada:** Nova desenhando a arquitetura de pagamento (integração Cielo real,
 abstração `PagamentoPort` já prevista desde a arquitetura original).
+
+## F5 desenhada (Nova) — 2026-09-30
+
+Arquitetura completa em `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md` e
+`cielo-fatos-verificados.md`. Resumo: porta de gateway (`autorizar/capturar/cancelar/
+consultar/criarPix`, adaptadores Cielo/Fake — a carteira deixa de ser "adaptador" desde a
+F4); Pix vira crédito real via QR Cielo, quitando dívida em aberto automaticamente, e
+**complementa** a tela Carteiras (o ajuste manual do ADMIN continua); webhook da Cielo não
+tem assinatura própria — tratado como dica, sempre reconsultado; idempotência garantida no
+efeito (índices únicos), não no evento; conciliação ganha 2 termos novos
+(`cardCapturePending`, `debtSettled`); 3 armadilhas corrigidas no schema atual, entre elas
+**não existe hoje nenhum caminho para quitar uma `Debt`** (motorista endividado fica
+bloqueado para sempre — a F5 fecha isso).
+
+**Achado que revisa a recomendação do Órion:** a Cielo não oferece campo de cartão em
+iframe hospedado por ela (não confirmado na doc, a confirmar com o comercial). Por isso a
+decisão de como o cartão entra (D1 abaixo) é SAQ A (redirect, mais simples/mais fricção) ou
+SAQ A-EP (campo na nossa página com mitigação: documento HTML isolado sem terceiros,
+CSP própria) — nunca SAQ A puro com campo nosso.
+
+**Plano em 6 etapas** (F5.0 contrato → F5.1 fundação [Cronos‖Vega‖Lyra, Pix com mocks] →
+F5.2 Pix real → F5.3 cadastro de cartão → F5.4 sessão com cartão → F5.5 config do gateway →
+F5.6 portões finais + go-live com R$1 real). **A trilha Pix (F5.1→F5.2) não depende de D1 e
+já pode começar.**
+
+**Decisões que dependem do dono, acrescentando às já registradas:**
+8. **D1 (central, bloqueia F5.3/F5.4):** como o cartão entra — (A) Checkout Cielo redirect,
+   SAQ A, motorista digita o cartão a cada recarga; (B) Silent Order Post + cartão salvo,
+   SAQ A-EP, cadastra uma vez e só toca "Iniciar" **[recomendada pela Nova]**; (C) cartão só
+   para recarregar a carteira (reabre a decisão nº 3, cartão vira só um jeito de dar saldo).
+9. D2: uma conta Cielo única da plataforma (Nova recomenda sim — a carteira é de rede).
+10. D3: coletar CPF do motorista para o Pix (a Cielo pode exigir; LGPD).
+11. D4: limites da recarga Pix (Nova sugere R$10–R$500, QR de 30 min).
+12. D5: crédito Pix quita dívida em aberto automaticamente antes de virar saldo (Nova
+    recomenda sim — hoje não há outra saída para a dívida).
+13. D6: forma de pagamento padrão na tela de iniciar recarga.
+14. D7: OPERATOR ver a origem (Pix/cartão) das recargas na tela Carteiras, ou só o saldo.
+15. Credenciais de sandbox da Cielo (Merchant + SOP) — abrir o ticket com a Cielo cedo.
+
+**3 perguntas técnicas para a própria Cielo** (não dá para responder só pelo código):
+cobrar o CardToken salvo sem pedir CVV de novo é permitido? existe mesmo campo de cartão
+hospedado? o `GET /1/card/{token}` devolve bandeira e final do cartão?
