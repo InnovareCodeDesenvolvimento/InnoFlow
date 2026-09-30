@@ -221,6 +221,27 @@ export const WALLET_ENTRY_TYPE_LABELS: Record<WalletEntryType, string> = {
   REFUND: "Estorno",
 }
 
+/**
+ * Status da cobrança no cartão (F5.4), em linguagem de MOTORISTA — diferente
+ * de `PAYMENT_INTENT_STATUS_LABELS` (painel admin, vocabulário técnico "Captura
+ * pendente"/"Capturado"). `AUTHORIZED` é o único estado que o recibo nunca
+ * deveria mostrar de fato (a sessão só termina de ser exibida no recibo
+ * depois do Stop, quando `finalizarSessao` já marcou `CAPTURE_PENDING`), mas
+ * o mapa cobre todos os membros de `PaymentIntentStatus` por exaustividade —
+ * nunca cair num `undefined` se o backend mandar um estado intermediário.
+ */
+export const SESSION_CARD_CAPTURE_STATUS_LABELS: Record<PaymentIntentStatus, string> = {
+  CREATED: "Processando",
+  AUTHORIZED: "Pré-autorizado",
+  CAPTURE_PENDING: "Cobrança em processamento",
+  CAPTURED: "Cobrado",
+  CANCELLED: "Cancelado",
+  DENIED: "Não cobrado — cartão recusado",
+  VOIDED: "Estornado",
+  FAILED: "Não foi possível cobrar",
+  EXPIRED: "Pré-autorização expirada",
+}
+
 // ---------------------------------------------------------------------------
 // AuditLog (painel admin, ADMIN-only)
 // ---------------------------------------------------------------------------

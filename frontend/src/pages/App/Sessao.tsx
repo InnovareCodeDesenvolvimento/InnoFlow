@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { AlertTriangle, Loader2, WifiOff, Zap } from "lucide-react"
+import { AlertTriangle, CreditCard, Loader2, WifiOff, Zap } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { Card, CardContent } from "@/components/ui/Card"
 import { SessionTimer } from "@/components/sessao/SessionTimer"
+import { SessionPaymentMethodBadge } from "@/components/sessao/SessionPaymentMethodBadge"
 import { useActiveSession, useCommandStatus, useStopSession } from "@/hooks/useMeSessions"
 import { useWakeLock } from "@/hooks/useWakeLock"
 import { getApiErrorMessage } from "@/services/api"
@@ -15,6 +16,21 @@ import type { MeActiveSession } from "@/types/api"
 
 interface StartLocationState {
   correlationId?: string
+  /**
+   * F5.4 — só vêm preenchidos quando o comando de início foi ACEITO com
+   * pagamento em CARTÃO (resposta síncrona de `POST /api/me/sessions/start`).
+   * `authorizedCents`/`cardBrand`/`cardLast4` existem só pra mostrar o teto
+   * pré-autorizado ENQUANTO aguarda o `StartTransaction` chegar — depois que a
+   * sessão aparece de verdade (`session.payment`), a fonte da verdade passa a
+   * ser ela. Decisão de UX: não existe endpoint de "cotação" antes de
+   * confirmar, então o teto só pode ser mostrado DEPOIS da resposta real —
+   * igual ao resto da tela (WALLET também nunca mostrou teto ANTES de
+   * iniciar, só dentro da sessão ativa).
+   */
+  paymentMode?: "WALLET" | "CARD"
+  authorizedCents?: number | null
+  cardBrand?: string
+  cardLast4?: string | null
 }
 
 /**
@@ -30,7 +46,8 @@ export function Sessao() {
   const location = useLocation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const initialCorrelationId = (location.state as StartLocationState | null)?.correlationId ?? null
+  const startState = location.state as StartLocationState | null
+  const initialCorrelationId = startState?.correlationId ?? null
 
   const [stopRequested, setStopRequested] = useState(false)
   const [confirmStopOpen, setConfirmStopOpen] = useState(false)
@@ -119,6 +136,13 @@ export function Sessao() {
         <p className="mt-1 text-sm text-ink-softer">
           {commandStatus === "ACCEPTED" ? "Comando aceito — aguardando o carregador iniciar a recarga." : "Enviando o comando de início."}
         </p>
+        {startState?.paymentMode === "CARD" && startState.authorizedCents != null && (
+          <p className="mt-4 flex items-center gap-2 rounded-xl bg-primary-50 px-4 py-3 text-left text-xs font-semibold text-primary-700">
+            <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Pré-autorizamos {formatCents(startState.authorizedCents)} no cartão {startState.cardBrand ?? ""}
+            {startState.cardLast4 ? ` •••• ${startState.cardLast4}` : ""} — você só paga pelo que consumir.
+          </p>
+        )}
         {startWarning && (
           <p className="mt-4 flex items-center gap-2 rounded-xl bg-warning-50 px-4 py-3 text-left text-xs font-semibold text-warning-700">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -162,6 +186,9 @@ export function Sessao() {
       <p className="text-sm text-ink-softer">
         {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
       </p>
+      <div className="mt-1.5">
+        <SessionPaymentMethodBadge paymentMode={session.paymentMode} payment={session.payment} />
+      </div>
 
       <Card className={`card-premium animate-fade-in-up mt-4 ${!stopRequested ? "animate-live-glow" : ""}`}>
         <CardContent className="p-5 text-center">
@@ -218,7 +245,11 @@ export function Sessao() {
         open={confirmStopOpen}
         onOpenChange={setConfirmStopOpen}
         title="Parar a recarga agora?"
-        description="O carregador vai encerrar a sessão e o valor consumido até aqui será cobrado da sua carteira."
+        description={
+          session.paymentMode === "CARD"
+            ? "O carregador vai encerrar a sessão e o valor consumido até aqui será cobrado no cartão usado nesta recarga."
+            : "O carregador vai encerrar a sessão e o valor consumido até aqui será cobrado da sua carteira."
+        }
         confirmLabel="Parar recarga"
         destructive
         onConfirm={handleConfirmStop}

@@ -901,18 +901,30 @@ export type PublicChargePointErrorCode = "CHARGE_POINT_NOT_FOUND"
 
 // ---- POST /api/me/sessions/start --------------------------------------------
 
+/**
+ * `payment` (F5.4, ver `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md`
+ * §2) escolhe a forma de pagamento da recarga: `WALLET` (default, comportamento
+ * de sempre) ou `CARD` com um `paymentMethodId` de `GET /api/me/payment-methods`
+ * — a pré-autorização roda DENTRO desta rota, antes do RemoteStart, nunca no
+ * `StartTransaction`/`Authorize` OCPP. Omitir `payment` equivale a `{ mode:
+ * "WALLET" }` (compatibilidade com quem chamava antes da F5.4 existir).
+ */
 export interface MeStartSessionRequest {
   ocppIdentity: string
   connectorId: number
+  payment?: { mode: "WALLET" } | { mode: "CARD"; paymentMethodId: string }
 }
 
 /** 202 — fire-and-forget, mesmo padrão do remote-start admin. */
 export interface MeStartSessionResponse {
   correlationId: string
   status: "PENDING"
+  paymentMode: "WALLET" | "CARD"
   walletBalanceCents: number
   /** Teto calculado (`calcularTetoReserva`) — só informativo, NUNCA reservado/debitado antecipadamente. */
   estimatedMaxCostCents: number
+  /** Valor de fato pré-autorizado no cartão — só preenchido quando `paymentMode === "CARD"` (a pré-auth já rodou síncrona, dentro desta mesma chamada). */
+  authorizedCents: number | null
   /** Cobrança mínima da tarifa — precisa aparecer ANTES de iniciar (achado de produto da F6, ver decisoes-pwa-motorista.md §6), não só no recibo. */
   minChargeCents: number | null
 }
@@ -925,6 +937,32 @@ export type MeStartSessionErrorCode =
   | "DRIVER_HAS_OPEN_DEBT"
   | "INSUFFICIENT_BALANCE"
   | "ALREADY_HAS_ACTIVE_SESSION"
+  /** `payment.paymentMethodId` não existe (mais) para este motorista — pode ter sido removido em outra aba. */
+  | "PAYMENT_METHOD_NOT_FOUND"
+  | "PAYMENT_METHOD_DISABLED"
+  | "CARD_AUTHORIZATION_DENIED"
+  | "PAYMENT_GATEWAY_UNAVAILABLE"
+
+/**
+ * Forma de pagamento usada na sessão (F5.4) — `card` só existe quando
+ * `paymentMode === "CARD"` (senão `null`, nunca omitido, pra não confundir
+ * com "ainda não sabemos"). `status` é o `PaymentIntentStatus` do intent de
+ * captura (`SESSION_CARD_CAPTURE`): `AUTHORIZED` antes do Stop,
+ * `CAPTURE_PENDING` logo depois (o worker captura fora do caminho síncrono,
+ * ver decisoes-f5-pagamento-cielo.md §2), `CAPTURED` quando resolve.
+ * `capturedCents < totalCostCents` da sessão = sobra virou `Debt`, mesmo
+ * espírito do aviso que WALLET já mostra quando o saldo não cobre tudo.
+ */
+export interface MeSessionPaymentInfo {
+  mode: "WALLET" | "CARD"
+  card: {
+    brand: string
+    last4: string | null
+    authorizedCents: number
+    capturedCents: number | null
+    status: PaymentIntentStatus
+  } | null
+}
 
 // ---- GET /api/me/sessions/active --------------------------------------------
 
@@ -944,6 +982,8 @@ export interface MeActiveSession {
   estimatedMaxCostCents: number
   minChargeCents: number | null
   tariff: PublicTariffSummary
+  paymentMode: "WALLET" | "CARD"
+  payment?: MeSessionPaymentInfo
 }
 
 export interface MeActiveSessionResponse {
@@ -998,6 +1038,8 @@ export interface MeSessionDetail {
   tariff: PublicTariffSummary
   walletEntry: { id: string; amountCents: number; balanceAfterCents: number; createdAt: string } | null
   debt: { id: string; amountCents: number } | null
+  paymentMode: "WALLET" | "CARD"
+  payment?: MeSessionPaymentInfo
 }
 
 export type MeSessionDetailErrorCode = "SESSION_NOT_FOUND"

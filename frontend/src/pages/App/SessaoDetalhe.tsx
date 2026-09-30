@@ -5,13 +5,16 @@ import { Card, CardContent } from "@/components/ui/Card"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { InstallPromptCard } from "@/components/pwa/InstallPromptCard"
+import { SessionPaymentMethodBadge } from "@/components/sessao/SessionPaymentMethodBadge"
 import { useMeSessionDetail } from "@/hooks/useMeSessions"
 import { getApiErrorMessage } from "@/services/api"
 import {
   CHARGING_SESSION_STATUS_LABELS,
+  SESSION_CARD_CAPTURE_STATUS_LABELS,
   formatCents,
   formatDateTime,
   formatEnergyWh,
+  paymentStatusBadgeVariant,
   sessionStatusBadgeVariant,
 } from "@/lib/utils"
 
@@ -71,6 +74,9 @@ export function SessaoDetalhe() {
               <p className="text-sm text-ink-softer">
                 {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
               </p>
+              <div className="mt-1">
+                <SessionPaymentMethodBadge paymentMode={session.paymentMode} payment={session.payment} />
+              </div>
             </div>
             <Badge variant={sessionStatusBadgeVariant(session.status)} className="shrink-0">
               {CHARGING_SESSION_STATUS_LABELS[session.status]}
@@ -114,7 +120,38 @@ export function SessaoDetalhe() {
                 </div>
               </dl>
 
-              {session.walletEntry ? (
+              {session.paymentMode === "CARD" ? (
+                session.payment?.card ? (
+                  <div className="mt-4 space-y-2 rounded-xl bg-muted px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-ink-softer">Cartão</span>
+                      <span className="text-sm font-bold text-ink">
+                        {session.payment.card.brand} •••• {session.payment.card.last4 ?? "----"}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-y-1">
+                      <span className="text-xs font-semibold text-ink-softer">Status da cobrança</span>
+                      {/* `whitespace-nowrap` — o rótulo é uma frase longa ("Cobrança em
+                          processamento"); sem isso o texto quebra DENTRO do badge e o
+                          pill vira um retângulo espremido (achado tirando screenshot em
+                          390px). `flex-wrap` no container deixa o badge INTEIRO cair pra
+                          próxima linha quando não cabe ao lado do rótulo, em vez de
+                          espremer o texto dentro dele. */}
+                      <Badge variant={paymentStatusBadgeVariant(session.payment.card.status)} className="whitespace-nowrap">
+                        {SESSION_CARD_CAPTURE_STATUS_LABELS[session.payment.card.status]}
+                      </Badge>
+                    </div>
+                    {session.payment.card.capturedCents !== null && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-ink-softer">Valor cobrado</span>
+                        <span className="text-sm font-bold text-ink">{formatCents(session.payment.card.capturedCents)}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-4 rounded-xl bg-muted px-4 py-3 text-xs text-ink-softer">A cobrança ainda está sendo processada.</p>
+                )
+              ) : session.walletEntry ? (
                 <div className="mt-4 flex items-center justify-between rounded-xl bg-muted px-4 py-3">
                   <span className="text-xs font-semibold text-ink-softer">Novo saldo da carteira</span>
                   <span className="text-sm font-black text-ink">{formatCents(session.walletEntry.balanceAfterCents)}</span>

@@ -425,19 +425,32 @@ export function buildPaymentsReport(
 
   const revenueCents = stopped.reduce((acc, s) => acc + (s.costs?.totalCostCents ?? 0), 0)
   const cardCapturedCents = stopped.filter((s) => s.paymentMethod === "CARD" && s.paymentStatus === "CAPTURED").reduce((acc, s) => acc + (s.costs?.totalCostCents ?? 0), 0)
+  // F5.4 — sessão CARD parada mas a captura ainda não foi confirmada pelo worker
+  // (`SessionPaymentStatus` deste mock usa "PENDING" para esse estado, mesmo
+  // vocabulário que já existia; no backend real é `PaymentIntent.CAPTURE_PENDING`).
+  // Sem somar aqui, `differenceCents` ficaria "vermelho" nos segundos entre o
+  // Stop e a captura — mesma identidade estendida do backend (`paymentsService.ts`).
+  const cardCapturePendingCents = stopped.filter((s) => s.paymentMethod === "CARD" && s.paymentStatus === "PENDING").reduce((acc, s) => acc + (s.costs?.totalCostCents ?? 0), 0)
   const walletDebitCents = stopped.filter((s) => s.paymentMethod === "WALLET" && s.paymentStatus === "CAPTURED").reduce((acc, s) => acc + (s.costs?.totalCostCents ?? 0), 0)
+  // F5.2 — dívida quitada automaticamente por crédito de Pix. Este mock ainda
+  // não modela a ligação Debt↔WalletEntry(DEBT_SETTLEMENT) nas fixtures de
+  // sessão, então fica honestamente em 0 em vez de inventar dado de demo —
+  // ver `PaymentsReconciliation.debtSettledCents` em `types/api.ts`.
+  const debtSettledCents = 0
   const openDebtCents = stopped.filter((s) => s.paymentStatus === "OPEN_DEBT").reduce((acc, s) => acc + (s.costs?.totalCostCents ?? 0), 0)
   const failedAttemptsCents = sessions.reduce(
     (acc, s) => acc + s.paymentIntents.filter((pi) => (pi.status === "DENIED" || pi.status === "FAILED") && inRange(pi.createdAt, query.from, query.to)).reduce((a, pi) => a + pi.amountRequestedCents, 0),
     0,
   )
+  // Informativo (estorno/chargeback de cartão) — não modelado neste mock ainda, ver comentário do tipo.
+  const cardRefundedCents = 0
 
   // Recarga de saldo (Pix) não pertence a nenhum operador (é float da rede) —
   // só ADMIN enxerga, e só quando não há filtro de site (site é conceito de operador).
   const walletTopupPixCents = scope.role === "ADMIN" && !operatorScope ? walletTopups.filter((t) => inRange(t.createdAt, query.from, query.to)).reduce((acc, t) => acc + t.amountCents, 0) : scope.role === "ADMIN" ? 0 : null
 
   const expectedCents = revenueCents
-  const accountedCents = cardCapturedCents + walletDebitCents + openDebtCents
+  const accountedCents = cardCapturedCents + cardCapturePendingCents + walletDebitCents + debtSettledCents + openDebtCents
   const differenceCents = expectedCents - accountedCents
 
   const rows: PaymentListRow[] = []
@@ -486,7 +499,20 @@ export function buildPaymentsReport(
   const { items, meta } = paginate(filteredRows, query.page, query.pageSize)
 
   return {
-    reconciliation: { revenueCents, cardCapturedCents, walletDebitCents, walletTopupPixCents, openDebtCents, failedAttemptsCents, expectedCents, accountedCents, differenceCents },
+    reconciliation: {
+      revenueCents,
+      cardCapturedCents,
+      cardCapturePendingCents,
+      walletDebitCents,
+      debtSettledCents,
+      walletTopupPixCents,
+      openDebtCents,
+      failedAttemptsCents,
+      cardRefundedCents,
+      expectedCents,
+      accountedCents,
+      differenceCents,
+    },
     items,
     meta,
   }

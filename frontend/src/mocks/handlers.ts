@@ -876,15 +876,24 @@ export const handlers = [
   http.post("/api/me/sessions/start", async ({ request }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
-    const body = (await request.json()) as { ocppIdentity: string; connectorId: number }
-    const result = startMockSession(scope.user.userId, body.ocppIdentity, body.connectorId)
-    if (!result.ok) return HttpResponse.json(errorBody(result.message, result.code), { status: result.code === "ALREADY_HAS_ACTIVE_SESSION" ? 409 : 422 })
+    const body = (await request.json()) as {
+      ocppIdentity: string
+      connectorId: number
+      payment?: { mode: "WALLET" } | { mode: "CARD"; paymentMethodId: string }
+    }
+    const result = startMockSession(scope.user.userId, body.ocppIdentity, body.connectorId, body.payment)
+    if (!result.ok) {
+      const status = result.code === "ALREADY_HAS_ACTIVE_SESSION" ? 409 : result.code === "PAYMENT_METHOD_NOT_FOUND" ? 404 : 422
+      return HttpResponse.json(errorBody(result.message, result.code), { status })
+    }
     return HttpResponse.json(
       {
         correlationId: result.correlationId,
         status: "PENDING",
+        paymentMode: result.paymentMode,
         walletBalanceCents: result.walletBalanceCents,
         estimatedMaxCostCents: result.estimatedMaxCostCents,
+        authorizedCents: result.authorizedCents,
         minChargeCents: result.minChargeCents,
       },
       { status: 202 },

@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { AlertCircle, LogIn, LogOut, MapPin, UserX, Zap } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { AlertCircle, CreditCard, LogIn, LogOut, MapPin, UserX, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
 import { buttonVariants } from "@/components/ui/buttonVariants"
@@ -9,8 +10,10 @@ import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { ConnectorPickerCard } from "@/components/chargePoint/ConnectorPickerCard"
+import { PaymentMethodSelector, type PaymentSelection } from "@/components/chargePoint/PaymentMethodSelector"
 import { usePublicChargePoint } from "@/hooks/usePublicChargePoint"
 import { useMeWallet, useStartSession } from "@/hooks/useMeSessions"
+import { useMePaymentMethods, paymentMethodsKeys } from "@/hooks/useMePaymentMethods"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
 import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
@@ -55,6 +58,31 @@ export function ChargePointLanding() {
   const { data: wallet } = useMeWallet({ pageSize: 1 }, isDriver)
   const startSession = useStartSession()
   const [startError, setStartError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+
+  // Cartão salvo (F5.4, ver `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md`
+  // §2) — mesma regra de `enabled` do saldo acima. `userPaymentSelection` só
+  // guarda uma escolha depois que o motorista de fato toca num radio; até lá
+  // a seleção EFETIVA é DERIVADA (cartão padrão se existir, senão Carteira) —
+  // sem `useEffect` sincronizando estado a partir da query (mesmo raciocínio
+  // de `Sessao.tsx`: tudo calculado durante o render). Isso também resolve
+  // sozinho o caso "cartão escolhido sumiu" (`PAYMENT_METHOD_NOT_FOUND`): ao
+  // invalidar a lista, a escolha stale deixa de bater em nenhum método e a
+  // seleção derivada volta pro padrão/Carteira no próximo render, sem precisar
+  // resetar `userPaymentSelection` manualmente.
+  const { data: paymentMethodsData } = useMePaymentMethods(isDriver)
+  const paymentMethods = paymentMethodsData?.items ?? []
+  const [userPaymentSelection, setUserPaymentSelection] = useState<PaymentSelection | null>(null)
+  const defaultPaymentMethod = paymentMethods.find((m) => m.isDefault)
+  const paymentSelectionIsValid =
+    !!userPaymentSelection &&
+    (userPaymentSelection.mode === "WALLET" || paymentMethods.some((m) => m.id === userPaymentSelection.paymentMethodId))
+  const paymentSelection: PaymentSelection =
+    paymentSelectionIsValid && userPaymentSelection
+      ? userPaymentSelection
+      : defaultPaymentMethod
+        ? { mode: "CARD", paymentMethodId: defaultPaymentMethod.id }
+        : { mode: "WALLET" }
 
   const redirectTarget = `/c/${encodeURIComponent(ocppIdentity)}${connectorId ? `/${connectorId}` : ""}`
 
@@ -62,11 +90,42 @@ export function ChargePointLanding() {
     if (!cp) return
     setStartError(null)
     try {
-      const result = await startSession.mutateAsync({ ocppIdentity: cp.ocppIdentity, connectorId: targetConnectorId })
-      navigate("/app/sessao", { state: { correlationId: result.correlationId } })
+      const result = await startSession.mutateAsync({ ocppIdentity: cp.ocppIdentity, connectorId: targetConnectorId, payment: paymentSelection })
+      const selectedCard = paymentSelection.mode === "CARD" ? paymentMethods.find((m) => m.id === paymentSelection.paymentMethodId) : undefined
+      navigate("/app/sessao", {
+        state: {
+          correlationId: result.correlationId,
+          paymentMode: result.paymentMode,
+          authorizedCents: result.authorizedCents,
+          cardBrand: selectedCard?.brand,
+          cardLast4: selectedCard?.last4,
+        },
+      })
     } catch (err) {
       if (getApiErrorCode(err) === "ALREADY_HAS_ACTIVE_SESSION") {
         navigate("/app/sessao")
+        return
+      }
+      const code = getApiErrorCode(err)
+      if (code === "PAYMENT_METHOD_NOT_FOUND") {
+        // Cartão pode ter sido removido em outra aba — recarrega a lista (a
+        // seleção derivada acima volta sozinha pro padrão/Carteira) e pede
+        // pra escolher de novo, sem perder o resto da tela.
+        queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
+        setStartError("Esse cartão não está mais disponível. Escolha outro cartão ou a carteira e tente de novo.")
+        return
+      }
+      if (code === "PAYMENT_METHOD_DISABLED") {
+        queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
+        setStartError("Este cartão foi desativado. Escolha outro cartão ou a carteira e tente de novo.")
+        return
+      }
+      if (code === "CARD_AUTHORIZATION_DENIED") {
+        setStartError("Seu cartão foi recusado. Tente outro cartão ou use a carteira.")
+        return
+      }
+      if (code === "PAYMENT_GATEWAY_UNAVAILABLE") {
+        setStartError("Não foi possível processar o pagamento agora. Tente novamente ou use a carteira.")
         return
       }
       setStartError(getApiErrorMessage(err, "Não foi possível iniciar a recarga. Tente novamente."))
@@ -274,6 +333,17 @@ export function ChargePointLanding() {
                               Regularize na carteira
                             </Link>{" "}
                             para poder carregar de novo.
+                          </p>
+                        )}
+                        {/* Só aparece com 1+ cartão salvo — com 0 cartões o fluxo fica
+                            IDÊNTICO ao de sempre (Carteira), sem forçar cadastro. */}
+                        {paymentMethods.length > 0 && (
+                          <PaymentMethodSelector methods={paymentMethods} value={paymentSelection} onChange={setUserPaymentSelection} />
+                        )}
+                        {paymentSelection.mode === "CARD" && (
+                          <p className="flex items-start gap-2 rounded-xl bg-muted px-4 py-3 text-xs text-ink-softer">
+                            <CreditCard className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            Faremos uma pré-autorização estimada neste cartão — você só paga pelo que consumir.
                           </p>
                         )}
                         {startError && (

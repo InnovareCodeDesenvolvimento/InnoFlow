@@ -6,10 +6,17 @@ export const paymentMethodsKeys = {
   list: ["me", "paymentMethods"] as const,
 }
 
-export function useMePaymentMethods() {
+/**
+ * `enabled` explícito (default `true`, mesmo padrão de `useMeWallet`) — a
+ * tela de iniciar recarga (`ChargePointLanding`, F5.4) precisa desligar esta
+ * query para visitante anônimo/ADMIN/OPERATOR, senão bate 401/403 à toa a
+ * cada render nessa tela pública.
+ */
+export function useMePaymentMethods(enabled = true) {
   return useQuery({
     queryKey: paymentMethodsKeys.list,
     queryFn: () => meService.listPaymentMethods(),
+    enabled,
   })
 }
 

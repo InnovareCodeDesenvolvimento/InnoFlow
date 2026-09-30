@@ -118,11 +118,21 @@ export function useMeSessions(params: MeSessionsQuery = {}) {
   })
 }
 
+/**
+ * `refetchInterval` (F5.4): enquanto a captura do cartão está `CAPTURE_PENDING`,
+ * faz polling curto (mesmo espírito de `useMeTopup`/`useCommandStatus` — não
+ * existe SSE de captura ainda, ver `.claude/agent-memory/nova/
+ * decisoes-f5-pagamento-cielo.md` §3, "webhook = dica"). `false` em qualquer
+ * outro caso (WALLET, ou CARD já resolvido) — comportamento IDÊNTICO ao de
+ * antes da F5.4 para quem paga com carteira.
+ */
 export function useMeSessionDetail(id: string | undefined) {
   return useQuery({
     queryKey: meKeys.sessionDetail(id ?? ""),
     queryFn: () => meService.sessionDetail(id as string),
     enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.payment?.card?.status === "CAPTURE_PENDING" ? 3000 : false),
+    refetchIntervalInBackground: false,
   })
 }
 

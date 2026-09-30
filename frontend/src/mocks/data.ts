@@ -43,6 +43,15 @@ export const mockUsers: MockUser[] = [
   // exatos (50,00 / 0), então semear dívida nela quebraria aquele teste. `getWalletState`
   // (`mocks/meData.ts`) reconhece este id e nasce com `openDebtCents` > 0.
   { id: "user_driver_devedor", name: "Diego Devedor", email: "devedor@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // Motorista com CARTÕES pré-cadastrados (F5.4 — pagamento na recarga) — conta
+  // separada de `user_driver` de propósito: registrar um cartão via UI e depois
+  // navegar de verdade (`page.goto`) pra `/c/:id` perde o estado do mock (cada
+  // navegação recarrega o módulo que roda os handlers do MSW, ver
+  // `.claude/agent-memory/lyra/` da F5.4) — pré-semear aqui é a única forma
+  // determinística de testar o SELETOR de pagamento ponta a ponta.
+  // `getPaymentMethods` (`mocks/meData.ts`) reconhece este id e nasce com 4
+  // cartões, um por gatilho de holderName (aprovado/recusa/gateway/parcial).
+  { id: "user_driver_cartoes", name: "Paula Cartões", email: "cartoes@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 
 export const mockSites: Site[] = [

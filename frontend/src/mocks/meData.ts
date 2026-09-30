@@ -20,9 +20,12 @@ import type {
   MePaymentMethodDTO,
   MeSessionDetail,
   MeSessionListItem,
+  MeSessionPaymentInfo,
+  MeStartSessionRequest,
   MeTopupDTO,
   MeTopupStatus,
   MeWalletEntryDTO,
+  PaymentIntentStatus,
   PublicChargePointCard,
   PublicChargePointConnector,
   PublicTariffSummary,
@@ -136,6 +139,17 @@ export function getCommandStatus(correlationId: string): CommandRecord["status"]
 // Sessão ativa (uma por vez, driver único nesta simulação)
 // ---------------------------------------------------------------------------
 
+/**
+ * Forma de pagamento da sessão (F5.4) — `card` só existe em `paymentMode ===
+ * "CARD"`, espelhando o `payment` opcional do `MeStartSessionRequest`.
+ * `authorizedCents` é fixado no START (pré-auth síncrona, ver
+ * decisoes-f5-pagamento-cielo.md §2) e nunca muda depois.
+ */
+interface MockSessionPayment {
+  mode: "WALLET" | "CARD"
+  card: { paymentMethodId: string; brand: string; last4: string | null; authorizedCents: number } | null
+}
+
 interface MockSession {
   id: string
   driverId: string
@@ -149,12 +163,46 @@ interface MockSession {
   tariff: PublicTariffSummary
   startedAt: string
   stopRequestedAt: string | null
+  payment: MockSessionPayment
 }
 
 let pendingSession: (MockSession & { promoteAt: number }) | null = null
 let activeSession: MockSession | null = null
 let sessionCounter = 1
 const sessionsHistory: MeSessionDetail[] = []
+
+/**
+ * Captura de cartão (F5.4) — lazy-resolve (mesmo padrão de
+ * `resolveTopupStatus`): `CAPTURE_PENDING` até `resolveAt`, depois vira
+ * `CAPTURED` (ou parcial, ver `CARD_PARTIAL_CAPTURE_MARKER`) na PRÓXIMA
+ * leitura, nunca por um timer — assim nenhuma aba esquecida aberta continua
+ * rodando setTimeout de fundo. Indexado por `MeSessionDetail.id`.
+ */
+interface MockCardCapture {
+  brand: string
+  last4: string | null
+  authorizedCents: number
+  totalCostCents: number
+  /** Quanto a captura VAI resolver quando `resolveAt` passar — pode ser menor que `totalCostCents` (cenário de dívida residual). */
+  targetCapturedCents: number
+  resolveAt: number
+  status: PaymentIntentStatus
+  capturedCents: number | null
+}
+const cardCapturesBySession = new Map<string, MockCardCapture>()
+const CARD_CAPTURE_DELAY_MS = 4000
+
+/**
+ * Gatilhos determinísticos por `holderName` do cartão (mesmo espírito do
+ * "e-mail especial" de `[[padrao-auth-429-e-segredo-carregador]]`/
+ * `[[padrao-recarga-pix-f5]]`): como `paymentMethodId` é gerado dinamicamente
+ * no cadastro (F5.3), não dá pra fixar um ID — o holderName é o único campo
+ * de texto livre que o motorista digita e controla na aba isolada. Case
+ * insensitive, substring.
+ */
+const CARD_DENIED_MARKER = "RECUSA"
+const CARD_GATEWAY_DOWN_MARKER = "GATEWAY"
+const CARD_PARTIAL_CAPTURE_MARKER = "PARCIAL"
 
 function computeEnergyWh(startedAt: string, atMs = Date.now()): number {
   const elapsedH = (atMs - new Date(startedAt).getTime()) / 3_600_000
@@ -193,6 +241,7 @@ function maybePromotePendingSession() {
       tariff: promoted.tariff,
       startedAt: promoted.startedAt,
       stopRequestedAt: promoted.stopRequestedAt,
+      payment: promoted.payment,
     }
     pendingSession = null
   }
@@ -202,8 +251,17 @@ export function startMockSession(
   driverId: string,
   ocppIdentity: string,
   connectorId: number,
+  payment: MeStartSessionRequest["payment"] = { mode: "WALLET" },
 ):
-  | { ok: true; correlationId: string; walletBalanceCents: number; estimatedMaxCostCents: number; minChargeCents: number | null }
+  | {
+      ok: true
+      correlationId: string
+      walletBalanceCents: number
+      estimatedMaxCostCents: number
+      minChargeCents: number | null
+      paymentMode: "WALLET" | "CARD"
+      authorizedCents: number | null
+    }
   | { ok: false; code: string; message: string } {
   maybePromotePendingSession()
   if (activeSession || pendingSession) return { ok: false, code: "ALREADY_HAS_ACTIVE_SESSION", message: "Você já tem uma recarga em andamento." }
@@ -216,8 +274,39 @@ export function startMockSession(
   if (!tariff) return { ok: false, code: "CONNECTOR_NOT_FOUND", message: "Este conector ainda não tem tarifa cadastrada." }
 
   const wallet = getWalletState(driverId)
+  // Dívida em aberto bloqueia SEMPRE — independente da forma de pagamento
+  // escolhida agora (é um "você deve à casa", não um problema desta cobrança).
   if (wallet.openDebtCents > 0) return { ok: false, code: "DRIVER_HAS_OPEN_DEBT", message: "Você tem uma dívida em aberto — quite-a na carteira antes de carregar de novo." }
-  if (wallet.balanceCents < 2000) return { ok: false, code: "INSUFFICIENT_BALANCE", message: "Saldo insuficiente para iniciar uma recarga." }
+
+  const paymentMode = payment?.mode ?? "WALLET"
+  const estimatedMaxCostCents = Math.max(2000, Math.round(Number(tariff.pricePerKwh ?? 0) * 60 * 100))
+
+  let sessionPayment: MockSessionPayment
+  let authorizedCents: number | null = null
+
+  if (paymentMode === "WALLET") {
+    // Saldo insuficiente só bloqueia quando de fato vai debitar a carteira.
+    if (wallet.balanceCents < 2000) return { ok: false, code: "INSUFFICIENT_BALANCE", message: "Saldo insuficiente para iniciar uma recarga." }
+    sessionPayment = { mode: "WALLET", card: null }
+  } else {
+    const paymentMethodId = payment && "paymentMethodId" in payment ? payment.paymentMethodId : undefined
+    const method = paymentMethodId ? getPaymentMethods(driverId).find((m) => m.id === paymentMethodId) : undefined
+    if (!method) return { ok: false, code: "PAYMENT_METHOD_NOT_FOUND", message: "Cartão não encontrado — pode ter sido removido." }
+
+    const holder = (method.holderName ?? "").toUpperCase()
+    if (holder.includes(CARD_DENIED_MARKER)) {
+      return { ok: false, code: "CARD_AUTHORIZATION_DENIED", message: "Seu cartão foi recusado." }
+    }
+    if (holder.includes(CARD_GATEWAY_DOWN_MARKER)) {
+      return { ok: false, code: "PAYMENT_GATEWAY_UNAVAILABLE", message: "Não foi possível processar o pagamento agora." }
+    }
+
+    authorizedCents = estimatedMaxCostCents
+    sessionPayment = {
+      mode: "CARD",
+      card: { paymentMethodId: method.id, brand: method.brand, last4: method.last4, authorizedCents },
+    }
+  }
 
   const site = mockSites.find((s) => s.id === cp.siteId)
   const correlationId = createCommand(2500)
@@ -235,11 +324,11 @@ export function startMockSession(
     tariff,
     startedAt: new Date().toISOString(),
     stopRequestedAt: null,
+    payment: sessionPayment,
     promoteAt: Date.now() + 4000, // simula o intervalo até o StartTransaction real chegar
   }
 
-  const estimatedMaxCostCents = Math.max(2000, Math.round(Number(tariff.pricePerKwh ?? 0) * 60 * 100))
-  return { ok: true, correlationId, walletBalanceCents: wallet.balanceCents, estimatedMaxCostCents, minChargeCents: tariff.minChargeCents }
+  return { ok: true, correlationId, walletBalanceCents: wallet.balanceCents, estimatedMaxCostCents, minChargeCents: tariff.minChargeCents, paymentMode, authorizedCents }
 }
 
 export function getMockActiveSession(driverId: string): MeActiveSession | null {
@@ -279,6 +368,24 @@ export function getMockActiveSession(driverId: string): MeActiveSession | null {
     estimatedMaxCostCents,
     minChargeCents: activeSession.tariff.minChargeCents,
     tariff: activeSession.tariff,
+    paymentMode: activeSession.payment.mode,
+    // Durante a sessão ATIVA o cartão só pode estar `AUTHORIZED` (a captura
+    // real só roda depois do Stop, ver `finalizeSession`) — nunca
+    // `CAPTURE_PENDING`/`CAPTURED` aqui, mesmo que pareça redundante com o
+    // capture record: são fases diferentes da MESMA sessão.
+    payment:
+      activeSession.payment.mode === "CARD" && activeSession.payment.card
+        ? {
+            mode: "CARD",
+            card: {
+              brand: activeSession.payment.card.brand,
+              last4: activeSession.payment.card.last4,
+              authorizedCents: activeSession.payment.card.authorizedCents,
+              capturedCents: null,
+              status: "AUTHORIZED",
+            },
+          }
+        : { mode: "WALLET", card: null },
   }
 }
 
@@ -312,21 +419,28 @@ function finalizeSession() {
   }
   const totalCostCents = subtotal
 
-  const wallet = getWalletState(activeSession.driverId)
-  const balanceAfter = wallet.balanceCents - totalCostCents
-  wallet.balanceCents = balanceAfter
-  const walletEntryId = `we_${sessionCounter}`
-  const entry: MeWalletEntryDTO = {
-    id: walletEntryId,
-    type: "CHARGE_DEBIT",
-    amountCents: -totalCostCents,
-    balanceAfterCents: balanceAfter,
-    referenceType: "CHARGING_SESSION",
-    referenceId: activeSession.id,
-    description: `Recarga em ${activeSession.siteName}`,
-    createdAt: finishedAt,
+  const isCard = activeSession.payment.mode === "CARD" && !!activeSession.payment.card
+  let walletEntry: MeSessionDetail["walletEntry"] = null
+
+  if (!isCard) {
+    // WALLET (comportamento de sempre, sem mudança) — débito síncrono no Stop.
+    const wallet = getWalletState(activeSession.driverId)
+    const balanceAfter = wallet.balanceCents - totalCostCents
+    wallet.balanceCents = balanceAfter
+    const walletEntryId = `we_${sessionCounter}`
+    const entry: MeWalletEntryDTO = {
+      id: walletEntryId,
+      type: "CHARGE_DEBIT",
+      amountCents: -totalCostCents,
+      balanceAfterCents: balanceAfter,
+      referenceType: "CHARGING_SESSION",
+      referenceId: activeSession.id,
+      description: `Recarga em ${activeSession.siteName}`,
+      createdAt: finishedAt,
+    }
+    wallet.entries.unshift(entry)
+    walletEntry = { id: walletEntryId, amountCents: -totalCostCents, balanceAfterCents: balanceAfter, createdAt: finishedAt }
   }
-  wallet.entries.unshift(entry)
 
   const detail: MeSessionDetail = {
     id: activeSession.id,
@@ -346,11 +460,58 @@ function finalizeSession() {
     minChargeAdjustmentCents,
     totalCostCents,
     tariff,
-    walletEntry: { id: walletEntryId, amountCents: -totalCostCents, balanceAfterCents: balanceAfter, createdAt: finishedAt },
+    walletEntry,
     debt: null,
+    paymentMode: activeSession.payment.mode,
   }
+
+  if (isCard && activeSession.payment.card) {
+    // `CAPTURE_PENDING` nasce AQUI (fechamento síncrono do Stop) — a captura
+    // de fato só resolve depois de `CARD_CAPTURE_DELAY_MS`, mesmo espírito do
+    // worker assíncrono real (nunca captura inline, ver decisoes-f5-pagamento-
+    // cielo.md §2). O marcador `PARCIAL` no holderName simula uma captura
+    // menor que o total — o resto vira `Debt`, resolvido em `resolveCardCapture`.
+    const method = getPaymentMethods(activeSession.driverId).find((m) => m.id === activeSession!.payment.card!.paymentMethodId)
+    const isPartial = (method?.holderName ?? "").toUpperCase().includes(CARD_PARTIAL_CAPTURE_MARKER)
+    const targetCapturedCents = isPartial ? Math.max(0, Math.round(totalCostCents * 0.6)) : Math.min(totalCostCents, activeSession.payment.card.authorizedCents)
+    cardCapturesBySession.set(activeSession.id, {
+      brand: activeSession.payment.card.brand,
+      last4: activeSession.payment.card.last4,
+      authorizedCents: activeSession.payment.card.authorizedCents,
+      totalCostCents,
+      targetCapturedCents,
+      resolveAt: Date.now() + CARD_CAPTURE_DELAY_MS,
+      status: "CAPTURE_PENDING",
+      capturedCents: null,
+    })
+  }
+
   sessionsHistory.unshift(detail)
   activeSession = null
+}
+
+/**
+ * Resolve a captura lazy (mesmo padrão de `resolveTopupStatus`) e já anexa
+ * `debt` ao `MeSessionDetail` quando a captura resolvida for PARCIAL — só na
+ * transição CAPTURE_PENDING→CAPTURED, nunca antes (dívida não existe até a
+ * cobrança de fato terminar).
+ */
+function resolveCardPayment(detail: MeSessionDetail): MeSessionPaymentInfo | undefined {
+  const capture = cardCapturesBySession.get(detail.id)
+  if (!capture) return undefined
+
+  if (capture.status === "CAPTURE_PENDING" && Date.now() >= capture.resolveAt) {
+    capture.status = "CAPTURED"
+    capture.capturedCents = capture.targetCapturedCents
+    if (capture.capturedCents < capture.totalCostCents) {
+      detail.debt = { id: `debt_${detail.id}`, amountCents: capture.totalCostCents - capture.capturedCents }
+    }
+  }
+
+  return {
+    mode: "CARD",
+    card: { brand: capture.brand, last4: capture.last4, authorizedCents: capture.authorizedCents, capturedCents: capture.capturedCents, status: capture.status },
+  }
 }
 
 export function listMockSessions(page: number, pageSize: number): { items: MeSessionListItem[]; total: number; page: number; pageSize: number } {
@@ -370,7 +531,12 @@ export function listMockSessions(page: number, pageSize: number): { items: MeSes
 }
 
 export function getMockSessionDetail(id: string): MeSessionDetail | null {
-  return sessionsHistory.find((s) => s.id === id) ?? null
+  const detail = sessionsHistory.find((s) => s.id === id)
+  if (!detail) return null
+  // `resolveCardPayment` pode mutar `detail.debt` (captura parcial resolvida
+  // agora) — por isso roda ANTES de montar o retorno, não depois.
+  const payment = resolveCardPayment(detail)
+  return payment ? { ...detail, payment } : detail
 }
 
 // ---------------------------------------------------------------------------
@@ -646,8 +812,31 @@ interface MockPaymentMethod {
 const paymentMethodsByDriver = new Map<string, MockPaymentMethod[]>()
 let paymentMethodCounter = 1
 
+/**
+ * `user_driver_cartoes` (ver `mocks/data.ts`) nasce com 4 cartões — um por
+ * gatilho de `holderName` do fluxo de pagamento (F5.4). Mesmo espírito de
+ * `DEBT_DEMO_DRIVER_ID`: como registrar um cartão pela UI e depois navegar de
+ * verdade pra `/c/:id` perde o estado do mock (cada navegação reimporta o
+ * módulo que roda os handlers do MSW — não existe SW "de servidor" aqui,
+ * `setupWorker` delega pro JS da própria página), pré-semear é a única forma
+ * determinística de testar o SELETOR ponta a ponta sem cadastrar na hora.
+ */
+const CARD_DEMO_DRIVER_ID = "user_driver_cartoes"
+
+function seedCardDemoDriver(): MockPaymentMethod[] {
+  const now = new Date().toISOString()
+  return [
+    { id: "pm_seed_aprovado", driverId: CARD_DEMO_DRIVER_ID, brand: "Visa", last4: "1234", holderName: "Motorista Aprovado", expiryMonth: 8, expiryYear: 2030, isDefault: true, createdAt: now },
+    { id: "pm_seed_recusa", driverId: CARD_DEMO_DRIVER_ID, brand: "Master", last4: "4444", holderName: "Motorista Recusa", expiryMonth: 9, expiryYear: 2029, isDefault: false, createdAt: now },
+    { id: "pm_seed_gateway", driverId: CARD_DEMO_DRIVER_ID, brand: "Elo", last4: "6516", holderName: "Motorista Gateway", expiryMonth: 5, expiryYear: 2031, isDefault: false, createdAt: now },
+    { id: "pm_seed_parcial", driverId: CARD_DEMO_DRIVER_ID, brand: "Amex", last4: "0005", holderName: "Motorista Parcial", expiryMonth: 11, expiryYear: 2028, isDefault: false, createdAt: now },
+  ]
+}
+
 function getPaymentMethods(driverId: string): MockPaymentMethod[] {
-  if (!paymentMethodsByDriver.has(driverId)) paymentMethodsByDriver.set(driverId, [])
+  if (!paymentMethodsByDriver.has(driverId)) {
+    paymentMethodsByDriver.set(driverId, driverId === CARD_DEMO_DRIVER_ID ? seedCardDemoDriver() : [])
+  }
   return paymentMethodsByDriver.get(driverId) as MockPaymentMethod[]
 }
 
