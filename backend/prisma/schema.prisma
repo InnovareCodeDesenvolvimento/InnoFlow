@@ -145,6 +145,8 @@ enum PaymentIntentStatus {
   VOIDED
   FAILED
   EXPIRED
+  PENDING // Pix: PaymentIntent criado na Cielo, aguardando o motorista pagar o QR Code
+  PAID // Pix: webhook (reconsultado) confirmou o pagamento — dispara crédito na carteira
 }
 
 enum WalletEntryType {
