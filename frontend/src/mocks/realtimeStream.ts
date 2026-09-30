@@ -71,6 +71,14 @@ export function createAdminEventStream(): ReadableStream<Uint8Array> {
  * `session.metrics`. Sem sessão ativa, só heartbeat — não inventa energia
  * que a simulação de sessão não gerou (mesma regra do backend real: push
  * não cria dado que o carregador não mandou).
+ *
+ * De propósito NÃO emite `topup.updated` (F5.1): o backend real também não
+ * emite esse evento ainda (ver `TopupUpdatedEvent` em `types/api.ts`), e este
+ * mock existe para espelhar o contrato real, não pra inventar um caminho que
+ * não existe hoje. A recarga Pix (`getMockTopup`) prova o estado "pago" por
+ * POLLING (`useMeTopup`), que é o mecanismo que de fato funciona sem esse
+ * evento — o handler de `topup.updated` já está pronto (`realtimeEventHandlers.ts`)
+ * para o dia em que o backend passar a emiti-lo.
  */
 export function createMeEventStream(userId: string): ReadableStream<Uint8Array> {
   let timer: ReturnType<typeof setInterval> | undefined

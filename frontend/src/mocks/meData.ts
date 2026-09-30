@@ -8,6 +8,7 @@
  * passos — sem isso, o fluxo "conectando"/"parando" nunca apareceria em tela
  * (tudo resolveria no mesmo tick).
  */
+import QRCode from "qrcode"
 import { mockChargePoints, mockConnectors, mockSites, mockTariffs } from "./data"
 import { extraStations } from "./stationsData"
 import type {
@@ -16,6 +17,8 @@ import type {
   MeActiveSession,
   MeSessionDetail,
   MeSessionListItem,
+  MeTopupDTO,
+  MeTopupStatus,
   MeWalletEntryDTO,
   PublicChargePointCard,
   PublicChargePointConnector,
@@ -378,24 +381,41 @@ interface WalletState {
 }
 const walletByDriver = new Map<string, WalletState>()
 
+/** `user_driver_devedor` (ver `mocks/data.ts`) nasce com dívida em aberto — prova em tela o aviso "os primeiros R$X quitam a dívida" da tela de recarga Pix sem mexer no motorista usado pelo E2E de sessão. */
+const DEBT_DEMO_DRIVER_ID = "user_driver_devedor"
+
 function getWalletState(driverId: string): WalletState {
   if (!walletByDriver.has(driverId)) {
     const seedAt = new Date(Date.now() - 86_400_000).toISOString()
+    const isDebtDemo = driverId === DEBT_DEMO_DRIVER_ID
     walletByDriver.set(driverId, {
-      balanceCents: 5000,
-      openDebtCents: 0,
-      entries: [
-        {
-          id: "we_seed",
-          type: "TOPUP_PIX",
-          amountCents: 5000,
-          balanceAfterCents: 5000,
-          referenceType: null,
-          referenceId: null,
-          description: "Saldo inicial de demonstração",
-          createdAt: seedAt,
-        },
-      ],
+      balanceCents: isDebtDemo ? 0 : 5000,
+      openDebtCents: isDebtDemo ? 3850 : 0,
+      entries: isDebtDemo
+        ? [
+            {
+              id: "we_seed_devedor",
+              type: "CHARGE_DEBIT",
+              amountCents: 0,
+              balanceAfterCents: 0,
+              referenceType: "CHARGING_SESSION",
+              referenceId: null,
+              description: "Recarga com saldo insuficiente — R$ 38,50 ficaram em aberto",
+              createdAt: seedAt,
+            },
+          ]
+        : [
+            {
+              id: "we_seed",
+              type: "TOPUP_PIX",
+              amountCents: 5000,
+              balanceAfterCents: 5000,
+              referenceType: null,
+              referenceId: null,
+              description: "Saldo inicial de demonstração",
+              createdAt: seedAt,
+            },
+          ],
     })
   }
   return walletByDriver.get(driverId) as WalletState
@@ -440,4 +460,157 @@ export function adjustMockWallet(
   }
   wallet.entries.unshift(entry)
   return { ok: true, entry }
+}
+
+// ---------------------------------------------------------------------------
+// Recarga de saldo via Pix (F5.1) — a rota real (`POST/GET
+// /api/me/wallet/topups`) ainda não existe no backend, ver
+// `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md`. Mesmo espírito
+// dos comandos OCPP acima: atraso realista (`AUTO_PAY_DELAY_MS`) para provar
+// o estado "PENDING" na tela antes de resolver — sem isso o motorista nunca
+// veria o QR code, o mock pagaria sozinho no mesmo tick.
+// ---------------------------------------------------------------------------
+
+/** Espelha `TOPUP_MIN_AMOUNT_CENTS`/`TOPUP_MAX_AMOUNT_CENTS` de `lib/topupAmount.ts` — mocks não importam de `lib/` de propósito (auto-contidos), então os dois lados precisam ser mantidos iguais manualmente se o limite mudar. */
+const TOPUP_MIN_AMOUNT_CENTS = 1_000
+const TOPUP_MAX_AMOUNT_CENTS = 50_000
+const TOPUP_EXPIRES_MS = 30 * 60_000
+/** "Paga sozinho" 8s depois de criado — tempo suficiente pra ver o QR/copia-e-cola na tela antes do estado virar `PAID`. */
+const AUTO_PAY_DELAY_MS = 8_000
+
+interface MockTopup {
+  id: string
+  driverId: string
+  status: MeTopupStatus
+  amountCents: number
+  qrCodeString: string
+  qrCodeImageBase64: string | null
+  expiresAt: string
+  paidAt: string | null
+  createdAt: string
+  debtSettledCents: number
+  autoPayAt: number
+}
+
+const topupsById = new Map<string, MockTopup>()
+let topupCounter = 1
+
+function centsToBrl(cents: number): string {
+  return (cents / 100).toFixed(2).replace(".", ",")
+}
+
+/**
+ * COSMÉTICO — não é um payload EMV Pix válido de verdade (a geração real é
+ * da Cielo, via backend). Só precisa "parecer" um copia-e-cola pra provar o
+ * botão de copiar e a exibição do QR no navegador.
+ */
+function buildPixCopiaECola(topupId: string, amountCents: number): string {
+  const amount = (amountCents / 100).toFixed(2)
+  return `00020126580014BR.GOV.BCB.PIX0136${topupId}5204000053039865406${amount}5802BR5913INNOELEKTRON LTDA6009SAO PAULO62070503***6304MOCK`
+}
+
+async function toQrCodeImageBase64(payload: string): Promise<string | null> {
+  try {
+    const dataUrl = await QRCode.toDataURL(payload, { margin: 1, width: 320 })
+    return dataUrl.replace(/^data:image\/png;base64,/, "")
+  } catch {
+    // Geração de QR nunca deveria derrubar a criação do Pix — o copia-e-cola sozinho já é usável.
+    return null
+  }
+}
+
+function toTopupDTO(t: MockTopup): MeTopupDTO {
+  return {
+    id: t.id,
+    status: t.status,
+    amountCents: t.amountCents,
+    qrCodeString: t.qrCodeString,
+    qrCodeImageBase64: t.qrCodeImageBase64,
+    expiresAt: t.expiresAt,
+    paidAt: t.paidAt,
+    createdAt: t.createdAt,
+    debtSettledCents: t.debtSettledCents,
+  }
+}
+
+/** Quita a dívida em aberto primeiro, credita o restante como saldo LIVRE — mesma regra prometida na tela ("os primeiros R$X quitam a dívida"). */
+function settleTopupPayment(t: MockTopup) {
+  const wallet = getWalletState(t.driverId)
+  const debtSettledCents = Math.min(t.amountCents, wallet.openDebtCents)
+  const freeCents = t.amountCents - debtSettledCents
+  wallet.openDebtCents -= debtSettledCents
+  wallet.balanceCents += freeCents
+
+  const paidAt = new Date().toISOString()
+  const entry: MeWalletEntryDTO = {
+    id: `we_topup_${t.id}`,
+    type: "TOPUP_PIX",
+    amountCents: freeCents,
+    balanceAfterCents: wallet.balanceCents,
+    referenceType: "TOPUP",
+    referenceId: t.id,
+    description: debtSettledCents > 0 ? `Recarga Pix de R$ ${centsToBrl(t.amountCents)} — R$ ${centsToBrl(debtSettledCents)} quitou dívida em aberto` : "Recarga Pix",
+    createdAt: paidAt,
+  }
+  wallet.entries.unshift(entry)
+
+  t.status = "PAID"
+  t.paidAt = paidAt
+  t.debtSettledCents = debtSettledCents
+}
+
+/** Resolve o estado "vivo" de um topup (chamado a cada leitura) — `PENDING` pode virar `EXPIRED` (prazo estourado) ou `PAID` (auto-pagamento simulado) na hora. Estados terminais nunca voltam. */
+function resolveTopupStatus(t: MockTopup): void {
+  if (t.status !== "PENDING") return
+  const now = Date.now()
+  if (now >= new Date(t.expiresAt).getTime()) {
+    t.status = "EXPIRED"
+    return
+  }
+  if (now >= t.autoPayAt) settleTopupPayment(t)
+}
+
+export async function createMockTopup(
+  driverId: string,
+  amountCents: unknown,
+): Promise<{ ok: true; topup: MeTopupDTO } | { ok: false; code: string; message: string }> {
+  if (typeof amountCents !== "number" || !Number.isInteger(amountCents) || amountCents < TOPUP_MIN_AMOUNT_CENTS || amountCents > TOPUP_MAX_AMOUNT_CENTS) {
+    return { ok: false, code: "TOPUP_AMOUNT_OUT_OF_RANGE", message: "Valor precisa estar entre R$ 10,00 e R$ 500,00." }
+  }
+  const hasPending = [...topupsById.values()].some((t) => {
+    if (t.driverId !== driverId) return false
+    resolveTopupStatus(t)
+    return t.status === "PENDING"
+  })
+  if (hasPending) {
+    return { ok: false, code: "TOO_MANY_PENDING_TOPUPS", message: "Você já tem uma recarga Pix aguardando pagamento." }
+  }
+
+  const id = `topup_${topupCounter++}`
+  const now = Date.now()
+  const qrCodeString = buildPixCopiaECola(id, amountCents)
+  const qrCodeImageBase64 = await toQrCodeImageBase64(qrCodeString)
+
+  const record: MockTopup = {
+    id,
+    driverId,
+    status: "PENDING",
+    amountCents,
+    qrCodeString,
+    qrCodeImageBase64,
+    expiresAt: new Date(now + TOPUP_EXPIRES_MS).toISOString(),
+    paidAt: null,
+    createdAt: new Date(now).toISOString(),
+    debtSettledCents: 0,
+    autoPayAt: now + AUTO_PAY_DELAY_MS,
+  }
+  topupsById.set(id, record)
+  return { ok: true, topup: toTopupDTO(record) }
+}
+
+export function getMockTopup(id: string): MeTopupDTO | null {
+  const t = topupsById.get(id)
+  if (!t) return null
+  resolveTopupStatus(t)
+  return toTopupDTO(t)
 }

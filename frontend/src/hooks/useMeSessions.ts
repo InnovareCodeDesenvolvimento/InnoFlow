@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { meService } from "@/services/me"
 import { useRealtimeHealthy } from "@/store/realtimeStore"
-import type { MeSessionsQuery, MeStartSessionRequest } from "@/types/api"
+import type { MeCreateTopupRequest, MeSessionsQuery, MeStartSessionRequest } from "@/types/api"
 
 export const meKeys = {
   activeSession: ["me", "activeSession"] as const,
@@ -9,6 +9,7 @@ export const meKeys = {
   sessionDetail: (id: string) => ["me", "sessions", id] as const,
   commandStatus: (correlationId: string | null) => ["me", "commandStatus", correlationId] as const,
   wallet: (params: MeSessionsQuery) => ["me", "wallet", params] as const,
+  topup: (id: string) => ["me", "topups", id] as const,
 }
 
 export function useStartSession() {
@@ -136,5 +137,33 @@ export function useMeWallet(params: MeSessionsQuery = {}, enabled = true) {
     queryFn: () => meService.wallet(params),
     enabled,
     placeholderData: (prev) => prev,
+  })
+}
+
+/** Gera o Pix (`POST /api/me/wallet/topups`) — 201 com o QR/copia-e-cola já prontos. */
+export function useCreateTopup() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: MeCreateTopupRequest) => meService.createTopup(payload),
+    // Semeia o cache com a resposta do próprio POST — a tela de "aguardando pagamento" não
+    // precisa de um GET extra só para mostrar o QR que acabou de vir na resposta da criação.
+    onSuccess: (topup) => queryClient.setQueryData(meKeys.topup(topup.id), topup),
+  })
+}
+
+/**
+ * Consulta o Pix por polling — mecanismo PRINCIPAL de descoberta de pagamento
+ * enquanto `topup.updated` (SSE) não existe no backend real (ver
+ * `realtimeEventHandlers.ts` e o comentário em `TopupUpdatedEvent`,
+ * `types/api.ts`). Mesmo padrão de `useCommandStatus`: intervalo curto
+ * enquanto `PENDING`, desliga sozinho ao chegar num status terminal.
+ */
+export function useMeTopup(id: string | null, intervalMs = 3000) {
+  return useQuery({
+    queryKey: meKeys.topup(id ?? ""),
+    queryFn: () => meService.getTopup(id as string),
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.status === "PENDING" ? intervalMs : false),
+    refetchIntervalInBackground: false,
   })
 }

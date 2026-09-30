@@ -2,12 +2,14 @@ import { api } from "./api"
 import type {
   MeActiveSessionResponse,
   MeCommandStatusResponse,
+  MeCreateTopupRequest,
   MeSessionDetail,
   MeSessionsListResponse,
   MeSessionsQuery,
   MeStartSessionRequest,
   MeStartSessionResponse,
   MeStopSessionResponse,
+  MeTopupDTO,
   MeWalletQuery,
   MeWalletResponse,
 } from "@/types/api"
@@ -55,6 +57,18 @@ export const meService = {
 
   async wallet(params: MeWalletQuery = {}): Promise<MeWalletResponse> {
     const { data } = await api.get<MeWalletResponse>("/api/me/wallet", { params })
+    return data
+  },
+
+  /** 201 — o QR/copia-e-cola já vem prontos (a rota real ainda não existe no backend, ver PROGRESSO.md §F5.1). */
+  async createTopup(payload: MeCreateTopupRequest): Promise<MeTopupDTO> {
+    const { data } = await api.post<MeTopupDTO>("/api/me/wallet/topups", payload)
+    return data
+  },
+
+  /** Consulta o status real do Pix — mecanismo PRINCIPAL de descoberta (polling), ver `useMeTopup`. */
+  async getTopup(id: string): Promise<MeTopupDTO> {
+    const { data } = await api.get<MeTopupDTO>(`/api/me/wallet/topups/${id}`)
     return data
   },
 }

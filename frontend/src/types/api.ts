@@ -1041,6 +1041,48 @@ export interface MeWalletResponse {
   pageSize: number
 }
 
+// ---- POST /api/me/wallet/topups, GET /api/me/wallet/topups/:id -----------------
+
+/**
+ * Recarga de saldo via Pix (F5.1 — ver `.claude/agent-memory/nova/
+ * decisoes-f5-pagamento-cielo.md`). `PENDING` é o único estado "vivo": a UI
+ * descobre `PAID`/`EXPIRED`/`FAILED` primariamente por polling de
+ * `GET /api/me/wallet/topups/:id` (mesmo espírito de `MeCommandStatusResponse`
+ * /`useCommandStatus`) — `topup.updated` (ver `RealtimeEvent` abaixo) já está
+ * PREPARADO no cliente, mas o backend real ainda não emite esse evento.
+ */
+export type MeTopupStatus = "PENDING" | "PAID" | "EXPIRED" | "FAILED"
+
+export interface MeCreateTopupRequest {
+  /** Entre `TOPUP_MIN_AMOUNT_CENTS` e `TOPUP_MAX_AMOUNT_CENTS` (ver `lib/topupAmount.ts`) — R$ 10,00 a R$ 500,00. */
+  amountCents: number
+  /** Opcional por enquanto — D3 (se a Cielo exige CPF no Pix) segue em aberto com o dono, ver PROGRESSO.md. */
+  cpf?: string
+}
+
+export interface MeTopupDTO {
+  id: string
+  status: MeTopupStatus
+  amountCents: number
+  /** "Copia e cola" do Pix (EMV) — `null` só se a geração falhar antes de existir (não deveria acontecer no 201). */
+  qrCodeString: string | null
+  /** Base64 SEM o prefixo `data:image/...` — quem exibe monta o `data:` URL. */
+  qrCodeImageBase64: string | null
+  expiresAt: string | null
+  paidAt: string | null
+  createdAt: string
+  /** Parte do `amountCents` que quitou `openDebtCents` automaticamente — 0 quando não havia dívida em aberto. */
+  debtSettledCents: number
+}
+
+export type MeTopupErrorCode =
+  | "TOPUP_AMOUNT_OUT_OF_RANGE"
+  | "CPF_REQUIRED"
+  | "INVALID_CPF"
+  | "TOO_MANY_PENDING_TOPUPS"
+  | "PAYMENT_GATEWAY_UNAVAILABLE"
+  | "TOPUP_NOT_FOUND"
+
 // ---------------------------------------------------------------------------
 // AuditLog (ADMIN-only) — trilha de "quem fez o quê, onde e como" no painel
 // admin. Contrato traduzido do desenho da Nova (2026-09-17), decisões
@@ -1206,6 +1248,21 @@ export interface WalletUpdatedEvent extends RealtimeEventBase {
 }
 
 /**
+ * PREPARADO, NÃO CONECTADO: o crédito Pix (F5.1) chega por webhook→worker
+ * reconsultando a Cielo (`decisoes-f5-pagamento-cielo.md` item 3 — o webhook
+ * é só uma dica, nunca verdade), e esse caminho ainda não existe no backend
+ * real. O handler (`realtimeEventHandlers.ts`) e o tipo já existem para o dia
+ * em que existir; até lá `useMeTopup` sobrevive sozinho por polling (mesmo
+ * padrão de `MeCommandStatusResponse`/`useCommandStatus`) — nunca dependa só
+ * deste evento para a tela de recarga Pix funcionar.
+ */
+export interface TopupUpdatedEvent extends RealtimeEventBase {
+  type: "topup.updated"
+  topupId: string
+  status: MeTopupStatus
+}
+
+/**
  * `status` é o mesmo enum de `Connector.status` (`ConnectorStatus`), nunca um valor novo inventado para o evento.
  * Também chega a TODO motorista logado pelo canal público `ui:ev:stations` (mapa "perto de mim") —
  * por isso o payload é só o que já é público na resposta de `GET /api/sites`; nada sensível entra aqui.
@@ -1240,6 +1297,7 @@ export type RealtimeEvent =
   | SessionMetricsEvent
   | SessionStatusEvent
   | WalletUpdatedEvent
+  | TopupUpdatedEvent
   | ChargePointStatusEvent
   | AdminEntityChangedEvent
   | DashboardDirtyEvent

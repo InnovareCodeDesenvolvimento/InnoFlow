@@ -38,6 +38,11 @@ export const mockUsers: MockUser[] = [
   // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
   // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).
   { id: "user_driver", name: "Carla Motorista", email: "motorista@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // Motorista com DÍVIDA em aberto (F5.1 — recarga Pix) — conta separada da de cima de
+  // propósito: `user_driver` é usada por `pwa-fluxo-recarga.spec.ts` com saldo/dívida
+  // exatos (50,00 / 0), então semear dívida nela quebraria aquele teste. `getWalletState`
+  // (`mocks/meData.ts`) reconhece este id e nasce com `openDebtCents` > 0.
+  { id: "user_driver_devedor", name: "Diego Devedor", email: "devedor@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 
 export const mockSites: Site[] = [

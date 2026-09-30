@@ -20,9 +20,11 @@ import {
   type Scope,
 } from "./reportsAggregate"
 import {
+  createMockTopup,
   getCommandStatus,
   getMockActiveSession,
   getMockSessionDetail,
+  getMockTopup,
   getMockWallet,
   getPublicChargePointCard,
   listMockSessions,
@@ -928,5 +930,30 @@ export const handlers = [
     const url = new URL(request.url)
     const { page, pageSize } = parsePagination(url, 20)
     return HttpResponse.json(getMockWallet(scope.user.userId, page, pageSize))
+  }),
+
+  // ---- Recarga de saldo via Pix (F5.1) -----------------------------------------
+  // A rota real ainda NÃO existe no backend (ver `.claude/agent-memory/nova/
+  // decisoes-f5-pagamento-cielo.md`) — `mocks/meData.ts` simula com atraso
+  // realista (8s) pra provar o estado "PENDING" (QR/copia-e-cola) antes de
+  // `PAID`, mesmo espírito dos comandos OCPP fire-and-forget acima.
+  http.post("/api/me/wallet/topups", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const body = (await request.json().catch(() => ({}))) as { amountCents?: unknown; cpf?: unknown }
+    const result = await createMockTopup(scope.user.userId, body.amountCents)
+    if (!result.ok) {
+      const status = result.code === "TOO_MANY_PENDING_TOPUPS" ? 409 : 400
+      return HttpResponse.json(errorBody(result.message, result.code), { status })
+    }
+    return HttpResponse.json(result.topup, { status: 201 })
+  }),
+
+  http.get("/api/me/wallet/topups/:id", ({ request, params }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const topup = getMockTopup(String(params.id))
+    if (!topup) return HttpResponse.json(errorBody("Recarga não encontrada.", "TOPUP_NOT_FOUND"), { status: 404 })
+    return HttpResponse.json(topup)
   }),
 ]

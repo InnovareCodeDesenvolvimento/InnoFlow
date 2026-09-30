@@ -72,6 +72,15 @@ export function handleRealtimeEvent(event: RealtimeEvent, queryClient: QueryClie
       queryClient.invalidateQueries({ queryKey: driversKeys.lists })
       return
 
+    // PREPARADO, NÃO CONECTADO (F5.1): o backend real ainda não emite este
+    // evento — ver o comentário em `TopupUpdatedEvent` (`types/api.ts`). O
+    // handler já existe para o dia em que existir; `useMeTopup` sobrevive
+    // sozinho por polling enquanto isso, então esta linha é só um atalho
+    // (refetch imediato em vez de esperar o próximo tick do polling).
+    case "topup.updated":
+      queryClient.invalidateQueries({ queryKey: meKeys.topup(event.topupId) })
+      return
+
     case "chargepoint.status":
       queryClient.invalidateQueries({ queryKey: connectorsKeys.all })
       queryClient.invalidateQueries({ queryKey: ["dashboard", "live"] })

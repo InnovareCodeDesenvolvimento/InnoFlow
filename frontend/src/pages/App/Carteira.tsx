@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { AlertTriangle, PlusCircle, Wallet } from "lucide-react"
+import { Link } from "react-router-dom"
+import { AlertTriangle, ChevronRight, QrCode, Wallet } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
@@ -13,10 +14,10 @@ import { formatCents, formatDateTime, WALLET_ENTRY_TYPE_LABELS } from "@/lib/uti
 const PAGE_SIZE = 20
 
 /**
- * `/app/carteira` — saldo, dívida (se houver) e extrato paginado. "Adicionar
- * saldo" é decisão explícita do dono: SEM contato de operador específico
- * ainda (ver PROGRESSO.md §PWA) — por isso o card explica o caminho manual
- * em vez de esconder o botão mudo/desabilitado sem explicação nenhuma.
+ * `/app/carteira` — saldo, dívida (se houver) e extrato paginado.
+ * "Adicionar saldo" leva à recarga via Pix (F5.1, `/app/carteira/adicionar`)
+ * — a rota real ainda não existe no backend, validado só contra mock MSW
+ * (ver handoff da Lyra em PROGRESSO.md).
  */
 export function Carteira() {
   const [page, setPage] = useState(1)
@@ -61,15 +62,19 @@ export function Carteira() {
             </div>
           )}
 
-          <div className="mt-3 rounded-2xl border border-dashed border-border-strong bg-muted/40 p-4">
-            <p className="flex items-center gap-2 text-sm font-bold text-ink">
-              <PlusCircle className="h-4 w-4 text-ink-softer" aria-hidden="true" />
-              Adicionar saldo
-            </p>
-            <p className="mt-1 text-xs text-ink-softer">
-              Recarga por Pix chega em breve. Para adicionar saldo agora, procure o operador do eletroposto.
-            </p>
-          </div>
+          <Link
+            to="/app/carteira/adicionar"
+            className="pressable mt-3 flex items-center gap-3 rounded-2xl bg-accent/10 p-4 ring-1 ring-accent/30 transition-colors hover:bg-accent/15"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/20 text-accent-700">
+              <QrCode className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-accent-700">Adicionar saldo</p>
+              <p className="text-xs text-ink-softer">Recarregue via Pix — o saldo cai na hora.</p>
+            </div>
+            <ChevronRight className="h-5 w-5 shrink-0 text-accent-700" aria-hidden="true" />
+          </Link>
 
           <h2 className="mb-2 mt-6 text-sm font-bold text-ink">Extrato</h2>
 

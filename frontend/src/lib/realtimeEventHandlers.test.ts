@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { publicSitesKeys } from "@/hooks/useSites"
+import { meKeys } from "@/hooks/useMeSessions"
 import { makeSite } from "@/test/siteFixtures"
 import { handleRealtimeEvent, isChargePointInLoadedStations } from "./realtimeEventHandlers"
 import type { PaginatedResponse, PublicSite, RealtimeEvent } from "@/types/api"
@@ -44,5 +45,18 @@ describe("chargepoint.status × estações carregadas", () => {
     const spy = vi.spyOn(client, "invalidateQueries")
     handleRealtimeEvent(statusEvent("qualquer"), client)
     expect(spy).not.toHaveBeenCalledWith({ queryKey: publicSitesKeys.all })
+  })
+})
+
+// PREPARADO, NÃO CONECTADO (F5.1): o backend real ainda não emite `topup.updated`
+// (ver comentário em `TopupUpdatedEvent`, `types/api.ts`) — este teste prova que o
+// handler está pronto para quando existir, mesmo sem o mock disparar o evento.
+describe("topup.updated", () => {
+  it("invalida só o topup específico (útil quando o evento chegar de verdade)", () => {
+    const client = new QueryClient()
+    const spy = vi.spyOn(client, "invalidateQueries")
+    const event: RealtimeEvent = { type: "topup.updated", occurredAt: new Date().toISOString(), topupId: "topup_1", status: "PAID" }
+    handleRealtimeEvent(event, client)
+    expect(spy).toHaveBeenCalledWith({ queryKey: meKeys.topup("topup_1") })
   })
 })
