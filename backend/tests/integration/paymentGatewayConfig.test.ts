@@ -39,7 +39,7 @@ const URL_BANCO = BASE_URL.replace(/\/[^/?]+(\?|$)/, `/${NOME_BANCO}$1`)
 const SEGREDOS = {
   merchantKey: 'MKEY-super-secreta-aaa111',
   sopClientSecret: 'SOPSECRET-super-secreto-bbb222',
-  webhookHeaderSecret: 'WHSECRET-super-secreto-ccc333',
+  webhookHeaderSecret: 'WHSECRET-super-secreto-ccc333-0123456789abcdef', // 48 caracteres (mínimo 32, B2)
 }
 
 type Mods = {
@@ -276,9 +276,9 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
 
   // ----------------------------------------------------------------------------------------------
   describe('PUT — validação e segredos', () => {
-    it('corpo inválido: 400 VALIDATION_ERROR (campo desconhecido, vazio, segredo do webhook < 8, ambiente inválido)', async () => {
+    it('corpo inválido: 400 VALIDATION_ERROR (campo desconhecido, vazio, segredo do webhook < 32, ambiente inválido)', async () => {
       const admin = await novoUsuario('ADMIN', 'admin')
-      for (const body of [{ merchantkey: 'x' }, {}, { webhookHeaderSecret: '1234567' }, { environment: 'staging' }, { confirmProduction: true }, { cardEnabled: 'sim' }]) {
+      for (const body of [{ merchantkey: 'x' }, {}, { webhookHeaderSecret: '1234567' }, { webhookHeaderSecret: 'x'.repeat(31) }, { webhookHeaderSecret: ' ' + 'x'.repeat(31) + ' ' }, { environment: 'staging' }, { confirmProduction: true }, { cardEnabled: 'sim' }]) {
         const res = await put(admin, body)
         expect(res.status, dumpSeguro(body)).toBe(400)
         expect(res.body.code).toBe('VALIDATION_ERROR')

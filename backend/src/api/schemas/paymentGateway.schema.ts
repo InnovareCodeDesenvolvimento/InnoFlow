@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SEGREDO_WEBHOOK_TAMANHO_MINIMO } from '../../core/pagamentos/verificarSegredoWebhook'
 
 /**
  * `PUT /api/admin/payment-gateway` (F5.5) — contrato literal de `UpdatePaymentGatewayConfigRequest`
@@ -13,7 +14,8 @@ export const updatePaymentGatewayConfigSchema = z
     merchantKey: z.string().trim().min(1).max(512).optional(),
     sopClientId: z.string().trim().min(1).max(256).optional(),
     sopClientSecret: z.string().trim().min(1).max(512).optional(),
-    webhookHeaderSecret: z.string().trim().min(8).max(256).optional(),
+    // Mínimo 32 (B2, F5.7): é a única autenticação do webhook — o gerador da tela (frontend) já faz 40 caracteres.
+    webhookHeaderSecret: z.string().trim().min(SEGREDO_WEBHOOK_TAMANHO_MINIMO, `O segredo do webhook precisa ter ao menos ${SEGREDO_WEBHOOK_TAMANHO_MINIMO} caracteres.`).max(256).optional(),
     cardEnabled: z.boolean().optional(),
     pixEnabled: z.boolean().optional(),
     confirmProduction: z.literal(true).optional(),

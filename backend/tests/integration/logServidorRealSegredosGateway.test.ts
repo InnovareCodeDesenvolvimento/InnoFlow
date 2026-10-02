@@ -33,7 +33,7 @@ const CONTROLE_POSITIVO = 'CONTROLEPOSITIVO-valor-visivel-no-log'
 const SEGREDOS_PUT = {
   merchantKey: 'MKEY-log-real-bbb222',
   sopClientSecret: 'SOPSECRET-log-real-ccc333',
-  webhookHeaderSecret: 'WHSECRET-log-real-ddd444',
+  webhookHeaderSecret: 'WHSECRET-log-real-ddd444-0123456789abcdef', // 40 caracteres (mínimo 32, B2)
 }
 
 function portaLivre(): Promise<number> {
