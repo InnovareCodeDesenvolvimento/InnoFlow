@@ -99,9 +99,11 @@ describe('Redis fora do ar — o que fica na fila do publish e o que acontece de
   // o `publish()` DESCARTA TODO evento, para sempre, com o Redis já saudável (só a reinicialização do processo conserta) — SSE, wallet.updated,
   // session.*, chargepoint.status param em silêncio e o log diz "Redis indisponível" com a conexão `ready`. `connectionIsDown` não ajuda:
   // 'connect' não conta como queda (de propósito: pode ser o 1º uso da conexão preguiçosa).
-  // `it.fails`: quando o Vega corrigir (ex.: prazo de vida para a vaga de pendente, ou liberar as vagas no 'close'/'ready'), isto passa a
-  // FALHAR e vira `it`. Confirmado numa cópia como `it` que ele falha pelo motivo certo (nenhum dos eventos NOVOS chega com o Redis saudável).
-  it.fails('(BUG) depois de um Redis que aceitou a conexão e nunca respondeu (status "connect") e voltou, o publish VOLTA a entregar — o contador de pendentes não pode vazar', async () => {
+  // CORRIGIDO (Vega, F5.7 B1): o `it.fails` virou `it`, asserção INALTERADA. Causa raiz: o PUBLISH tem a flag `loading` e o ioredis o ESCREVE no
+  // socket já em 'connect' (os outros comandos esperam o 'ready' na fila offline) — `bus.ts` agora NÃO publica em 'connect' (descarta, best-effort),
+  // então o órfão não nasce; e as vagas têm idade máxima (`core/realtime/publishSlots.ts`) como defesa em profundidade. Mutação provada: sem o
+  // descarte em 'connect' este teste volta a falhar (0 eventos novos entregues).
+  it('(BUG corrigido — F5.7 B1) depois de um Redis que aceitou a conexão e nunca respondeu (status "connect") e voltou, o publish VOLTA a entregar — o contador de pendentes não pode vazar', async () => {
     const userId = `fila-connect-${Math.random().toString(36).slice(2, 8)}`
     const { recebidos, fechar } = await assinar(userId)
     try {

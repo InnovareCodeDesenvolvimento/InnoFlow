@@ -4,6 +4,7 @@ import { logger } from '../lib/logger'
 import { createLogGate } from '../lib/rateLimitedLog'
 import { DeadlineExceededError, withDeadline } from '../lib/withDeadline'
 import { createChannelHub, type ChannelHub } from '../core/realtime/channelHub'
+import { createPublishSlots } from '../core/realtime/publishSlots'
 import type { RealtimeEvent } from './events'
 
 /**
@@ -94,12 +95,31 @@ export const MAX_PUBLISHES_IN_FLIGHT = 100
  */
 export const PUBLISH_CIRCUIT_OPEN_MS = 1_000
 
-/** A conexão SABE que está fora (reconectando/fechada): enfileirar só empilha comando que ninguém vai esperar. Inclui só o que é certeza — 'connecting' pode ser o primeiro uso da conexão preguiçosa. */
+/**
+ * Idade máxima de uma vaga de publish pendente (rede de segurança — ver `core/realtime/publishSlots.ts`). Um publish de verdade
+ * liquida em milissegundos (segundos com o Redis lento); passou disso e ainda ocupa a vaga, o ioredis o perdeu. Generoso de propósito:
+ * com o Redis TRAVADO e a conexão `ready` os comandos enfileirados são legítimos e voltam em lote — esta idade não pode "abrir" o teto
+ * durante uma pane longa a ponto de empilhar mais eventos velhos do que `MAX_PUBLISHES_IN_FLIGHT` por janela.
+ */
+export const PUBLISH_SLOT_MAX_AGE_MS = 5 * 60_000
+
+/**
+ * A conexão NÃO deve receber o comando agora (nome histórico `connectionIsDown`): enfileirar só empilharia comando que ninguém vai esperar, ou o perderia.
+ *  - `reconnecting`/`close`/`end`: a conexão SABE que está fora.
+ *  - `connect` (TCP aberto, ainda sem `ready`): CAUSA RAIZ do vazamento do contador (B1, Íris 02/10/2026). O PUBLISH é um comando
+ *    com a flag `loading`, que o ioredis ESCREVE no socket já em `connect` (os demais comandos esperam o `ready` na fila offline).
+ *    Se o socket morre antes do `ready` (Redis que aceita e não responde — BGSAVE/fork, host sobrecarregado, partição), o ioredis só
+ *    preserva e reenvia os comandos já enviados quando o status ANTERIOR era `ready`: este fica ÓRFÃO — nem reenviado nem
+ *    rejeitado (`maxRetriesPerRequest: null`). Descartar aqui custa só a janela de 1 RTT entre o TCP e o `ready` (evento de UI é
+ *    best-effort e o polling cobre) e elimina o órfão na origem.
+ * `connecting` (inclui o PRIMEIRO uso da conexão preguiçosa) fica de fora: aí o comando vai para a fila offline, que o ioredis
+ * mantém e descarrega no `ready`.
+ */
 function connectionIsDown(connection: Redis): boolean {
-  return connection.status === 'reconnecting' || connection.status === 'close' || connection.status === 'end'
+  return connection.status === 'reconnecting' || connection.status === 'close' || connection.status === 'end' || connection.status === 'connect'
 }
 
-let publishesInFlight = 0
+const publishSlots = createPublishSlots({ max: MAX_PUBLISHES_IN_FLIGHT, maxAgeMs: PUBLISH_SLOT_MAX_AGE_MS })
 let waitSkippedUntil = 0
 const logPublishFailure = createLogGate(10_000)
 
@@ -120,25 +140,42 @@ const logPublishFailure = createLogGate(10_000)
  */
 export async function publish(channel: string, event: RealtimeEvent): Promise<void> {
   let pending: Promise<number>
+  let slotId: number
   try {
     const connection = getPublisher()
-    if (connectionIsDown(connection) || publishesInFlight >= MAX_PUBLISHES_IN_FLIGHT) {
+    if (connectionIsDown(connection)) {
       logPublishFailure((suppressed) => logger.warn({ channel, type: event.type, status: connection.status, suppressed }, '[realtime] Redis indisponível — evento de UI descartado (best-effort)'))
       return
     }
-    pending = connection.publish(channel, JSON.stringify(event))
+    const slot = publishSlots.tryAcquire()
+    if (slot.reclaimed > 0) {
+      logger.error({ reclaimed: slot.reclaimed, maxAgeMs: PUBLISH_SLOT_MAX_AGE_MS }, '[realtime] vagas de publish pendentes recuperadas por idade — comandos que o ioredis perdeu (nem resolveram nem rejeitaram)')
+    }
+    if (slot.id === null) {
+      logPublishFailure((suppressed) => logger.warn({ channel, type: event.type, status: connection.status, suppressed }, '[realtime] Redis indisponível — evento de UI descartado (best-effort)'))
+      return
+    }
+    slotId = slot.id
+    try {
+      pending = connection.publish(channel, JSON.stringify(event))
+    } catch (err) {
+      publishSlots.release(slotId) // não chegou a ser enviado: a vaga volta
+      throw err
+    }
   } catch (err) {
     logPublishFailure((suppressed) => logger.error({ err, channel, type: event.type, suppressed }, '[realtime] falha ao publicar evento (best-effort, não propaga)'))
     return
   }
 
-  publishesInFlight++
-  // O contador desce quando o comando de fato liquida (não no prazo): é ele que mede a fila do ioredis.
-  // É também quem registra a falha do comando, aguardado ou não (o `await` abaixo não loga erro do Redis: seria em dobro).
+  // A vaga desce quando o comando de fato liquida (não no prazo): é ela que mede a fila do ioredis. `release` é idempotente (a vaga
+  // pode já ter sido recuperada por idade). É também quem registra a falha do comando, aguardado ou não (o `await` abaixo não loga
+  // erro do Redis: seria em dobro).
   pending.then(
-    () => publishesInFlight--,
+    () => {
+      publishSlots.release(slotId)
+    },
     (err: unknown) => {
-      publishesInFlight--
+      publishSlots.release(slotId)
       logPublishFailure((suppressed) => logger.error({ err, channel, type: event.type, suppressed }, '[realtime] falha ao publicar evento (best-effort, não propaga)'))
     },
   )
