@@ -78,7 +78,8 @@ async function withFakeRemoteStartResponder<T>(chargePointId: string, status: 'A
     try {
       const payload = JSON.parse(message) as { correlationId: string; method: string }
       if (payload.method !== 'RemoteStartTransaction') return
-      void publisher.publish(`ocpp:reply:${payload.correlationId}`, JSON.stringify({ correlationId: payload.correlationId, ok: true, result: { status } }))
+      // `.catch`: o `disconnect()` do `finally` pode chegar antes do ACK do PUBLISH — sem isto o ioredis rejeita ("Connection is closed") sem ouvinte e o vitest sai com código 1 mesmo com tudo verde.
+      publisher.publish(`ocpp:reply:${payload.correlationId}`, JSON.stringify({ correlationId: payload.correlationId, ok: true, result: { status } })).catch(() => {})
     } catch {
       // mensagem malformada — ignora
     }

@@ -25,7 +25,10 @@ function capturarSaidaDoLogger(objetoLogado: Record<string, unknown>): string {
       cb()
     },
   })
-  const logger = pino({ redact: { paths: REDACT_PATHS, censor: '[redacted]' } }, stream)
+  // `timestamp: false` + `base: null`: sem `time` (epoch em ms, 13 dígitos) e sem `pid` na saída. O CVV de teste ('737', 3 dígitos)
+  // é substring de qualquer número — o `time` do pino o continha em ~1% das execuções (ex. 1790981287375) e o teste
+  // `not.toContain('737')` falhava ao acaso, sem nenhum vazamento.
+  const logger = pino({ timestamp: false, base: null, redact: { paths: REDACT_PATHS, censor: '[redacted]' } }, stream)
   logger.info(objetoLogado, 'pagamento cielo (teste)')
   return chunks.join('')
 }
