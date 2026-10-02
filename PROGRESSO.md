@@ -975,3 +975,45 @@ consumido de verdade.
 credenciais de sandbox. Pendências conhecidas, nenhuma bloqueante: CI não define
 `PAYMENT_SECRETS_KEY` (achado da Íris); tela de configuração do gateway (`PaymentGatewayConfig`
 via admin) ainda não existe — hoje tudo usa env.
+
+## Portão final da F5 (Órion, 2026-10-02) — sandbox LIBERADO, produção BLOQUEADA
+
+Revisão adversarial de toda a superfície de pagamento (webhook, cobrança no cartão, config do
+gateway, guarda de produção do Atlas). **0 crítico, 3 alto, 6 médio, 12 baixo.** A guarda que
+impede o `FakeAdapter` em produção foi considerada sólida (sem caminho por env, cache, falha de
+decifração ou race de boot).
+
+**ALTO — bloqueiam produção com dinheiro real:**
+1. **Captura de cartão sem rede de segurança** — se Cielo, Redis ou `PAYMENT_SECRETS_KEY` falharem
+   por mais de ~75 s no Stop, o `PaymentIntent` fica em `CAPTURE_PENDING` para sempre: energia
+   entregue, nada cobrado. Falta varredor que re-enfileire por idade + alerta.
+2. **Sandbox em instância pública = cobrança grátis** (cartões de teste da Cielo são públicos e o
+   cadastro é aberto). A coerência atual compara ambiente×URL, nunca com `NODE_ENV`. Em produção
+   real o ambiente tem que ser `production`; enquanto for sandbox, restringir a testadores.
+3. **Porta 9000 do OCPP sem resposta do dono** (crua `ws://` ou WSS?) — agora o Basic Auth do
+   carregador protege medições que viram cobrança de cartão.
+
+**MÉDIO:** captura com status transitório vira FAILED + dívida de 100% (e pode cobrar 2x); PUT do
+gateway sem step-up (ADMIN comprometido desvia o dinheiro) e sem alerta; DTO/readiness não detecta
+segredo indecifrável; sem marca de ambiente em `PaymentIntent`/`PaymentMethod` (cartões de sandbox
+sobrevivem à virada para produção); Stop rejeitado fecha a sessão sem confirmar o carregador
+(pré-existente da F4); sessão que nunca recebe `StopTransaction` deixa a pré-auth presa.
+**BAIXO relevantes:** token do caminho do webhook em claro no log; `err.body.*` da Cielo não
+coberto pelo redact; segredos de webhook com mínimo de apenas 8; `mutation.variables` guarda
+segredos em memória no front; `creditarTopupPix` não confere valor/`merchantOrderId`.
+
+**Go-live (condições verificáveis):** itens acima corrigidos; `GET /api/admin/payment-gateway`
+em produção devolvendo `environment:"production"`; porta 9000 em WSS com a crua fechada;
+`PAYMENT_ALLOW_FAKE_ADAPTER` ausente nos 3 Apps; `PAYMENT_SECRETS_KEY` com backup em dois lugares;
+`CIELO_WEBHOOK_PATH_TOKEN` e segredo do header novos (32+ caracteres) cadastrados no Site da
+Cielo; hosts de produção, OAuth do SOP e `GET /1/card/{token}` confirmados com a Cielo;
+`PUBLIC_API_BASE_URL` definida; `CIELO_API_BASE_URL` NÃO definida (deixar derivar); cartões de
+sandbox desativados; testes reais com R$ 10 (Pix) e cartão (piso de pré-auth é R$ 50: baixar por
+env temporariamente) reconciliados com o extrato Cielo; alertas lidos por alguém (logs `alert:`);
+plano para chargeback/estorno (hoje só gravado em `WebhookEvent`).
+
+**Rotação pós-deploy:** segredo do webhook (vazou no log entre `4e66951` e `55e2983` — verificar o
+log do EasyPanel por `x-innoelektron-webhook-secret` ≠ `[redacted]`); MerchantKey/SOP secret se
+vistos fora do cofre; senhas ADMIN/seed. **Decisão barata agora (ainda sem dados reais):**
+versionar o ciphertext (`v1:<kid>:`) e suportar `PAYMENT_SECRETS_KEY_PREVIOUS` para rotacionar a
+chave sem perder cartões salvos.
