@@ -163,6 +163,16 @@ enum PaymentIntentStatus {
   PAID // Pix: webhook (reconsultado) confirmou o pagamento — dispara crédito na carteira
 }
 
+// Ambiente do gateway Cielo sob o qual um PaymentMethod/PaymentIntent nasceu
+// (F5.7, achado M4 do Órion). Token de cartão e intent são do ambiente que os
+// criou: um token SANDBOX não cobra em PRODUCTION e um intent em trânsito seria
+// reconsultado no host errado. É o AMBIENTE EFETIVO do gateway no instante da
+// criação — a decisão de qual é o ambiente efetivo é do Vega, não do banco.
+enum PaymentEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
 enum WalletEntryType {
   TOPUP_PIX
   TOPUP_REFUND
@@ -741,6 +751,13 @@ model PaymentMethod {
   expiryMonth              Int?
   expiryYear               Int?
 
+  // Ambiente Cielo em que o cartão foi tokenizado (F5.7). O token só vale
+  // nesse ambiente — listar/cobrar filtra por este campo. DEFAULT SANDBOX:
+  // toda linha pré-existente nasceu sob sandbox ou sob o simulador (nunca
+  // houve dinheiro real), então SANDBOX é o rótulo verdadeiro do legado.
+  // Sem índice próprio: ver migration 20261002120000_payment_environment.
+  environment PaymentEnvironment @default(SANDBOX)
+
   isDefault Boolean  @default(false)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -762,6 +779,14 @@ model PaymentIntent {
 
   purpose  PaymentIntentPurpose
   provider PaymentProvider
+
+  // Ambiente Cielo sob o qual o intent foi criado (F5.7) — define em qual host
+  // (sandbox/produção) ele deve ser reconsultado/capturado/cancelado, e
+  // bloqueia a troca de ambiente do gateway enquanto houver intent "vivo"
+  // nele. DEFAULT SANDBOX pelo mesmo motivo de PaymentMethod.environment
+  // (legado nunca processou dinheiro real). Sem índice próprio: ver migration
+  // 20261002120000_payment_environment.
+  environment PaymentEnvironment @default(SANDBOX)
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
