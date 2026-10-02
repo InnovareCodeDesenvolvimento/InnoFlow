@@ -158,6 +158,47 @@ um `warn` com `alert: "ocpp_auth_lockout"` (procure por ele nos logs). Pergunta 
 (Vulcano): a porta 9000 é publicada crua ou atrás de TLS (WSS)? Basic Auth em `ws://` trafega a
 senha em claro; o ideal é WSS obrigatório e a porta crua não exposta.
 
+### Gateway de pagamento (Cielo) — banco manda, env é reserva (F5.5, 02/10/2026)
+
+A conta Cielo da plataforma agora é configurada pela tela **Admin → Gateway de pagamento**
+(`GET`/`PUT /api/admin/payment-gateway`, só ADMIN), sem editar variáveis no EasyPanel.
+**Precedência:** o que foi salvo na tela (tabela `PaymentGatewayConfig`) **vale mais** que a env;
+sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
+
+- **`merchantId` + `merchantKey` andam juntos** (idem `sopClientId` + `sopClientSecret`): se a tela
+  salvou qualquer um do par, o par INTEIRO vem do banco — nunca "merchantId novo + chave velha do
+  env". Por isso a tela exige reenviar a chave ao trocar o `merchantId` quando o par ainda vem do env.
+  O segredo do header do webhook é independente (banco > `CIELO_WEBHOOK_HEADER_SECRET` > nenhum).
+- **Segredos ficam cifrados no banco** (AES-256-GCM) com `PAYMENT_SECRETS_KEY`, que **só existe na
+  env do servidor**. Sem ela a tela recusa gravar segredo (503 `PAYMENT_SECRETS_KEY_MISSING`); **se a
+  chave for trocada/perdida, os segredos salvos não decifram e o gateway fica indisponível (503) —
+  nunca cai no simulador.** Faça backup da chave junto com os demais segredos.
+- **Ambiente decide as URLs.** `environment` salvo na tela escolhe `sandbox`/`production` e, junto, os
+  hosts da Cielo. Se `CIELO_API_BASE_URL`/`CIELO_API_QUERY_BASE_URL` forem definidas **explicitamente**
+  no servidor, elas ganham — e se contradisserem o ambiente (production com URL de sandbox, ou
+  sandbox com o host oficial de produção) o servidor **recusa** (503) e loga `alert:
+  payment_gateway_environment_url_mismatch`. Em geral **não defina essas duas envs**: deixe derivar.
+  ⚠️ Hosts de produção (`https://api.cieloecommerce.cielo.com.br` / `https://apiquery.cieloecommerce.cielo.com.br`)
+  **a confirmar na doc da Cielo antes do go-live** — não foram testados contra a conta real.
+- **Virar produção** na tela exige confirmação digitada e que todo meio habilitado esteja pronto
+  (`readiness`); senão 409 `GATEWAY_NOT_READY` com a lista do que falta.
+- **Cache e consistência:** a API invalida o próprio cache ao salvar; o `worker` é outro processo e
+  enxerga a mudança em **até 10 s** (TTL). Para trocar credencial com segurança, desligue o meio na
+  tela, troque, religue.
+- **Desligar cartão/Pix só bloqueia COMEÇOS novos** (cadastro de cartão, pré-autorização, novo Pix).
+  Captura, cancelamento, webhook, varredores e crédito de Pix já gerado continuam funcionando.
+- O `FakeAdapter` continua **proibido em produção**: sem credencial (banco **nem** env) o gateway
+  responde 503; falha ao ler/decifrar a config também (fail-closed).
+
+**Envs que continuam SÓ no servidor** (a tela não edita; contam como "presentes" no `readiness` se
+estiverem setadas): `PAYMENT_SECRETS_KEY`, `CIELO_WEBHOOK_PATH_TOKEN` (compõe a URL do webhook),
+`CIELO_SOP_SCRIPT_URL`, `CIELO_SOP_OAUTH_TOKEN_URL` — e, opcionalmente, `PUBLIC_API_BASE_URL`
+(ex.: `https://innoflow.innovarecode.com.br`, só para montar a `webhookUrl` mostrada na tela; sem
+ela a API deriva do próprio request, respeitando `TRUST_PROXY_HOPS`). `CIELO_MERCHANT_ID`,
+`CIELO_MERCHANT_KEY`, `CIELO_SOP_CLIENT_ID/SECRET`, `CIELO_WEBHOOK_HEADER_SECRET` e `CIELO_SANDBOX`
+viram **reserva**: ainda funcionam, e a primeira gravação pela tela parte deles (ambiente e "habilitado
+se há credenciais"), então salvar uma flag não desliga o que já funcionava.
+
 ## 1.1 Frontend
 
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
