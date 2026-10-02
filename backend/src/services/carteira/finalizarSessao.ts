@@ -1,6 +1,7 @@
 import { Prisma, type StopReason } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
+import { withDeadline } from '../../lib/withDeadline'
 import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { liquidarSessao } from './liquidarSessao'
 import { prepararFechamentoCartao } from '../pagamentos/fecharSessaoCartao'
@@ -24,6 +25,9 @@ export interface FinalizarSessaoInput {
   timestamp: Date
   stopReason: StopReason | null
 }
+
+/** Prazo para ENFILEIRAR a captura (ver comentário no ponto de uso): o Stop não pode esperar o Redis voltar. */
+const ENQUEUE_CAPTURA_PRAZO_MS = 5_000
 
 /**
  * Núcleo de "fechar uma `ChargingSession` de verdade": calcula energia
@@ -168,8 +172,11 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
   // `Accepted` antes disto — ver `stopTransaction.ts`) nem prende o lock da
   // sessão durante a chamada à Cielo.
   if (resultado.cardResultado?.action === 'CAPTURE' && resultado.cardResultado.paymentIntentId) {
-    await enqueueCapturarSessaoCartao(resultado.cardResultado.paymentIntentId).catch((err) =>
-      logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao enfileirar captura de sessão CARD (não bloqueante — o varredor não cobre CAPTURE_PENDING nunca criado; reavaliar se isto acontecer na prática)'),
+    // Com prazo: com o Redis FORA o ioredis (maxRetriesPerRequest: null, exigência do BullMQ) não rejeita — o `add` ficaria
+    // pendurado e seguraria o handler do StopTransaction. Estourado o prazo, o intent já está CAPTURE_PENDING no banco e o
+    // varredor (reenfileirarCapturasPendentes) assume; o `add` abandonado conclui sozinho se o Redis voltar (jobId idempotente).
+    await withDeadline(enqueueCapturarSessaoCartao(resultado.cardResultado.paymentIntentId), ENQUEUE_CAPTURA_PRAZO_MS, 'enfileirar captura de cartão').catch((err) =>
+      logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao enfileirar captura de sessão CARD (não bloqueante — o intent já está CAPTURE_PENDING no banco e o varredor periódico (reenfileirarCapturasPendentes, F5.7) o reenfileira em CARD_CAPTURE_RETRY_AFTER_MINUTES)'),
     )
   } else if (resultado.cardResultado?.action === 'VOID' && resultado.cardResultado.paymentIntentId) {
     await cancelarPreAutorizacaoCartao(resultado.cardResultado.paymentIntentId).catch((err) =>

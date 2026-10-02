@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import type { Queue } from 'bullmq'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
@@ -140,18 +141,57 @@ export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPor
   })
 }
 
-/** Enfileira a captura — chamado por `finalizarSessao.ts` DEPOIS do commit (mesmo padrão de `enqueueLiquidarSessaoRetry`). */
-export async function enqueueCapturarSessaoCartao(paymentIntentId: string): Promise<void> {
-  const queue = createQueue(CAPTURAR_SESSAO_CARTAO_QUEUE_NAME)
+/**
+ * Tentativas do JOB de captura (rápidas, com backoff) — a primeira linha de defesa contra um soluço da Cielo/rede.
+ * F5.7: eram 5 x 5 s exponencial (~75 s no total, curto demais: uma Cielo instável por 2 minutos esgotava tudo e o intent
+ * ficava `CAPTURE_PENDING` para sempre); agora 8 x 10 s exponencial (~21 min). Passado isso, quem assume é o varredor
+ * (`reenfileirarCapturasPendentes`), que reenfileira por horas — o job NÃO é a única chance.
+ */
+export const CAPTURA_JOB_ATTEMPTS = 8
+export const CAPTURA_JOB_BACKOFF_MS = 10_000
+
+/** Id determinístico do job: um intent nunca tem dois jobs de captura vivos ao mesmo tempo (nem o do Stop e o do varredor em paralelo). */
+export function capturaJobId(paymentIntentId: string): string {
+  return `capturar-${paymentIntentId}`
+}
+
+/** Só para teste: encolhe a política do job (8 x 10 s) para um teste não esperar minutos. Produção nunca passa isto. */
+export interface OpcoesJobCaptura {
+  attempts?: number
+  backoffMs?: number
+}
+
+export type ResultadoEnfileirarCaptura = 'ENFILEIRADO' | 'JA_EM_ANDAMENTO'
+
+/**
+ * Enfileira a captura — chamado por `finalizarSessao.ts` DEPOIS do commit (mesmo padrão de `enqueueLiquidarSessaoRetry`) e
+ * pelo varredor. Idempotente por `jobId`: se já existe um job vivo (esperando/ativo/atrasado) para este intent, não duplica
+ * (`JA_EM_ANDAMENTO`); se existe um job TERMINADO (falhou — fica retido por `removeOnFail`), é removido e recriado, porque o
+ * BullMQ ignora em silêncio um `add` com `jobId` que já existe.
+ *
+ * `queueInjetada`: o varredor reaproveita UMA fila para o lote inteiro (cada `createQueue` abre uma conexão Redis nova) e os
+ * testes usam uma fila própria; quem injeta é dono do ciclo de vida (não é fechada aqui).
+ */
+export async function enqueueCapturarSessaoCartao(paymentIntentId: string, queueInjetada?: Queue, opcoesJob?: OpcoesJobCaptura): Promise<ResultadoEnfileirarCaptura> {
+  const queue = queueInjetada ?? createQueue(CAPTURAR_SESSAO_CARTAO_QUEUE_NAME)
   try {
+    const jobId = capturaJobId(paymentIntentId)
+    const existente = await queue.getJob(jobId)
+    if (existente) {
+      const estado = await existente.getState()
+      if (estado !== 'failed' && estado !== 'completed') return 'JA_EM_ANDAMENTO'
+      await existente.remove()
+    }
     const jobData: CapturarSessaoCartaoJobData = { paymentIntentId }
     await queue.add('capturar', jobData, {
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 5_000 },
+      jobId,
+      attempts: opcoesJob?.attempts ?? CAPTURA_JOB_ATTEMPTS,
+      backoff: { type: 'exponential', delay: opcoesJob?.backoffMs ?? CAPTURA_JOB_BACKOFF_MS },
       removeOnComplete: true,
       removeOnFail: 100,
     })
+    return 'ENFILEIRADO'
   } finally {
-    await queue.close()
+    if (!queueInjetada) await queue.close()
   }
 }

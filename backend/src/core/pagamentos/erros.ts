@@ -46,3 +46,13 @@ export class ConfiguracaoGatewayIncoerenteError extends Error {
     this.name = 'ConfiguracaoGatewayIncoerenteError'
   }
 }
+
+/**
+ * `true` quando o erro significa "o gateway está INDISPONÍVEL por configuração/ambiente agora" (produção sem credencial,
+ * config ilegível/indecifrável, ambiente x URLs incoerentes) — e NÃO "esta operação falhou". Quem repete trabalho em fila
+ * (job de captura) usa isto para ADIAR sem gastar tentativas: a falha não é do intent, é da instalação, e passa quando
+ * alguém corrige a config ou o banco volta (F5.7, ALTO-1).
+ */
+export function ehGatewayIndisponivelPorConfiguracao(err: unknown): boolean {
+  return err instanceof GatewayPagamentoNaoConfiguradoError || err instanceof ConfiguracaoGatewayIndisponivelError || err instanceof ConfiguracaoGatewayIncoerenteError
+}

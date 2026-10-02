@@ -3,6 +3,7 @@ import { createRedisConnection } from '../../lib/redis'
 import { logger } from '../../lib/logger'
 import { env } from '../../lib/env'
 import { varrerPreAutorizacoesCartao } from '../../services/pagamentos/varrerPreAutorizacoesCartao'
+import { reenfileirarCapturasPendentes } from '../../services/pagamentos/reenfileirarCapturasPendentes'
 import { getPagamentoPort, isPagamentoDisponivel } from '../../services/pagamentos/pagamentoPortInstance'
 import { createQueue, VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME, type VarrerPreAutorizacoesCartaoJobData } from '../queues'
 
@@ -12,8 +13,19 @@ export function startVarrerPreAutorizacoesCartaoWorker(): Worker<VarrerPreAutori
     VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME,
     async (_job: Job<VarrerPreAutorizacoesCartaoJobData>) => {
       // Produção sem credencial Cielo (gateway bloqueado): nada para varrer, pula em silêncio em vez de falhar a cada rodada.
-      if (!(await isPagamentoDisponivel())) return
-      await varrerPreAutorizacoesCartao(await getPagamentoPort())
+      const disponivel = await isPagamentoDisponivel()
+      let erroDaVarredura: unknown = null
+      if (disponivel) {
+        try {
+          await varrerPreAutorizacoesCartao(await getPagamentoPort())
+        } catch (err) {
+          erroDaVarredura = err // não pode impedir a rede de segurança da captura (abaixo) de rodar nesta rodada
+        }
+      }
+      // F5.7: a rede de segurança da CAPTURA roda SEMPRE — com o gateway fora ela só alerta (não reenfileira nem gasta o
+      // teto), e um intent de dinheiro já entregue parado em CAPTURE_PENDING não pode ficar mudo só porque a config caiu.
+      await reenfileirarCapturasPendentes({ gatewayDisponivel: disponivel })
+      if (erroDaVarredura) throw erroDaVarredura
     },
     { connection: createRedisConnection(), concurrency: 1 }, // 1: nunca duas varreduras do mesmo lote em paralelo
   )

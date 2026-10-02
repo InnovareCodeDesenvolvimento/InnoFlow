@@ -232,6 +232,14 @@ const envSchema = z.object({
   // como o primeiro horizonte de desistência de um intent `CREATED` que nunca
   // recebeu resposta da Cielo (reconsultado antes; ver `varrerPreAutorizacoesCartao.ts`).
   CARD_PREAUTH_ABANDON_MINUTES: z.coerce.number().int().positive().default(5),
+  // F5.7 (ALTO-1) — rede de segurança da CAPTURA. Um intent em `CAPTURE_PENDING` há mais que isto (minutos) é
+  // REENFILEIRADO pelo varredor periódico (a captura é idempotente: reconsulta a Cielo antes de capturar). É também
+  // o intervalo mínimo entre dois reenfileiramentos do MESMO intent.
+  CARD_CAPTURE_RETRY_AFTER_MINUTES: z.coerce.number().int().positive().default(5),
+  // Teto de reenfileiramentos do varredor por intent (com o default de 5 min são ~8 h). Ao atingir, PARA de
+  // reenfileirar e só alerta (`payment_capture_retry_exhausted`, 1x/h) — decisão humana. Para retomar depois de
+  // corrigir a causa: apagar a chave Redis `card-capture:sweeps:<intentId>`.
+  CARD_CAPTURE_MAX_SWEEP_RETRIES: z.coerce.number().int().positive().default(100),
 
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem

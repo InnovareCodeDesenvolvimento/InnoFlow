@@ -46,9 +46,10 @@ import { cancelarPreAutorizacaoCartao } from './cancelarPreAutorizacaoCartao'
  *    na hora. Se negou/falhou/cancelou, só espelha o status. Se a Cielo não
  *    tem registro nenhum, desiste (FAILED) depois de 3x o horizonte de
  *    abandono (dá tempo de mais reconsultas antes de desistir de vez).
- * C) CAPTURE_PENDING há mais de 24h — só ALERTA em log (não é erro
- *    automático: a Cielo pode levar até 5 dias úteis para capturar, mesma
- *    ressalva documentada na F5.2 para o Pix).
+ * C) (REMOVIDO na F5.7) CAPTURE_PENDING antigo — antes só ALERTAVA após 24h, o que deixava a captura sem rede de
+ *    segurança. Agora é `reenfileirarCapturasPendentes.ts` (reenfileira + alerta escalonado), chamado pelo MESMO job
+ *    periódico (`worker/jobs/varrerPreAutorizacoesCartaoJob.ts`) — separado daqui porque precisa rodar MESMO com o gateway
+ *    indisponível (só para alertar), enquanto os casos A/B precisam da Cielo.
  */
 
 const BATCH_SIZE = 50
@@ -56,7 +57,6 @@ const BATCH_SIZE = 50
 export interface VarrerPreAutorizacoesCartaoResultado {
   canceladasAbandonadas: number
   resolvidasCreated: number
-  alertasCapturePending: number
 }
 
 export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: PagamentoPort): Promise<VarrerPreAutorizacoesCartaoResultado> {
@@ -64,7 +64,6 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
   const agora = new Date()
   const limiteAbandono = new Date(agora.getTime() - env.CARD_PREAUTH_ABANDON_MINUTES * 60_000)
   const limiteDesistencia = new Date(agora.getTime() - env.CARD_PREAUTH_ABANDON_MINUTES * 60_000 * 3)
-  const limiteAlertaCapturePending = new Date(agora.getTime() - 24 * 60 * 60_000)
 
   let canceladasAbandonadas = 0
   let resolvidasCreated = 0
@@ -146,17 +145,9 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
     }
   }
 
-  // C) CAPTURE_PENDING antigo demais — só alerta.
-  const capturePendingAntigos = await prisma.paymentIntent.count({
-    where: { purpose: 'SESSION_CARD_CAPTURE', status: 'CAPTURE_PENDING', updatedAt: { lt: limiteAlertaCapturePending } },
-  })
-  if (capturePendingAntigos > 0) {
-    logger.warn({ capturePendingAntigos }, '[varrerPreAutorizacoesCartao] intents CAPTURE_PENDING há mais de 24h — investigar manualmente (Cielo pode levar até 5 dias úteis para capturar)')
+  if (canceladasAbandonadas > 0 || resolvidasCreated > 0) {
+    logger.info({ canceladasAbandonadas, resolvidasCreated }, '[varrerPreAutorizacoesCartao] rodada concluída')
   }
 
-  if (canceladasAbandonadas > 0 || resolvidasCreated > 0 || capturePendingAntigos > 0) {
-    logger.info({ canceladasAbandonadas, resolvidasCreated, alertasCapturePending: capturePendingAntigos }, '[varrerPreAutorizacoesCartao] rodada concluída')
-  }
-
-  return { canceladasAbandonadas, resolvidasCreated, alertasCapturePending: capturePendingAntigos }
+  return { canceladasAbandonadas, resolvidasCreated }
 }
