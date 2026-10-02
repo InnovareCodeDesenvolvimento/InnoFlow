@@ -24,6 +24,19 @@ function getPaymentSecretsKey(): Buffer {
   return cachedKey
 }
 
+/**
+ * `PAYMENT_SECRETS_KEY` presente E decodificável para 32 bytes? Não lança — usado pela configuração do
+ * gateway (F5.5) para calcular `readiness` e decidir 503 `PAYMENT_SECRETS_KEY_MISSING` ANTES de tentar cifrar.
+ */
+export function isPaymentSecretsKeyConfigured(): boolean {
+  try {
+    getPaymentSecretsKey()
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function encryptPaymentSecret(plaintext: string): string {
   return encryptAesGcm(plaintext, getPaymentSecretsKey())
 }

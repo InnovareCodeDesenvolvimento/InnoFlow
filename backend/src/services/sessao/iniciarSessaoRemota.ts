@@ -12,6 +12,7 @@ import { recordCommandResult, isAcceptedCommandResult } from '../../ocpp/command
 import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
+import { assertMeioDePagamentoHabilitado } from '../pagamentos/gatewayConfig'
 
 const COMMAND_TIMEOUT_MS = 35_000
 
@@ -75,6 +76,9 @@ export interface IniciarSessaoRemotaResultado {
 export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Promise<IniciarSessaoRemotaResultado> {
   const { chargePointId, chargePointScope, connectorId, userId, payment } = params
   const mode = payment?.mode ?? 'WALLET'
+
+  // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED ANTES de qualquer efeito (nem PaymentIntent, nem pré-auth). Só COMEÇOS novos: a carteira não passa por aqui.
+  if (mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD')
 
   const chargePoint = await prisma.chargePoint.findFirst({ where: { id: chargePointId, ...chargePointScope } })
   if (!chargePoint) throw new AppError('Charge point não encontrado.', 404, 'CHARGE_POINT_NOT_FOUND')
@@ -176,7 +180,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       // Decifra só no momento da chamada — nunca persiste nem loga em claro
       // (mesma regra da F5.3: `cardToken` inteiro NUNCA em log).
       const cardToken = decryptPaymentSecret(paymentMethod.cieloCardTokenCiphertext)
-      autorizacao = await getPagamentoPort().autorizar({
+      autorizacao = await (await getPagamentoPort()).autorizar({
         merchantOrderId: intent.id,
         amountRequestedCents: estimatedMaxCostCents,
         cartao: { cardToken, brand: paymentMethod.brand ?? undefined },

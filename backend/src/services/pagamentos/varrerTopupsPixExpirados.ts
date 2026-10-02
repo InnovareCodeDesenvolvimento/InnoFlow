@@ -23,7 +23,8 @@ import { emitTopupUpdated, emitWalletUpdated } from '../../realtime/emit'
 
 const BATCH_SIZE = 50
 
-export async function varrerTopupsPixExpirados(pagamentoPort: PagamentoPort = getPagamentoPort()): Promise<{ creditados: number; expirados: number }> {
+export async function varrerTopupsPixExpirados(pagamentoPortInjetado?: PagamentoPort): Promise<{ creditados: number; expirados: number }> {
+  const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const vencidos = await prisma.paymentIntent.findMany({
     where: { purpose: 'WALLET_TOPUP_PIX', status: 'PENDING', pixExpiresAt: { lt: new Date() } },
     orderBy: { pixExpiresAt: 'asc' },

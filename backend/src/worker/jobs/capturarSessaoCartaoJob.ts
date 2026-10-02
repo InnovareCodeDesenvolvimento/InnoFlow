@@ -14,7 +14,7 @@ export function startCapturarSessaoCartaoWorker(): Worker<CapturarSessaoCartaoJo
   const worker = new Worker<CapturarSessaoCartaoJobData>(
     CAPTURAR_SESSAO_CARTAO_QUEUE_NAME,
     async (job: Job<CapturarSessaoCartaoJobData>) => {
-      await capturarSessaoCartao(job.data.paymentIntentId, getPagamentoPort())
+      await capturarSessaoCartao(job.data.paymentIntentId, await getPagamentoPort())
     },
     { connection: createRedisConnection(), concurrency: 5 },
   )

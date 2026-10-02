@@ -35,7 +35,7 @@ export function startCreditarTopupPixWorker(): Worker<CreditarTopupPixJobData> {
       }
 
       try {
-        const resultado = await creditarTopupPix(webhookEvent.paymentIntentId, getPagamentoPort())
+        const resultado = await creditarTopupPix(webhookEvent.paymentIntentId, await getPagamentoPort())
         if (resultado) {
           await Promise.all([emitWalletUpdated(resultado.userId, resultado.balanceAfterCents), emitTopupUpdated(resultado.userId, resultado.paymentIntentId, 'PAID')]).catch((err) =>
             logger.error({ err, webhookEventId: webhookEvent.id }, '[worker][creditar-topup-pix] falha ao publicar eventos de tempo real (não bloqueante)'),

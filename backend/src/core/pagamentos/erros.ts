@@ -24,3 +24,25 @@ export class CartaoTokenInvalidoError extends Error {
     this.name = 'CartaoTokenInvalidoError'
   }
 }
+
+/**
+ * A configuração do gateway (banco) não pôde ser LIDA/DECIFRADA (Postgres fora, segredo corrompido,
+ * `PAYMENT_SECRETS_KEY` trocada/ausente com credencial cifrada no banco). Fail-CLOSED (F5.5): nunca cai para
+ * o `FakeAdapter` nem para as credenciais do env "por conveniência" — a conta que o dono configurou na tela é
+ * a que vale, e adivinhar outra pode cobrar da conta errada ou de graça. As rotas já convertem qualquer erro do
+ * resolvedor em 503 `PAYMENT_GATEWAY_UNAVAILABLE`.
+ */
+export class ConfiguracaoGatewayIndisponivelError extends Error {
+  constructor(motivo: string, options?: { cause?: unknown }) {
+    super(`Configuração do gateway de pagamento indisponível: ${motivo}`, options)
+    this.name = 'ConfiguracaoGatewayIndisponivelError'
+  }
+}
+
+/** Ambiente (sandbox/production) incompatível com as URLs explícitas do servidor — recusa construir o adaptador em vez de cobrar/não cobrar na conta errada em silêncio. */
+export class ConfiguracaoGatewayIncoerenteError extends Error {
+  constructor(motivo: string) {
+    super(`Configuração do gateway incoerente: ${motivo}`)
+    this.name = 'ConfiguracaoGatewayIncoerenteError'
+  }
+}

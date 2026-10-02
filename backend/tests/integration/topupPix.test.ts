@@ -38,7 +38,7 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
 
   beforeAll(async () => {
     resetPagamentoPortCacheParaTeste()
-    getPagamentoPort() // força a resolução preguiçosa agora (decide Cielo real x FakeAdapter), ainda em beforeAll
+    fakePort = (await getPagamentoPort()) as FakeAdapter // força a resolução preguiçosa agora (decide Cielo real x FakeAdapter), ainda em beforeAll
     expect(isUsandoFakeAdapter(), 'este teste exige FakeAdapter — CIELO_MERCHANT_ID não pode estar setado no ambiente de teste').toBe(true)
     worker = startCreditarTopupPixWorker()
     await settle(300) // dá tempo do Worker terminar de conectar ao Redis antes do 1º job
@@ -50,8 +50,9 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
     redis.disconnect()
   })
 
+  let fakePort: FakeAdapter
   function port(): FakeAdapter {
-    return getPagamentoPort() as FakeAdapter
+    return fakePort // singleton do processo — resolvido no beforeAll (getPagamentoPort é assíncrono desde a F5.5)
   }
 
   async function newDriver(label: string) {
@@ -66,8 +67,8 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
     return last?.balanceAfterCents ?? 0
   }
 
-  function postWebhook(paymentId: string, changeType = 1) {
-    return request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', getCieloWebhookHeaderSecret()).send({ PaymentId: paymentId, ChangeType: changeType })
+  async function postWebhook(paymentId: string, changeType = 1) {
+    return request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', await getCieloWebhookHeaderSecret()).send({ PaymentId: paymentId, ChangeType: changeType })
   }
 
   async function createTopup(token: string, amountCents: number) {
@@ -287,7 +288,7 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
   // ---------------------------------------------------------------------------
   describe('webhook — segurança', () => {
     it('pathToken errado devolve 404 (rota nem existe para quem não sabe o token)', async () => {
-      const res = await request(app).post('/api/webhooks/cielo/token-completamente-errado').set('x-innoelektron-webhook-secret', getCieloWebhookHeaderSecret()).send({ PaymentId: 'x', ChangeType: 1 })
+      const res = await request(app).post('/api/webhooks/cielo/token-completamente-errado').set('x-innoelektron-webhook-secret', await getCieloWebhookHeaderSecret()).send({ PaymentId: 'x', ChangeType: 1 })
       expect(res.status).toBe(404)
     })
 
@@ -307,7 +308,7 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
     })
 
     it('corpo malformado (sem PaymentId) -> 400', async () => {
-      const res = await request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', getCieloWebhookHeaderSecret()).send({ ChangeType: 1 })
+      const res = await request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', await getCieloWebhookHeaderSecret()).send({ ChangeType: 1 })
       expect(res.status).toBe(400)
     })
   })

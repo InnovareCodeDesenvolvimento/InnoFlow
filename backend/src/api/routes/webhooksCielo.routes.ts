@@ -2,9 +2,10 @@ import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { verificarSegredoWebhookConstante } from '../../core/pagamentos/verificarSegredoWebhook'
-import { getCieloWebhookHeaderSecret, getCieloWebhookPathToken } from '../../services/pagamentos/webhookCieloSecrets'
+import { getCieloWebhookHeaderSecret, getCieloWebhookPathToken, WEBHOOK_SECRET_HEADER_NAME } from '../../services/pagamentos/webhookCieloSecrets'
 import { enqueueCreditarTopupPix } from '../../services/pagamentos/enqueueCreditarTopupPix'
 import { asyncHandler } from '../middleware/asyncHandler'
+import { ConfiguracaoGatewayIndisponivelError } from '../../core/pagamentos/erros'
 import { AppError } from '../middleware/errorHandler'
 import { validateBody } from '../middleware/validate'
 import { webhookCieloBodySchema, type WebhookCieloBody } from '../schemas/webhookCielo.schema'
@@ -21,13 +22,11 @@ import { webhookCieloBodySchema, type WebhookCieloBody } from '../schemas/webhoo
  * - `pathToken` (segmento da URL) é só ROTEAMENTO — comparação simples
  *   (`===`). Não é o mecanismo de defesa: ele aparece em log de acesso,
  *   histórico de proxy, etc.
- * - Header estático (nome combinado no painel da Cielo, valor em
- *   `CIELO_WEBHOOK_HEADER_SECRET`) é o segredo DE VERDADE — comparado em
+ * - Header estático (nome combinado no painel da Cielo; valor salvo na tela do
+ *   gateway (banco, F5.5) ou, na falta, em `CIELO_WEBHOOK_HEADER_SECRET`) é o segredo DE VERDADE — comparado em
  *   TEMPO CONSTANTE (`verificarSegredoWebhookConstante`).
  */
 const router = Router()
-
-const WEBHOOK_SECRET_HEADER_NAME = 'x-innoelektron-webhook-secret'
 
 router.post(
   '/:pathToken',
@@ -41,7 +40,15 @@ router.post(
     }
 
     const headerSecret = req.header(WEBHOOK_SECRET_HEADER_NAME)
-    if (!verificarSegredoWebhookConstante(headerSecret, getCieloWebhookHeaderSecret())) {
+    let segredoEsperado: string
+    try {
+      segredoEsperado = await getCieloWebhookHeaderSecret()
+    } catch (err) {
+      // Config ilegível/segredo não decifra: 503 (a Cielo reenvia) — nunca aceitar/rejeitar contra um segredo que não é o cadastrado.
+      if (err instanceof ConfiguracaoGatewayIndisponivelError) throw new AppError('Serviço temporariamente indisponível.', 503, 'SERVICE_UNAVAILABLE')
+      throw err
+    }
+    if (!verificarSegredoWebhookConstante(headerSecret, segredoEsperado)) {
       logger.warn({ paymentId: (req.body as WebhookCieloBody).PaymentId }, '[webhook][cielo] segredo do header ausente/inválido — rejeitado')
       throw new AppError('Não autorizado.', 401, 'UNAUTHORIZED')
     }

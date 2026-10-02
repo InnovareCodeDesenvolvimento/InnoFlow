@@ -59,7 +59,8 @@ export interface VarrerPreAutorizacoesCartaoResultado {
   alertasCapturePending: number
 }
 
-export async function varrerPreAutorizacoesCartao(pagamentoPort: PagamentoPort = getPagamentoPort()): Promise<VarrerPreAutorizacoesCartaoResultado> {
+export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: PagamentoPort): Promise<VarrerPreAutorizacoesCartaoResultado> {
+  const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const agora = new Date()
   const limiteAbandono = new Date(agora.getTime() - env.CARD_PREAUTH_ABANDON_MINUTES * 60_000)
   const limiteDesistencia = new Date(agora.getTime() - env.CARD_PREAUTH_ABANDON_MINUTES * 60_000 * 3)

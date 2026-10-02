@@ -94,7 +94,7 @@ async function withFakeRemoteStartResponder<T>(chargePointId: string, status: 'A
 describe('Sessão de recarga com cartão — captura parcial real, conciliação e concorrência (F5.4, Íris, Postgres + Redis reais)', () => {
   const app = createApp()
   const suffix = uniqueSuffix()
-  const pagamentoPort = getPagamentoPort() // FakeAdapter singleton — gerarId default já é randomUUID() (fix ab887fc), seguro entre arquivos.
+  let pagamentoPort: Awaited<ReturnType<typeof getPagamentoPort>> // resolvido no beforeAll (getPagamentoPort é assíncrono desde a F5.5) // FakeAdapter singleton — gerarId default já é randomUUID() (fix ab887fc), seguro entre arquivos.
 
   let tenant: TestTenant
   let ctx: OcppHandlerCtx
@@ -140,6 +140,7 @@ describe('Sessão de recarga com cartão — captura parcial real, conciliação
   }
 
   beforeAll(async () => {
+    pagamentoPort = await getPagamentoPort()
     tenant = await createTenant({ suffix, label: 'card-iris' })
     await prisma.chargePoint.update({ where: { id: tenant.chargePointId }, data: { active: true, lastSeenAt: new Date() } })
     await prisma.tariffAssignment.create({ data: { operatorId: tenant.operatorId, tariffId: tenant.tariffId, scope: 'OPERATOR' } })

@@ -12,8 +12,8 @@ export function startExpirarTopupsPixWorker(): Worker<ExpirarTopupsPixJobData> {
     EXPIRAR_TOPUPS_PIX_QUEUE_NAME,
     async (_job: Job<ExpirarTopupsPixJobData>) => {
       // Produção sem credencial Cielo (gateway bloqueado): nada para varrer, pula em silêncio em vez de falhar a cada rodada.
-      if (!isPagamentoDisponivel()) return
-      await varrerTopupsPixExpirados(getPagamentoPort())
+      if (!(await isPagamentoDisponivel())) return
+      await varrerTopupsPixExpirados(await getPagamentoPort())
     },
     { connection: createRedisConnection(), concurrency: 1 }, // 1: nunca duas varreduras do mesmo lote em paralelo
   )

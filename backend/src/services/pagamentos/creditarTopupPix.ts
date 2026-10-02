@@ -36,7 +36,8 @@ export interface CreditarTopupPixResultado {
   status: 'PAID'
 }
 
-export async function creditarTopupPix(paymentIntentId: string, pagamentoPort: PagamentoPort = getPagamentoPort()): Promise<CreditarTopupPixResultado | null> {
+export async function creditarTopupPix(paymentIntentId: string, pagamentoPortInjetado?: PagamentoPort): Promise<CreditarTopupPixResultado | null> {
+  const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const intent = await prisma.paymentIntent.findUnique({ where: { id: paymentIntentId } })
   if (!intent) {
     logger.error({ paymentIntentId }, '[creditarTopupPix] PaymentIntent não encontrado — nada a creditar')

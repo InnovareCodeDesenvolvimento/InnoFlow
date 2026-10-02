@@ -29,7 +29,8 @@ export interface CapturarSessaoCartaoResultado {
   shortfallCents: number
 }
 
-export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPort: PagamentoPort = getPagamentoPort()): Promise<CapturarSessaoCartaoResultado | null> {
+export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPortInjetado?: PagamentoPort): Promise<CapturarSessaoCartaoResultado | null> {
+  const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const intent = await prisma.paymentIntent.findUnique({ where: { id: paymentIntentId } })
   if (!intent) {
     logger.error({ paymentIntentId }, '[capturarSessaoCartao] PaymentIntent não encontrado — nada a capturar')

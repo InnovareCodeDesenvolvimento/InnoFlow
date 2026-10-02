@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
+import { assertMeioDePagamentoHabilitado } from '../../services/pagamentos/gatewayConfig'
 import { encryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
 import { toMePaymentMethodDto } from '../../services/pagamentos/paymentMethodDto'
@@ -26,6 +27,15 @@ const MAX_PAYMENT_METHODS_PER_USER = 5
 
 const router = Router()
 
+async function resolverPortOu503() {
+  try {
+    return await getPagamentoPort()
+  } catch (err) {
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, '[api][me] gateway de pagamento indisponível ao cadastrar cartão')
+    throw new AppError('O cadastro de cartão está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+  }
+}
+
 // ------------------------------------------------------------
 // POST /tokenization-session — accessToken para a página isolada da Lyra
 // ------------------------------------------------------------
@@ -35,9 +45,11 @@ router.post(
   meTokenizationSessionRateLimit,
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
+    // F5.5: cartão desligado na tela do gateway => nem sessão de tokenização (cadastro de cartão novo).
+    await assertMeioDePagamentoHabilitado('CARD')
     let sessao
     try {
-      sessao = await getPagamentoPort().sessaoTokenizacao()
+      sessao = await (await getPagamentoPort()).sessaoTokenizacao()
     } catch (err) {
       // Erro de CONFIGURAÇÃO (env ausente) ou de rede/OAuth com a Cielo —
       // os dois viram 503: não é o motorista que errou, é o gateway que não
@@ -68,6 +80,9 @@ router.post(
     const userId = req.user!.userId
     const { cardToken, brand, makeDefault } = req.body as MeCreatePaymentMethodInput
 
+    // F5.5: cartão desligado na tela do gateway => não cadastra cartão novo (checagem ANTES de qualquer chamada à Cielo).
+    await assertMeioDePagamentoHabilitado('CARD')
+
     // Checagem RÁPIDA antes de gastar uma chamada de rede na Cielo — a
     // checagem de VERDADE (que fecha a maior parte da janela de corrida)
     // roda de novo dentro da transação, logo antes do INSERT.
@@ -76,9 +91,11 @@ router.post(
       throw new AppError('Você já tem o número máximo de cartões cadastrados.', 409, 'TOO_MANY_PAYMENT_METHODS')
     }
 
+    // Resolver o adaptador FORA do try: gateway bloqueado/ilegível é 503 (indisponível), não "falha ao verificar o cartão" (502).
+    const pagamentoPort = await resolverPortOu503()
     let dadosCartao
     try {
-      dadosCartao = await getPagamentoPort().consultarCartaoTokenizado(cardToken)
+      dadosCartao = await pagamentoPort.consultarCartaoTokenizado(cardToken)
     } catch (err) {
       if (err instanceof CartaoTokenInvalidoError) {
         throw new AppError('Cartão inválido ou não reconhecido.', 400, 'INVALID_CARD_TOKEN')

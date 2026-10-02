@@ -73,7 +73,7 @@ async function withFakeRemoteStartResponder<T>(chargePointId: string, status: 'A
 describe('Sessão de recarga com cartão (F5.4, Postgres + Redis reais)', () => {
   const app = createApp()
   const suffix = uniqueSuffix()
-  const pagamentoPort = getPagamentoPort() // FakeAdapter — sem credencial Cielo no ambiente de teste (ver pagamentoPortInstance.ts)
+  let pagamentoPort: Awaited<ReturnType<typeof getPagamentoPort>> // resolvido no beforeAll (getPagamentoPort é assíncrono desde a F5.5) // FakeAdapter — sem credencial Cielo no ambiente de teste (ver pagamentoPortInstance.ts)
 
   let tenant: TestTenant
   let ctx: OcppHandlerCtx
@@ -120,6 +120,7 @@ describe('Sessão de recarga com cartão (F5.4, Postgres + Redis reais)', () => 
   }
 
   beforeAll(async () => {
+    pagamentoPort = await getPagamentoPort()
     tenant = await createTenant({ suffix, label: 'card' })
     await prisma.chargePoint.update({ where: { id: tenant.chargePointId }, data: { active: true, lastSeenAt: new Date() } })
     await prisma.tariffAssignment.create({ data: { operatorId: tenant.operatorId, tariffId: tenant.tariffId, scope: 'OPERATOR' } })

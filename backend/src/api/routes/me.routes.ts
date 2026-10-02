@@ -13,6 +13,7 @@ import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { apenasDigitos, isValidCpf } from '../../core/pagamentos/validarCpf'
 import { valorTopupDentroDoLimite, TOPUP_MIN_AMOUNT_CENTS, TOPUP_MAX_AMOUNT_CENTS } from '../../core/pagamentos/validarValorTopup'
 import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
+import { assertMeioDePagamentoHabilitado } from '../../services/pagamentos/gatewayConfig'
 import { toMeTopupDto } from '../../services/pagamentos/topupDto'
 import { cacheTopupQrImage, getTopupDebtSettledCents, getTopupQrImage } from '../../services/pagamentos/topupEphemeralCache'
 import { env } from '../../lib/env'
@@ -78,6 +79,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
     const body = req.body as MeStartSessionInput
+
+    // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED já na porta (sem lock, sem consulta). `iniciarSessaoRemota` repete a checagem (defesa em profundidade); a carteira nunca passa por aqui.
+    if (body.payment?.mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD')
 
     // Lock anti-duplo-toque: duas requisições de start quase simultâneas do
     // MESMO motorista (ex.: usuário toca duas vezes o botão no PWA antes do
@@ -540,6 +544,9 @@ router.post(
     const userId = req.user!.userId
     const { amountCents, cpf } = req.body as MeCreateTopupInput
 
+    // F5.5: admin pode desligar o Pix na tela do gateway — só bloqueia COMEÇOS novos (QR já gerado continua pagável/creditável).
+    await assertMeioDePagamentoHabilitado('PIX')
+
     // Faixa de valor e CPF respondem com `code` ESPECÍFICO (contrato de
     // `frontend/src/lib/topupAmount.ts`), por isso são checados aqui — não
     // no schema Zod, que cairia em `VALIDATION_ERROR` genérico.
@@ -575,7 +582,7 @@ router.post(
     const expiresInSeconds = env.PIX_TOPUP_EXPIRES_MINUTES * 60
     let resultadoPix
     try {
-      resultadoPix = await getPagamentoPort().criarPix({
+      resultadoPix = await (await getPagamentoPort()).criarPix({
         merchantOrderId: intent.id,
         amountRequestedCents: amountCents,
         cliente: { name: user.name, identity: cpfDigits ?? null },

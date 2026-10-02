@@ -214,6 +214,12 @@ const envSchema = z.object({
   // (precisa decodificar para exatos 32 bytes — AES-256).
   PAYMENT_SECRETS_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
+  // F5.5 (02/10/2026) — URL pública da API (ex.: https://api.exemplo.com.br), usada só para MONTAR a
+  // `webhookUrl` que a tela do gateway mostra ao dono (cadastrar no Site Cielo). OPCIONAL: sem ela a rota
+  // deriva do próprio request (protocolo/host respeitando `TRUST_PROXY_HOPS`) — que funciona quando o proxy
+  // repassa Host/X-Forwarded-*, mas uma env explícita não depende disso.
+  PUBLIC_API_BASE_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+
   // F5.4 (30/09/2026) — sessão de recarga cobrando de cartão (pré-auth +
   // captura parcial via PaymentIntent). Cadência do varredor de
   // pré-autorizações (`worker/jobs/varrerPreAutorizacoesCartaoJob.ts`) — mesmo

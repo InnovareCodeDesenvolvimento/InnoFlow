@@ -23,7 +23,8 @@ import { getPagamentoPort } from './pagamentoPortInstance'
  * de qualquer transação de banco (mesmo espírito de `creditarTopupPix.ts`);
  * só o resultado é gravado dentro de uma transação curta, com lock.
  */
-export async function cancelarPreAutorizacaoCartao(paymentIntentId: string, pagamentoPort: PagamentoPort = getPagamentoPort()): Promise<void> {
+export async function cancelarPreAutorizacaoCartao(paymentIntentId: string, pagamentoPortInjetado?: PagamentoPort): Promise<void> {
+  const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const intent = await prisma.paymentIntent.findUnique({ where: { id: paymentIntentId } })
   if (!intent) {
     logger.error({ paymentIntentId }, '[cancelarPreAutorizacaoCartao] PaymentIntent não encontrado — nada a cancelar')

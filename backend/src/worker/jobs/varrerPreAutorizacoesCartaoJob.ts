@@ -12,8 +12,8 @@ export function startVarrerPreAutorizacoesCartaoWorker(): Worker<VarrerPreAutori
     VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME,
     async (_job: Job<VarrerPreAutorizacoesCartaoJobData>) => {
       // Produção sem credencial Cielo (gateway bloqueado): nada para varrer, pula em silêncio em vez de falhar a cada rodada.
-      if (!isPagamentoDisponivel()) return
-      await varrerPreAutorizacoesCartao(getPagamentoPort())
+      if (!(await isPagamentoDisponivel())) return
+      await varrerPreAutorizacoesCartao(await getPagamentoPort())
     },
     { connection: createRedisConnection(), concurrency: 1 }, // 1: nunca duas varreduras do mesmo lote em paralelo
   )
