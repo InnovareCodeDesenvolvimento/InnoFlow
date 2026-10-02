@@ -30,6 +30,7 @@ const AdminSessoes = lazy(() => import("@/pages/Admin/Sessoes"))
 const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
 const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
+const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
 
 const ChargePointLanding = lazy(() => import("@/pages/Public/ChargePointLanding").then((m) => ({ default: m.ChargePointLanding })))
 const AppLayout = lazy(() => import("@/pages/App/Layout").then((m) => ({ default: m.AppLayout })))
@@ -103,6 +104,15 @@ export default function App() {
               element={
                 <RequireAuth roles={["ADMIN"]}>
                   <AdminAuthTokens />
+                </RequireAuth>
+              }
+            />
+            {/* Conta Cielo é ÚNICA da plataforma (a carteira é da rede): só ADMIN configura (F5.5); o servidor confere de novo (403). */}
+            <Route
+              path="gateway-pagamento"
+              element={
+                <RequireAuth roles={["ADMIN"]}>
+                  <AdminGatewayPagamento />
                 </RequireAuth>
               }
             />

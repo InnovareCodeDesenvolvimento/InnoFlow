@@ -1,0 +1,241 @@
+import type {
+  PaymentGatewayConfigDTO,
+  PaymentGatewayEnvironment,
+  PaymentGatewayRequirement,
+  PaymentMethodReadiness,
+  UpdatePaymentGatewayConfigRequest,
+} from "@/types/api"
+
+/**
+ * Espelho (no que a tela precisa provar) de `GET/PUT /api/admin/payment-gateway`
+ * (F5.5). NÃO é a regra de negócio da Vega — é só o suficiente para exercitar o
+ * contrato no navegador enquanto o backend real não está acessível deste
+ * ambiente. Regras espelhadas do bloco "F5.5" de `types/api.ts`:
+ *  - SEGREDOS NUNCA SÃO GUARDADOS NEM DEVOLVIDOS: o mock só lembra `...Set`;
+ *  - campo ausente no PUT = não mexer;
+ *  - 503 `PAYMENT_SECRETS_KEY_MISSING` ao gravar segredo sem a chave de cifragem do servidor;
+ *  - 400 `PRODUCTION_CONFIRMATION_REQUIRED` ao mudar sandbox → production sem `confirmProduction: true`;
+ *  - 409 `GATEWAY_NOT_READY` (com a lista em `details`) ao ir para produção ou habilitar um meio com pré-requisito faltando;
+ *  - `source: "env"` até o primeiro PUT; depois `"database"` com `updatedAt`.
+ *
+ * SUPOSIÇÕES DO MOCK (o contrato não fecha; alinhar com o Vega):
+ *  - "pronto" do cartão = MERCHANT_ID, MERCHANT_KEY, SOP_CLIENT_ID, SOP_CLIENT_SECRET, SOP_SCRIPT_URL,
+ *    SOP_OAUTH_TOKEN_URL, PAYMENT_SECRETS_KEY; do Pix = MERCHANT_ID, MERCHANT_KEY, WEBHOOK_PATH_TOKEN,
+ *    WEBHOOK_HEADER_SECRET, PAYMENT_SECRETS_KEY;
+ *  - ir para produção exige que todo meio HABILITADO (no estado resultante) esteja pronto;
+ *  - `details` do 409 é um array de strings (`["MERCHANT_KEY", ...]`).
+ *
+ * CENÁRIOS por conta de ADMIN (o estado vive por usuário, em memória da página — um `page.goto` zera):
+ *  - `admin@innoelektron.com`                → origem `env`, NADA configurado (servidor completo);
+ *  - `gateway-pronto@innoelektron.com`       → `database`, sandbox, tudo pronto, Pix habilitado;
+ *  - `gateway-producao@innoelektron.com`     → `database`, produção, tudo pronto, Pix e cartão habilitados;
+ *  - `gateway-sem-chave@innoelektron.com`    → `env`, servidor SEM `PAYMENT_SECRETS_KEY` e sem token do webhook (503 ao enviar segredo; `webhookUrl: null`),
+ *                                              Pix já habilitado sem estar pronto (ir para produção => 409 GATEWAY_NOT_READY).
+ */
+
+interface ServerEnv {
+  sopScriptUrl: boolean
+  sopOauthTokenUrl: boolean
+  webhookPathToken: boolean
+  secretsKey: boolean
+}
+
+interface GatewayState {
+  source: "env" | "database"
+  environment: PaymentGatewayEnvironment
+  merchantId: string | null
+  merchantKeySet: boolean
+  sopClientId: string | null
+  sopClientSecretSet: boolean
+  webhookHeaderSecretSet: boolean
+  cardEnabled: boolean
+  pixEnabled: boolean
+  updatedAt: string | null
+}
+
+interface Scenario {
+  server: ServerEnv
+  state: GatewayState
+}
+
+const FULL_SERVER: ServerEnv = { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: true, secretsKey: true }
+
+const EMPTY_STATE: GatewayState = {
+  source: "env",
+  environment: "sandbox",
+  merchantId: null,
+  merchantKeySet: false,
+  sopClientId: null,
+  sopClientSecretSet: false,
+  webhookHeaderSecretSet: false,
+  cardEnabled: false,
+  pixEnabled: false,
+  updatedAt: null,
+}
+
+const READY_STATE: GatewayState = {
+  source: "database",
+  environment: "sandbox",
+  merchantId: "mid-sandbox-7f3a91",
+  merchantKeySet: true,
+  sopClientId: "sop-client-demo-22",
+  sopClientSecretSet: true,
+  webhookHeaderSecretSet: true,
+  cardEnabled: false,
+  pixEnabled: true,
+  updatedAt: "2026-10-01T14:32:00.000Z",
+}
+
+function seed(userId: string): Scenario {
+  switch (userId) {
+    case "user_admin_gateway_pronto":
+      return { server: { ...FULL_SERVER }, state: { ...READY_STATE } }
+    case "user_admin_gateway_producao":
+      return { server: { ...FULL_SERVER }, state: { ...READY_STATE, environment: "production", merchantId: "mid-prod-5c0de2", cardEnabled: true, pixEnabled: true } }
+    case "user_admin_gateway_sem_chave":
+      // Pix já HABILITADO (herdado do ambiente do servidor) mas sem pré-requisito: prova que DESLIGAR é sempre permitido e dá o caminho ao 409 GATEWAY_NOT_READY (ir para produção).
+      return { server: { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: false, secretsKey: false }, state: { ...EMPTY_STATE, pixEnabled: true } }
+    default:
+      return { server: { ...FULL_SERVER }, state: { ...EMPTY_STATE } }
+  }
+}
+
+const scenarios = new Map<string, Scenario>()
+
+function scenarioFor(userId: string): Scenario {
+  let scenario = scenarios.get(userId)
+  if (!scenario) {
+    scenario = seed(userId)
+    scenarios.set(userId, scenario)
+  }
+  return scenario
+}
+
+const REQUIREMENT_ORDER: PaymentGatewayRequirement[] = [
+  "MERCHANT_ID",
+  "MERCHANT_KEY",
+  "SOP_CLIENT_ID",
+  "SOP_CLIENT_SECRET",
+  "SOP_SCRIPT_URL",
+  "SOP_OAUTH_TOKEN_URL",
+  "WEBHOOK_PATH_TOKEN",
+  "WEBHOOK_HEADER_SECRET",
+  "PAYMENT_SECRETS_KEY",
+]
+
+function missingFor(method: "card" | "pix", state: GatewayState, server: ServerEnv): PaymentGatewayRequirement[] {
+  const missing = new Set<PaymentGatewayRequirement>()
+  if (!state.merchantId) missing.add("MERCHANT_ID")
+  if (!state.merchantKeySet) missing.add("MERCHANT_KEY")
+  if (!server.secretsKey) missing.add("PAYMENT_SECRETS_KEY")
+  if (method === "card") {
+    if (!state.sopClientId) missing.add("SOP_CLIENT_ID")
+    if (!state.sopClientSecretSet) missing.add("SOP_CLIENT_SECRET")
+    if (!server.sopScriptUrl) missing.add("SOP_SCRIPT_URL")
+    if (!server.sopOauthTokenUrl) missing.add("SOP_OAUTH_TOKEN_URL")
+  } else {
+    if (!server.webhookPathToken) missing.add("WEBHOOK_PATH_TOKEN")
+    if (!state.webhookHeaderSecretSet) missing.add("WEBHOOK_HEADER_SECRET")
+  }
+  return REQUIREMENT_ORDER.filter((r) => missing.has(r))
+}
+
+function readiness(method: "card" | "pix", state: GatewayState, server: ServerEnv): PaymentMethodReadiness {
+  const missing = missingFor(method, state, server)
+  return { ready: missing.length === 0, missing }
+}
+
+function toDto({ state, server }: Scenario): PaymentGatewayConfigDTO {
+  return {
+    source: state.source,
+    environment: state.environment,
+    merchantId: state.merchantId,
+    merchantKeySet: state.merchantKeySet,
+    sopClientId: state.sopClientId,
+    sopClientSecretSet: state.sopClientSecretSet,
+    webhookHeaderSecretSet: state.webhookHeaderSecretSet,
+    webhookUrl: server.webhookPathToken ? "https://api.innoflow.example/api/webhooks/cielo/k3x9-demo-token" : null,
+    webhookHeaderName: "x-innoelektron-webhook-secret",
+    cardEnabled: state.cardEnabled,
+    pixEnabled: state.pixEnabled,
+    readiness: { card: readiness("card", state, server), pix: readiness("pix", state, server) },
+    updatedAt: state.updatedAt,
+  }
+}
+
+export function getGatewayConfig(userId: string): PaymentGatewayConfigDTO {
+  return toDto(scenarioFor(userId))
+}
+
+export type GatewayUpdateResult =
+  | { ok: true; dto: PaymentGatewayConfigDTO }
+  | { ok: false; status: 400 | 409 | 503; code: string; message: string; details?: PaymentGatewayRequirement[] }
+
+const fail = (status: 400 | 409 | 503, code: string, message: string, details?: PaymentGatewayRequirement[]): GatewayUpdateResult => ({ ok: false, status, code, message, details })
+
+function isText(value: unknown, min: number, max: number): value is string {
+  return typeof value === "string" && value.trim().length >= min && value.trim().length <= max
+}
+
+/** Aplica um PUT. Valida tudo ANTES de mexer no estado (um 4xx/5xx nunca deixa meia alteração). Nunca guarda valor de segredo. */
+export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdateResult {
+  const scenario = scenarioFor(userId)
+  const input = (body && typeof body === "object" ? body : {}) as UpdatePaymentGatewayConfigRequest & Record<string, unknown>
+
+  // ---- 400 VALIDATION_ERROR ----
+  if (input.environment !== undefined && input.environment !== "sandbox" && input.environment !== "production") {
+    return fail(400, "VALIDATION_ERROR", "environment: deve ser 'sandbox' ou 'production'.")
+  }
+  for (const key of ["merchantId", "sopClientId"] as const) {
+    if (input[key] !== undefined && !isText(input[key], 1, 100)) return fail(400, "VALIDATION_ERROR", `${key}: de 1 a 100 caracteres.`)
+  }
+  for (const key of ["merchantKey", "sopClientSecret"] as const) {
+    if (input[key] !== undefined && !isText(input[key], 1, 200)) return fail(400, "VALIDATION_ERROR", `${key}: de 1 a 200 caracteres.`)
+  }
+  if (input.webhookHeaderSecret !== undefined && !isText(input.webhookHeaderSecret, 8, 200)) {
+    return fail(400, "VALIDATION_ERROR", "webhookHeaderSecret: de 8 a 200 caracteres.")
+  }
+  for (const key of ["cardEnabled", "pixEnabled"] as const) {
+    if (input[key] !== undefined && typeof input[key] !== "boolean") return fail(400, "VALIDATION_ERROR", `${key}: deve ser booleano.`)
+  }
+  if (input.confirmProduction !== undefined && input.confirmProduction !== true) {
+    return fail(400, "VALIDATION_ERROR", "confirmProduction: só aceita true.")
+  }
+
+  // ---- 503: sem chave de cifragem o servidor não grava segredo ----
+  const writesSecret = input.merchantKey !== undefined || input.sopClientSecret !== undefined || input.webhookHeaderSecret !== undefined
+  if (writesSecret && !scenario.server.secretsKey) {
+    return fail(503, "PAYMENT_SECRETS_KEY_MISSING", "O servidor não está configurado para guardar segredos (PAYMENT_SECRETS_KEY ausente).")
+  }
+
+  // ---- 400: virar produção exige confirmação explícita ----
+  if (input.environment === "production" && scenario.state.environment === "sandbox" && input.confirmProduction !== true) {
+    return fail(400, "PRODUCTION_CONFIRMATION_REQUIRED", "Mudar para produção exige confirmProduction: true.")
+  }
+
+  // ---- estado candidato (ainda não gravado) ----
+  const next: GatewayState = {
+    ...scenario.state,
+    environment: input.environment ?? scenario.state.environment,
+    merchantId: input.merchantId !== undefined ? input.merchantId.trim() : scenario.state.merchantId,
+    sopClientId: input.sopClientId !== undefined ? input.sopClientId.trim() : scenario.state.sopClientId,
+    merchantKeySet: scenario.state.merchantKeySet || input.merchantKey !== undefined,
+    sopClientSecretSet: scenario.state.sopClientSecretSet || input.sopClientSecret !== undefined,
+    webhookHeaderSecretSet: scenario.state.webhookHeaderSecretSet || input.webhookHeaderSecret !== undefined,
+    cardEnabled: input.cardEnabled ?? scenario.state.cardEnabled,
+    pixEnabled: input.pixEnabled ?? scenario.state.pixEnabled,
+  }
+
+  // ---- 409: ir para produção / habilitar um meio com pré-requisito faltando ----
+  const turnsOn = (method: "card" | "pix") => (method === "card" ? input.cardEnabled === true : input.pixEnabled === true)
+  const goesProduction = input.environment === "production" && scenario.state.environment !== "production"
+  const toCheck = (["card", "pix"] as const).filter((m) => (m === "card" ? next.cardEnabled : next.pixEnabled) && (turnsOn(m) || goesProduction))
+  const missing = new Set<PaymentGatewayRequirement>()
+  for (const method of toCheck) for (const r of missingFor(method, next, scenario.server)) missing.add(r)
+  if (missing.size > 0) {
+    return fail(409, "GATEWAY_NOT_READY", "Há pré-requisitos faltando para o que foi pedido.", REQUIREMENT_ORDER.filter((r) => missing.has(r)))
+  }
+
+  scenario.state = { ...next, source: "database", updatedAt: new Date().toISOString() }
+  return { ok: true, dto: toDto(scenario) }
+}

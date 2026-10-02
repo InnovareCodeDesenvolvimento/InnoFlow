@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, CreditCard, KeyRound, LayoutDashboard, Landmark, MapPin, Plug, ScrollText, TrendingUp, Wallet, WalletCards, Zap } from "lucide-react"
+import { Activity, CalendarDays, CreditCard, KeyRound, LayoutDashboard, Landmark, MapPin, Plug, ScrollText, TrendingUp, Vault, Wallet, WalletCards, Zap } from "lucide-react"
 import type { NavGroup, NavItem } from "@/components/painel/navegacao"
 import { flattenNav, matchNavItem } from "@/components/painel/navegacao"
 import type { Role } from "@/types/api"
@@ -51,10 +51,19 @@ const ADMIN_ONLY_ITEMS: NavItem[] = [
   { label: "Auditoria", href: "/admin/auditoria", icon: ScrollText, hint: "Quem fez o quê, onde e como" },
 ]
 
-/** Navegação efetiva do painel, ajustada por papel: OPERATOR não vê o grupo "Rede" — as rotas nem respondem para ele (403). */
+/**
+ * Item de ADMIN dentro do grupo "Financeiro" (a conta Cielo é única da plataforma, F5.5): fica junto do
+ * resto do dinheiro, mas só ADMIN o vê — a rota é ADMIN-only na UI (`RequireAuth`) e no servidor (403).
+ */
+const ADMIN_ONLY_FINANCE_ITEMS: NavItem[] = [
+  { label: "Gateway de pagamento", href: "/admin/gateway-pagamento", icon: Vault, hint: "Conta Cielo: credenciais, ambiente e meios de pagamento (admin)" },
+]
+
+/** Navegação efetiva do painel, ajustada por papel: OPERATOR não vê o grupo "Rede" nem o "Gateway de pagamento" — as rotas nem respondem para ele (403). */
 export function getAdminNav(role: Role | undefined): NavGroup[] {
   if (role !== "ADMIN") return BASE_NAV
-  return [...BASE_NAV, { title: "Rede", items: ADMIN_ONLY_ITEMS }]
+  const groups = BASE_NAV.map((group) => (group.title === "Financeiro" ? { ...group, items: [...group.items, ...ADMIN_ONLY_FINANCE_ITEMS] } : group))
+  return [...groups, { title: "Rede", items: ADMIN_ONLY_ITEMS }]
 }
 
 export const ADMIN_NAV_ITEMS: NavItem[] = flattenNav(BASE_NAV)

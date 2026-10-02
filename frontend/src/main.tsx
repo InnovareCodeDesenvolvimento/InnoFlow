@@ -40,7 +40,10 @@ function renderApp() {
  */
 if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === "true") {
   const { worker } = await import("./mocks/browser")
-  await worker.start({ onUnhandledRequest: "bypass" })
+  // `quiet`: o MSW, por padrão, imprime no console o CORPO de cada requisição tratada — e o PUT do
+  // gateway de pagamento (F5.5) carrega segredos (MerchantKey etc.). Nada de segredo no console,
+  // nem no modo mock.
+  await worker.start({ onUnhandledRequest: "bypass", quiet: true })
 }
 
 renderApp()

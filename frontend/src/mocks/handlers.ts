@@ -39,6 +39,7 @@ import {
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
+import { getGatewayConfig, updateGatewayConfig } from "./paymentGatewayData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -784,6 +785,26 @@ export const handlers = [
         : HttpResponse.json(errorBody("Saldo insuficiente para este débito.", "INSUFFICIENT_BALANCE"), { status: 409 })
     }
     return HttpResponse.json(result.entry, { status: 201 })
+  }),
+
+  // ---- Gateway de pagamento / Cielo (ADMIN only, F5.5) -------------------------------
+  // Espelho do bloco "F5.5" de `types/api.ts` (regras e cenários em `paymentGatewayData.ts`).
+  // Segredos NUNCA são devolvidos; o corpo do PUT não é logado em lugar nenhum.
+  http.get("/api/admin/payment-gateway", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return HttpResponse.json(getGatewayConfig(scope.user.userId))
+  }),
+
+  http.put("/api/admin/payment-gateway", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateGatewayConfig(scope.user.userId, body)
+    if (!result.ok) {
+      return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status })
+    }
+    return HttpResponse.json(result.dto)
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------

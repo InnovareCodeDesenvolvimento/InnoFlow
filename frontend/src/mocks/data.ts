@@ -35,6 +35,11 @@ export const mockUsers: MockUser[] = [
     operatorName: operatorNameFor(OPERATOR_A_ID),
     password: "senha1234",
   },
+  // Admins de CENÁRIO do Gateway de pagamento (F5.5) — o estado do mock vive por usuário
+  // (`mocks/paymentGatewayData.ts`), então cada conta nasce num cenário determinístico para o E2E.
+  { id: "user_admin_gateway_pronto", name: "Gil Gateway", email: "gateway-pronto@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_gateway_producao", name: "Paulo Produção", email: "gateway-producao@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_gateway_sem_chave", name: "Sônia Sem-Chave", email: "gateway-sem-chave@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
   // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).
   { id: "user_driver", name: "Carla Motorista", email: "motorista@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
