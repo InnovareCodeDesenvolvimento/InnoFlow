@@ -15,6 +15,10 @@ export const REDACT_PATHS = [
   'req.headers.cookie',
   'res.headers["set-cookie"]',
   'req.headers.merchantkey',
+  // F5.5 — achado ao rodar o webhook contra Postgres real: o `pino-http` loga `req.headers` de TODA requisição e o
+  // header do segredo do webhook da Cielo (valor EM CLARO do segredo compartilhado) saía no log a cada notificação.
+  // Nome do header = `WEBHOOK_SECRET_HEADER_NAME` (minúsculo, como o Node entrega).
+  'req.headers["x-innoelektron-webhook-secret"]',
   'CardNumber',
   '*.CardNumber',
   'SecurityCode',
@@ -48,4 +52,19 @@ export const REDACT_PATHS = [
   '*.clientSecret',
   'cpf',
   '*.cpf',
+  // F5.5 (config do gateway, camelCase — nomes do corpo do `PUT /api/admin/payment-gateway` e das colunas de
+  // `PaymentGatewayConfig`). `fast-redact` é case-sensitive e só casa 1 nível (`*.`): por isso cada nome entra
+  // solto E com `*.`, e NÃO bastam `MerchantKey`/`ClientSecret` (PascalCase, outro nome).
+  'merchantKey',
+  '*.merchantKey',
+  'sopClientSecret',
+  '*.sopClientSecret',
+  'webhookHeaderSecret',
+  '*.webhookHeaderSecret',
+  'merchantKeyCiphertext',
+  '*.merchantKeyCiphertext',
+  'sopClientSecretCiphertext',
+  '*.sopClientSecretCiphertext',
+  'webhookHeaderSecretCiphertext',
+  '*.webhookHeaderSecretCiphertext',
 ]

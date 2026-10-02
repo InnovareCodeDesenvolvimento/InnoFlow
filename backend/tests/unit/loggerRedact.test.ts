@@ -46,6 +46,13 @@ const VALORES_SENSIVEIS = {
   accessToken: 'fake-access-token-sop-real',
   clientSecret: 'cielo-sop-client-secret-real',
   cpf: '12345678900',
+  // F5.5 — tela de config do gateway (camelCase, nomes do corpo do PUT e das colunas `*Ciphertext`).
+  merchantKey: 'merchant-key-da-tela-do-gateway',
+  sopClientSecret: 'sop-client-secret-da-tela-do-gateway',
+  webhookHeaderSecret: 'webhook-header-secret-da-tela',
+  merchantKeyCiphertext: 'ciphertext-merchant-key-base64==',
+  sopClientSecretCiphertext: 'ciphertext-sop-secret-base64==',
+  webhookHeaderSecretCiphertext: 'ciphertext-webhook-secret-base64==',
 }
 
 describe('redact do logger — campos sensíveis do fluxo de pagamento (Cielo)', () => {
@@ -67,6 +74,12 @@ describe('redact do logger — campos sensíveis do fluxo de pagamento (Cielo)',
   it('req.headers.merchantkey (case do Express — headers HTTP chegam em minúsculas) nunca aparece na saída', () => {
     const saida = capturarSaidaDoLogger({ req: { headers: { merchantkey: 'header-secret-value' } } })
     expect(saida).not.toContain('header-secret-value')
+  })
+
+  it('req.headers["x-innoelektron-webhook-secret"] (segredo do webhook da Cielo, logado pelo pino-http em toda requisição) nunca aparece na saída', () => {
+    const saida = capturarSaidaDoLogger({ req: { headers: { 'x-innoelektron-webhook-secret': 'segredo-do-webhook-em-claro', host: 'api.exemplo.com.br' } } })
+    expect(saida).not.toContain('segredo-do-webhook-em-claro')
+    expect(saida).toContain('api.exemplo.com.br')
   })
 
   it('campos NÃO sensíveis do log de pagamento continuam visíveis (PaymentId/Status/ReturnCode/valores) — redact não apaga o log inteiro', () => {
