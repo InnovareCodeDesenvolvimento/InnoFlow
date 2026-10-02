@@ -203,13 +203,17 @@ describe('Redis fora do ar — o publish tem prazo, disjuntor e NÃO acumula fil
     await assinante.subscribe(userChannel(u.id))
     try {
       await proxy.down()
-      // Espera o cliente do processo perceber a queda (senão o 1º comando entraria na fila antes de ele saber).
-      await waitFor(async () => publisherStatus() !== 'ready', { timeoutMs: 5_000, what: 'cliente perceber a queda' })
+      // Espera o cliente do processo SABER que caiu — os estados que `bus.ts` (`connectionIsDown`) trata como queda.
+      // Antes isto era `!== 'ready'`, que também aceita 'connect'/'connecting' (reconexão em curso, que o bus NÃO
+      // descarta: pode ser o 1º uso de uma conexão preguiçosa): pegar a janela dessas fases enfileirava os 50 eventos
+      // e os entregava quando o proxy voltava — falha intermitente que dependia só de quando o poll de 50ms caía.
+      let statusNaQueda = ''
+      await waitFor(async () => { statusNaQueda = publisherStatus(); return ['reconnecting', 'close', 'end'].includes(statusNaQueda) }, { timeoutMs: 5_000, what: 'cliente perceber a queda' })
       for (let i = 0; i < 50; i++) await publishToUser(u.id, evento(u.id, i))
       await proxy.up()
       await aguardarRedisPronto()
       await new Promise((r) => setTimeout(r, 1_500)) // tempo de sobra para uma fila offline (se existisse) ser despejada
-      expect(recebidos).toEqual([])
+      expect(recebidos, `status do publisher ao começar a publicar: ${statusNaQueda}`).toEqual([])
     } finally {
       await proxy.up()
       await assinante.quit().catch(() => {})
