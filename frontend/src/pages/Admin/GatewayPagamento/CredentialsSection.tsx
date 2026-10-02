@@ -57,6 +57,7 @@ export function CredentialsSection({
             testId="secret-merchantKey"
             name="MerchantKey"
             isSet={dto.merchantKeySet}
+            unreadable={dto.secretsDecryptable === false}
             value={draft.merchantKey}
             onChange={(value) => onChange({ merchantKey: value })}
             error={errors.merchantKey}
@@ -65,6 +66,7 @@ export function CredentialsSection({
             testId="secret-sopClientSecret"
             name="Client Secret do cadastro de cartão"
             isSet={dto.sopClientSecretSet}
+            unreadable={dto.secretsDecryptable === false}
             value={draft.sopClientSecret}
             onChange={(value) => onChange({ sopClientSecret: value })}
             error={errors.sopClientSecret}

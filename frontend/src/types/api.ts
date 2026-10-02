@@ -1489,6 +1489,19 @@ export interface PaymentGatewayConfigDTO {
   cardEnabled: boolean
   pixEnabled: boolean
   readiness: { card: PaymentMethodReadiness; pix: PaymentMethodReadiness }
+  /**
+   * `true` = todos os segredos salvos no banco foram lidos e decifrados agora; `false` = ao menos um NÃO decifra
+   * (chave `PAYMENT_SECRETS_KEY` trocada/perdida ou dado corrompido) e o gateway está em 503 — a tela deve alertar
+   * mesmo que os chips digam "Configurada". `null` = não há segredo salvo no banco (`source: "env"` ou nada gravado).
+   */
+  secretsDecryptable: boolean | null
+  /**
+   * `true` = ambiente efetivo é SANDBOX em servidor de PRODUÇÃO (`NODE_ENV=production`): os cartões de teste da Cielo
+   * são públicos, então Pix e cartão só funcionam para os e-mails da lista de testadores do servidor
+   * (`PAYMENT_SANDBOX_TESTER_EMAILS`); os demais motoristas recebem `PAYMENT_METHOD_DISABLED` com
+   * `reason: "SANDBOX_RESTRICTED"`. A tela deve mostrar um aviso permanente.
+   */
+  sandboxRestricted: boolean
   /** `null` quando `source === "env"` (nada salvo). */
   updatedAt: string | null
 }
@@ -1511,6 +1524,12 @@ export interface UpdatePaymentGatewayConfigRequest {
    * `PRODUCTION_CONFIRMATION_REQUIRED`.
    */
   confirmProduction?: true
+  /**
+   * OBRIGATÓRIO em TODO PUT (step-up): a senha ATUAL do ADMIN logado. Quem rouba um token de 12 h não consegue
+   * redirecionar o dinheiro para outra conta Cielo sem saber a senha. Ausente => 400 `VALIDATION_ERROR`; errada =>
+   * 403 `INVALID_CURRENT_PASSWORD` (403 e NÃO 401, para o interceptor não deslogar). Nunca é logada nem auditada.
+   */
+  currentPassword: string
 }
 
 export type PaymentGatewayConfigErrorCode =
@@ -1524,6 +1543,8 @@ export type PaymentGatewayConfigErrorCode =
   | "RATE_LIMITED_PAYMENT_GATEWAY" // 429 — PUT: 10 por minuto por usuário
   | "PAYMENT_GATEWAY_UNAVAILABLE" // 503 — GET/PUT com a configuração ilegível (banco fora, segredo que não decifra): fail-closed
   | "INTERNAL_ERROR" // 500 — a auditoria falhou: NADA foi gravado (fail-closed); pode tentar de novo
+  | "INVALID_CURRENT_PASSWORD" // 403 — step-up: a senha atual informada está errada (conta o limite de tentativas)
+  | "GATEWAY_HAS_INFLIGHT_PAYMENTS" // 409 — trocar `environment` com pagamentos em trânsito (CREATED/AUTHORIZED/PENDING/CAPTURE_PENDING) do ambiente atual; `details: { count }`; aguarde liquidarem
 
 /**
  * Regras do PUT que a tela precisa respeitar (comportamento real do servidor, F5.5):
@@ -1543,6 +1564,8 @@ export type PaymentGatewayConfigErrorCode =
  * `PAYMENT_METHOD_DISABLED` (409) tem DOIS sentidos nas rotas do motorista — a tela deve ramificar por
  * `details[0].reason`:
  * - sem `details` (ou sem `reason`): o CARTÃO escolhido foi removido/desativado pelo próprio motorista -> pedir outro cartão;
+ * - `reason: "SANDBOX_RESTRICTED"`: servidor de produção em ambiente SANDBOX e este motorista não está na lista de testadores — mesma
+ *   mensagem de "indisponível no momento" (não revele o motivo);
  * - `details: [{ method: "CARD" | "PIX", reason: "GATEWAY_DISABLED" }]`: o ADMIN desligou esse meio de pagamento na
  *   configuração do gateway -> esconder/avisar "indisponível no momento", NÃO pedir "escolha outro cartão".
  * Rotas afetadas: `POST /api/me/payment-methods/tokenization-session`, `POST /api/me/payment-methods`,
@@ -1550,5 +1573,5 @@ export type PaymentGatewayConfigErrorCode =
  */
 export interface PaymentMethodDisabledDetail {
   method: "CARD" | "PIX"
-  reason: "GATEWAY_DISABLED"
+  reason: "GATEWAY_DISABLED" | "SANDBOX_RESTRICTED"
 }

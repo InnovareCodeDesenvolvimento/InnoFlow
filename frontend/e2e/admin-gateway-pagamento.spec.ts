@@ -47,6 +47,13 @@ const envOption = (page: Page, name: "Sandbox" | "Produção") => page.getByTest
 
 const secretInput = (page: Page, field: "merchantKey" | "sopClientSecret" | "webhookHeaderSecret") => page.getByTestId(`secret-${field}`).locator("input")
 
+/** Preenche a senha atual (step-up, F5.7) no diálogo de salvar e confirma. */
+async function submitSaveDialog(page: Page, password: string = PASSWORD) {
+  const dialog = page.getByRole("dialog", { name: "Confirmar alterações no gateway" })
+  await dialog.getByLabel("Sua senha atual").fill(password)
+  await dialog.getByRole("button", { name: "Confirmar e salvar" }).click()
+}
+
 function captureConsole(page: Page) {
   const lines: string[] = []
   page.on("console", (msg) => lines.push(msg.text()))
@@ -54,10 +61,24 @@ function captureConsole(page: Page) {
   return lines
 }
 
+/**
+ * Bodies dos PUTs SEM a senha (os testes comparam só o diff do que mudou) — a senha vai para `passwords`,
+ * em paralelo, para provar que TODO PUT a carregou (step-up).
+ */
+const passwordsByPuts = new WeakMap<object, unknown[]>()
+/** As senhas que acompanharam cada PUT capturado por `capturePuts`, na mesma ordem. */
+const putPasswords = (puts: object) => passwordsByPuts.get(puts) ?? []
+
 function capturePuts(page: Page) {
   const bodies: Array<Record<string, unknown>> = []
+  const passwords: unknown[] = []
+  passwordsByPuts.set(bodies, passwords)
   page.on("request", (req) => {
-    if (req.method() === "PUT" && req.url().includes("/api/admin/payment-gateway")) bodies.push(JSON.parse(req.postData() ?? "{}"))
+    if (req.method() === "PUT" && req.url().includes("/api/admin/payment-gateway")) {
+      const { currentPassword, ...rest } = JSON.parse(req.postData() ?? "{}") as Record<string, unknown>
+      passwords.push(currentPassword)
+      bodies.push(rest)
+    }
   })
   return bodies
 }
@@ -137,7 +158,7 @@ test.describe("ADMIN — origem env, nada configurado: ver → configurar → ha
     await expect(merchantKey).toHaveValue("SEGREDO-MK-123456")
 
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await summaryDialog.getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(page.getByText("Configuração do gateway salva.")).toBeVisible() // toast
     await expect(summaryDialog).toHaveCount(0)
 
@@ -166,7 +187,7 @@ test.describe("ADMIN — origem env, nada configurado: ver → configurar → ha
     await page.getByRole("button", { name: "Salvar alterações" }).click()
     await expect(page.getByTestId("save-summary")).toContainText("Desabilitado")
     await expect(page.getByTestId("save-summary")).toContainText("Habilitado")
-    await summaryDialog.getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(summaryDialog).toHaveCount(0)
     expect(puts).toHaveLength(2)
     expect(puts[1]).toEqual({ pixEnabled: true })
@@ -200,7 +221,7 @@ test.describe("ADMIN — origem env, nada configurado: ver → configurar → ha
     await page.getByRole("button", { name: "Salvar alterações" }).click()
     await expect(page.getByTestId("save-summary")).toContainText("Sandbox (testes)")
     await expect(summaryDialog.getByText(/passa a cobrar de verdade/)).toBeVisible()
-    await summaryDialog.getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(summaryDialog).toHaveCount(0)
     expect(puts).toHaveLength(3)
     expect(puts[2]).toEqual({ environment: "production", confirmProduction: true })
@@ -226,14 +247,16 @@ test.describe("ADMIN — origem env, nada configurado: ver → configurar → ha
     expect(await everythingTheUserCouldSee(page)).not.toContain("SEGREDO-DESCARTADO-9")
   })
 
-  test("segredo do webhook com menos de 8 caracteres: erro no campo e salvar bloqueado", async ({ page }) => {
+  test("segredo do webhook com menos de 32 caracteres: erro no campo e salvar bloqueado (mínimo do servidor)", async ({ page }) => {
     await login(page, "admin@innoelektron.com")
     await openGateway(page)
     await page.getByRole("button", { name: "Informar Segredo do header" }).click()
     await secretInput(page, "webhookHeaderSecret").fill("curto")
-    await expect(page.getByText("O segredo precisa ter pelo menos 8 caracteres.")).toBeVisible()
+    await expect(page.getByText("O segredo precisa ter pelo menos 32 caracteres.")).toBeVisible()
     await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeDisabled()
-    await secretInput(page, "webhookHeaderSecret").fill("longo-o-bastante")
+    await secretInput(page, "webhookHeaderSecret").fill("longo-o-bastante-ainda-curto-12") // 31
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeDisabled()
+    await secretInput(page, "webhookHeaderSecret").fill("longo-o-bastante-agora-sim-32-ok") // 32
     await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeEnabled()
   })
 })
@@ -272,7 +295,7 @@ test.describe("ADMIN — banco, sandbox, tudo pronto", () => {
     await page.keyboard.press("Space")
     await expect(pix).toHaveAttribute("aria-checked", "false")
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
     expect(puts).toEqual([{ pixEnabled: false }])
   })
@@ -283,7 +306,7 @@ test.describe("ADMIN — banco, sandbox, tudo pronto", () => {
     await openGateway(page)
     await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
     expect(puts).toEqual([{ cardEnabled: true }])
   })
@@ -307,7 +330,7 @@ test.describe("ADMIN — já em produção", () => {
 
     await envOption(page, "Sandbox").click()
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
     expect(puts).toEqual([{ environment: "sandbox" }]) // sem confirmProduction na direção segura
     await expect(page.getByTestId("environment-sandbox-note")).toBeVisible()
@@ -344,7 +367,7 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     await page.getByRole("button", { name: "Informar MerchantKey" }).click()
     await secretInput(page, "merchantKey").fill("SEGREDO-SEM-CHAVE-77")
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     const error = page.getByTestId("save-error")
     await expect(error).toBeVisible()
     await expect(error).toHaveAttribute("data-code", "PAYMENT_SECRETS_KEY_MISSING")
@@ -371,7 +394,7 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     await prodDialog.getByLabel(/Para confirmar, digite PRODUÇÃO/).fill("Produção")
     await prodDialog.getByRole("button", { name: "Selecionar produção" }).click()
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(error).toHaveAttribute("data-code", "GATEWAY_NOT_READY")
     const notReady = page.getByTestId("save-error-missing")
     await expect(notReady).toContainText("MerchantKey da Cielo")
@@ -385,7 +408,7 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
 
 const confirmSave = async (page: Page) => {
   await page.getByRole("button", { name: "Salvar alterações" }).click()
-  await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+  await submitSaveDialog(page)
 }
 
 test.describe("PARES de credenciais: id + segredo no mesmo salvar (regra do servidor real)", () => {
@@ -458,9 +481,9 @@ test.describe("PARES de credenciais: id + segredo no mesmo salvar (regra do serv
         return { status: res.status, body: await res.json() }
       }
       return {
-        idOnly: await call({ merchantId: "x" }),
-        keyOnly: await call({ merchantKey: "x-segredo" }),
-        two: await call({ sopClientId: "s", merchantId: "m" }),
+        idOnly: await call({ merchantId: "x", currentPassword: "senha1234" }),
+        keyOnly: await call({ merchantKey: "x-segredo", currentPassword: "senha1234" }),
+        two: await call({ sopClientId: "s", merchantId: "m", currentPassword: "senha1234" }),
       }
     })
     expect(result.idOnly.status).toBe(409)
@@ -601,7 +624,7 @@ test.describe("mobile (390px)", () => {
 
     // 503 (lista com variáveis do servidor)
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog").getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(page.getByTestId("save-error")).toHaveAttribute("data-code", "PAYMENT_SECRETS_KEY_MISSING")
     expect(await horizontalOverflow(page)).toEqual({ document: 0, main: 0, stray: [] })
 
@@ -612,7 +635,7 @@ test.describe("mobile (390px)", () => {
     await page.getByRole("dialog").getByLabel(/Para confirmar/).fill("produção")
     await page.getByRole("dialog").getByRole("button", { name: "Selecionar produção" }).click()
     await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog").getByRole("button", { name: "Confirmar e salvar" }).click()
+    await submitSaveDialog(page)
     await expect(page.getByTestId("save-error")).toHaveAttribute("data-code", "GATEWAY_NOT_READY")
     expect(await horizontalOverflow(page)).toEqual({ document: 0, main: 0, stray: [] })
   })
@@ -622,5 +645,280 @@ test.describe("mobile (390px)", () => {
     await page.goto("/admin/gateway-pagamento")
     await expect(page.getByTestId("environment-production-banner")).toBeVisible()
     expect(await horizontalOverflow(page)).toEqual({ document: 0, main: 0, stray: [] })
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// F5.7 — step-up de senha, segredos ilegíveis, sandbox restrito, pagamentos em andamento
+// (NADA provado contra o backend real: mocks MSW espelhando o bloco "F5.5" ampliado de `types/api.ts`)
+// ---------------------------------------------------------------------------------------------------------------------
+
+const SENHA_ERRADA = "SENHA-ERRADA-Zq9"
+
+test.describe("step-up: senha atual obrigatória em TODO salvar", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("campo obrigatório e mascarado; errada => 'Senha incorreta.' no diálogo, sem deslogar e com o rascunho; certa salva; senha/segredo não vazam", async ({ page }) => {
+    const consoleLines = captureConsole(page)
+    const puts = capturePuts(page)
+    await login(page, "gateway-pronto@innoelektron.com")
+    await openGateway(page)
+
+    // rascunho com um segredo e um interruptor
+    await page.getByRole("button", { name: "Substituir MerchantKey" }).click()
+    await secretInput(page, "merchantKey").fill("SEGREDO-MK-STEPUP-1")
+    await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    const dialog = page.getByRole("dialog", { name: "Confirmar alterações no gateway" })
+    const password = dialog.getByLabel("Sua senha atual")
+    const confirm = dialog.getByRole("button", { name: "Confirmar e salvar" })
+
+    // obrigatório, mascarado, e o gerenciador de senhas entende que é a senha ATUAL (não 'nova')
+    await expect(password).toBeVisible()
+    await expect(password).toHaveAttribute("type", "password")
+    await expect(password).toHaveAttribute("autocomplete", "current-password")
+    await expect(password).toHaveAttribute("required", "")
+    await expect(confirm).toBeDisabled()
+    expect(puts).toHaveLength(0)
+
+    // com senha, habilita; apagou, desabilita de novo
+    await password.fill("x")
+    await expect(confirm).toBeEnabled()
+    await password.fill("")
+    await expect(confirm).toBeDisabled()
+
+    // ---- senha ERRADA --------------------------------------------------------------------------------------------
+    await password.fill(SENHA_ERRADA)
+    await confirm.click()
+    await expect(dialog.getByText("Senha incorreta.")).toBeVisible()
+    await expect(dialog.getByRole("alert").filter({ hasText: "Senha incorreta." })).toBeVisible()
+    await expect(password).toBeFocused() // pronto para digitar de novo
+    await expect(password).toHaveValue("") // a senha errada não fica no campo
+    await expect(password).toHaveAttribute("aria-invalid", "true")
+    await expect(confirm).toBeDisabled() // campo vazio de novo
+    // NÃO deslogou (403, não 401): mesma rota, sessão viva, rascunho intacto
+    await expect(page).toHaveURL(/\/admin\/gateway-pagamento$/)
+    expect(await page.evaluate(() => localStorage.getItem("innoelektron_token"))).toBeTruthy()
+    await expect(page.getByTestId("save-error")).toHaveCount(0) // o erro vive no diálogo, não vira alerta da página
+    expect(puts).toHaveLength(1)
+    expect(putPasswords(puts)).toEqual([SENHA_ERRADA])
+    expect(await dialog.innerText()).not.toContain(SENHA_ERRADA)
+
+    // o rascunho continua por trás: cancelar mostra segredo e interruptor como estavam
+    await dialog.getByRole("button", { name: "Cancelar" }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(secretInput(page, "merchantKey")).toHaveValue("SEGREDO-MK-STEPUP-1")
+    await expect(page.getByRole("switch", { name: "Habilitar Cartão" })).toHaveAttribute("aria-checked", "true")
+    // reabrir o diálogo: nada do erro nem da senha anterior
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    await expect(dialog.getByText("Senha incorreta.")).toHaveCount(0)
+    await expect(password).toHaveValue("")
+
+    // ---- senha CERTA (Enter envia) -------------------------------------------------------------------------------
+    await password.fill(PASSWORD)
+    await password.press("Enter")
+    await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+    await expect(dialog).toHaveCount(0)
+    expect(puts).toHaveLength(2)
+    expect(putPasswords(puts)).toEqual([SENHA_ERRADA, PASSWORD])
+    expect(puts[1]).toEqual({ merchantKey: "SEGREDO-MK-STEPUP-1", cardEnabled: true })
+
+    // ---- depois de salvo: nenhuma senha nem segredo no DOM, no localStorage, na URL ou no console -------------------
+    await expect(page.locator("input[type=password]")).toHaveCount(0)
+    const seen = await everythingTheUserCouldSee(page)
+    for (const secret of [PASSWORD, SENHA_ERRADA, "SEGREDO-MK-STEPUP-1"]) expect(seen).not.toContain(secret)
+    expect(page.url()).not.toMatch(/senha|SEGREDO/i)
+    const consoleText = consoleLines.join("\n")
+    for (const secret of [PASSWORD, SENHA_ERRADA, "SEGREDO-MK-STEPUP-1", "currentPassword"]) expect(consoleText).not.toContain(secret)
+    // também depois de reabrir o diálogo: o campo nasce vazio
+    await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    await expect(password).toHaveValue("")
+  })
+
+  test("Esc/Cancelar fecham sem enviar e sem lembrar a senha digitada pela metade", async ({ page }) => {
+    const puts = capturePuts(page)
+    await login(page, "gateway-pronto@innoelektron.com")
+    await openGateway(page)
+    await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    const dialog = page.getByRole("dialog", { name: "Confirmar alterações no gateway" })
+    await dialog.getByLabel("Sua senha atual").fill("meio-digitada")
+    await page.keyboard.press("Escape")
+    await expect(dialog).toHaveCount(0)
+    expect(puts).toHaveLength(0)
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    await expect(dialog.getByLabel("Sua senha atual")).toHaveValue("")
+  })
+
+  test("o mock exige a senha: PUT sem currentPassword => 400 VALIDATION_ERROR; senha errada => 403 INVALID_CURRENT_PASSWORD e NADA é gravado", async ({ page }) => {
+    await login(page, "gateway-pronto@innoelektron.com")
+    const result = await page.evaluate(async () => {
+      const token = localStorage.getItem("innoelektron_token")
+      const call = async (method: string, body?: unknown) => {
+        const res = await fetch("/api/admin/payment-gateway", {
+          method,
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        })
+        return { status: res.status, body: await res.json() }
+      }
+      return {
+        semSenha: await call("PUT", { cardEnabled: true }),
+        errada: await call("PUT", { cardEnabled: true, currentPassword: "nao-e-esta" }),
+        depois: await call("GET"),
+      }
+    })
+    expect(result.semSenha.status).toBe(400)
+    expect(result.semSenha.body.code).toBe("VALIDATION_ERROR")
+    expect(result.errada.status).toBe(403)
+    expect(result.errada.body.code).toBe("INVALID_CURRENT_PASSWORD")
+    expect(result.depois.body.cardEnabled).toBe(false) // nenhum dos dois gravou
+  })
+})
+
+/** No celular o menu é uma gaveta: abre a rota direto (o estado do mock é determinístico por conta, então reiniciar não atrapalha). */
+async function openGatewayAt(page: Page, width: number) {
+  if (width >= 1024) return openGateway(page)
+  await page.goto("/admin/gateway-pagamento")
+  await expect(page.getByRole("heading", { name: "Gateway de pagamento", level: 1 })).toBeVisible()
+}
+
+for (const viewport of [
+  { name: "390px", width: 390, height: 844 },
+  { name: "1440px", width: 1440, height: 900 },
+]) {
+  test.describe(`estado do servidor visível na tela (${viewport.name})`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } })
+
+    test("segredos ilegíveis: alerta persistente, chips 'Configurada (ilegível)', e reenviar os 3 segredos restabelece", async ({ page }) => {
+      const puts = capturePuts(page)
+      await login(page, "gateway-ilegivel-segredos@innoelektron.com")
+      await openGatewayAt(page, viewport.width)
+
+      const alert = page.getByTestId("secrets-unreadable-alert")
+      await expect(alert).toBeVisible()
+      await expect(alert).toHaveAttribute("role", "alert")
+      await expect(alert).toContainText("O servidor não consegue decifrar os segredos salvos")
+      await expect(alert).toContainText("PAYMENT_SECRETS_KEY")
+      await expect(alert).toContainText("indisponível (503)")
+      await expect(alert).toContainText("Reenvie os 3 segredos — MerchantKey, Client Secret do cadastro de cartão e segredo do webhook")
+      // sem sandbox restrito aqui
+      await expect(page.getByTestId("sandbox-restricted-banner")).toHaveCount(0)
+
+      for (const field of ["merchantKey", "sopClientSecret", "webhookHeaderSecret"] as const) {
+        await expect(page.getByTestId(`secret-${field}-chip`)).toHaveText("Configurada (ilegível)")
+      }
+      // nenhum chip verde "Configurada" sobrou
+      await expect(page.getByTestId("section-credentials").getByText("Configurada", { exact: true })).toHaveCount(0)
+
+      // o alerta continua com um rascunho que NÃO resolve (só mexer num interruptor)
+      await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+      await expect(alert).toBeVisible()
+      await page.getByRole("button", { name: "Descartar" }).click()
+
+      // reenviar os 3 segredos (MerchantKey e Client Secret digitados, webhook gerado) restabelece
+      await page.getByRole("button", { name: "Substituir MerchantKey" }).click()
+      await secretInput(page, "merchantKey").fill("nova-merchant-key-1")
+      await page.getByRole("button", { name: "Substituir Client Secret do cadastro de cartão" }).click()
+      await secretInput(page, "sopClientSecret").fill("novo-client-secret-1")
+      await page.getByRole("button", { name: "Substituir Segredo do header" }).click()
+      await page.getByRole("button", { name: "Gerar segredo aleatório" }).click()
+      await confirmSave(page)
+      await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+      expect(Object.keys(puts[0]).sort()).toEqual(["merchantKey", "sopClientSecret", "webhookHeaderSecret"])
+      await expect(alert).toHaveCount(0)
+      for (const field of ["merchantKey", "sopClientSecret", "webhookHeaderSecret"] as const) {
+        await expect(page.getByTestId(`secret-${field}-chip`)).toHaveText("Configurada")
+      }
+    })
+
+    test("estados saudáveis NÃO mostram o alerta de ilegível nem a faixa de sandbox (pronto)", async ({ page }) => {
+      await login(page, "gateway-pronto@innoelektron.com")
+      await openGatewayAt(page, viewport.width)
+      await expect(page.getByTestId("secret-merchantKey-chip")).toHaveText("Configurada")
+      await expect(page.getByTestId("secrets-unreadable-alert")).toHaveCount(0)
+      await expect(page.getByTestId("sandbox-restricted-banner")).toHaveCount(0)
+    })
+
+    test("origem env (secretsDecryptable null): nada de alerta de ilegível; segredos 'Não configurada'", async ({ page }) => {
+      await login(page, "admin@innoelektron.com")
+      await openGatewayAt(page, viewport.width)
+      await expect(page.getByTestId("secrets-unreadable-alert")).toHaveCount(0)
+      await expect(page.getByTestId("secret-merchantKey-chip")).toHaveText("Não configurada")
+    })
+
+    test("sandbox em servidor de produção: faixa permanente de aviso, sem overflow", async ({ page }) => {
+      await login(page, "gateway-sandbox-publico@innoelektron.com")
+      await openGatewayAt(page, viewport.width)
+
+      const banner = page.getByTestId("sandbox-restricted-banner")
+      await expect(banner).toBeVisible()
+      await expect(banner).toContainText("Ambiente SANDBOX em servidor de produção")
+      await expect(banner).toContainText("PAYMENT_SANDBOX_TESTER_EMAILS")
+      await expect(banner).toContainText("EasyPanel")
+      await expect(banner).toContainText("Os outros motoristas veem")
+      await expect(banner).toContainText("indisponível no momento")
+      await expect(page.getByTestId("secrets-unreadable-alert")).toHaveCount(0)
+
+      // permanente: continua com rascunho
+      await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+      await expect(banner).toBeVisible()
+
+      const overflow = await page.evaluate(() => {
+        const main = document.querySelector("main") as HTMLElement
+        return { document: document.documentElement.scrollWidth - document.documentElement.clientWidth, main: main.scrollWidth - main.clientWidth }
+      })
+      expect(overflow).toEqual({ document: 0, main: 0 })
+    })
+
+    test("ir para produção com pagamentos em andamento: 409 com N; rascunho mantido; só trocar de interruptor ainda salva", async ({ page }) => {
+      const puts = capturePuts(page)
+      await login(page, "gateway-em-andamento@innoelektron.com")
+      await openGatewayAt(page, viewport.width)
+      await envOption(page, "Produção").click()
+      const prodDialog = page.getByRole("dialog", { name: "Passar para produção?" })
+      await prodDialog.getByLabel(/Para confirmar, digite PRODUÇÃO/).fill("PRODUÇÃO")
+      await prodDialog.getByRole("button", { name: "Selecionar produção" }).click()
+      await confirmSave(page)
+
+      const error = page.getByTestId("save-error")
+      await expect(error).toHaveAttribute("data-code", "GATEWAY_HAS_INFLIGHT_PAYMENTS")
+      await expect(error).toContainText("Há 3 pagamentos em andamento neste ambiente. Aguarde liquidarem para trocar o ambiente.")
+      await expect(error).toContainText("O que você preencheu continua na tela.")
+      await expect(page.getByTestId("environment-production-banner")).toContainText("ainda não salva")
+      expect(puts).toEqual([{ environment: "production", confirmProduction: true }])
+      expect(putPasswords(puts)).toEqual([PASSWORD])
+
+      // continua em sandbox no servidor: descartar e mexer só num interruptor (não é troca de ambiente) funciona
+      await page.getByRole("button", { name: "Descartar" }).click()
+      await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+      await confirmSave(page)
+      await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+    })
+  })
+}
+
+test.describe("diálogo de salvar com senha (390px)", () => {
+  test.use({ viewport: { width: 390, height: 844 } })
+
+  test("cabe na tela com o campo de senha e o erro; botões acessíveis", async ({ page }) => {
+    await login(page, "gateway-pronto@innoelektron.com")
+    await page.goto("/admin/gateway-pagamento")
+    await page.getByRole("switch", { name: "Habilitar Cartão" }).click()
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    const dialog = page.getByRole("dialog", { name: "Confirmar alterações no gateway" })
+    await dialog.getByLabel("Sua senha atual").fill(SENHA_ERRADA)
+    await dialog.getByRole("button", { name: "Confirmar e salvar" }).click()
+    await expect(dialog.getByText("Senha incorreta.")).toBeVisible()
+    await expect
+      .poll(async () => {
+        const box = await dialog.boundingBox()
+        return box ? [Math.round(box.x) >= 0, Math.round(box.x + box.width) <= 390, Math.round(box.y + box.height) <= 844] : null
+      })
+      .toEqual([true, true, true])
+    await expect(dialog.getByRole("button", { name: "Confirmar e salvar" })).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Cancelar" })).toBeVisible()
   })
 })

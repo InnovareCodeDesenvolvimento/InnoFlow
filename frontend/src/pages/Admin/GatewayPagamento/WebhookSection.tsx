@@ -2,7 +2,7 @@ import { Dices, TriangleAlert, Webhook } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { Input } from "@/components/ui/Input"
-import { generateRandomSecret, type DraftErrors, type GatewayDraft } from "@/lib/paymentGateway"
+import { generateRandomSecret, WEBHOOK_SECRET_MIN, type DraftErrors, type GatewayDraft } from "@/lib/paymentGateway"
 import type { PaymentGatewayConfigDTO } from "@/types/api"
 import { CopyButton } from "./CopyButton"
 import { SecretField } from "./SecretField"
@@ -85,11 +85,12 @@ export function WebhookSection({
             testId="secret-webhookHeaderSecret"
             name="Segredo do header"
             isSet={dto.webhookHeaderSecretSet}
+            unreadable={dto.secretsDecryptable === false}
             value={secretValue}
             onChange={handleSecretChange}
             revealed={revealed}
             error={errors.webhookHeaderSecret}
-            hint={`Mínimo de 8 caracteres. Este valor é o que a Cielo vai enviar no header ${dto.webhookHeaderName}.`}
+            hint={`Mínimo de ${WEBHOOK_SECRET_MIN} caracteres (o gerador abaixo já atende). Este valor é o que a Cielo vai enviar no header ${dto.webhookHeaderName}.`}
             actions={revealed ? <CopyButton value={secretValue ?? ""} label="Copiar segredo gerado" /> : undefined}
           />
 

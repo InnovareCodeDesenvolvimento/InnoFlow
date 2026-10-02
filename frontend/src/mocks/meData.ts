@@ -831,15 +831,27 @@ const CARD_DEMO_DRIVER_ID = "user_driver_cartoes"
  */
 const GATEWAY_OFF_DRIVER_ID = "user_driver_gateway_off"
 
+/**
+ * `user_driver_gateway_restrito` (F5.7): servidor de produção em ambiente SANDBOX e este motorista não está na lista de testadores.
+ * As mesmas 4 rotas respondem 409 `PAYMENT_METHOD_DISABLED` com `reason: "SANDBOX_RESTRICTED"`. A PWA trata igual a `GATEWAY_DISABLED`
+ * (mesmas mensagens — não revela a restrição).
+ */
+const SANDBOX_RESTRICTED_DRIVER_ID = "user_driver_gateway_restrito"
+
 export function isGatewayDisabledFor(driverId: string): boolean {
-  return driverId === GATEWAY_OFF_DRIVER_ID
+  return driverId === GATEWAY_OFF_DRIVER_ID || driverId === SANDBOX_RESTRICTED_DRIVER_ID
 }
 
-export function gatewayDisabledBody(method: "CARD" | "PIX") {
+export function gatewayDisabledBody(driverId: string, method: "CARD" | "PIX") {
+  const restricted = driverId === SANDBOX_RESTRICTED_DRIVER_ID
   return {
-    error: method === "CARD" ? "Pagamento com cartão desabilitado pelo administrador." : "Pix desabilitado pelo administrador.",
+    error: restricted
+      ? "Meio de pagamento indisponível para este usuário no ambiente atual."
+      : method === "CARD"
+        ? "Pagamento com cartão desabilitado pelo administrador."
+        : "Pix desabilitado pelo administrador.",
     code: "PAYMENT_METHOD_DISABLED",
-    details: [{ method, reason: "GATEWAY_DISABLED" as const }],
+    details: [{ method, reason: restricted ? ("SANDBOX_RESTRICTED" as const) : ("GATEWAY_DISABLED" as const) }],
   }
 }
 
@@ -853,15 +865,15 @@ function seedCardDemoDriver(): MockPaymentMethod[] {
   ]
 }
 
-function seedGatewayOffDriver(): MockPaymentMethod[] {
+function seedGatewayOffDriver(driverId: string): MockPaymentMethod[] {
   return [
-    { id: "pm_seed_gwoff", driverId: GATEWAY_OFF_DRIVER_ID, brand: "Visa", last4: "4242", holderName: "Motorista Gateway Off", expiryMonth: 8, expiryYear: 2030, isDefault: true, createdAt: new Date().toISOString() },
+    { id: `pm_seed_${driverId}`, driverId, brand: "Visa", last4: "4242", holderName: "Motorista Gateway Off", expiryMonth: 8, expiryYear: 2030, isDefault: true, createdAt: new Date().toISOString() },
   ]
 }
 
 function getPaymentMethods(driverId: string): MockPaymentMethod[] {
   if (!paymentMethodsByDriver.has(driverId)) {
-    paymentMethodsByDriver.set(driverId, driverId === CARD_DEMO_DRIVER_ID ? seedCardDemoDriver() : driverId === GATEWAY_OFF_DRIVER_ID ? seedGatewayOffDriver() : [])
+    paymentMethodsByDriver.set(driverId, driverId === CARD_DEMO_DRIVER_ID ? seedCardDemoDriver() : isGatewayDisabledFor(driverId) ? seedGatewayOffDriver(driverId) : [])
   }
   return paymentMethodsByDriver.get(driverId) as MockPaymentMethod[]
 }

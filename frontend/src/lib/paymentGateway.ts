@@ -114,7 +114,7 @@ const SECRET_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 const SECRET_BYTE_LIMIT = 248
 
 export const GENERATED_SECRET_LENGTH = 40
-/** Piso para o segredo gerado: o servidor aceita ≥ 8, mas um segredo de header estático merece bem mais. */
+/** Piso para o segredo gerado: igual ao mínimo que o servidor exige do segredo do webhook (32). */
 export const GENERATED_SECRET_MIN_LENGTH = 32
 
 export type RandomBytesFn = (buffer: Uint8Array) => Uint8Array
@@ -166,7 +166,19 @@ export interface GatewayDraft {
   pixEnabled?: boolean
 }
 
-export const WEBHOOK_SECRET_MIN = 8
+/** Mínimo do segredo do header do webhook (servidor, Órion B2): 32. O gerador (40) já atende. */
+export const WEBHOOK_SECRET_MIN = 32
+
+/**
+ * O que MUDOU (o diff do PUT), sem a senha: é isto que a tela monta, valida e resume. A senha atual (step-up) só se
+ * junta no último instante, em `withCurrentPassword` — assim ela não passa por rascunho, resumo nem cache.
+ */
+export type GatewayChanges = Omit<UpdatePaymentGatewayConfigRequest, "currentPassword">
+
+/** Junta a senha atual (step-up, obrigatória em TODO PUT) ao diff. Não guarda nem repete a senha em lugar nenhum. */
+export function withCurrentPassword(changes: GatewayChanges, currentPassword: string): UpdatePaymentGatewayConfigRequest {
+  return { ...changes, currentPassword }
+}
 
 export const SECRET_FIELDS = ["merchantKey", "sopClientSecret", "webhookHeaderSecret"] as const
 export type SecretField = (typeof SECRET_FIELDS)[number]
@@ -203,8 +215,8 @@ export const CREDENTIAL_PAIRS = [
  *  - `confirmProduction: true` só quando vira sandbox → produção E o admin
  *    confirmou digitando.
  */
-export function buildUpdatePayload(dto: PaymentGatewayConfigDTO, draft: GatewayDraft): UpdatePaymentGatewayConfigRequest {
-  const payload: UpdatePaymentGatewayConfigRequest = {}
+export function buildUpdatePayload(dto: PaymentGatewayConfigDTO, draft: GatewayDraft): GatewayChanges {
+  const payload: GatewayChanges = {}
 
   if (draft.environment !== undefined && draft.environment !== dto.environment) {
     payload.environment = draft.environment
@@ -242,7 +254,7 @@ export function buildUpdatePayload(dto: PaymentGatewayConfigDTO, draft: GatewayD
   return payload
 }
 
-export function hasChanges(payload: UpdatePaymentGatewayConfigRequest): boolean {
+export function hasChanges(payload: GatewayChanges): boolean {
   return Object.keys(payload).length > 0
 }
 
@@ -253,7 +265,7 @@ export type DraftErrors = Partial<Record<SecretField | "merchantId" | "sopClient
  * é o que se valida). O erro vai no campo que FALTA — o lado que o admin ainda
  * precisa preencher na mesma alteração.
  */
-export function validateCredentialPairs(dto: PaymentGatewayConfigDTO, payload: UpdatePaymentGatewayConfigRequest): DraftErrors {
+export function validateCredentialPairs(dto: PaymentGatewayConfigDTO, payload: GatewayChanges): DraftErrors {
   const errors: DraftErrors = {}
   for (const pair of CREDENTIAL_PAIRS) {
     const idSent = payload[pair.id] !== undefined
@@ -267,7 +279,7 @@ export function validateCredentialPairs(dto: PaymentGatewayConfigDTO, payload: U
   return errors
 }
 
-/** Validações que o cliente consegue fazer sem inventar regra: hoje, só o mínimo de 8 do segredo do webhook (contrato). */
+/** Validações que o cliente consegue fazer sem inventar regra: hoje, só o mínimo de 32 do segredo do webhook (contrato). */
 export function validateDraft(draft: GatewayDraft): DraftErrors {
   const errors: DraftErrors = {}
   const secret = draft.webhookHeaderSecret?.trim()
@@ -290,7 +302,7 @@ export interface ChangeSummaryItem {
 const ENABLED_LABEL = (v: boolean) => (v ? "Habilitado" : "Desabilitado")
 
 /** Linhas do diálogo de confirmação a partir do PAYLOAD já montado (o que será enviado é exatamente o que se mostra). */
-export function describeChanges(dto: PaymentGatewayConfigDTO, payload: UpdatePaymentGatewayConfigRequest): ChangeSummaryItem[] {
+export function describeChanges(dto: PaymentGatewayConfigDTO, payload: GatewayChanges): ChangeSummaryItem[] {
   const items: ChangeSummaryItem[] = []
   if (payload.environment) {
     items.push({ key: "environment", label: "Ambiente", from: ENVIRONMENT_LABELS[dto.environment], to: ENVIRONMENT_LABELS[payload.environment] })
@@ -327,6 +339,7 @@ export const GATEWAY_RATE_LIMITED_MESSAGE = "Muitas alterações em pouco tempo.
 export const GATEWAY_UNAVAILABLE_MESSAGE =
   "O servidor não conseguiu ler a configuração do gateway — o banco pode estar fora do ar ou a PAYMENT_SECRETS_KEY foi trocada. Nada foi alterado."
 export const GATEWAY_INTERNAL_ERROR_MESSAGE = "Não foi possível salvar e nada foi alterado. Tente novamente."
+export const GATEWAY_WRONG_PASSWORD_MESSAGE = "Senha incorreta."
 export const GATEWAY_SESSION_EXPIRED_MESSAGE = "Sua sessão expirou. Entre de novo para continuar — nada foi alterado."
 
 /**
@@ -364,6 +377,21 @@ export function extractRequirements(details: unknown): PaymentGatewayRequirement
     if (match && !found.includes(match)) found.push(match)
   }
   return found
+}
+
+/** `details` do 409 `GATEWAY_HAS_INFLIGHT_PAYMENTS` é `{ count }` (aceita também `[{ count }]`). `null` se não houver um número válido. */
+export function extractInflightCount(details: unknown): number | null {
+  const source: unknown = Array.isArray(details) ? details[0] : details
+  if (!source || typeof source !== "object") return null
+  const count = (source as { count?: unknown }).count
+  return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : null
+}
+
+/** Texto do 409 de pagamentos em andamento. Sem `count` legível, não inventa número. */
+export function inflightPaymentsMessage(count: number | null): string {
+  const tail = "Aguarde liquidarem para trocar o ambiente."
+  if (count === null) return `Há pagamentos em andamento neste ambiente. ${tail}`
+  return count === 1 ? `Há 1 pagamento em andamento neste ambiente. ${tail}` : `Há ${count} pagamentos em andamento neste ambiente. ${tail}`
 }
 
 /**
@@ -408,6 +436,11 @@ export function parseGatewaySaveError(err: unknown): GatewaySaveError {
       }
     case "VALIDATION_ERROR":
       return { code, message: `O servidor não aceitou algum valor${serverMessage ? `: ${serverMessage}` : "."} Revise os campos e tente de novo.`, requirements: [], draftKept: true }
+    case "INVALID_CURRENT_PASSWORD":
+      // 403 (e não 401): a sessão continua válida. Quem trata é o diálogo de salvar, que fica aberto com o rascunho intacto.
+      return { code, message: GATEWAY_WRONG_PASSWORD_MESSAGE, requirements: [], draftKept: true }
+    case "GATEWAY_HAS_INFLIGHT_PAYMENTS":
+      return { code, message: inflightPaymentsMessage(extractInflightCount(body?.details)), requirements: [], draftKept: true }
     case "FORBIDDEN":
       return { code, message: "Somente administradores podem alterar o gateway de pagamento.", requirements: [], draftKept: true }
     default:

@@ -15,27 +15,38 @@ import { expect, test, type Page } from "@playwright/test"
  * login e o resto é clique na SPA.
  */
 
-const DRIVER_EMAIL = "gateway-off@innoelektron.com"
+/**
+ * Dois motivos, UMA experiência (F5.7): `GATEWAY_DISABLED` (o admin desligou o meio) e `SANDBOX_RESTRICTED` (servidor de
+ * produção em sandbox, motorista fora da lista de testadores — `gateway-restrito@`, `user_driver_gateway_restrito`).
+ * O motorista vê as MESMAS mensagens e nunca descobre que existe restrição por testador.
+ */
+const DRIVERS = [
+  { reason: "GATEWAY_DISABLED", email: "gateway-off@innoelektron.com" },
+  { reason: "SANDBOX_RESTRICTED", email: "gateway-restrito@innoelektron.com" },
+] as const
+/** Vazar o motivo da restrição ajudaria quem procura cobrança grátis com cartão de teste. */
+const REVEALS_RESTRICTION = /testador|sandbox|restri[çc]|lista de/i
 const PASSWORD = "senha1234"
 const CHARGE_POINT_URL = "/c/CP-VILA-NORTE-01/1"
 
-async function loginAsDriver(page: Page, redirect = "/app") {
+async function loginAsDriver(page: Page, email: string, redirect = "/app") {
   await page.goto(`/login?redirect=${encodeURIComponent(redirect)}`)
-  await page.getByLabel("E-mail").fill(DRIVER_EMAIL)
+  await page.getByLabel("E-mail").fill(email)
   await page.getByLabel("Senha").fill(PASSWORD)
   await page.getByRole("button", { name: "Entrar" }).click()
   await expect(page).toHaveURL(new RegExp(redirect.replace(/\//g, "\\/")))
 }
 
-for (const viewport of [
-  { name: "mobile (390px)", width: 390, height: 844 },
-  { name: "desktop (1440px)", width: 1440, height: 900 },
-]) {
-  test.describe(`gateway desligado pelo admin — ${viewport.name}`, () => {
+for (const driver of DRIVERS)
+  for (const viewport of [
+    { name: "mobile (390px)", width: 390, height: 844 },
+    { name: "desktop (1440px)", width: 1440, height: 900 },
+  ]) {
+  test.describe(`meio de pagamento indisponível (${driver.reason}) — ${viewport.name}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } })
 
     test("(a) iniciar recarga com cartão: avisa, volta para Carteira, esconde o seletor — e a carteira ainda inicia", async ({ page }) => {
-      await loginAsDriver(page, CHARGE_POINT_URL)
+      await loginAsDriver(page, driver.email, CHARGE_POINT_URL)
 
       // antes: cartão padrão pré-selecionado e a nota de pré-autorização
       await expect(page.getByRole("radio", { name: /Visa.*4242/ })).toBeChecked()
@@ -54,6 +65,8 @@ for (const viewport of [
       // o aviso fica (persistente) e o botão continua utilizável
       await expect(page.getByRole("button", { name: "Iniciar recarga" })).toBeEnabled()
 
+      expect(await page.locator("body").innerText()).not.toMatch(REVEALS_RESTRICTION)
+
       // segunda tentativa vai pela carteira (sem payment CARD) e funciona
       await page.getByRole("button", { name: "Iniciar recarga" }).click()
       await expect(page).toHaveURL(/\/app\/sessao/)
@@ -62,7 +75,7 @@ for (const viewport of [
     test("(b) Adicionar cartão em Meus cartões: 'cadastro indisponível', sem abrir a aba isolada", async ({ page, context }) => {
       let popups = 0
       context.on("page", () => popups++)
-      await loginAsDriver(page)
+      await loginAsDriver(page, driver.email)
       await page.goto("/app/carteira") // estado do mock é determinístico (semente), reiniciar não atrapalha
       await page.getByRole("link", { name: /Meus cartões/ }).click()
       await expect(page).toHaveURL(/\/app\/carteira\/cartoes/)
@@ -73,10 +86,11 @@ for (const viewport of [
       // o botão volta ao normal (não fica girando) e o cartão salvo continua listado
       await expect(page.getByRole("button", { name: "Adicionar cartão" })).toBeEnabled()
       await expect(page.getByText(/4242/)).toBeVisible()
+      expect(await page.locator("body").innerText()).not.toMatch(REVEALS_RESTRICTION)
     })
 
     test("(c) Adicionar saldo por Pix: 'Pix indisponível', sem botão de tentar de novo", async ({ page }) => {
-      await loginAsDriver(page)
+      await loginAsDriver(page, driver.email)
       await page.goto("/app/carteira")
       await page.getByRole("link", { name: /Adicionar saldo/ }).click()
       await expect(page).toHaveURL(/\/app\/carteira\/adicionar/)
@@ -89,6 +103,7 @@ for (const viewport of [
       // sem laço de tentativa: o formulário e qualquer "tentar/gerar" somem
       await expect(page.getByRole("button", { name: /Gerar código Pix|Tentar novamente|Gerar novo Pix/ })).toHaveCount(0)
       await expect(page.getByText(/Aguardando pagamento/)).toHaveCount(0)
+      expect(await page.locator("body").innerText()).not.toMatch(REVEALS_RESTRICTION)
 
       await panel.getByRole("link", { name: "Voltar à carteira" }).click()
       await expect(page).toHaveURL(/\/app\/carteira$/)

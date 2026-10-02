@@ -42,6 +42,11 @@ export const mockUsers: MockUser[] = [
   { id: "user_admin_gateway_sem_chave", name: "Sônia Sem-Chave", email: "gateway-sem-chave@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_falhas", name: "Fábio Falhas", email: "gateway-falhas@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_ilegivel", name: "Ivo Ilegível", email: "gateway-ilegivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  // F5.7: segredos que o servidor não decifra (GET 200 com `secretsDecryptable:false`), sandbox em servidor de produção
+  // (`sandboxRestricted:true`) e troca de ambiente bloqueada por pagamentos em andamento (409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`).
+  { id: "user_admin_gateway_ilegivel_segredos", name: "Sílvia Segredos", email: "gateway-ilegivel-segredos@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_gateway_sandbox_publico", name: "Sandra Sandbox", email: "gateway-sandbox-publico@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_gateway_em_andamento", name: "Emílio Andamento", email: "gateway-em-andamento@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
   // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).
   { id: "user_driver", name: "Carla Motorista", email: "motorista@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
@@ -65,6 +70,9 @@ export const mockUsers: MockUser[] = [
   // aparece) e saldo normal (a carteira continua funcionando). Conta separada de propósito: ligar o
   // cenário nos motoristas existentes quebraria os E2E de cartão/Pix.
   { id: "user_driver_gateway_off", name: "Gabi Gateway-Off", email: "gateway-off@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // F5.7: servidor de produção em SANDBOX e motorista fora da lista de testadores — as mesmas rotas respondem
+  // `reason: "SANDBOX_RESTRICTED"` (a PWA mostra o mesmo "indisponível no momento"). Nasce com 1 cartão, como o `gateway-off@`.
+  { id: "user_driver_gateway_restrito", name: "Rita Restrita", email: "gateway-restrito@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 
 export const mockSites: Site[] = [

@@ -15,6 +15,7 @@ import {
   parseGatewaySaveError,
   validateCredentialPairs,
   validateDraft,
+  withCurrentPassword,
   type GatewayDraft,
   type GatewaySaveError,
 } from "@/lib/paymentGateway"
@@ -25,6 +26,7 @@ import { EnvironmentSection } from "./EnvironmentSection"
 import { MethodCard } from "./MethodCard"
 import { RequirementList } from "./RequirementList"
 import { SourceBanner } from "./SourceBanner"
+import { SandboxRestrictedBanner, UnreadableSecretsAlert } from "./StatusBanners"
 import { WebhookSection } from "./WebhookSection"
 
 function GatewaySkeleton() {
@@ -60,6 +62,8 @@ export default function GatewayPagamentoPage() {
   const [productionDialogOpen, setProductionDialogOpen] = useState(false)
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveError, setSaveError] = useState<GatewaySaveError | null>(null)
+  // 403 INVALID_CURRENT_PASSWORD: o erro vive no diálogo de salvar (que continua aberto), não no alerta da página.
+  const [passwordError, setPasswordError] = useState<string | null>(null)
   const errorRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -116,24 +120,42 @@ export default function GatewayPagamentoPage() {
     setSaveError(null)
   }
 
-  const handleSave = async () => {
+  const closeSaveDialog = () => {
+    setSaveDialogOpen(false)
+    setPasswordError(null)
+  }
+
+  const handleSave = async (currentPassword: string) => {
     if (!dirty || mutation.isPending) return
     setSaveError(null)
+    setPasswordError(null)
     try {
-      await mutation.mutateAsync(payload)
+      await mutation.mutateAsync(withCurrentPassword(payload, currentPassword))
       // Segredos digitados morrem aqui: o rascunho inteiro é descartado (o DTO novo já está no cache).
       setDraft({})
-      setSaveDialogOpen(false)
+      closeSaveDialog()
       toast.success("Configuração do gateway salva.")
     } catch (err) {
-      setSaveDialogOpen(false)
-      setSaveError(parseGatewaySaveError(err))
+      const parsed = parseGatewaySaveError(err)
+      if (parsed.code === "INVALID_CURRENT_PASSWORD") {
+        // Senha errada: o diálogo fica aberto com o erro; o rascunho (e a sessão — é 403, não 401) seguem intactos.
+        setPasswordError(parsed.message)
+      } else {
+        closeSaveDialog()
+        setSaveError(parsed)
+      }
+    } finally {
+      // Órion B7: `mutation.variables` guardaria o corpo do PUT (segredos + senha) na memória até o próximo envio.
+      mutation.reset()
     }
   }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader title="Gateway de pagamento" description="Conta Cielo da plataforma: credenciais, ambiente e meios de pagamento." icon={Vault} />
+
+      {dto.secretsDecryptable === false && <UnreadableSecretsAlert />}
+      {dto.sandboxRestricted && <SandboxRestrictedBanner />}
 
       <SourceBanner source={dto.source} updatedAt={dto.updatedAt} />
 
@@ -223,6 +245,7 @@ export default function GatewayPagamentoPage() {
               type="button"
               onClick={() => {
                 setSaveError(null)
+                setPasswordError(null)
                 setSaveDialogOpen(true)
               }}
               disabled={!canSave}
@@ -249,8 +272,9 @@ export default function GatewayPagamentoPage() {
           items={changes}
           goesToProduction={payload.environment === "production"}
           loading={mutation.isPending}
-          onCancel={() => setSaveDialogOpen(false)}
-          onConfirm={() => void handleSave()}
+          passwordError={passwordError}
+          onCancel={closeSaveDialog}
+          onConfirm={(currentPassword) => void handleSave(currentPassword)}
         />
       )}
     </div>

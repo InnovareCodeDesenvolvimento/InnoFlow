@@ -1,26 +1,57 @@
+import { type FormEvent, useEffect, useId, useRef, useState } from "react"
 import { ArrowRight, Check, ShieldCheck, TriangleAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/Dialog"
+import { Input } from "@/components/ui/Input"
 import type { ChangeSummaryItem } from "@/lib/paymentGateway"
 
 /**
- * Resumo do que vai ser enviado, antes do PUT. Segredos aparecem só como
- * "Será substituída" — o valor digitado nunca é renderizado aqui (nem em
- * atributo). `goesToProduction` acrescenta o aviso de cobrança real.
+ * Resumo do que vai ser enviado, antes do PUT, + step-up de SENHA (F5.7).
+ * Segredos aparecem só como "Será substituída" — o valor digitado nunca é
+ * renderizado aqui (nem em atributo). `goesToProduction` acrescenta o aviso de
+ * cobrança real.
+ *
+ * Senha atual: vive SÓ no estado local deste diálogo (que desmonta ao fechar, e
+ * com ele a senha), é entregue a `onConfirm` e zerada NA HORA — então nem
+ * durante a requisição, nem depois de um erro, ela fica no campo. Não é aparada
+ * (senha pode ter espaço). "Confirmar" só habilita com algo digitado.
+ * `passwordError` (403 `INVALID_CURRENT_PASSWORD`) aparece no próprio diálogo e
+ * devolve o foco ao campo; o rascunho da tela não é tocado.
  */
 export function ConfirmSaveDialog({
   items,
   goesToProduction,
   loading,
+  passwordError,
   onConfirm,
   onCancel,
 }: {
   items: ChangeSummaryItem[]
   goesToProduction: boolean
   loading: boolean
-  onConfirm: () => void
+  passwordError?: string | null
+  onConfirm: (currentPassword: string) => void
   onCancel: () => void
 }) {
+  const [password, setPassword] = useState("")
+  const passwordRef = useRef<HTMLInputElement>(null)
+  const formId = useId()
+
+  // Senha errada: o campo já foi zerado ao enviar; só devolve o foco para digitar de novo.
+  useEffect(() => {
+    if (passwordError) passwordRef.current?.focus()
+  }, [passwordError])
+
+  const canConfirm = password.length > 0 && !loading
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!canConfirm) return
+    const typed = password
+    setPassword("")
+    onConfirm(typed)
+  }
+
   return (
     <Dialog open onOpenChange={(open) => !open && !loading && onCancel()}>
       <DialogContent widthClassName="sm:max-w-lg">
@@ -53,12 +84,30 @@ export function ConfirmSaveDialog({
           </p>
         )}
 
+        <form id={formId} onSubmit={handleSubmit} className="mt-4" noValidate>
+          <Input
+            ref={passwordRef}
+            type="password"
+            name="currentPassword"
+            label="Sua senha atual"
+            required
+            autoComplete="current-password"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={loading}
+            error={passwordError ?? undefined}
+            hint="Pedida em toda alteração do gateway, para que só quem conhece a senha possa mexer na conta que recebe o dinheiro."
+          />
+        </form>
+
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
             <X className="h-4 w-4" aria-hidden="true" />
             Cancelar
           </Button>
-          <Button type="button" variant={goesToProduction ? "destructive" : "default"} loading={loading} onClick={onConfirm}>
+          <Button type="submit" form={formId} variant={goesToProduction ? "destructive" : "default"} loading={loading} disabled={password.length === 0}>
             {!loading && <Check className="h-4 w-4" aria-hidden="true" />}
             Confirmar e salvar
           </Button>

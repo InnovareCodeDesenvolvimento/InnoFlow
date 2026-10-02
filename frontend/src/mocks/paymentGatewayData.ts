@@ -6,6 +6,9 @@ import type {
   UpdatePaymentGatewayConfigRequest,
 } from "@/types/api"
 
+/** Senha das contas de ADMIN do mock (a mesma de `mocks/data.ts`): o PUT confere `currentPassword` contra ela (step-up, F5.7). */
+const MOCK_ADMIN_PASSWORD = "senha1234"
+
 /**
  * Espelho (no que a tela precisa provar) de `GET/PUT /api/admin/payment-gateway`
  * (F5.5). NÃO é a regra de negócio da Vega — é só o suficiente para exercitar o
@@ -41,6 +44,18 @@ import type {
  *                                              "ERRO-429" => 429 RATE_LIMITED_PAYMENT_GATEWAY, "ERRO-503" => 503 PAYMENT_GATEWAY_UNAVAILABLE,
  *                                              "ERRO-500" => 500 INTERNAL_ERROR (nada é gravado em nenhum deles);
  *  - `gateway-ilegivel@innoelektron.com`     → o GET devolve 503 PAYMENT_GATEWAY_UNAVAILABLE (configuração ilegível no servidor).
+ *
+ * F5.7 (step-up de senha, segredos ilegíveis, sandbox restrito) — espelha o bloco "F5.5" ampliado de `types/api.ts`:
+ *  - TODO PUT exige `currentPassword`: ausente => 400 VALIDATION_ERROR; diferente de `senha1234` => 403 INVALID_CURRENT_PASSWORD
+ *    (nada é gravado; 403 e NÃO 401, para o interceptor não deslogar). A senha nunca é guardada nem devolvida;
+ *  - `secretsDecryptable`: `null` sem segredo no banco (`source:"env"`); `true`/`false` com segredo salvo. Reenviar os 3 segredos
+ *    num mesmo PUT restabelece (`false` → `true`);
+ *  - `sandboxRestricted`: `true` quando o servidor é de produção (`NODE_ENV`) e o ambiente efetivo é sandbox;
+ *  - `webhookHeaderSecret`: mínimo 32 (Órion B2);
+ *  - `gateway-ilegivel-segredos@innoelektron.com` → como o "pronto", mas `secretsDecryptable: false` (o GET é 200; o gateway "está em 503");
+ *  - `gateway-sandbox-publico@innoelektron.com`   → como o "pronto", servidor de produção em sandbox => `sandboxRestricted: true`;
+ *  - `gateway-em-andamento@innoelektron.com`      → como o "pronto", com 3 pagamentos em trânsito: trocar `environment` => 409
+ *                                                   GATEWAY_HAS_INFLIGHT_PAYMENTS com `details: { count: 3 }` (nada é gravado).
  */
 
 interface ServerEnv {
@@ -48,6 +63,8 @@ interface ServerEnv {
   sopOauthTokenUrl: boolean
   webhookPathToken: boolean
   secretsKey: boolean
+  /** `NODE_ENV=production` no servidor: sandbox aqui é "cobrança grátis" (cartões de teste públicos) => `sandboxRestricted`. */
+  productionNode: boolean
 }
 
 interface GatewayState {
@@ -61,6 +78,10 @@ interface GatewayState {
   cardEnabled: boolean
   pixEnabled: boolean
   updatedAt: string | null
+  /** Só simulação: `false` = o servidor não decifra os segredos salvos (chave trocada). */
+  secretsDecryptable: boolean
+  /** Só simulação: pagamentos em trânsito no ambiente atual (bloqueiam a troca de ambiente). */
+  inflightPayments: number
 }
 
 interface Scenario {
@@ -68,7 +89,7 @@ interface Scenario {
   state: GatewayState
 }
 
-const FULL_SERVER: ServerEnv = { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: true, secretsKey: true }
+const FULL_SERVER: ServerEnv = { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: true, secretsKey: true, productionNode: false }
 
 const EMPTY_STATE: GatewayState = {
   source: "env",
@@ -81,6 +102,8 @@ const EMPTY_STATE: GatewayState = {
   cardEnabled: false,
   pixEnabled: false,
   updatedAt: null,
+  secretsDecryptable: true,
+  inflightPayments: 0,
 }
 
 const READY_STATE: GatewayState = {
@@ -94,6 +117,8 @@ const READY_STATE: GatewayState = {
   cardEnabled: false,
   pixEnabled: true,
   updatedAt: "2026-10-01T14:32:00.000Z",
+  secretsDecryptable: true,
+  inflightPayments: 0,
 }
 
 function seed(userId: string): Scenario {
@@ -105,9 +130,15 @@ function seed(userId: string): Scenario {
     case "user_admin_gateway_falhas":
     case "user_admin_gateway_ilegivel":
       return { server: { ...FULL_SERVER }, state: { ...READY_STATE } }
+    case "user_admin_gateway_ilegivel_segredos":
+      return { server: { ...FULL_SERVER }, state: { ...READY_STATE, secretsDecryptable: false } }
+    case "user_admin_gateway_sandbox_publico":
+      return { server: { ...FULL_SERVER, productionNode: true }, state: { ...READY_STATE } }
+    case "user_admin_gateway_em_andamento":
+      return { server: { ...FULL_SERVER }, state: { ...READY_STATE, inflightPayments: 3 } }
     case "user_admin_gateway_sem_chave":
       // Pix já HABILITADO (herdado do ambiente do servidor) mas sem pré-requisito: prova que DESLIGAR é sempre permitido e dá o caminho ao 409 GATEWAY_NOT_READY (ir para produção).
-      return { server: { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: false, secretsKey: false }, state: { ...EMPTY_STATE, pixEnabled: true } }
+      return { server: { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: false, secretsKey: false, productionNode: false }, state: { ...EMPTY_STATE, pixEnabled: true } }
     default:
       return { server: { ...FULL_SERVER }, state: { ...EMPTY_STATE } }
   }
@@ -172,16 +203,20 @@ function toDto({ state, server }: Scenario): PaymentGatewayConfigDTO {
     cardEnabled: state.cardEnabled,
     pixEnabled: state.pixEnabled,
     readiness: { card: readiness("card", state, server), pix: readiness("pix", state, server) },
+    // `null` = nenhum segredo no banco (origem env); senão, se o servidor consegue decifrar o que está salvo.
+    secretsDecryptable: state.source === "env" ? null : state.secretsDecryptable,
+    sandboxRestricted: server.productionNode && state.environment === "sandbox",
     updatedAt: state.updatedAt,
   }
 }
 
-export type GatewayFailureStatus = 400 | 409 | 429 | 500 | 503
+export type GatewayFailureStatus = 400 | 403 | 409 | 429 | 500 | 503
+type GatewayFailureDetails = PaymentGatewayRequirement[] | { count: number }
 export type GatewayUpdateResult =
   | { ok: true; dto: PaymentGatewayConfigDTO }
-  | { ok: false; status: GatewayFailureStatus; code: string; message: string; details?: PaymentGatewayRequirement[] }
+  | { ok: false; status: GatewayFailureStatus; code: string; message: string; details?: GatewayFailureDetails }
 
-const fail = (status: GatewayFailureStatus, code: string, message: string, details?: PaymentGatewayRequirement[]): GatewayUpdateResult => ({ ok: false, status, code, message, details })
+const fail = (status: GatewayFailureStatus, code: string, message: string, details?: GatewayFailureDetails): GatewayUpdateResult => ({ ok: false, status, code, message, details })
 
 export function getGatewayConfig(userId: string): GatewayUpdateResult {
   if (userId === "user_admin_gateway_ilegivel") {
@@ -209,8 +244,8 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
   for (const key of ["merchantKey", "sopClientSecret"] as const) {
     if (input[key] !== undefined && !isText(input[key], 1, 200)) return fail(400, "VALIDATION_ERROR", `${key}: de 1 a 200 caracteres.`)
   }
-  if (input.webhookHeaderSecret !== undefined && !isText(input.webhookHeaderSecret, 8, 200)) {
-    return fail(400, "VALIDATION_ERROR", "webhookHeaderSecret: de 8 a 200 caracteres.")
+  if (input.webhookHeaderSecret !== undefined && !isText(input.webhookHeaderSecret, 32, 200)) {
+    return fail(400, "VALIDATION_ERROR", "webhookHeaderSecret: de 32 a 200 caracteres.")
   }
   for (const key of ["cardEnabled", "pixEnabled"] as const) {
     if (input[key] !== undefined && typeof input[key] !== "boolean") return fail(400, "VALIDATION_ERROR", `${key}: deve ser booleano.`)
@@ -218,6 +253,13 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
   if (input.confirmProduction !== undefined && input.confirmProduction !== true) {
     return fail(400, "VALIDATION_ERROR", "confirmProduction: só aceita true.")
   }
+
+  // ---- 400/403: step-up de senha em TODO PUT (a senha nunca é guardada nem ecoada) ----
+  if (input.currentPassword === undefined) return fail(400, "VALIDATION_ERROR", "currentPassword: obrigatório.")
+  if (typeof input.currentPassword !== "string" || input.currentPassword.length < 1 || input.currentPassword.length > 200) {
+    return fail(400, "VALIDATION_ERROR", "currentPassword: de 1 a 200 caracteres.")
+  }
+  if (input.currentPassword !== MOCK_ADMIN_PASSWORD) return fail(403, "INVALID_CURRENT_PASSWORD", "Senha atual incorreta.")
 
   // ---- falhas determinísticas do cenário `gateway-falhas@` (nada é gravado) ----
   if (userId === "user_admin_gateway_falhas" && typeof input.merchantId === "string") {
@@ -236,6 +278,11 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
   // ---- 400: virar produção exige confirmação explícita ----
   if (input.environment === "production" && scenario.state.environment === "sandbox" && input.confirmProduction !== true) {
     return fail(400, "PRODUCTION_CONFIRMATION_REQUIRED", "Mudar para produção exige confirmProduction: true.")
+  }
+
+  // ---- 409: trocar o ambiente com pagamentos em trânsito do ambiente atual ----
+  if (input.environment !== undefined && input.environment !== scenario.state.environment && scenario.state.inflightPayments > 0) {
+    return fail(409, "GATEWAY_HAS_INFLIGHT_PAYMENTS", "Há pagamentos em andamento neste ambiente.", { count: scenario.state.inflightPayments })
   }
 
   // ---- 409: PARES de credenciais andam juntos (id + segredo no mesmo PUT quando o par vem do env ou não há segredo salvo) ----
@@ -271,6 +318,8 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
     return fail(409, "GATEWAY_NOT_READY", "Há pré-requisitos faltando para o que foi pedido.", REQUIREMENT_ORDER.filter((r) => missing.has(r)))
   }
 
-  scenario.state = { ...next, source: "database", updatedAt: new Date().toISOString() }
+  // Reenviar os 3 segredos no mesmo PUT restabelece a leitura (a chave nova cifra tudo de novo).
+  const resendsAllSecrets = input.merchantKey !== undefined && input.sopClientSecret !== undefined && input.webhookHeaderSecret !== undefined
+  scenario.state = { ...next, source: "database", updatedAt: new Date().toISOString(), secretsDecryptable: next.secretsDecryptable || resendsAllSecrets }
   return { ok: true, dto: toDto(scenario) }
 }

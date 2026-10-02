@@ -3,10 +3,12 @@ import { AxiosError, AxiosHeaders } from "axios"
 import {
   buildUpdatePayload,
   describeChanges,
+  extractInflightCount,
   extractRequirements,
   generateRandomSecret,
   GENERATED_SECRET_MIN_LENGTH,
   hasChanges,
+  inflightPaymentsMessage,
   isProductionConfirmation,
   parseGatewayLoadError,
   parseGatewaySaveError,
@@ -16,6 +18,8 @@ import {
   splitRequirements,
   validateCredentialPairs,
   validateDraft,
+  WEBHOOK_SECRET_MIN,
+  withCurrentPassword,
 } from "./paymentGateway"
 import type { PaymentGatewayConfigDTO, PaymentGatewayRequirement } from "@/types/api"
 
@@ -44,6 +48,8 @@ const dto: PaymentGatewayConfigDTO = {
   cardEnabled: false,
   pixEnabled: true,
   readiness: { card: { ready: false, missing: ["SOP_CLIENT_SECRET"] }, pix: { ready: true, missing: [] } },
+  secretsDecryptable: true,
+  sandboxRestricted: false,
   updatedAt: "2026-10-01T14:32:00.000Z",
 }
 
@@ -149,6 +155,9 @@ describe("generateRandomSecret", () => {
   })
 })
 
+/** 32 caracteres: o mínimo do segredo do webhook. */
+const LONG_SECRET = "abcdefghijklmnopqrstuvwxyz012345"
+
 describe("buildUpdatePayload — envia SÓ o que mudou", () => {
   it("rascunho vazio ou igual ao salvo → payload vazio", () => {
     expect(buildUpdatePayload(dto, {})).toEqual({})
@@ -163,10 +172,10 @@ describe("buildUpdatePayload — envia SÓ o que mudou", () => {
 
   it("segredo só vai se substituído e com conteúdo; vazio (clicou em Substituir e desistiu de digitar) não vai", () => {
     expect(buildUpdatePayload(dto, { merchantKey: "" })).toEqual({})
-    expect(buildUpdatePayload(dto, { merchantKey: "nova-chave\n", sopClientSecret: "s3gredo", webhookHeaderSecret: "12345678" })).toEqual({
+    expect(buildUpdatePayload(dto, { merchantKey: "nova-chave\n", sopClientSecret: "s3gredo", webhookHeaderSecret: LONG_SECRET })).toEqual({
       merchantKey: "nova-chave",
       sopClientSecret: "s3gredo",
-      webhookHeaderSecret: "12345678",
+      webhookHeaderSecret: LONG_SECRET,
     })
   })
 
@@ -187,16 +196,38 @@ describe("buildUpdatePayload — envia SÓ o que mudou", () => {
   })
 
   it("flag de UI (webhookSecretRevealed) nunca vai no corpo", () => {
-    expect(buildUpdatePayload(dto, { webhookHeaderSecret: "abcdefgh1234", webhookSecretRevealed: true })).toEqual({ webhookHeaderSecret: "abcdefgh1234" })
+    expect(buildUpdatePayload(dto, { webhookHeaderSecret: LONG_SECRET, webhookSecretRevealed: true })).toEqual({ webhookHeaderSecret: LONG_SECRET })
   })
 })
 
 describe("validateDraft", () => {
-  it("segredo do webhook com 1 a 7 caracteres é erro (mínimo do contrato: 8); vazio/ausente/8+ não", () => {
-    expect(validateDraft({ webhookHeaderSecret: "1234567" }).webhookHeaderSecret).toMatch(/8 caracteres/)
-    expect(validateDraft({ webhookHeaderSecret: "12345678" })).toEqual({})
+  it("segredo do webhook com 1 a 31 caracteres é erro (mínimo do servidor: 32); vazio/ausente/32+ não", () => {
+    expect(WEBHOOK_SECRET_MIN).toBe(32)
+    expect(validateDraft({ webhookHeaderSecret: "12345678" }).webhookHeaderSecret).toMatch(/32 caracteres/)
+    expect(validateDraft({ webhookHeaderSecret: LONG_SECRET.slice(0, 31) }).webhookHeaderSecret).toMatch(/32 caracteres/)
+    expect(validateDraft({ webhookHeaderSecret: LONG_SECRET })).toEqual({})
     expect(validateDraft({ webhookHeaderSecret: "" })).toEqual({})
     expect(validateDraft({})).toEqual({})
+  })
+
+  it("o mínimo vale depois do trim (espaços nas pontas não contam) e o gerador de 40 já atende", () => {
+    expect(validateDraft({ webhookHeaderSecret: `  ${LONG_SECRET.slice(0, 31)}  ` }).webhookHeaderSecret).toBeDefined()
+    expect(validateDraft({ webhookHeaderSecret: generateRandomSecret() })).toEqual({})
+  })
+})
+
+describe("withCurrentPassword — step-up em TODO PUT", () => {
+  it("junta a senha ao diff sem mutar o diff e sem perder campos", () => {
+    const changes = buildUpdatePayload(dto, { pixEnabled: false })
+    const body = withCurrentPassword(changes, "senha1234")
+    expect(body).toEqual({ pixEnabled: false, currentPassword: "senha1234" })
+    expect(changes).toEqual({ pixEnabled: false })
+  })
+
+  it("a senha NÃO é aparada (senha pode ter espaços) e o resumo do diálogo nunca a contém", () => {
+    expect(withCurrentPassword({}, " s e n h a ").currentPassword).toBe(" s e n h a ")
+    const changes = buildUpdatePayload(dto, { merchantKey: "chave-secreta-xyz" })
+    expect(JSON.stringify(describeChanges(dto, changes))).not.toContain("chave-secreta-xyz")
   })
 })
 
@@ -245,9 +276,31 @@ describe("extractRequirements / parseGatewaySaveError", () => {
 
   it("PRODUCTION_CONFIRMATION_REQUIRED, VALIDATION_ERROR, FORBIDDEN e genérico têm texto próprio", () => {
     expect(parseGatewaySaveError(axiosError(400, { error: "x", code: "PRODUCTION_CONFIRMATION_REQUIRED" })).message).toMatch(/confirmação digitada/)
-    expect(parseGatewaySaveError(axiosError(400, { error: "webhookHeaderSecret: mínimo 8", code: "VALIDATION_ERROR" })).message).toMatch(/webhookHeaderSecret: mínimo 8/)
+    expect(parseGatewaySaveError(axiosError(400, { error: "webhookHeaderSecret: mínimo 32", code: "VALIDATION_ERROR" })).message).toMatch(/webhookHeaderSecret: mínimo 32/)
     expect(parseGatewaySaveError(axiosError(403, { error: "x", code: "FORBIDDEN" })).message).toMatch(/administradores/)
     expect(parseGatewaySaveError(axiosError(500, { error: "boom", code: "INTERNAL" })).message).toMatch(/Não foi possível salvar/)
+  })
+
+  it("INVALID_CURRENT_PASSWORD (403): 'Senha incorreta.' e o rascunho continua (o diálogo trata, sem deslogar)", () => {
+    const parsed = parseGatewaySaveError(axiosError(403, { error: "x", code: "INVALID_CURRENT_PASSWORD" }))
+    expect(parsed).toMatchObject({ code: "INVALID_CURRENT_PASSWORD", message: "Senha incorreta.", draftKept: true })
+  })
+
+  it("GATEWAY_HAS_INFLIGHT_PAYMENTS (409): N vem de details.count; sem número legível não inventa", () => {
+    expect(parseGatewaySaveError(axiosError(409, { error: "x", code: "GATEWAY_HAS_INFLIGHT_PAYMENTS", details: { count: 3 } })).message).toBe(
+      "Há 3 pagamentos em andamento neste ambiente. Aguarde liquidarem para trocar o ambiente.",
+    )
+    expect(inflightPaymentsMessage(1)).toBe("Há 1 pagamento em andamento neste ambiente. Aguarde liquidarem para trocar o ambiente.")
+    const semNumero = parseGatewaySaveError(axiosError(409, { error: "x", code: "GATEWAY_HAS_INFLIGHT_PAYMENTS" })).message
+    expect(semNumero).toMatch(/pagamentos em andamento/)
+    expect(semNumero).not.toMatch(/\d/)
+    expect(parseGatewaySaveError(axiosError(409, { error: "x", code: "GATEWAY_HAS_INFLIGHT_PAYMENTS", details: { count: 2 } })).draftKept).toBe(true)
+  })
+
+  it("extractInflightCount: aceita {count} e [{count}]; rejeita lixo", () => {
+    expect(extractInflightCount({ count: 5 })).toBe(5)
+    expect(extractInflightCount([{ count: 0 }])).toBe(0)
+    for (const bad of [undefined, null, "3", [], {}, { count: "3" }, { count: -1 }, { count: 1.5 }, [null]]) expect(extractInflightCount(bad)).toBeNull()
   })
 
   it("sem resposta (rede caiu) e erro que não é do axios: mensagem de conexão", () => {

@@ -24,10 +24,17 @@ export function usePaymentGatewayConfig() {
   })
 }
 
-/** Salva e já escreve a resposta (DTO atualizado) no cache — a tela reflete o novo estado na hora — e invalida para reconferir com o servidor. */
+/**
+ * Salva e já escreve a resposta (DTO atualizado) no cache — a tela reflete o novo estado na hora — e invalida para reconferir com o servidor.
+ *
+ * `gcTime: 0` (Órion B7): o corpo do PUT carrega SEGREDOS e a SENHA ATUAL, e o TanStack Query guarda esse corpo em `variables`
+ * (na mutation e no `MutationCache`) por 5 minutos depois de a tela largá-la. Com `gcTime: 0` a mutation sai do cache assim
+ * que termina e perde o observador (a tela chama `reset()`); coberto por `usePaymentGateway.test.tsx`.
+ */
 export function useUpdatePaymentGateway() {
   const queryClient = useQueryClient()
   return useMutation({
+    gcTime: 0,
     mutationFn: (payload: UpdatePaymentGatewayConfigRequest) => paymentGatewayService.update(payload),
     onSuccess: (dto) => {
       queryClient.setQueryData(paymentGatewayKeys.config, dto)

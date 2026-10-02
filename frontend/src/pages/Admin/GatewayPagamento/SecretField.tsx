@@ -1,5 +1,5 @@
 import { type ReactNode, useId } from "react"
-import { CheckCircle2, CircleDashed, KeyRound, Undo2 } from "lucide-react"
+import { CheckCircle2, CircleDashed, KeyRound, ShieldAlert, Undo2 } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
@@ -11,6 +11,9 @@ import { Input } from "@/components/ui/Input"
  * revela um input vazio.
  *  - `value === undefined` → admin não mexeu (nada será enviado);
  *  - `value` string (mesmo "") → admin está substituindo.
+ * `unreadable` (F5.7): o servidor tem o segredo salvo mas não consegue decifrá-lo —
+ * o chip deixa de ser o verde de "Configurada" e passa a "Configurada (ilegível)" em
+ * perigo (não é só cor: o texto e o ícone mudam).
  * `type="password"` + `autoComplete="new-password"` impedem o gerenciador de
  * senhas do navegador de preencher/oferecer salvar. `revealed` troca para
  * texto simples (só o segredo recém-GERADO, que o admin precisa copiar).
@@ -18,6 +21,7 @@ import { Input } from "@/components/ui/Input"
 export function SecretField({
   name,
   isSet,
+  unreadable = false,
   value,
   onChange,
   revealed = false,
@@ -29,6 +33,8 @@ export function SecretField({
   /** Nome legível do segredo ("MerchantKey"). */
   name: string
   isSet: boolean
+  /** `true` = salvo, porém ilegível no servidor (`secretsDecryptable === false`). Só faz sentido com `isSet`. */
+  unreadable?: boolean
   value: string | undefined
   onChange: (value: string | undefined) => void
   revealed?: boolean
@@ -49,13 +55,18 @@ export function SecretField({
             <KeyRound className="h-3.5 w-3.5 text-ink-subtle" aria-hidden="true" />
             {name}
           </span>
-          {isSet ? (
-            <Badge variant="success" className="whitespace-nowrap">
+          {isSet && unreadable ? (
+            <Badge variant="danger" className="whitespace-nowrap" data-testid={`${testId}-chip`}>
+              <ShieldAlert className="h-3 w-3" aria-hidden="true" />
+              Configurada (ilegível)
+            </Badge>
+          ) : isSet ? (
+            <Badge variant="success" className="whitespace-nowrap" data-testid={`${testId}-chip`}>
               <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
               Configurada
             </Badge>
           ) : (
-            <Badge variant="warning" className="whitespace-nowrap">
+            <Badge variant="warning" className="whitespace-nowrap" data-testid={`${testId}-chip`}>
               <CircleDashed className="h-3 w-3" aria-hidden="true" />
               Não configurada
             </Badge>

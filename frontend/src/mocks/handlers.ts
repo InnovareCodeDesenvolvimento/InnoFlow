@@ -907,7 +907,7 @@ export const handlers = [
       payment?: { mode: "WALLET" } | { mode: "CARD"; paymentMethodId: string }
     }
     if (body.payment?.mode === "CARD" && isGatewayDisabledFor(scope.user.userId)) {
-      return HttpResponse.json(gatewayDisabledBody("CARD"), { status: 409 })
+      return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     }
     const result = startMockSession(scope.user.userId, body.ocppIdentity, body.connectorId, body.payment)
     if (!result.ok) {
@@ -983,7 +983,7 @@ export const handlers = [
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
     const body = (await request.json().catch(() => ({}))) as { amountCents?: unknown; cpf?: unknown }
-    if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody("PIX"), { status: 409 })
+    if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "PIX"), { status: 409 })
     const result = await createMockTopup(scope.user.userId, body.amountCents)
     if (!result.ok) {
       const status = result.code === "TOO_MANY_PENDING_TOPUPS" ? 409 : 400
@@ -1011,7 +1011,7 @@ export const handlers = [
   http.post("/api/me/payment-methods/tokenization-session", ({ request }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
-    if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody("CARD"), { status: 409 })
+    if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     return HttpResponse.json(createMockTokenizationSession())
   }),
 
@@ -1019,7 +1019,7 @@ export const handlers = [
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
     const body = (await request.json().catch(() => ({}))) as { cardToken?: unknown; brand?: unknown; makeDefault?: unknown }
-    if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody("CARD"), { status: 409 })
+    if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     const result = createMockPaymentMethod(scope.user.userId, body.cardToken, body.brand, body.makeDefault === true)
     if (!result.ok) {
       const status = result.code === "TOO_MANY_PAYMENT_METHODS" ? 409 : 400
