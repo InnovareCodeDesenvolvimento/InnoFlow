@@ -98,7 +98,12 @@ export function SecretField({
         </div>
       )}
 
-      {!replacing && !isSet && hint && <p className="text-xs text-ink-softer">{hint}</p>}
+      {!replacing && error && (
+        <p role="alert" className="text-xs font-medium text-danger">
+          {error}
+        </p>
+      )}
+      {!replacing && !error && !isSet && hint && <p className="text-xs text-ink-softer">{hint}</p>}
     </div>
   )
 }

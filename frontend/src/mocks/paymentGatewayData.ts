@@ -23,14 +23,24 @@ import type {
  *    SOP_OAUTH_TOKEN_URL, PAYMENT_SECRETS_KEY; do Pix = MERCHANT_ID, MERCHANT_KEY, WEBHOOK_PATH_TOKEN,
  *    WEBHOOK_HEADER_SECRET, PAYMENT_SECRETS_KEY;
  *  - ir para produção exige que todo meio HABILITADO (no estado resultante) esteja pronto;
- *  - `details` do 409 é um array de strings (`["MERCHANT_KEY", ...]`).
+ *  - `details` do 409 é um array de strings (`["MERCHANT_KEY", ...]`) em ordem estável.
+ *
+ * COMPORTAMENTO REAL DO SERVIDOR (Vega, F5.5) já espelhado:
+ *  - PARES: `merchantId`+`merchantKey` e `sopClientId`+`sopClientSecret` andam juntos. Com `source:"env"` ou sem segredo
+ *    salvo, enviar só um lado => 409 `GATEWAY_NOT_READY` com a metade que falta em `details`. Com `source:"database"` e o
+ *    segredo salvo, trocar só o id passa. (Para a chave sozinha só se exige o id na origem `env`.)
+ *  - o mock NÃO é a fonte da regra: se o servidor real divergir, o servidor manda.
  *
  * CENÁRIOS por conta de ADMIN (o estado vive por usuário, em memória da página — um `page.goto` zera):
  *  - `admin@innoelektron.com`                → origem `env`, NADA configurado (servidor completo);
  *  - `gateway-pronto@innoelektron.com`       → `database`, sandbox, tudo pronto, Pix habilitado;
  *  - `gateway-producao@innoelektron.com`     → `database`, produção, tudo pronto, Pix e cartão habilitados;
  *  - `gateway-sem-chave@innoelektron.com`    → `env`, servidor SEM `PAYMENT_SECRETS_KEY` e sem token do webhook (503 ao enviar segredo; `webhookUrl: null`),
- *                                              Pix já habilitado sem estar pronto (ir para produção => 409 GATEWAY_NOT_READY).
+ *                                              Pix já habilitado sem estar pronto (ir para produção => 409 GATEWAY_NOT_READY);
+ *  - `gateway-falhas@innoelektron.com`       → como o "pronto", mas o PUT falha de forma determinística conforme o MerchantId enviado:
+ *                                              "ERRO-429" => 429 RATE_LIMITED_PAYMENT_GATEWAY, "ERRO-503" => 503 PAYMENT_GATEWAY_UNAVAILABLE,
+ *                                              "ERRO-500" => 500 INTERNAL_ERROR (nada é gravado em nenhum deles);
+ *  - `gateway-ilegivel@innoelektron.com`     → o GET devolve 503 PAYMENT_GATEWAY_UNAVAILABLE (configuração ilegível no servidor).
  */
 
 interface ServerEnv {
@@ -92,6 +102,9 @@ function seed(userId: string): Scenario {
       return { server: { ...FULL_SERVER }, state: { ...READY_STATE } }
     case "user_admin_gateway_producao":
       return { server: { ...FULL_SERVER }, state: { ...READY_STATE, environment: "production", merchantId: "mid-prod-5c0de2", cardEnabled: true, pixEnabled: true } }
+    case "user_admin_gateway_falhas":
+    case "user_admin_gateway_ilegivel":
+      return { server: { ...FULL_SERVER }, state: { ...READY_STATE } }
     case "user_admin_gateway_sem_chave":
       // Pix já HABILITADO (herdado do ambiente do servidor) mas sem pré-requisito: prova que DESLIGAR é sempre permitido e dá o caminho ao 409 GATEWAY_NOT_READY (ir para produção).
       return { server: { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: false, secretsKey: false }, state: { ...EMPTY_STATE, pixEnabled: true } }
@@ -163,15 +176,19 @@ function toDto({ state, server }: Scenario): PaymentGatewayConfigDTO {
   }
 }
 
-export function getGatewayConfig(userId: string): PaymentGatewayConfigDTO {
-  return toDto(scenarioFor(userId))
-}
-
+export type GatewayFailureStatus = 400 | 409 | 429 | 500 | 503
 export type GatewayUpdateResult =
   | { ok: true; dto: PaymentGatewayConfigDTO }
-  | { ok: false; status: 400 | 409 | 503; code: string; message: string; details?: PaymentGatewayRequirement[] }
+  | { ok: false; status: GatewayFailureStatus; code: string; message: string; details?: PaymentGatewayRequirement[] }
 
-const fail = (status: 400 | 409 | 503, code: string, message: string, details?: PaymentGatewayRequirement[]): GatewayUpdateResult => ({ ok: false, status, code, message, details })
+const fail = (status: GatewayFailureStatus, code: string, message: string, details?: PaymentGatewayRequirement[]): GatewayUpdateResult => ({ ok: false, status, code, message, details })
+
+export function getGatewayConfig(userId: string): GatewayUpdateResult {
+  if (userId === "user_admin_gateway_ilegivel") {
+    return fail(503, "PAYMENT_GATEWAY_UNAVAILABLE", "Configuração do gateway ilegível no servidor.")
+  }
+  return { ok: true, dto: toDto(scenarioFor(userId)) }
+}
 
 function isText(value: unknown, min: number, max: number): value is string {
   return typeof value === "string" && value.trim().length >= min && value.trim().length <= max
@@ -202,6 +219,14 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
     return fail(400, "VALIDATION_ERROR", "confirmProduction: só aceita true.")
   }
 
+  // ---- falhas determinísticas do cenário `gateway-falhas@` (nada é gravado) ----
+  if (userId === "user_admin_gateway_falhas" && typeof input.merchantId === "string") {
+    const trigger = input.merchantId.trim().toUpperCase()
+    if (trigger === "ERRO-429") return fail(429, "RATE_LIMITED_PAYMENT_GATEWAY", "Muitas alterações no gateway de pagamento. Aguarde um minuto.")
+    if (trigger === "ERRO-503") return fail(503, "PAYMENT_GATEWAY_UNAVAILABLE", "Configuração do gateway ilegível no servidor.")
+    if (trigger === "ERRO-500") return fail(500, "INTERNAL_ERROR", "Erro interno.")
+  }
+
   // ---- 503: sem chave de cifragem o servidor não grava segredo ----
   const writesSecret = input.merchantKey !== undefined || input.sopClientSecret !== undefined || input.webhookHeaderSecret !== undefined
   if (writesSecret && !scenario.server.secretsKey) {
@@ -211,6 +236,16 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
   // ---- 400: virar produção exige confirmação explícita ----
   if (input.environment === "production" && scenario.state.environment === "sandbox" && input.confirmProduction !== true) {
     return fail(400, "PRODUCTION_CONFIRMATION_REQUIRED", "Mudar para produção exige confirmProduction: true.")
+  }
+
+  // ---- 409: PARES de credenciais andam juntos (id + segredo no mesmo PUT quando o par vem do env ou não há segredo salvo) ----
+  const pairMissing = new Set<PaymentGatewayRequirement>()
+  if (input.merchantId !== undefined && input.merchantKey === undefined && (scenario.state.source === "env" || !scenario.state.merchantKeySet)) pairMissing.add("MERCHANT_KEY")
+  if (input.merchantKey !== undefined && input.merchantId === undefined && scenario.state.source === "env") pairMissing.add("MERCHANT_ID")
+  if (input.sopClientId !== undefined && input.sopClientSecret === undefined && (scenario.state.source === "env" || !scenario.state.sopClientSecretSet)) pairMissing.add("SOP_CLIENT_SECRET")
+  if (input.sopClientSecret !== undefined && input.sopClientId === undefined && scenario.state.source === "env") pairMissing.add("SOP_CLIENT_ID")
+  if (pairMissing.size > 0) {
+    return fail(409, "GATEWAY_NOT_READY", "Credenciais em par: envie as duas metades na mesma alteração.", REQUIREMENT_ORDER.filter((r) => pairMissing.has(r)))
   }
 
   // ---- estado candidato (ainda não gravado) ----

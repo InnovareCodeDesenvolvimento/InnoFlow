@@ -823,6 +823,26 @@ let paymentMethodCounter = 1
  */
 const CARD_DEMO_DRIVER_ID = "user_driver_cartoes"
 
+/**
+ * `user_driver_gateway_off` (ver `mocks/data.ts`): o admin desligou o MEIO no gateway (F5.5).
+ * As 4 rotas do motorista afetadas respondem 409 `PAYMENT_METHOD_DISABLED` com
+ * `details: [{ method, reason: "GATEWAY_DISABLED" }]` (contrato: `PaymentMethodDisabledDetail`).
+ * Pagamento por carteira segue normal.
+ */
+const GATEWAY_OFF_DRIVER_ID = "user_driver_gateway_off"
+
+export function isGatewayDisabledFor(driverId: string): boolean {
+  return driverId === GATEWAY_OFF_DRIVER_ID
+}
+
+export function gatewayDisabledBody(method: "CARD" | "PIX") {
+  return {
+    error: method === "CARD" ? "Pagamento com cartão desabilitado pelo administrador." : "Pix desabilitado pelo administrador.",
+    code: "PAYMENT_METHOD_DISABLED",
+    details: [{ method, reason: "GATEWAY_DISABLED" as const }],
+  }
+}
+
 function seedCardDemoDriver(): MockPaymentMethod[] {
   const now = new Date().toISOString()
   return [
@@ -833,9 +853,15 @@ function seedCardDemoDriver(): MockPaymentMethod[] {
   ]
 }
 
+function seedGatewayOffDriver(): MockPaymentMethod[] {
+  return [
+    { id: "pm_seed_gwoff", driverId: GATEWAY_OFF_DRIVER_ID, brand: "Visa", last4: "4242", holderName: "Motorista Gateway Off", expiryMonth: 8, expiryYear: 2030, isDefault: true, createdAt: new Date().toISOString() },
+  ]
+}
+
 function getPaymentMethods(driverId: string): MockPaymentMethod[] {
   if (!paymentMethodsByDriver.has(driverId)) {
-    paymentMethodsByDriver.set(driverId, driverId === CARD_DEMO_DRIVER_ID ? seedCardDemoDriver() : [])
+    paymentMethodsByDriver.set(driverId, driverId === CARD_DEMO_DRIVER_ID ? seedCardDemoDriver() : driverId === GATEWAY_OFF_DRIVER_ID ? seedGatewayOffDriver() : [])
   }
   return paymentMethodsByDriver.get(driverId) as MockPaymentMethod[]
 }

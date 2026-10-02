@@ -73,7 +73,8 @@ test.describe("ADMIN — origem env, nada configurado: ver → configurar → ha
 
     // ---- VER: origem env + prontidão por meio ------------------------------------------------
     await expect(page.getByTestId("source-banner-env")).toContainText("Usando as variáveis do servidor")
-    await expect(page.getByTestId("source-banner-env")).toContainText("Ao salvar, passa a valer o que for salvo aqui")
+    await expect(page.getByTestId("source-banner-env")).toContainText("Na primeira gravação, a configuração nasce com o ambiente atual")
+    await expect(page.getByTestId("source-banner-env")).toContainText("salvar não desliga o que já funcionava")
     await expect(page.getByTestId("method-pix-readiness")).toHaveText("Faltam 3 itens")
     await expect(page.getByTestId("method-card-readiness")).toHaveText("Faltam 4 itens")
     await expect(page.getByTestId("method-pix-missing")).toContainText("MerchantId da Cielo")
@@ -338,7 +339,8 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     // cartão desligado e sem pronto: não dá para ligar
     await expect(page.getByRole("switch", { name: "Habilitar Cartão" })).toBeDisabled()
 
-    // 503: enviar um segredo
+    // 503: enviar um segredo (origem env: o par vai junto — MerchantId + MerchantKey)
+    await page.getByLabel("MerchantId", { exact: true }).fill("mid-503")
     await page.getByRole("button", { name: "Informar MerchantKey" }).click()
     await secretInput(page, "merchantKey").fill("SEGREDO-SEM-CHAVE-77")
     await page.getByRole("button", { name: "Salvar alterações" }).click()
@@ -354,13 +356,14 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     expect(await page.locator("body").innerText()).not.toContain("SEGREDO-SEM-CHAVE-77")
     expect(consoleLines.join("\n")).not.toContain("SEGREDO-SEM-CHAVE-77")
 
-    // Descarta o segredo; salvar SÓ o MerchantId (não é segredo) funciona
+    // Descarta o segredo. Origem env: o MerchantId sozinho NÃO é enviável (par com a MerchantKey) — a tela barra no cliente.
     await page.getByRole("button", { name: "Descartar" }).click()
     await expect(page.getByTestId("save-error")).toHaveCount(0)
     await page.getByLabel("MerchantId", { exact: true }).fill("mid-sem-segredo")
-    await page.getByRole("button", { name: "Salvar alterações" }).click()
-    await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
-    await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+    await expect(page.getByText("Ao informar o MerchantId, informe também a MerchantKey nesta mesma alteração.")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeDisabled()
+    expect(puts).toHaveLength(1) // nada novo saiu
+    await page.getByRole("button", { name: "Descartar" }).click()
 
     // 409: ir para produção com o Pix habilitado e sem pré-requisitos
     await envOption(page, "Produção").click()
@@ -377,6 +380,145 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     expect(puts.at(-1)).toEqual({ environment: "production", confirmProduction: true })
     // continua em sandbox no servidor: o banner de produção é só rascunho
     await expect(page.getByTestId("environment-production-banner")).toContainText("ainda não salva")
+  })
+})
+
+const confirmSave = async (page: Page) => {
+  await page.getByRole("button", { name: "Salvar alterações" }).click()
+  await page.getByRole("dialog", { name: "Confirmar alterações no gateway" }).getByRole("button", { name: "Confirmar e salvar" }).click()
+}
+
+test.describe("PARES de credenciais: id + segredo no mesmo salvar (regra do servidor real)", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("origem env: um lado só é barrado no cliente, com a mensagem no campo que falta; os dois juntos salvam", async ({ page }) => {
+    const puts = capturePuts(page)
+    await login(page, "admin@innoelektron.com")
+    await openGateway(page)
+
+    // MerchantId sozinho => erro na MerchantKey (que ainda nem está aberta para edição)
+    await page.getByLabel("MerchantId", { exact: true }).fill("mid-par-1")
+    const keyField = page.getByTestId("secret-merchantKey")
+    await expect(keyField.getByRole("alert")).toHaveText("Ao informar o MerchantId, informe também a MerchantKey nesta mesma alteração.")
+    await expect(page.getByTestId("save-bar-errors")).toContainText("corrija os campos marcados")
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeDisabled()
+
+    // abrir o campo (ainda vazio) mantém o erro, agora dentro do input; digitar a chave resolve
+    await page.getByRole("button", { name: "Informar MerchantKey" }).click()
+    await expect(keyField.getByRole("alert")).toHaveText(/informe também a MerchantKey/)
+    await expect(secretInput(page, "merchantKey")).toHaveAttribute("aria-invalid", "true")
+    await secretInput(page, "merchantKey").fill("SEGREDO-PAR-1")
+    await expect(page.getByTestId("save-bar-errors")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeEnabled()
+
+    // some o id e fica só a chave => o erro vai para o MerchantId
+    await page.getByLabel("MerchantId", { exact: true }).fill("")
+    await expect(page.getByText("Ao informar a MerchantKey, informe também o MerchantId nesta mesma alteração.")).toBeVisible()
+    await expect(page.getByLabel("MerchantId", { exact: true })).toHaveAttribute("aria-invalid", "true")
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeDisabled()
+
+    // par do cartão: Client ID sozinho
+    await page.getByLabel("MerchantId", { exact: true }).fill("mid-par-1")
+    await page.getByLabel("Client ID do cadastro de cartão").fill("sop-par-1")
+    await expect(page.getByTestId("secret-sopClientSecret").getByRole("alert")).toHaveText(
+      "Ao informar o Client ID do cadastro de cartão, informe também o Client Secret do cadastro de cartão nesta mesma alteração.",
+    )
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeDisabled()
+    await page.getByLabel("Client ID do cadastro de cartão").fill("")
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeEnabled()
+
+    await confirmSave(page)
+    await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+    expect(puts).toHaveLength(1)
+    expect(Object.keys(puts[0]).sort()).toEqual(["merchantId", "merchantKey"])
+  })
+
+  test("origem banco com segredo salvo: trocar só o MerchantId é permitido (nenhuma barreira)", async ({ page }) => {
+    const puts = capturePuts(page)
+    await login(page, "gateway-pronto@innoelektron.com")
+    await openGateway(page)
+    await page.getByLabel("MerchantId", { exact: true }).fill("mid-so-id-9")
+    await expect(page.getByTestId("save-bar-errors")).toHaveCount(0)
+    await expect(page.locator("[data-testid=section-credentials] [role=alert]")).toHaveCount(0)
+    await confirmSave(page)
+    await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+    expect(puts).toEqual([{ merchantId: "mid-so-id-9" }])
+  })
+
+  test("o MOCK espelha o servidor: PUT com um lado só (origem env) => 409 GATEWAY_NOT_READY, details = array de STRINGS", async ({ page }) => {
+    await login(page, "admin@innoelektron.com")
+    const result = await page.evaluate(async () => {
+      const token = localStorage.getItem("innoelektron_token")
+      const call = async (body: unknown) => {
+        const res = await fetch("/api/admin/payment-gateway", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        })
+        return { status: res.status, body: await res.json() }
+      }
+      return {
+        idOnly: await call({ merchantId: "x" }),
+        keyOnly: await call({ merchantKey: "x-segredo" }),
+        two: await call({ sopClientId: "s", merchantId: "m" }),
+      }
+    })
+    expect(result.idOnly.status).toBe(409)
+    expect(result.idOnly.body.code).toBe("GATEWAY_NOT_READY")
+    expect(result.idOnly.body.details).toEqual(["MERCHANT_KEY"])
+    expect(result.keyOnly.body.details).toEqual(["MERCHANT_ID"])
+    expect(result.two.body.details).toEqual(["MERCHANT_KEY", "SOP_CLIENT_SECRET"]) // ordem estável do contrato
+  })
+})
+
+test.describe("erros novos do servidor: 429 / 503 / 500 preservam o rascunho; GET 503 mostra o aviso", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("PUT 429, 503 (configuração ilegível) e 500 (auditoria falhou): mensagem certa, rascunho intacto, e dá para salvar depois", async ({ page }) => {
+    const puts = capturePuts(page)
+    await login(page, "gateway-falhas@innoelektron.com")
+    await openGateway(page)
+    const merchantId = page.getByLabel("MerchantId", { exact: true })
+    const error = page.getByTestId("save-error")
+
+    await merchantId.fill("ERRO-429")
+    await confirmSave(page)
+    await expect(error).toHaveAttribute("data-code", "RATE_LIMITED_PAYMENT_GATEWAY")
+    await expect(error).toContainText("Muitas alterações em pouco tempo. Aguarde um minuto e tente de novo.")
+    await expect(error).toContainText("O que você preencheu continua na tela.")
+    await expect(merchantId).toHaveValue("ERRO-429")
+    await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeEnabled()
+
+    await merchantId.fill("ERRO-503")
+    await confirmSave(page)
+    await expect(error).toHaveAttribute("data-code", "PAYMENT_GATEWAY_UNAVAILABLE")
+    await expect(error).toContainText("não conseguiu ler a configuração")
+    await expect(error).toContainText("PAYMENT_SECRETS_KEY foi trocada")
+    await expect(error).toContainText("Nada foi alterado")
+    await expect(error.locator("[data-testid=save-error-missing]")).toHaveCount(0) // não vira lista de pendências
+    await expect(merchantId).toHaveValue("ERRO-503")
+
+    await merchantId.fill("ERRO-500")
+    await confirmSave(page)
+    await expect(error).toHaveAttribute("data-code", "INTERNAL_ERROR")
+    await expect(error).toContainText("Não foi possível salvar e nada foi alterado. Tente novamente.")
+    await expect(merchantId).toHaveValue("ERRO-500")
+    expect(puts).toHaveLength(3)
+
+    // corrigido o valor, o mesmo rascunho salva e o alerta some
+    await merchantId.fill("mid-ok-77")
+    await confirmSave(page)
+    await expect(page.getByText("Configuração do gateway salva.")).toBeVisible()
+    await expect(error).toHaveCount(0)
+    expect(puts).toHaveLength(4)
+  })
+
+  test("GET 503 (configuração ilegível): estado de erro explica a causa, com 'Tentar novamente'", async ({ page }) => {
+    await login(page, "gateway-ilegivel@innoelektron.com")
+    await page.getByRole("navigation", { name: NAV }).getByRole("link", { name: "Gateway de pagamento" }).click()
+    await expect(page.getByText(/não conseguiu ler a configuração do gateway/)).toBeVisible()
+    await expect(page.getByText(/PAYMENT_SECRETS_KEY foi trocada/)).toBeVisible()
+    await expect(page.getByRole("button", { name: /Tentar novamente/ })).toBeVisible()
   })
 })
 

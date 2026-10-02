@@ -172,6 +172,30 @@ export const SECRET_FIELDS = ["merchantKey", "sopClientSecret", "webhookHeaderSe
 export type SecretField = (typeof SECRET_FIELDS)[number]
 
 /**
+ * PARES de credenciais: andam JUNTOS no servidor (`merchantId`+`merchantKey`,
+ * `sopClientId`+`sopClientSecret`). Se o par ainda vem do env (`source: "env"`)
+ * ou não há segredo salvo, enviar só um lado => 409 `GATEWAY_NOT_READY` com a
+ * metade que falta. Com `source: "database"` e o segredo já salvo, trocar só o
+ * id é permitido.
+ */
+export const CREDENTIAL_PAIRS = [
+  {
+    id: "merchantId",
+    secret: "merchantKey",
+    idWithArticle: "o MerchantId",
+    secretWithArticle: "a MerchantKey",
+    secretSet: (dto: PaymentGatewayConfigDTO) => dto.merchantKeySet,
+  },
+  {
+    id: "sopClientId",
+    secret: "sopClientSecret",
+    idWithArticle: "o Client ID do cadastro de cartão",
+    secretWithArticle: "o Client Secret do cadastro de cartão",
+    secretSet: (dto: PaymentGatewayConfigDTO) => dto.sopClientSecretSet,
+  },
+] as const
+
+/**
  * Monta o corpo do PUT com SÓ o que mudou em relação ao DTO carregado
  * (campo ausente = "não mexer", contrato do servidor):
  *  - texto em branco não é enviado (não existe "apagar" nesta versão);
@@ -204,6 +228,17 @@ export function buildUpdatePayload(dto: PaymentGatewayConfigDTO, draft: GatewayD
   if (draft.cardEnabled !== undefined && draft.cardEnabled !== dto.cardEnabled) payload.cardEnabled = draft.cardEnabled
   if (draft.pixEnabled !== undefined && draft.pixEnabled !== dto.pixEnabled) payload.pixEnabled = draft.pixEnabled
 
+  // Par vindo do env: trocar só a chave exige reenviar o id junto (regra do servidor). Se o id já
+  // está VISÍVEL no campo (valor do env), o admin não precisa redigitá-lo — a tela o reenvia.
+  if (dto.source === "env") {
+    for (const pair of CREDENTIAL_PAIRS) {
+      if (payload[pair.secret] !== undefined && payload[pair.id] === undefined) {
+        const visible = (draft[pair.id] ?? dto[pair.id] ?? "").trim()
+        if (visible) payload[pair.id] = visible
+      }
+    }
+  }
+
   return payload
 }
 
@@ -212,6 +247,25 @@ export function hasChanges(payload: UpdatePaymentGatewayConfigRequest): boolean 
 }
 
 export type DraftErrors = Partial<Record<SecretField | "merchantId" | "sopClientId", string>>
+
+/**
+ * Valida os PARES de credenciais sobre o PAYLOAD já montado (o que será enviado
+ * é o que se valida). O erro vai no campo que FALTA — o lado que o admin ainda
+ * precisa preencher na mesma alteração.
+ */
+export function validateCredentialPairs(dto: PaymentGatewayConfigDTO, payload: UpdatePaymentGatewayConfigRequest): DraftErrors {
+  const errors: DraftErrors = {}
+  for (const pair of CREDENTIAL_PAIRS) {
+    const idSent = payload[pair.id] !== undefined
+    const secretSent = payload[pair.secret] !== undefined
+    if (idSent && !secretSent && (dto.source === "env" || !pair.secretSet(dto))) {
+      errors[pair.secret] = `Ao informar ${pair.idWithArticle}, informe também ${pair.secretWithArticle} nesta mesma alteração.`
+    } else if (secretSent && !idSent && dto.source === "env") {
+      errors[pair.id] = `Ao informar ${pair.secretWithArticle}, informe também ${pair.idWithArticle} nesta mesma alteração.`
+    }
+  }
+  return errors
+}
 
 /** Validações que o cliente consegue fazer sem inventar regra: hoje, só o mínimo de 8 do segredo do webhook (contrato). */
 export function validateDraft(draft: GatewayDraft): DraftErrors {
@@ -264,6 +318,34 @@ export interface GatewaySaveError {
   message: string
   /** Só em `GATEWAY_NOT_READY`: o que falta, vindo de `details` do servidor. */
   requirements: PaymentGatewayRequirement[]
+  /** `true` quando o rascunho da tela continua intacto e o admin pode tentar de novo (tudo, exceto sessão expirada, que leva ao login). */
+  draftKept: boolean
+}
+
+/** Texto único para "nada foi alterado" em erros transitórios do servidor (429/503/500). */
+export const GATEWAY_RATE_LIMITED_MESSAGE = "Muitas alterações em pouco tempo. Aguarde um minuto e tente de novo."
+export const GATEWAY_UNAVAILABLE_MESSAGE =
+  "O servidor não conseguiu ler a configuração do gateway — o banco pode estar fora do ar ou a PAYMENT_SECRETS_KEY foi trocada. Nada foi alterado."
+export const GATEWAY_INTERNAL_ERROR_MESSAGE = "Não foi possível salvar e nada foi alterado. Tente novamente."
+export const GATEWAY_SESSION_EXPIRED_MESSAGE = "Sua sessão expirou. Entre de novo para continuar — nada foi alterado."
+
+/**
+ * Mensagem para erros que valem tanto no GET quanto no PUT (sessão, limite, configuração ilegível, falha interna),
+ * ou `null` se o erro não é um desses. Decide por `code` e, na falta dele (proxy na frente), por status.
+ */
+export function gatewayTransientErrorMessage(code: string | undefined, status: number | undefined): string | null {
+  if (code === "UNAUTHORIZED" || (code === undefined && status === 401)) return GATEWAY_SESSION_EXPIRED_MESSAGE
+  if (code === "RATE_LIMITED" || code === "RATE_LIMITED_PAYMENT_GATEWAY" || (code === undefined && status === 429)) return GATEWAY_RATE_LIMITED_MESSAGE
+  if (code === "PAYMENT_GATEWAY_UNAVAILABLE") return GATEWAY_UNAVAILABLE_MESSAGE
+  if (code === "INTERNAL_ERROR") return GATEWAY_INTERNAL_ERROR_MESSAGE
+  return null
+}
+
+/** Mensagem do erro ao CARREGAR a tela (GET), ou `null` para cair no texto do servidor/genérico. */
+export function parseGatewayLoadError(err: unknown): string | null {
+  if (!axios.isAxiosError(err) || !err.response) return null
+  const body = err.response.data as { code?: unknown } | undefined
+  return gatewayTransientErrorMessage(typeof body?.code === "string" ? body.code : undefined, err.response.status)
 }
 
 /**
@@ -291,36 +373,44 @@ export function extractRequirements(details: unknown): PaymentGatewayRequirement
  */
 export function parseGatewaySaveError(err: unknown): GatewaySaveError {
   if (!axios.isAxiosError(err) || !err.response) {
-    return { code: undefined, message: "Não foi possível falar com o servidor. Confira a conexão e tente de novo — nada foi salvo.", requirements: [] }
+    return { code: undefined, message: "Não foi possível falar com o servidor. Confira a conexão e tente de novo — nada foi salvo.", requirements: [], draftKept: true }
   }
   const body = err.response.data as { error?: unknown; code?: unknown; details?: unknown } | undefined
   const code = typeof body?.code === "string" ? body.code : undefined
   const serverMessage = typeof body?.error === "string" ? body.error : undefined
 
+  const transient = gatewayTransientErrorMessage(code, err.response.status)
+  if (transient) {
+    return { code: code ?? (err.response.status === 429 ? "RATE_LIMITED" : "UNAUTHORIZED"), message: transient, requirements: [], draftKept: transient !== GATEWAY_SESSION_EXPIRED_MESSAGE }
+  }
+
   switch (code) {
     case "GATEWAY_NOT_READY":
       return {
         code,
-        message: "O servidor recusou: faltam pré-requisitos para ativar o que você pediu (produção ou habilitar um meio de pagamento). Nada foi salvo.",
+        message: "O servidor recusou: faltam pré-requisitos para o que você pediu (passar para produção, habilitar um meio de pagamento ou completar um par de credenciais). Nada foi salvo.",
         requirements: extractRequirements(body?.details),
+        draftKept: true,
       }
     case "PAYMENT_SECRETS_KEY_MISSING":
       return {
         code,
         message: `O servidor não tem a variável PAYMENT_SECRETS_KEY, então não consegue guardar segredos com segurança — nada foi salvo. Peça para quem cuida do servidor criá-la no EasyPanel (gere o valor com "${PAYMENT_SECRETS_KEY_COMMAND}") e reiniciar a API. Alterações que não envolvem segredos podem ser salvas normalmente.`,
         requirements: ["PAYMENT_SECRETS_KEY"],
+        draftKept: true,
       }
     case "PRODUCTION_CONFIRMATION_REQUIRED":
       return {
         code,
         message: "A mudança para produção exige confirmação digitada. Escolha Produção de novo, digite a palavra pedida e salve outra vez.",
         requirements: [],
+        draftKept: true,
       }
     case "VALIDATION_ERROR":
-      return { code, message: `O servidor não aceitou algum valor${serverMessage ? `: ${serverMessage}` : "."} Revise os campos e tente de novo.`, requirements: [] }
+      return { code, message: `O servidor não aceitou algum valor${serverMessage ? `: ${serverMessage}` : "."} Revise os campos e tente de novo.`, requirements: [], draftKept: true }
     case "FORBIDDEN":
-      return { code, message: "Somente administradores podem alterar o gateway de pagamento.", requirements: [] }
+      return { code, message: "Somente administradores podem alterar o gateway de pagamento.", requirements: [], draftKept: true }
     default:
-      return { code, message: "Não foi possível salvar a configuração. Tente de novo em instantes.", requirements: [] }
+      return { code, message: "Não foi possível salvar a configuração. Tente de novo em instantes.", requirements: [], draftKept: true }
   }
 }

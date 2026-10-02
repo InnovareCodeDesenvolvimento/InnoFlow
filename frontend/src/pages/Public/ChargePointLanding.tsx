@@ -16,6 +16,7 @@ import { useMeWallet, useStartSession } from "@/hooks/useMeSessions"
 import { useMePaymentMethods, paymentMethodsKeys } from "@/hooks/useMePaymentMethods"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
+import { CARD_GATEWAY_DISABLED_START_MESSAGE, isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
 import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
 // Variante pequena (128×128, ~16kB) do ícone — a original (512×512, ~140kB)
 // é overkill para um `h-7 w-7` no hero e pesava sozinha mais que todo o JS
@@ -73,12 +74,18 @@ export function ChargePointLanding() {
   const { data: paymentMethodsData } = useMePaymentMethods(isDriver)
   const paymentMethods = paymentMethodsData?.items ?? []
   const [userPaymentSelection, setUserPaymentSelection] = useState<PaymentSelection | null>(null)
+  // O ADMIN desligou o MEIO cartão (409 `PAYMENT_METHOD_DISABLED` + `reason: GATEWAY_DISABLED`).
+  // Não existe endpoint para saber de antemão, então só se descobre ao tentar: daí em diante,
+  // nesta sessão da tela, o seletor some e a seleção efetiva é sempre Carteira. Estado local
+  // de propósito (não é do servidor nem compartilhado): recarregar a página tenta o cartão de novo.
+  const [cardGatewayDisabled, setCardGatewayDisabled] = useState(false)
   const defaultPaymentMethod = paymentMethods.find((m) => m.isDefault)
   const paymentSelectionIsValid =
     !!userPaymentSelection &&
     (userPaymentSelection.mode === "WALLET" || paymentMethods.some((m) => m.id === userPaymentSelection.paymentMethodId))
-  const paymentSelection: PaymentSelection =
-    paymentSelectionIsValid && userPaymentSelection
+  const paymentSelection: PaymentSelection = cardGatewayDisabled
+    ? { mode: "WALLET" }
+    : paymentSelectionIsValid && userPaymentSelection
       ? userPaymentSelection
       : defaultPaymentMethod
         ? { mode: "CARD", paymentMethodId: defaultPaymentMethod.id }
@@ -113,6 +120,13 @@ export function ChargePointLanding() {
         // pra escolher de novo, sem perder o resto da tela.
         queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
         setStartError("Esse cartão não está mais disponível. Escolha outro cartão ou a carteira e tente de novo.")
+        return
+      }
+      if (code === "PAYMENT_METHOD_DISABLED" && isGatewayDisabledError(err)) {
+        // Sentido 2: não é "cartão desativado" — o meio todo está fora. A mensagem
+        // persistente (no lugar do seletor) é renderizada a partir deste estado.
+        setCardGatewayDisabled(true)
+        setStartError(null)
         return
       }
       if (code === "PAYMENT_METHOD_DISABLED") {
@@ -337,7 +351,13 @@ export function ChargePointLanding() {
                         )}
                         {/* Só aparece com 1+ cartão salvo — com 0 cartões o fluxo fica
                             IDÊNTICO ao de sempre (Carteira), sem forçar cadastro. */}
-                        {paymentMethods.length > 0 && (
+                        {cardGatewayDisabled && (
+                          <p role="alert" data-testid="card-gateway-disabled" className="flex items-start gap-2 rounded-xl bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
+                            <CreditCard className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                            {CARD_GATEWAY_DISABLED_START_MESSAGE}
+                          </p>
+                        )}
+                        {paymentMethods.length > 0 && !cardGatewayDisabled && (
                           <PaymentMethodSelector methods={paymentMethods} value={paymentSelection} onChange={setUserPaymentSelection} />
                         )}
                         {paymentSelection.mode === "CARD" && (

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useCreateTokenizationSession, useAddPaymentMethod } from "./useMePaymentMethods"
 import { getApiErrorMessage } from "@/services/api"
+import { isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
 import type { MeCardTokenizationSessionResponse } from "@/types/api"
 import { CARD_TOKENIZATION_CHANNEL_SOURCE, type CardTokenizationChildMessage, type CardTokenizationInitMessage } from "@/types/cardTokenizationChannel"
 
@@ -34,6 +35,9 @@ export type AddCardFlowStatus = "idle" | "opening" | "awaiting" | "saving"
  */
 export function useAddCardFlow() {
   const [status, setStatus] = useState<AddCardFlowStatus>("idle")
+  // `true` quando o ADMIN desligou o meio cartão (409 `PAYMENT_METHOD_DISABLED` + `GATEWAY_DISABLED`)
+  // na criação da sessão de tokenização OU ao salvar o cartão. Estado local: some ao sair da tela.
+  const [unavailable, setUnavailable] = useState(false)
   const childRef = useRef<Window | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -53,12 +57,14 @@ export function useAddCardFlow() {
   const start = useCallback(async () => {
     if (status !== "idle") return
     setStatus("opening")
+    setUnavailable(false)
 
     let session: MeCardTokenizationSessionResponse | undefined
     try {
       session = await createSession.mutateAsync()
     } catch (err) {
-      toast.error("Não foi possível iniciar o cadastro do cartão.", { description: getApiErrorMessage(err) })
+      if (isGatewayDisabledError(err)) setUnavailable(true)
+      else toast.error("Não foi possível iniciar o cadastro do cartão.", { description: getApiErrorMessage(err) })
       setStatus("idle")
       return
     }
@@ -88,7 +94,8 @@ export function useAddCardFlow() {
             toast.success("Cartão cadastrado.")
           })
           .catch((err: unknown) => {
-            toast.error("Não foi possível salvar o cartão.", { description: getApiErrorMessage(err) })
+            if (isGatewayDisabledError(err)) setUnavailable(true)
+            else toast.error("Não foi possível salvar o cartão.", { description: getApiErrorMessage(err) })
           })
           .finally(() => {
             window.removeEventListener("message", handleMessage)
@@ -135,5 +142,5 @@ export function useAddCardFlow() {
     }, 500)
   }, [status, createSession, addPaymentMethod, cleanup])
 
-  return { start, status, isBusy: status !== "idle" }
+  return { start, status, isBusy: status !== "idle", unavailable }
 }

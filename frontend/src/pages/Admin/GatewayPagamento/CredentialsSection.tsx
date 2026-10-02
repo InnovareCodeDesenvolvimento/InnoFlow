@@ -38,6 +38,7 @@ export function CredentialsSection({
             spellCheck={false}
             value={merchantId}
             onChange={(e) => onChange({ merchantId: e.target.value })}
+            error={errors.merchantId}
             hint={draft.merchantId?.trim() === "" && dto.merchantId ? "Em branco, o valor atual é mantido." : "Identificador da loja na Cielo."}
           />
           <Input
@@ -46,6 +47,7 @@ export function CredentialsSection({
             spellCheck={false}
             value={sopClientId}
             onChange={(e) => onChange({ sopClientId: e.target.value })}
+            error={errors.sopClientId}
             hint={draft.sopClientId?.trim() === "" && dto.sopClientId ? "Em branco, o valor atual é mantido." : "Silent Order Post (formulário de cartão isolado)."}
           />
         </div>

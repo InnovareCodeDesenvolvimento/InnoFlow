@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { ArrowLeft, CreditCard, MoreVertical, Plus, Star } from "lucide-react"
+import { ArrowLeft, CreditCard, MoreVertical, Plus, Star, TriangleAlert } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { EmptyState } from "@/components/ui/EmptyState"
@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useMePaymentMethods, useRemovePaymentMethod, useSetDefaultPaymentMethod } from "@/hooks/useMePaymentMethods"
 import { useAddCardFlow } from "@/hooks/useAddCardFlow"
 import { getApiErrorMessage } from "@/services/api"
+import { CARD_GATEWAY_DISABLED_ADD_MESSAGE } from "@/lib/paymentMethodDisabled"
 import { toast } from "sonner"
 import type { MePaymentMethodDTO } from "@/types/api"
 
@@ -76,6 +77,12 @@ export function Cartoes() {
         <Plus className="h-4 w-4" aria-hidden="true" />
         Adicionar cartão
       </Button>
+      {addCardFlow.unavailable && (
+        <p role="alert" data-testid="add-card-unavailable" className="mt-3 flex items-start gap-2 rounded-xl bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {CARD_GATEWAY_DISABLED_ADD_MESSAGE}
+        </p>
+      )}
 
       <div className="mt-6">
         {isLoading && (

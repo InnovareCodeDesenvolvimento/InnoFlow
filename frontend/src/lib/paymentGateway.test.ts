@@ -8,11 +8,13 @@ import {
   GENERATED_SECRET_MIN_LENGTH,
   hasChanges,
   isProductionConfirmation,
+  parseGatewayLoadError,
   parseGatewaySaveError,
   readinessSummary,
   REQUIREMENT_INFO,
   requirementInfo,
   splitRequirements,
+  validateCredentialPairs,
   validateDraft,
 } from "./paymentGateway"
 import type { PaymentGatewayConfigDTO, PaymentGatewayRequirement } from "@/types/api"
@@ -251,5 +253,114 @@ describe("extractRequirements / parseGatewaySaveError", () => {
   it("sem resposta (rede caiu) e erro que não é do axios: mensagem de conexão", () => {
     expect(parseGatewaySaveError(new AxiosError("Network Error")).message).toMatch(/servidor/)
     expect(parseGatewaySaveError(new Error("qualquer")).message).toMatch(/servidor/)
+  })
+})
+
+const axiosError = (status: number, data: unknown) =>
+  new AxiosError("falhou", String(status), undefined, undefined, { status, statusText: "", headers: {}, config: { headers: new AxiosHeaders() }, data })
+
+describe("PARES de credenciais (id + segredo no mesmo salvar)", () => {
+  const fromEnv: PaymentGatewayConfigDTO = { ...dto, source: "env", merchantId: null, merchantKeySet: false, sopClientId: null, sopClientSecretSet: false, updatedAt: null }
+  const pairs = (base: PaymentGatewayConfigDTO, draft: Parameters<typeof buildUpdatePayload>[1]) => validateCredentialPairs(base, buildUpdatePayload(base, draft))
+
+  it("origem env: só o MerchantId => erro na MerchantKey, com a mensagem pedida", () => {
+    expect(pairs(fromEnv, { merchantId: "mid-novo" })).toEqual({
+      merchantKey: "Ao informar o MerchantId, informe também a MerchantKey nesta mesma alteração.",
+    })
+  })
+
+  it("origem env: só a MerchantKey (id em branco) => erro no MerchantId", () => {
+    expect(pairs(fromEnv, { merchantKey: "segredo" })).toEqual({
+      merchantId: "Ao informar a MerchantKey, informe também o MerchantId nesta mesma alteração.",
+    })
+  })
+
+  it("origem env: os dois lados juntos => sem erro", () => {
+    expect(pairs(fromEnv, { merchantId: "mid-novo", merchantKey: "segredo" })).toEqual({})
+  })
+
+  it("origem env com id visível no campo (valor do env): trocar só a chave reenvia o id sozinho", () => {
+    const envWithId: PaymentGatewayConfigDTO = { ...fromEnv, merchantId: "mid-do-env", merchantKeySet: true }
+    const payload = buildUpdatePayload(envWithId, { merchantKey: "nova" })
+    expect(payload).toEqual({ merchantKey: "nova", merchantId: "mid-do-env" })
+    expect(validateCredentialPairs(envWithId, payload)).toEqual({})
+  })
+
+  it("banco SEM segredo salvo: só o id => erro; banco COM segredo salvo: só o id passa", () => {
+    const dbNoKey: PaymentGatewayConfigDTO = { ...dto, merchantKeySet: false }
+    expect(Object.keys(pairs(dbNoKey, { merchantId: "outro" }))).toEqual(["merchantKey"])
+    expect(pairs(dto, { merchantId: "outro" })).toEqual({})
+  })
+
+  it("banco: trocar só a chave nunca exige o id (ele já está salvo)", () => {
+    expect(pairs(dto, { merchantKey: "nova" })).toEqual({})
+  })
+
+  it("par do cartão (Client ID + Client Secret) segue a mesma regra, com mensagem própria", () => {
+    // dto: sopClientSecretSet=false => só o Client ID não basta
+    expect(pairs(dto, { sopClientId: "sop-2" })).toEqual({
+      sopClientSecret: "Ao informar o Client ID do cadastro de cartão, informe também o Client Secret do cadastro de cartão nesta mesma alteração.",
+    })
+    expect(pairs(dto, { sopClientId: "sop-2", sopClientSecret: "s" })).toEqual({})
+  })
+
+  it("os dois pares são avaliados de forma independente", () => {
+    expect(Object.keys(pairs(fromEnv, { merchantId: "a", sopClientId: "b" })).sort()).toEqual(["merchantKey", "sopClientSecret"])
+  })
+
+  it("alterar só flag/ambiente não dispara regra de par", () => {
+    expect(pairs(fromEnv, { pixEnabled: true, environment: "production" })).toEqual({})
+  })
+})
+
+describe("erros novos do servidor (F5.5): 401 / 429 / 503 / 500", () => {
+  it.each(["RATE_LIMITED", "RATE_LIMITED_PAYMENT_GATEWAY"])("429 %s => 'Aguarde um minuto', rascunho mantido", (code) => {
+    const parsed = parseGatewaySaveError(axiosError(429, { error: "x", code }))
+    expect(parsed.message).toBe("Muitas alterações em pouco tempo. Aguarde um minuto e tente de novo.")
+    expect(parsed.code).toBe(code)
+    expect(parsed.draftKept).toBe(true)
+  })
+
+  it("429 sem code (proxy na frente) cai na mesma mensagem", () => {
+    expect(parseGatewaySaveError(axiosError(429, undefined)).message).toMatch(/Aguarde um minuto/)
+  })
+
+  it("503 PAYMENT_GATEWAY_UNAVAILABLE explica leitura da configuração e que nada mudou — e não confunde com PAYMENT_SECRETS_KEY_MISSING", () => {
+    const parsed = parseGatewaySaveError(axiosError(503, { error: "x", code: "PAYMENT_GATEWAY_UNAVAILABLE" }))
+    expect(parsed.message).toMatch(/não conseguiu ler a configuração/)
+    expect(parsed.message).toMatch(/PAYMENT_SECRETS_KEY foi trocada/)
+    expect(parsed.message).toMatch(/Nada foi alterado/)
+    expect(parsed.requirements).toEqual([]) // não é pendência para o admin resolver na tela
+    expect(parsed.draftKept).toBe(true)
+  })
+
+  it("500 INTERNAL_ERROR: falha de auditoria => nada alterado, tente de novo", () => {
+    const parsed = parseGatewaySaveError(axiosError(500, { error: "x", code: "INTERNAL_ERROR" }))
+    expect(parsed.message).toBe("Não foi possível salvar e nada foi alterado. Tente novamente.")
+    expect(parsed.draftKept).toBe(true)
+  })
+
+  it("401 UNAUTHORIZED: sessão expirou (o interceptor leva ao login); não promete rascunho", () => {
+    const parsed = parseGatewaySaveError(axiosError(401, { error: "x", code: "UNAUTHORIZED" }))
+    expect(parsed.message).toMatch(/sessão expirou/)
+    expect(parsed.draftKept).toBe(false)
+  })
+
+  it("nenhuma dessas mensagens ecoa o texto cru do servidor (que poderia carregar dados)", () => {
+    const parsed = parseGatewaySaveError(axiosError(500, { error: "SEGREDO-NO-ERRO", code: "INTERNAL_ERROR" }))
+    expect(parsed.message).not.toContain("SEGREDO-NO-ERRO")
+  })
+
+  it("parseGatewayLoadError (GET): mesmas mensagens; 403/404 e rede ficam para o texto genérico (null)", () => {
+    expect(parseGatewayLoadError(axiosError(503, { error: "x", code: "PAYMENT_GATEWAY_UNAVAILABLE" }))).toMatch(/não conseguiu ler a configuração/)
+    expect(parseGatewayLoadError(axiosError(429, { error: "x", code: "RATE_LIMITED" }))).toMatch(/Aguarde um minuto/)
+    expect(parseGatewayLoadError(axiosError(403, { error: "x", code: "FORBIDDEN" }))).toBeNull()
+    expect(parseGatewayLoadError(new AxiosError("Network Error"))).toBeNull()
+  })
+
+  it("GATEWAY_NOT_READY por par não promete 'produção': a mensagem cobre pares e devolve a metade que falta", () => {
+    const parsed = parseGatewaySaveError(axiosError(409, { error: "x", code: "GATEWAY_NOT_READY", details: ["MERCHANT_KEY"] }))
+    expect(parsed.message).toMatch(/par de credenciais/)
+    expect(parsed.requirements).toEqual(["MERCHANT_KEY"])
   })
 })

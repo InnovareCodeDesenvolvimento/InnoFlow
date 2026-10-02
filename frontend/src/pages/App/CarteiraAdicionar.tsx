@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, ArrowLeft, QrCode, RotateCcw, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/Button"
+import { buttonVariants } from "@/components/ui/buttonVariants"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { TopupAmountPicker } from "@/components/carteira/TopupAmountPicker"
@@ -11,6 +12,7 @@ import { TopupSuccessCard } from "@/components/carteira/TopupSuccessCard"
 import { useCreateTopup, useMeTopup, useMeWallet } from "@/hooks/useMeSessions"
 import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
 import { createTopupErrorMessage } from "@/lib/topupAmount"
+import { isGatewayDisabledError, PIX_GATEWAY_DISABLED_MESSAGE } from "@/lib/paymentMethodDisabled"
 
 /**
  * `/app/carteira/adicionar` — recarga de saldo via Pix (F5.1). Três passos
@@ -46,6 +48,11 @@ export function CarteiraAdicionar() {
       queryClient.invalidateQueries({ queryKey: ["me", "wallet"] })
     }
   }, [topup?.status, topup?.id, queryClient])
+
+  // O ADMIN desligou o Pix (409 `PAYMENT_METHOD_DISABLED` + `GATEWAY_DISABLED`): derivado do erro da
+  // mutação, sem estado extra. A tela troca o formulário por um aviso SEM botão de tentar de novo
+  // (repetir só devolveria o mesmo 409); sair e voltar à tela reinicia o estado.
+  const pixUnavailable = createTopup.isError && isGatewayDisabledError(createTopup.error)
 
   const handleCreate = async (amountCents: number, cpf: string | undefined) => {
     try {
@@ -93,7 +100,19 @@ export function CarteiraAdicionar() {
               <ErrorState message={getApiErrorMessage(walletQuery.error, "Não foi possível carregar sua carteira.")} onRetry={() => walletQuery.refetch()} />
             )}
 
-            {!walletQuery.isLoading && !walletQuery.isError && (
+            {!walletQuery.isLoading && !walletQuery.isError && pixUnavailable && (
+              <div role="alert" data-testid="pix-unavailable" className="flex flex-col items-center rounded-2xl bg-muted px-4 py-10 text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-warning-100 text-warning-700" aria-hidden="true">
+                  <AlertTriangle className="h-7 w-7" />
+                </span>
+                <p className="mt-4 text-base font-black text-ink">{PIX_GATEWAY_DISABLED_MESSAGE}</p>
+                <Link to="/app/carteira" className={buttonVariants({ variant: "outline", className: "mt-5 w-full" })}>
+                  Voltar à carteira
+                </Link>
+              </div>
+            )}
+
+            {!walletQuery.isLoading && !walletQuery.isError && !pixUnavailable && (
               <TopupAmountPicker
                 openDebtCents={walletQuery.data?.openDebtCents ?? 0}
                 loading={createTopup.isPending}

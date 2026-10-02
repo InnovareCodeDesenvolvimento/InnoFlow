@@ -4,7 +4,8 @@ import type { PaymentGatewayConfigDTO } from "@/types/api"
 
 /**
  * Origem dos valores efetivos: `env` = nada salvo ainda (vale o ambiente do
- * servidor — aviso informativo de que salvar passa a mandar); `database` =
+ * servidor; a 1ª gravação semeia a linha com o ambiente atual e com os meios
+ * que já têm credencial habilitados — não desliga nada); `database` =
  * configuração salva aqui, com data/hora.
  */
 export function SourceBanner({ source, updatedAt }: Pick<PaymentGatewayConfigDTO, "source" | "updatedAt">) {
@@ -13,7 +14,8 @@ export function SourceBanner({ source, updatedAt }: Pick<PaymentGatewayConfigDTO
       <div role="status" className="flex items-start gap-3 rounded-xl border border-info-600/30 bg-info-50 p-4 text-info-700" data-testid="source-banner-env">
         <Info className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
         <p className="min-w-0 text-sm">
-          <span className="font-bold">Usando as variáveis do servidor.</span> Ao salvar, passa a valer o que for salvo aqui.
+          <span className="font-bold">Usando as variáveis do servidor.</span> Na primeira gravação, a configuração nasce com o ambiente atual e com
+          &quot;habilitado&quot; nos meios que já têm credencial no servidor — salvar não desliga o que já funcionava. Daí em diante, vale o que for salvo aqui.
         </p>
       </div>
     )

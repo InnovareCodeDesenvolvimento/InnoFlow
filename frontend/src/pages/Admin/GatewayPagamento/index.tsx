@@ -11,7 +11,9 @@ import {
   buildUpdatePayload,
   describeChanges,
   hasChanges,
+  parseGatewayLoadError,
   parseGatewaySaveError,
+  validateCredentialPairs,
   validateDraft,
   type GatewayDraft,
   type GatewaySaveError,
@@ -81,7 +83,11 @@ export default function GatewayPagamentoPage() {
       <div className="mx-auto max-w-4xl space-y-6">
         <PageHeader title="Gateway de pagamento" description="Conta Cielo da plataforma: credenciais, ambiente e meios de pagamento." icon={Vault} />
         <ErrorState
-          message={forbidden ? "Somente administradores podem ver e alterar o gateway de pagamento." : getApiErrorMessage(error, "Não foi possível carregar a configuração do gateway.")}
+          message={
+            forbidden
+              ? "Somente administradores podem ver e alterar o gateway de pagamento."
+              : (parseGatewayLoadError(error) ?? getApiErrorMessage(error, "Não foi possível carregar a configuração do gateway."))
+          }
           onRetry={forbidden ? undefined : () => void refetch()}
         />
       </div>
@@ -90,7 +96,7 @@ export default function GatewayPagamentoPage() {
 
   const payload = buildUpdatePayload(dto, draft)
   const changes = describeChanges(dto, payload)
-  const errors = validateDraft(draft)
+  const errors = { ...validateDraft(draft), ...validateCredentialPairs(dto, payload) }
   const dirty = hasChanges(payload)
   const canSave = dirty && Object.keys(errors).length === 0 && !mutation.isPending
 
@@ -137,6 +143,7 @@ export default function GatewayPagamentoPage() {
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0">{saveError.message}</span>
           </p>
+          {saveError.draftKept && <p className="pl-6 text-xs font-medium">O que você preencheu continua na tela.</p>}
           {saveError.requirements.length > 0 && saveError.code === "GATEWAY_NOT_READY" && (
             <div className="rounded-lg bg-white/70 p-3 text-ink">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-softer">O que falta</p>
@@ -192,9 +199,17 @@ export default function GatewayPagamentoPage() {
         <div className="mx-auto flex max-w-4xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-ink-softer" aria-live="polite" data-testid="save-bar-status">
             {dirty ? (
-              <span className="font-semibold text-ink">
-                {changes.length} {changes.length === 1 ? "alteração não salva" : "alterações não salvas"}
-              </span>
+              <>
+                <span className="font-semibold text-ink">
+                  {changes.length} {changes.length === 1 ? "alteração não salva" : "alterações não salvas"}
+                </span>
+                {Object.keys(errors).length > 0 && (
+                  <span className="font-semibold text-danger-700" data-testid="save-bar-errors">
+                    {" "}
+                    — corrija os campos marcados para salvar.
+                  </span>
+                )}
+              </>
             ) : (
               "Nenhuma alteração pendente."
             )}
