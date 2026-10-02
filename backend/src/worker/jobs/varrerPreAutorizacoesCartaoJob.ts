@@ -3,7 +3,7 @@ import { createRedisConnection } from '../../lib/redis'
 import { logger } from '../../lib/logger'
 import { env } from '../../lib/env'
 import { varrerPreAutorizacoesCartao } from '../../services/pagamentos/varrerPreAutorizacoesCartao'
-import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
+import { getPagamentoPort, isPagamentoDisponivel } from '../../services/pagamentos/pagamentoPortInstance'
 import { createQueue, VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME, type VarrerPreAutorizacoesCartaoJobData } from '../queues'
 
 /** Processa cada disparo do agendador (ver `scheduleVarrerPreAutorizacoesCartaoScan`). */
@@ -11,6 +11,8 @@ export function startVarrerPreAutorizacoesCartaoWorker(): Worker<VarrerPreAutori
   const worker = new Worker<VarrerPreAutorizacoesCartaoJobData>(
     VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME,
     async (_job: Job<VarrerPreAutorizacoesCartaoJobData>) => {
+      // Produção sem credencial Cielo (gateway bloqueado): nada para varrer, pula em silêncio em vez de falhar a cada rodada.
+      if (!isPagamentoDisponivel()) return
       await varrerPreAutorizacoesCartao(getPagamentoPort())
     },
     { connection: createRedisConnection(), concurrency: 1 }, // 1: nunca duas varreduras do mesmo lote em paralelo

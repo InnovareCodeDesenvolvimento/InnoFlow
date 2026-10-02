@@ -3,7 +3,7 @@ import { createRedisConnection } from '../../lib/redis'
 import { logger } from '../../lib/logger'
 import { env } from '../../lib/env'
 import { varrerTopupsPixExpirados } from '../../services/pagamentos/varrerTopupsPixExpirados'
-import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
+import { getPagamentoPort, isPagamentoDisponivel } from '../../services/pagamentos/pagamentoPortInstance'
 import { createQueue, EXPIRAR_TOPUPS_PIX_QUEUE_NAME, type ExpirarTopupsPixJobData } from '../queues'
 
 /** Processa cada disparo do agendador (ver `scheduleExpirarTopupsPixScan`). */
@@ -11,6 +11,8 @@ export function startExpirarTopupsPixWorker(): Worker<ExpirarTopupsPixJobData> {
   const worker = new Worker<ExpirarTopupsPixJobData>(
     EXPIRAR_TOPUPS_PIX_QUEUE_NAME,
     async (_job: Job<ExpirarTopupsPixJobData>) => {
+      // Produção sem credencial Cielo (gateway bloqueado): nada para varrer, pula em silêncio em vez de falhar a cada rodada.
+      if (!isPagamentoDisponivel()) return
       await varrerTopupsPixExpirados(getPagamentoPort())
     },
     { connection: createRedisConnection(), concurrency: 1 }, // 1: nunca duas varreduras do mesmo lote em paralelo

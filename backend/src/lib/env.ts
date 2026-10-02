@@ -150,6 +150,10 @@ const envSchema = z.object({
   // `envBoolean`, NÃO `z.coerce.boolean()` — este tratava "false"/"0" como true (ver `envBoolean.ts`).
   // Default `true` (sandbox) de propósito: esquecer a env nunca aponta para produção.
   CIELO_SANDBOX: envBoolean(true),
+  // Opt-in EXPLÍCITO para usar o `FakeAdapter` em produção (default false). O Fake aprova QUALQUER cartão e não
+  // cobra nada — sem esta env, produção sem `CIELO_MERCHANT_ID`/`CIELO_MERCHANT_KEY` bloqueia Pix/cartão (503).
+  // Ver `core/pagamentos/decidirAdaptador.ts`. Só ligue para demonstrar o fluxo sabendo que NADA é cobrado.
+  PAYMENT_ALLOW_FAKE_ADAPTER: envBoolean(false),
   // F5.3 (30/09/2026) — sessão de tokenização de cartão (Silent Order Post,
   // D1 do dono: cartão salvo, SAQ A-EP). Substitui `CIELO_SOP_POST_URL` da
   // F5.1 (nunca chegou a ser configurada/usada): o contrato real que o
