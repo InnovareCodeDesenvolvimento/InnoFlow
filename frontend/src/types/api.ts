@@ -1516,6 +1516,39 @@ export interface UpdatePaymentGatewayConfigRequest {
 export type PaymentGatewayConfigErrorCode =
   | "VALIDATION_ERROR" // 400
   | "PRODUCTION_CONFIRMATION_REQUIRED" // 400 — mudou para production sem `confirmProduction: true`
-  | "GATEWAY_NOT_READY" // 409 — `environment: production` (ou habilitar um meio) com pré-requisito faltando; `details` lista os `PaymentGatewayRequirement`
-  | "PAYMENT_SECRETS_KEY_MISSING" // 503 — servidor sem chave de cifragem: não aceita gravar segredos
+  | "GATEWAY_NOT_READY" // 409 — `environment: production` (ou habilitar um meio) com pré-requisito faltando; `details` é um ARRAY DE STRINGS com os `PaymentGatewayRequirement` (ordem estável) — diferente dos outros `details` da API, que são objetos
+  | "PAYMENT_SECRETS_KEY_MISSING" // 503 — servidor sem chave de cifragem: não aceita gravar segredos (só quando o body TEM segredo; salvar só `merchantId` passa)
   | "FORBIDDEN" // 403 — só ADMIN
+  | "UNAUTHORIZED" // 401 — sem sessão válida
+  | "RATE_LIMITED" // 429 — limite geral da API admin
+  | "RATE_LIMITED_PAYMENT_GATEWAY" // 429 — PUT: 10 por minuto por usuário
+  | "PAYMENT_GATEWAY_UNAVAILABLE" // 503 — GET/PUT com a configuração ilegível (banco fora, segredo que não decifra): fail-closed
+  | "INTERNAL_ERROR" // 500 — a auditoria falhou: NADA foi gravado (fail-closed); pode tentar de novo
+
+/**
+ * Regras do PUT que a tela precisa respeitar (comportamento real do servidor, F5.5):
+ * - PARES de credenciais andam juntos: `merchantId`+`merchantKey` e `sopClientId`+`sopClientSecret`. Se o par
+ *   ainda vem do env (`source: "env"`) ou não há chave salva e a tela envia só um lado => 409 `GATEWAY_NOT_READY`
+ *   com a metade que falta. Ao trocar o `merchantId`, a tela deve exigir reenviar a chave nesses casos.
+ * - Na 1ª gravação (`source: "env"`) a linha nasce semeada com o ambiente atual (`CIELO_SANDBOX`) e flags =
+ *   "há credenciais no env": salvar uma flag qualquer NÃO desliga o que já funcionava pelo env.
+ * - Desabilitar um meio NUNCA dá 409 de prontidão; habilitar sem pré-requisito dá. Editar campo alheio de um meio
+ *   já habilitado e quebrado também não é bloqueado.
+ * - `confirmProduction` só é exigido na mudança sandbox -> production (não se já está em production).
+ * - PUT `{}` ou só `{ confirmProduction: true }` => 400; campo desconhecido => 400 (strict); strings são aparadas.
+ * - `webhookUrl` carrega o token de caminho do webhook: só ADMIN deve ver.
+ */
+
+/**
+ * `PAYMENT_METHOD_DISABLED` (409) tem DOIS sentidos nas rotas do motorista — a tela deve ramificar por
+ * `details[0].reason`:
+ * - sem `details` (ou sem `reason`): o CARTÃO escolhido foi removido/desativado pelo próprio motorista -> pedir outro cartão;
+ * - `details: [{ method: "CARD" | "PIX", reason: "GATEWAY_DISABLED" }]`: o ADMIN desligou esse meio de pagamento na
+ *   configuração do gateway -> esconder/avisar "indisponível no momento", NÃO pedir "escolha outro cartão".
+ * Rotas afetadas: `POST /api/me/payment-methods/tokenization-session`, `POST /api/me/payment-methods`,
+ * `POST /api/me/sessions/start` (modo CARD) e `POST /api/me/wallet/topups` (Pix).
+ */
+export interface PaymentMethodDisabledDetail {
+  method: "CARD" | "PIX"
+  reason: "GATEWAY_DISABLED"
+}
