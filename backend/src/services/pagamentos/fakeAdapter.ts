@@ -18,6 +18,15 @@ export interface FakeAdapterOptions {
   cardTokensNegados?: string[]
   /** `cardToken`s que `consultarCartaoTokenizado` deve tratar como desconhecidos/inválidos (F5.3, simula `GET /1/card/{token}` 404). */
   cardTokensInvalidos?: string[]
+  /**
+   * Como `capturar()` se comporta (F5.7, M1) — para provar a política "só resultado definitivo decide a cobrança":
+   *  - `NORMAL` (default): captura na hora.
+   *  - `PENDENTE`: a Cielo aceita a captura mas ainda processa (`Status=PENDING` -> `CREATED` no vocabulário da porta):
+   *    `capturar()` e `consultar()` devolvem CREATED até `concluirCapturaPendente()` (que simula "a Cielo concluiu depois").
+   *  - `NEGADA`: a Cielo recusa a captura de forma DEFINITIVA (`FAILED`).
+   * Mutável em runtime via `definirModoCaptura()`.
+   */
+  modoCaptura?: 'NORMAL' | 'PENDENTE' | 'NEGADA'
   /** Gera IDs previsíveis para asserção em teste (`fake-payment-1`, `fake-payment-2`, ...). Default: `crypto.randomUUID()`. */
   gerarId?: () => string
 }
@@ -29,6 +38,8 @@ interface IntentSimulado {
   returnCode: string | null
   amountAuthorizedCents: number | null
   amountCapturedCents: number | null
+  /** Captura aceita mas ainda em processamento (modo PENDENTE): `consultar()` devolve CREATED enquanto isto existir. */
+  capturaPendenteCents?: number
 }
 
 /** Pix vive num mapa SEPARADO do cartão (mesma separação de vocabulário do `PagamentoPort` real — `PixPaymentStatus` != `CardPaymentStatus`, ver gap fechado em `ResultadoConsultaPix`). */
@@ -43,8 +54,32 @@ export class FakeAdapter implements PagamentoPort {
   private readonly intents = new Map<string, IntentSimulado>()
   private readonly porMerchantOrderId = new Map<string, string>()
   private readonly pixIntents = new Map<string, IntentPixSimulado>()
+  private readonly capturasSolicitadas = new Map<string, number>()
+  private modoCaptura: 'NORMAL' | 'PENDENTE' | 'NEGADA'
 
-  constructor(private readonly options: FakeAdapterOptions = {}) {}
+  constructor(private readonly options: FakeAdapterOptions = {}) {
+    this.modoCaptura = options.modoCaptura ?? 'NORMAL'
+  }
+
+  /** Só de teste: muda como as PRÓXIMAS capturas se comportam (ver `FakeAdapterOptions.modoCaptura`). */
+  definirModoCaptura(modo: 'NORMAL' | 'PENDENTE' | 'NEGADA'): void {
+    this.modoCaptura = modo
+  }
+
+  /** Só de teste: quantas vezes `capturar()` foi CHAMADO para este pagamento — a prova de que nunca se captura 2x. */
+  contagemCapturar(providerPaymentId: string): number {
+    return this.capturasSolicitadas.get(providerPaymentId) ?? 0
+  }
+
+  /** Só de teste: a Cielo concluiu a captura que estava pendente — depois disto `consultar()` devolve CAPTURED. */
+  concluirCapturaPendente(providerPaymentId: string): void {
+    const intent = this.exigirIntent(providerPaymentId)
+    if (intent.capturaPendenteCents === undefined) throw new Error(`FakeAdapter.concluirCapturaPendente: ${providerPaymentId} não tem captura pendente`)
+    intent.status = 'CAPTURED'
+    intent.amountCapturedCents = intent.capturaPendenteCents
+    intent.returnCode = '6'
+    delete intent.capturaPendenteCents
+  }
 
   private proximoId(): string {
     // Achado real da Íris (F5.2, 30/09/2026): o default aqui documentava
@@ -78,6 +113,16 @@ export class FakeAdapter implements PagamentoPort {
     if (intent.status !== 'AUTHORIZED') {
       throw new Error(`FakeAdapter.capturar: intent ${providerPaymentId} está em ${intent.status}, esperado AUTHORIZED`)
     }
+    this.capturasSolicitadas.set(providerPaymentId, this.contagemCapturar(providerPaymentId) + 1)
+    if (this.modoCaptura === 'PENDENTE') {
+      intent.capturaPendenteCents = amountCents
+      return { providerPaymentId, status: 'CREATED', returnCode: null, amountCapturedCents: null }
+    }
+    if (this.modoCaptura === 'NEGADA') {
+      intent.status = 'FAILED'
+      intent.returnCode = '57'
+      return { providerPaymentId, status: 'FAILED', returnCode: intent.returnCode, amountCapturedCents: null }
+    }
     intent.status = 'CAPTURED'
     intent.amountCapturedCents = amountCents
     intent.returnCode = '6'
@@ -95,7 +140,7 @@ export class FakeAdapter implements PagamentoPort {
     return {
       providerPaymentId: intent.providerPaymentId,
       merchantOrderId: intent.merchantOrderId,
-      status: intent.status,
+      status: intent.capturaPendenteCents !== undefined ? 'CREATED' : intent.status,
       returnCode: intent.returnCode,
       amountAuthorizedCents: intent.amountAuthorizedCents,
       amountCapturedCents: intent.amountCapturedCents,

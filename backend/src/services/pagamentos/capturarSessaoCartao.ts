@@ -29,6 +29,17 @@ export interface CapturarSessaoCartaoResultado {
   shortfallCents: number
 }
 
+/** A Cielo ainda não disse CAPTURED nem FAILED/VOIDED: lançar faz o job retentar sem decidir cobrança nenhuma (ver M1 abaixo). */
+export class CapturaCartaoNaoDefinitivaError extends Error {
+  constructor(
+    readonly paymentIntentId: string,
+    readonly statusCielo: string,
+  ) {
+    super(`captura do intent ${paymentIntentId} sem resultado definitivo (status ${statusCielo}) — reconsultar`)
+    this.name = 'CapturaCartaoNaoDefinitivaError'
+  }
+}
+
 export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPortInjetado?: PagamentoPort): Promise<CapturarSessaoCartaoResultado | null> {
   const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const intent = await prisma.paymentIntent.findUnique({ where: { id: paymentIntentId } })
@@ -61,6 +72,21 @@ export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPor
       : consultaAtual.status === 'AUTHORIZED'
         ? await pagamentoPort.capturar(intent.cieloPaymentId, intent.captureAmountCents)
         : { status: consultaAtual.status, returnCode: consultaAtual.returnCode, amountCapturedCents: consultaAtual.amountCapturedCents }
+
+  // F5.7 (M1, achado do Órion): SÓ um resultado DEFINITIVO decide a cobrança. CAPTURED = cobrou; FAILED/VOIDED =
+  // a Cielo disse que NÃO cobrou e não vai cobrar (negado, cancelado/expirado) — único caso que vira dívida.
+  // QUALQUER outro status (CREATED = o `PENDING` da Cielo mapeado pelo adaptador, AUTHORIZED = a captura ainda
+  // não pegou, CAPTURE_PENDING, ou um valor que não conhecemos) é TRANSITÓRIO: a captura pode concluir DEPOIS.
+  // Antes isto caía no ramo "falhou": FAILED + dívida de 100%, e quando a Cielo concluía a captura o motorista
+  // pagava duas vezes (cartão + dívida). Agora LANÇA: o intent segue CAPTURE_PENDING, o job retenta (e o varredor
+  // reenfileira), e a próxima volta RECONSULTA antes de qualquer decisão.
+  if (resultadoCaptura.status !== 'CAPTURED' && resultadoCaptura.status !== 'FAILED' && resultadoCaptura.status !== 'VOIDED') {
+    logger.warn(
+      { paymentIntentId, statusCielo: resultadoCaptura.status, returnCode: resultadoCaptura.returnCode },
+      '[capturarSessaoCartao] Cielo devolveu status NÃO definitivo para a captura — nada gravado, será reconsultado',
+    )
+    throw new CapturaCartaoNaoDefinitivaError(paymentIntentId, resultadoCaptura.status)
+  }
 
   return prisma.$transaction(async (tx) => {
     const lockedRows = await tx.$queryRaw<{ id: string; status: string; chargingSessionId: string | null }[]>(
