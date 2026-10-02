@@ -1433,3 +1433,89 @@ export type RealtimeEvent =
   | ChargePointStatusEvent
   | AdminEntityChangedEvent
   | DashboardDirtyEvent
+
+// ============================================================================
+// F5.5 — Configuração do gateway de pagamento (Cielo). ADMIN-ONLY.
+// ============================================================================
+// Contrato escrito e commitado PELO ATLAS antes da implementação (Vega e Lyra
+// trabalham em paralelo contra este texto literal — não editem nem dupliquem:
+// se faltar campo, avisem no handoff). A conta Cielo é ÚNICA da plataforma
+// (decisão D2: a carteira é da rede), então só ADMIN vê e altera; OPERATOR não.
+//
+//   GET /api/admin/payment-gateway  -> PaymentGatewayConfigDTO
+//   PUT /api/admin/payment-gateway  -> PaymentGatewayConfigDTO (já atualizado)
+//
+// SEGREDOS NUNCA VOLTAM: merchantKey, sopClientSecret e webhookHeaderSecret são
+// só de ESCRITA; o GET devolve apenas `...Set: boolean`. Campo ausente no PUT =
+// "não mexer". Não há "apagar segredo" nesta versão (só substituir).
+
+export type PaymentGatewayEnvironment = "sandbox" | "production"
+
+/** Pré-requisito que falta para um meio de pagamento funcionar. Códigos estáveis (a tela mapeia para texto em português). */
+export type PaymentGatewayRequirement =
+  | "MERCHANT_ID"
+  | "MERCHANT_KEY"
+  | "SOP_CLIENT_ID"
+  | "SOP_CLIENT_SECRET"
+  | "SOP_SCRIPT_URL" // só variável de ambiente do servidor — a tela não edita
+  | "SOP_OAUTH_TOKEN_URL" // idem
+  | "WEBHOOK_PATH_TOKEN" // idem (compõe `webhookUrl`)
+  | "WEBHOOK_HEADER_SECRET"
+  | "PAYMENT_SECRETS_KEY" // idem — sem ela o servidor não consegue cifrar/guardar os segredos acima
+
+export interface PaymentMethodReadiness {
+  /** `true` = todos os pré-requisitos presentes (independe de estar habilitado pelo admin). */
+  ready: boolean
+  missing: PaymentGatewayRequirement[]
+}
+
+export interface PaymentGatewayConfigDTO {
+  /**
+   * De onde vêm os valores efetivos. `"database"` = existe configuração salva pelo admin (ela manda).
+   * `"env"` = nada salvo ainda: vale o ambiente do servidor (comportamento anterior à F5.5), e a tela
+   * deve avisar que salvar passa a valer o que foi salvo aqui.
+   */
+  source: "database" | "env"
+  environment: PaymentGatewayEnvironment
+  merchantId: string | null
+  merchantKeySet: boolean
+  sopClientId: string | null
+  sopClientSecretSet: boolean
+  webhookHeaderSecretSet: boolean
+  /** URL que o dono cadastra no Site Cielo (somente leitura). `null` se o token de caminho do webhook ainda não está configurado no servidor. */
+  webhookUrl: string | null
+  /** Nome do header que a Cielo deve enviar com o segredo (constante do servidor, somente leitura). */
+  webhookHeaderName: string
+  cardEnabled: boolean
+  pixEnabled: boolean
+  readiness: { card: PaymentMethodReadiness; pix: PaymentMethodReadiness }
+  /** `null` quando `source === "env"` (nada salvo). */
+  updatedAt: string | null
+}
+
+export interface UpdatePaymentGatewayConfigRequest {
+  environment?: PaymentGatewayEnvironment
+  merchantId?: string
+  /** Só escrita. */
+  merchantKey?: string
+  sopClientId?: string
+  /** Só escrita. */
+  sopClientSecret?: string
+  /** Só escrita. Mínimo de 8 caracteres. */
+  webhookHeaderSecret?: string
+  cardEnabled?: boolean
+  pixEnabled?: boolean
+  /**
+   * OBRIGATÓRIO como `true` quando o PUT muda `environment` de "sandbox" para "production"
+   * (a tela pede confirmação digitada e envia isto). Ausente nesse caso => 400
+   * `PRODUCTION_CONFIRMATION_REQUIRED`.
+   */
+  confirmProduction?: true
+}
+
+export type PaymentGatewayConfigErrorCode =
+  | "VALIDATION_ERROR" // 400
+  | "PRODUCTION_CONFIRMATION_REQUIRED" // 400 — mudou para production sem `confirmProduction: true`
+  | "GATEWAY_NOT_READY" // 409 — `environment: production` (ou habilitar um meio) com pré-requisito faltando; `details` lista os `PaymentGatewayRequirement`
+  | "PAYMENT_SECRETS_KEY_MISSING" // 503 — servidor sem chave de cifragem: não aceita gravar segredos
+  | "FORBIDDEN" // 403 — só ADMIN
