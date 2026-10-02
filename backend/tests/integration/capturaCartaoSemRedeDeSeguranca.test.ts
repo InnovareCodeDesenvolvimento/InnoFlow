@@ -173,6 +173,32 @@ describe('ALTO-1 — captura de cartão com rede de segurança do varredor (F5.7
   })
 
   // ---------------------------------------------------------------------------
+  // Prova em TEMPO REAL (~3 min) com a política de produção (8 x 10 s exponencial), fora da suíte padrão: `PROVA_TEMPO_REAL=1`.
+  // Com a política ANTIGA (5 x 5 s, ~75 s) uma Cielo fora por 90 s esgotava o job e o intent ficava CAPTURE_PENDING para sempre.
+  describe.skipIf(!process.env.PROVA_TEMPO_REAL)('ALTO-1 — Cielo fora por MAIS de 75 s com a política real do job (tempo real, opt-in)', () => {
+    it('Redis fora no Stop + Cielo fora por 90 s: o job de produção sobrevive à janela antiga e captura UMA vez', async () => {
+      const { intent } = await sessaoParada('tempo-real', async () => {
+        await proxy.down()
+        await sleep(100)
+      })
+      await proxy.up()
+      await envelhecer(intent.id, 10)
+      const { porta, estado } = gatewayInstavel(fake)
+      iniciarWorker(async () => porta)
+      const inicio = Date.now()
+      await reenfileirarCapturasPendentes({ queue }) // política REAL: 8 tentativas, backoff exponencial de 10 s
+      setTimeout(() => (estado.falhando = false), 90_000).unref() // a Cielo volta aos 90 s (> 75 s, o total da política antiga)
+      await waitFor(async () => (await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status === 'CAPTURED', { timeoutMs: 240_000, what: 'captura depois de a Cielo voltar (90 s)' })
+      const decorridoS = Math.round((Date.now() - inicio) / 1000)
+      console.info(`[prova tempo real] capturado ${decorridoS} s depois do 1º enfileiramento (Cielo voltou aos 90 s; política antiga teria desistido aos ~75 s)`)
+      expect(decorridoS).toBeGreaterThan(75)
+      expect(fake.contagemCapturar(intent.cieloPaymentId!)).toBe(1)
+      expect(await prisma.debt.count({ where: { paymentIntentId: intent.id } })).toBe(0)
+      expect(await reportFor()).toMatchObject({ differenceCents: 0 })
+    }, 280_000)
+  })
+
+  // ---------------------------------------------------------------------------
   describe('ALTO-1 — gateway indisponível POR CONFIGURAÇÃO não gasta tentativas do job', () => {
     it('o job é ADIADO (várias voltas, attempts=2) e, quando a config volta, captura — nunca virou "falhou"', async () => {
       const { intent } = await sessaoParada('cfg')
