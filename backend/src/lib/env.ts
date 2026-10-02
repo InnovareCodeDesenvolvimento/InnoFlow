@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { envBoolean } from './envBoolean'
 
 /**
  * Validação de variáveis de ambiente — falha rápido no boot em vez de
@@ -146,7 +147,9 @@ const envSchema = z.object({
   CIELO_MERCHANT_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
   CIELO_API_BASE_URL: z.string().trim().min(1).default('https://apisandbox.cieloecommerce.cielo.com.br'),
   CIELO_API_QUERY_BASE_URL: z.string().trim().min(1).default('https://apiquerysandbox.cieloecommerce.cielo.com.br'),
-  CIELO_SANDBOX: z.coerce.boolean().default(true),
+  // `envBoolean`, NÃO `z.coerce.boolean()` — este tratava "false"/"0" como true (ver `envBoolean.ts`).
+  // Default `true` (sandbox) de propósito: esquecer a env nunca aponta para produção.
+  CIELO_SANDBOX: envBoolean(true),
   // F5.3 (30/09/2026) — sessão de tokenização de cartão (Silent Order Post,
   // D1 do dono: cartão salvo, SAQ A-EP). Substitui `CIELO_SOP_POST_URL` da
   // F5.1 (nunca chegou a ser configurada/usada): o contrato real que o
