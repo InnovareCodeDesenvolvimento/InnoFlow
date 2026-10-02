@@ -211,7 +211,8 @@ ${saida.slice(-2000)}`)
       expect(r.status, await r.clone().text()).toBe(500)
       const log = await logAssentado()
       expect(log).toContain('erro não tratado') // o caminho de erro DE FATO foi exercitado e logado
-      expect(log).toContain('Failing row contains') // e o Postgres/Prisma despejou a linha rejeitada na mensagem do erro
+      // e o Postgres/Prisma devolveu a linha rejeitada ("Failing row contains (...)") na mensagem do erro — o log traz o marcador no lugar (F5.7 B3)
+      expect(log).toContain('[linha rejeitada pelo banco omitida do log]')
       return { log }
     } finally {
       await appPrisma.$executeRawUnsafe(`ALTER TABLE "PaymentGatewayConfig" DROP CONSTRAINT IF EXISTS iris_barra_chave`)
@@ -228,8 +229,8 @@ ${saida.slice(-2000)}`)
   // dentro da mensagem do erro do Prisma e entra no log 3 vezes (stderr cru do engine do Prisma — que NEM PASSA pelo `redact` do
   // pino —, `err.message` e `err.stack`), com os `*Ciphertext` TRUNCADOS em 64 caracteres. Nunca o segredo em claro (a cifragem é
   // antes do Prisma) e só com uma falha de gravação no banco (constraint), mas o texto cifrado é justamente o que esta tela promete
-  // nunca logar. Hoje `it.fails`: quando o log do erro passar a omitir o `DETAIL` (ou o Prisma deixar de incluí-lo), vira `it`.
-  it.fails('(achado baixo) o erro de gravação no banco NÃO despeja pedaço do texto cifrado das credenciais no log', async () => {
+  // nunca logar. CORRIGIDO (Vega, F5.7 B3): o log do engine do Prisma sai como evento pelo nosso logger e o serializer do `err` limpa o `Failing row contains (...)` (`lib/logSerializers.ts`); `it.fails` virou `it`, asserção inalterada.
+  it('(achado baixo, corrigido na F5.7 B3) o erro de gravação no banco NÃO despeja pedaço do texto cifrado das credenciais no log', async () => {
     const { log } = await provocarErro500NoPut('MKEY-500b-nao-pode-aparecer-ggg777')
     expect(log).not.toContain('Failing row contains') // a linha rejeitada (com os `*Ciphertext` truncados) é o que não deve ir para o log
   })

@@ -40,14 +40,20 @@ export class CieloTimeoutError extends Error {
 }
 
 export class CieloHttpError extends Error {
+  /** Corpo de erro já parseado — só usado internamente para extrair Status/ReturnCode; NUNCA logado (NÃO enumerável, ver o construtor). */
+  declare readonly body: unknown
+
   constructor(
     message: string,
     public readonly httpStatus: number,
-    /** Corpo de erro já parseado — só usado internamente para extrair Status/ReturnCode; nunca logado inteiro. */
-    public readonly body: unknown,
+    body: unknown,
   ) {
     super(message)
     this.name = 'CieloHttpError'
+    // F5.7 (B5): propriedade NÃO enumerável. O corpo de erro da Cielo pode ECOAR o payload enviado (`CardNumber`, `Holder`,
+    // `Identity`), e todo `logger.error({ err })` serializa as propriedades enumeráveis do erro — era um vazamento de PAN em
+    // potencial. Continua legível por `err.body` (o adaptador extrai Status/ReturnCode dele); só some do JSON/spread/serializer.
+    Object.defineProperty(this, 'body', { value: body, enumerable: false, writable: false, configurable: true })
   }
 }
 

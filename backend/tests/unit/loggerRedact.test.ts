@@ -56,6 +56,12 @@ const VALORES_SENSIVEIS = {
   merchantKeyCiphertext: 'ciphertext-merchant-key-base64==',
   sopClientSecretCiphertext: 'ciphertext-sop-secret-base64==',
   webhookHeaderSecretCiphertext: 'ciphertext-webhook-secret-base64==',
+  // F5.7 (B6) — dado pessoal do payload da Cielo e do Pix.
+  Identity: 'identity-cpf-do-pagador-eco',
+  Holder: 'holder-nome-impresso-no-cartao',
+  holderName: 'holdername-nome-do-portador-camel',
+  QrCodeString: 'qrcodestring-copia-e-cola-pix-0001',
+  pixQrCode: 'pixqrcode-copia-e-cola-pix-camel-0002',
 }
 
 describe('redact do logger — campos sensíveis do fluxo de pagamento (Cielo)', () => {

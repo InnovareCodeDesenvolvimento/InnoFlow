@@ -5,6 +5,7 @@ import compression from 'compression'
 import pinoHttp from 'pino-http'
 import { env } from '../lib/env'
 import { logger } from '../lib/logger'
+import { LOG_SERIALIZERS } from '../lib/logSerializers'
 import { prisma } from '../lib/prisma'
 import { redis } from '../lib/redis'
 import { AppError, errorHandler } from './middleware/errorHandler'
@@ -70,7 +71,8 @@ export function createApp(): Express {
   )
   app.use(compression())
   app.use(express.json())
-  app.use(pinoHttp({ logger }))
+  // `serializers.err`: o pino-http SOBRESCREVE o `err` do logger pelo serializer padrão do pino (sem a varredura profunda) — repete o nosso aqui.
+  app.use(pinoHttp({ logger, serializers: LOG_SERIALIZERS }))
 
   // Health check "de verdade": um load balancer/orquestrador só deve marcar
   // a instância como saudável se ela consegue falar com as duas dependências

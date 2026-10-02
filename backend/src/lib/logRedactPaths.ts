@@ -67,4 +67,19 @@ export const REDACT_PATHS = [
   '*.sopClientSecretCiphertext',
   'webhookHeaderSecretCiphertext',
   '*.webhookHeaderSecretCiphertext',
+  // F5.7 (B6, portão do Órion) — dado pessoal/sensível do payload da Cielo e do Pix: `Identity` (CPF do pagador no
+  // `Customer`), `Holder` (nome impresso no cartão, `CreditCard.Holder`), `holderName` (idem, camelCase do nosso lado),
+  // `QrCodeString`/`pixQrCode` (o "copia e cola" do Pix: quem o tem paga para a NOSSA conta, mas ele identifica o pagamento
+  // e o motorista). Soltos e `*.` como os demais — e, para o que vem DENTRO de um `err`, o serializer de `logSerializers.ts`
+  // varre em profundidade usando esta mesma lista (o `fast-redact` só casa 1 nível e é case-sensitive).
+  'Identity',
+  '*.Identity',
+  'Holder',
+  '*.Holder',
+  'holderName',
+  '*.holderName',
+  'QrCodeString',
+  '*.QrCodeString',
+  'pixQrCode',
+  '*.pixQrCode',
 ]
