@@ -62,6 +62,7 @@ const PATH_ENTITY_MAP: ReadonlyArray<{ prefix: string; entityType: string }> = [
   { prefix: '/api/admin/sessions', entityType: 'ChargingSession' },
   { prefix: '/api/admin/reports', entityType: 'Report' },
   { prefix: '/api/admin/audit-logs', entityType: 'AuditLog' },
+  { prefix: '/api/admin/payment-gateway', entityType: 'PaymentGatewayConfig' },
 ]
 
 function inferEntityType(pathname: string): string | null {

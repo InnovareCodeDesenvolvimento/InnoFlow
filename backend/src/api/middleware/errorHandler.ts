@@ -14,7 +14,7 @@ export class AppError extends Error {
     public message: string,
     public statusCode: number = 400,
     public code: string = 'ERROR',
-    public details?: Array<Record<string, unknown>>,
+    public details?: Array<Record<string, unknown> | string>,
   ) {
     super(message)
     this.name = 'AppError'

@@ -29,6 +29,7 @@ import adminSessionsRoutes from './routes/sessions.routes'
 import adminDriversRoutes from './routes/drivers.routes'
 import adminAuditLogsRoutes from './routes/auditLogs.routes'
 import adminEventsRoutes from './routes/events.routes'
+import adminPaymentGatewayRoutes from './routes/paymentGateway.routes'
 
 /**
  * Monta o app Express da API — auth JWT, isolamento multi-tenant e os CRUDs
@@ -121,6 +122,7 @@ export function createApp(): Express {
   app.use('/api/admin/sessions', adminRateLimit, adminSessionsRoutes)
   app.use('/api/admin/drivers', adminRateLimit, adminDriversRoutes)
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
+  app.use('/api/admin/payment-gateway', adminRateLimit, adminPaymentGatewayRoutes) // ADMIN-only (F5.5) — config da conta Cielo
   app.use('/api/admin/events', adminRateLimit, adminEventsRoutes) // SSE — teto por IP aqui; abertura por usuário e teto de streams dentro da rota
 
   // 404 — nenhuma rota bateu.

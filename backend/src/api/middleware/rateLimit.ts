@@ -119,3 +119,10 @@ export const meCreatePaymentMethodRateLimit = buildLimiter(60 * 1000, 8, 'RATE_L
  * enfileira um job).
  */
 export const webhookCieloRateLimit = buildLimiter(60 * 1000, 60, 'RATE_LIMITED_WEBHOOK')
+
+/**
+ * `PUT /api/admin/payment-gateway` (F5.5) — troca credenciais/ambiente da conta Cielo da plataforma: ato raro e
+ * sensível, então 10/min por ADMIN (por USUÁRIO, não por IP — atrás de NAT compartilhado o limite por IP
+ * puniria outros admins). Roda DEPOIS de `authenticate`/`requireRole('ADMIN')`.
+ */
+export const paymentGatewayWriteRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_PAYMENT_GATEWAY', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
