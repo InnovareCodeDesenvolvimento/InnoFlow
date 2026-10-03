@@ -57,7 +57,9 @@ jobs:
             -p 5432:5432 \
             --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d innoelektron_test" \
             --health-interval 5s --health-timeout 5s --health-retries 12 \
-            postgres:16-alpine -c max_connections=300
+            postgres:16-alpine -c max_connections=300 -c lc_messages=C
+          # `lc_messages=C` de propósito (defesa dupla, F5.9b2): mensagens de erro do Postgres SEMPRE em inglês, independente do locale do host/imagem.
+          # A limpeza do DETAIL no log já é por estrutura (lib/logSerializers.ts), mas um teste que afirma texto de erro do banco não pode depender de idioma.
           # `-h 127.0.0.1` de propósito: durante o initdb a imagem sobe um servidor TEMPORÁRIO só em socket unix
           # (sem TCP) e depois reinicia; `pg_isready` pelo socket diria "pronto" cedo demais.
           for i in $(seq 1 40); do

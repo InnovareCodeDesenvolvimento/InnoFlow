@@ -34,9 +34,14 @@ export const CAMPOS_SENSIVEIS: ReadonlySet<string> = new Set(REDACT_PATHS.map(no
 
 /**
  * Trechos de TEXTO sensíveis.
- *  1. `Failing row contains (...)`: o `DETAIL` do Postgres numa violação de constraint despeja a linha rejeitada — com os `*Ciphertext`
- *     das credenciais do gateway (truncados em 64 caracteres) — dentro da `message` do erro do Prisma (B3 da Íris). Sai tudo da linha a
- *     partir daí (o conteúdo da linha pode ter parênteses); o resto da mensagem (qual constraint/tabela) continua útil.
+ *  1. O `DETAIL` do Postgres numa violação de constraint (SQLSTATE 23xxx): despeja a linha rejeitada — com os `*Ciphertext` das credenciais do
+ *     gateway (truncados em 64 caracteres) — ou a chave duplicada (e-mail, idTag...) dentro da `message` do erro do Prisma (B3 da Íris). O
+ *     TEXTO do detalhe é localizado pelo `lc_messages` do servidor ("Failing row contains" / "Registro que falhou contém" / ...), então casar
+ *     pela frase deixava vazar em qualquer Postgres que não fosse inglês (achado da F5.9b1, PG pt-BR). Por isso a limpeza é por ESTRUTURA — os
+ *     dois formatos em que o Prisma embrulha o `DbError`, ambos com rótulos que são do PRÓPRIO Prisma (não do servidor):
+ *       a) `DETAIL: <texto da linha>` (erros brutos P2010 e `meta.message`) — a linha inteira depois do rótulo;
+ *       b) `detail: Some("<texto>")` (erros do client como `update()`/`create()`, `PrismaClientUnknownRequestError`) — o valor entre aspas.
+ *     A frase em inglês continua casada também (defesa extra para a mensagem avulsa do driver). O resto (qual constraint/tabela) continua útil.
  *  2. `campoSensivel: "valor"` (F5.8): o erro de VALIDAÇÃO do Prisma monta a `message` (e o `stack`) com a "invocação" e os VALORES dos
  *     argumentos — `merchantKeyCiphertext: "v1:..."` saía inteiro. Troca só o valor entre aspas; o nome do campo e o resto da mensagem ficam
  *     (o erro continua diagnosticável). Usa os MESMOS nomes de `CAMPOS_SENSIVEIS` (fonte única).
@@ -44,8 +49,15 @@ export const CAMPOS_SENSIVEIS: ReadonlySet<string> = new Set(REDACT_PATHS.map(no
 const NOMES_SENSIVEIS_REGEX = [...CAMPOS_SENSIVEIS].map((n) => n.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')).join('|')
 const PADRAO_CAMPO_SENSIVEL_NO_TEXTO = new RegExp(String.raw`(?<![\w-])(${NOMES_SENSIVEIS_REGEX})(\s*:\s*)"(?:[^"\\\n]|\\.)*"`, 'gi')
 
+const PADRAO_DETAIL_ROTULO = /(\bDETAIL:[ \t]*)[^\n]*/g
+const PADRAO_DETAIL_DEBUG_DO_PRISMA = /(\bdetail:\s*Some\(")(?:[^"\\]|\\.)*("\))/g
+
 export function limparTextoSensivel(texto: string): string {
-  return texto.replace(/Failing row contains \([^\n]*/g, LINHA_REJEITADA_OMITIDA).replace(PADRAO_CAMPO_SENSIVEL_NO_TEXTO, `$1$2"${CENSOR}"`)
+  return texto
+    .replace(/Failing row contains \([^\n]*/g, LINHA_REJEITADA_OMITIDA)
+    .replace(PADRAO_DETAIL_ROTULO, `$1${LINHA_REJEITADA_OMITIDA}`)
+    .replace(PADRAO_DETAIL_DEBUG_DO_PRISMA, `$1${LINHA_REJEITADA_OMITIDA}$2`)
+    .replace(PADRAO_CAMPO_SENSIVEL_NO_TEXTO, `$1$2"${CENSOR}"`)
 }
 
 export function varrerSensivel(valor: unknown, profundidade = 0, visto: WeakSet<object> = new WeakSet()): unknown {
