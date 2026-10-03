@@ -228,9 +228,18 @@ describe('--reboot-with-queued-stop (S1)', () => {
 
 describe('--offline-queue (S4)', () => {
   it('rede cai e o poste segue medindo: ao voltar SEM Boot despeja MeterValues enfileirados (com os timestamps originais) e depois o Stop', async () => {
-    const a = await montar({ offlineQueue: true, incidentAfterMs: 120, offlineForMs: 250 })
+    // Tolerante a carga (flake de ~2 em 10 suítes completas): a janela offline é LONGA (900 ms = ~30 amostras nominais) e a contagem não usa o relógio da máquina — usa os
+    // eventos do PRÓPRIO simulador (`meter-values-queued`, `incident-offline`, `incident-reconnecting`). Com a máquina carregada os timers atrasam, mas as amostras
+    // enfileiradas e a ordem do despejo continuam observáveis por condição, com prazo, e não por um "> 100 ms de atraso" medido contra `Date.now()`.
+    const a = await montar({ offlineQueue: true, incidentAfterMs: 120, offlineForMs: 900 })
+    const eventos: Array<{ name: string; at: number }> = []
+    a.sim.on('evt', (e: { name: string; at: number }) => eventos.push(e))
     await a.iniciarRecarga()
-    await esperarAte(() => a.porMetodo('StopTransaction').length === 1, 6000)
+    await esperarAte(() => a.porMetodo('StopTransaction').length === 1, 15_000)
+    const enfileiradas = eventos.filter((e) => e.name === 'meter-values-queued').length
+    const tOffline = eventos.find((e) => e.name === 'incident-offline')!.at
+    const tReconexao = eventos.find((e) => e.name === 'incident-reconnecting')!.at
+    expect(enfileiradas, 'o poste deveria ter medido e enfileirado durante a queda').toBeGreaterThanOrEqual(3)
 
     expect(a.porMetodo('BootNotification')).toHaveLength(1) // sem reinício
     const idxStop = a.log.findIndex((m) => m.method === 'StopTransaction')
@@ -238,8 +247,13 @@ describe('--offline-queue (S4)', () => {
     expect(stop.params.reason).toBe('Other')
 
     // houve MeterValues despejados em lote DEPOIS do corte (timestamp do payload bem anterior ao instante do recebimento)
-    const atrasados = a.porMetodo('MeterValues').filter((m) => m.at - Date.parse(m.params.meterValue[0].timestamp) > 100)
+    // (medidas DURANTE a queda: payload entre o corte e a reconexão — só podem ter chegado no despejo)
+    const atrasados = a.porMetodo('MeterValues').filter((m) => {
+      const ts = Date.parse(m.params.meterValue[0].timestamp)
+      return ts > tOffline && ts < tReconexao
+    })
     expect(atrasados.length).toBeGreaterThanOrEqual(3)
+    expect(atrasados.length).toBeGreaterThanOrEqual(enfileiradas - 1) // nada do que foi enfileirado se perdeu (folga de 1 para a borda do relógio)
     // e a ordem da fila foi preservada: MeterValues atrasados -> Finishing -> Stop, tudo antes do Stop
     const idxUltimoAtrasado = a.log.lastIndexOf(atrasados[atrasados.length - 1])
     const idxFinishing = a.log.findIndex((m) => m.method === 'StatusNotification' && m.params.status === 'Finishing')

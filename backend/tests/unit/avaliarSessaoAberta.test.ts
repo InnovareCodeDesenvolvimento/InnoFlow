@@ -134,14 +134,23 @@ describe('estadosSessao — constante única de "aberta"', () => {
 
 describe('espelho do schema Prisma — os tipos literais do core não podem derivar dos enums', () => {
   const schema = readFileSync(join(__dirname, '../../prisma/schema.prisma'), 'utf8')
-  const valoresDoEnum = (nome: string): string[] => {
-    const m = schema.match(new RegExp(`enum ${nome} \\{([\\s\\S]*?)\\n\\}`))
+  const valoresDoEnum = (nome: string, texto: string = schema): string[] => {
+    // Aceita CRLF: o checkout do Windows (core.autocrlf) quebrava a leitura do schema com LF puro.
+    const m = texto.match(new RegExp(`enum ${nome} \\{([\\s\\S]*?)\\r?\\n\\}`))
     if (!m) throw new Error(`enum ${nome} não achado no schema`)
     return m[1]
-      .split('\n')
+      .split(/\r?\n/)
       .map((l) => l.replace(/\/\/.*$/, '').trim())
       .filter((l) => /^[A-Z_]+$/.test(l))
   }
+
+  it('o parser aceita o schema com fim de linha CRLF (checkout do Windows) — mesmo resultado do LF', () => {
+    const crlfSchema = schema.replace(/\r?\n/g, '\r\n')
+    expect(crlfSchema).toContain('\r\n')
+    for (const nome of ['ChargingSessionStatus', 'ConnectorStatus', 'StopUnconfirmedReason', 'MeterStopSource']) {
+      expect(valoresDoEnum(nome, crlfSchema)).toEqual(valoresDoEnum(nome, schema.replace(/\r\n/g, '\n')))
+    }
+  })
 
   it('ChargingSessionStatus = abertas + STOP_UNCONFIRMED + STOPPED', () => {
     const esperado: StatusSessao[] = [...ESTADOS_SESSAO_ABERTA, 'STOP_UNCONFIRMED', 'STOPPED']
