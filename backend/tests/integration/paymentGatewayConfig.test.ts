@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { PrismaClient } from '@prisma/client'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
+import { HASH_SENHA_ADMIN_TESTE, SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
 
 /**
  * Configuração do gateway Cielo (F5.5) — ponta a ponta contra Postgres + Redis REAIS.
@@ -168,12 +169,13 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       const op = await m.prisma.operator.create({ data: { name: `Op ${sufixo}`, email: `op-${sufixo}@example.com` } })
       operatorId = op.id
     }
-    const user = await m.prisma.user.create({ data: { role, name: `${label} ${sufixo}`, email: `${label}-${sufixo}@example.com`, operatorId } })
+    const user = await m.prisma.user.create({ data: { role, name: `${label} ${sufixo}`, email: `${label}-${sufixo}@example.com`, operatorId, passwordHash: HASH_SENHA_ADMIN_TESTE } })
     return { id: user.id, token: m.issueToken({ id: user.id, role, operatorId }), email: user.email }
   }
   const auth = (u: { token: string }) => ({ Authorization: `Bearer ${u.token}` })
   const get = (u: { token: string }) => request(app).get('/api/admin/payment-gateway').set(auth(u))
-  const put = (u: { token: string }, body: Record<string, unknown>) => request(app).put('/api/admin/payment-gateway').set(auth(u)).send(body)
+  // Step-up (M2): todo PUT leva a senha atual do admin; `semSenha` testa a ausência e `{ currentPassword: ... }` no corpo sobrescreve.
+  const put = (u: { token: string }, body: Record<string, unknown>) => request(app).put('/api/admin/payment-gateway').set(auth(u)).send({ currentPassword: SENHA_ADMIN_TESTE, ...body })
 
   /** Pré-requisitos só-de-servidor presentes (script/OAuth do SOP apontando pro servidor falso). */
   function servidorComPreRequisitosDeCartao() {

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { PrismaClient } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { HASH_SENHA_ADMIN_TESTE, SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
 
 /**
  * O LOG REAL do servidor de verdade — a prova que faltava ao redact da F5.5 (Íris, 02/10/2026).
@@ -80,7 +81,7 @@ ${saida.slice(-2000)}`)
     execSync('npx prisma migrate deploy', { env: { ...process.env, DATABASE_URL: URL_BANCO }, stdio: 'pipe', cwd: process.cwd() })
 
     appPrisma = new PrismaClient({ datasources: { db: { url: URL_BANCO } } })
-    const admin = await appPrisma.user.create({ data: { role: 'ADMIN', name: 'Admin Log Real', email: `admin-log-real-${Math.random().toString(36).slice(2, 8)}@example.com` } })
+    const admin = await appPrisma.user.create({ data: { role: 'ADMIN', name: 'Admin Log Real', email: `admin-log-real-${Math.random().toString(36).slice(2, 8)}@example.com`, passwordHash: HASH_SENHA_ADMIN_TESTE } })
     adminToken = jwt.sign({ userId: admin.id, role: 'ADMIN', operatorId: null }, process.env.JWT_SECRET!, { algorithm: 'HS256', expiresIn: '1h' })
 
     const porta = await portaLivre()
@@ -161,7 +162,7 @@ ${saida.slice(-2000)}`)
     const r = await fetch(`${base}/api/admin/payment-gateway`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}`, 'x-controle-positivo': CONTROLE_POSITIVO },
-      body: JSON.stringify({ merchantId: 'mid-log-real', ...SEGREDOS_PUT, pixEnabled: true }),
+      body: JSON.stringify({ merchantId: 'mid-log-real', ...SEGREDOS_PUT, pixEnabled: true, currentPassword: SENHA_ADMIN_TESTE }),
     })
     expect(r.status, await r.clone().text()).toBe(200)
     const log = await logAssentado()
@@ -181,7 +182,7 @@ ${saida.slice(-2000)}`)
     const r409 = await fetch(`${base}/api/admin/payment-gateway`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ cardEnabled: true, merchantKey: segredoRecusado }), // cartão sem SOP => GATEWAY_NOT_READY
+      body: JSON.stringify({ cardEnabled: true, merchantKey: segredoRecusado, currentPassword: SENHA_ADMIN_TESTE }), // cartão sem SOP => GATEWAY_NOT_READY
     })
     expect(r409.status).toBe(409)
     expect(await r409.text()).not.toContain(segredoRecusado)
@@ -189,7 +190,7 @@ ${saida.slice(-2000)}`)
     const r400 = await fetch(`${base}/api/admin/payment-gateway`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ merchantkey: segredoRecusado }), // typo de campo => 400 strict
+      body: JSON.stringify({ merchantkey: segredoRecusado, currentPassword: SENHA_ADMIN_TESTE }), // typo de campo => 400 strict
     })
     expect(r400.status).toBe(400)
     expect(await r400.text()).not.toContain(segredoRecusado)
@@ -206,7 +207,7 @@ ${saida.slice(-2000)}`)
       const r = await fetch(`${base}/api/admin/payment-gateway`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
-        body: JSON.stringify({ merchantKey: segredo, merchantId: 'mid-500' }),
+        body: JSON.stringify({ merchantKey: segredo, merchantId: 'mid-500', currentPassword: SENHA_ADMIN_TESTE }),
       })
       expect(r.status, await r.clone().text()).toBe(500)
       const log = await logAssentado()

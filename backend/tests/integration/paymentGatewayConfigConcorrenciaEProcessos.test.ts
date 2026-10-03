@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline'
 import { PrismaClient } from '@prisma/client'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import request from 'supertest'
+import { HASH_SENHA_ADMIN_TESTE, SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
 
 /**
  * Config do gateway (F5.5) — o que a mutação da Íris (02/10/2026) mostrou que os testes do Vega NÃO seguravam:
@@ -83,7 +84,7 @@ describe('Config do gateway (F5.5) — concorrência do PUT e consistência entr
   async function novoAdmin(label: string) {
     contador += 1
     const sufixo = `${contador}-${Math.random().toString(36).slice(2, 7)}`
-    const user = await m.prisma.user.create({ data: { role: 'ADMIN', name: `${label} ${sufixo}`, email: `${label}-${sufixo}@example.com` } })
+    const user = await m.prisma.user.create({ data: { role: 'ADMIN', name: `${label} ${sufixo}`, email: `${label}-${sufixo}@example.com`, passwordHash: HASH_SENHA_ADMIN_TESTE } })
     return { id: user.id, token: m.issueToken({ id: user.id, role: 'ADMIN', operatorId: null }) }
   }
   async function novoMotorista() {
@@ -92,7 +93,7 @@ describe('Config do gateway (F5.5) — concorrência do PUT e consistência entr
     const user = await m.prisma.user.create({ data: { role: 'DRIVER', name: `motorista ${sufixo}`, email: `motorista-${sufixo}@example.com` } })
     return { id: user.id, token: m.issueToken({ id: user.id, role: 'DRIVER', operatorId: null }) }
   }
-  const put = (u: { token: string }, body: Record<string, unknown>) => request(app).put('/api/admin/payment-gateway').set({ Authorization: `Bearer ${u.token}` }).send(body)
+  const put = (u: { token: string }, body: Record<string, unknown>) => request(app).put('/api/admin/payment-gateway').set({ Authorization: `Bearer ${u.token}` }).send({ currentPassword: SENHA_ADMIN_TESTE, ...body })
 
   // ----------------------------------------------------------------------------------------------
   it('N PUTs simultâneos formam uma CADEIA na auditoria: o "antes" de cada um é o "depois" de outro (só o primeiro parte de vazio) — prova o FOR UPDATE', async () => {

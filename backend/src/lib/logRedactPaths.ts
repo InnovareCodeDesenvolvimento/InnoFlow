@@ -67,6 +67,10 @@ export const REDACT_PATHS = [
   '*.sopClientSecretCiphertext',
   'webhookHeaderSecretCiphertext',
   '*.webhookHeaderSecretCiphertext',
+  // F5.7 (M2, step-up) — a senha ATUAL do ADMIN no corpo do PUT do gateway (`UpdatePaymentGatewayConfigRequest.currentPassword`). A rota a descarta
+  // do corpo e nunca a loga, mas a rede de segurança vale para qualquer log de corpo/erro que um dia a carregue (solta E `*.`, como as demais).
+  'currentPassword',
+  '*.currentPassword',
   // F5.7 (B6, portão do Órion) — dado pessoal/sensível do payload da Cielo e do Pix: `Identity` (CPF do pagador no
   // `Customer`), `Holder` (nome impresso no cartão, `CreditCard.Holder`), `holderName` (idem, camelCase do nosso lado),
   // `QrCodeString`/`pixQrCode` (o "copia e cola" do Pix: quem o tem paga para a NOSSA conta, mas ele identifica o pagamento

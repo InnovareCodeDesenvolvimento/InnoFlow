@@ -19,8 +19,13 @@ export const updatePaymentGatewayConfigSchema = z
     cardEnabled: z.boolean().optional(),
     pixEnabled: z.boolean().optional(),
     confirmProduction: z.literal(true).optional(),
+    // Step-up (F5.7, M2): a senha ATUAL do ADMIN logado, OBRIGATÓRIA em todo PUT. Sem trim (espaço pode fazer parte da senha); teto 200 = o do
+    // login (bcrypt só lê 72 bytes). A rota a extrai e DESCARTA do corpo logo após conferir — nunca chega a log/auditoria/serviço.
+    currentPassword: z.string().min(1, 'Informe a senha atual.').max(200),
   })
   .strict()
-  .refine((body) => Object.keys(body).some((k) => k !== 'confirmProduction'), { message: 'Informe ao menos um campo para alterar.' })
+  .refine((body) => Object.keys(body).some((k) => k !== 'confirmProduction' && k !== 'currentPassword'), { message: 'Informe ao menos um campo para alterar.' })
 
 export type UpdatePaymentGatewayConfigInput = z.infer<typeof updatePaymentGatewayConfigSchema>
+/** O corpo SEM a senha — é o que o serviço recebe (a senha não passa da rota). */
+export type UpdatePaymentGatewayConfigBody = Omit<UpdatePaymentGatewayConfigInput, 'currentPassword'>

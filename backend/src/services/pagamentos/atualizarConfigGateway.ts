@@ -5,7 +5,7 @@ import { encryptPaymentSecret, isPaymentSecretsKeyConfigured } from '../../lib/c
 import { diffEntity, type EntityDiff } from '../../core/auditoria/diffEntity'
 import { avaliarMudancaDeConfig, calcularReadiness, resolverEstadoEfetivo, type AmbienteGateway, type EstadoEfetivo, type LinhaConfigGateway } from '../../core/pagamentos/configGateway'
 import { AppError } from '../../api/middleware/errorHandler'
-import type { UpdatePaymentGatewayConfigInput } from '../../api/schemas/paymentGateway.schema'
+import type { UpdatePaymentGatewayConfigBody } from '../../api/schemas/paymentGateway.schema'
 import { writeAuditLog } from '../auditoria/writeAuditLog'
 import { invalidarCacheConfigGateway, lerEnvGateway } from './gatewayConfig'
 
@@ -78,7 +78,7 @@ function snapshotAuditavel(estado: EstadoEfetivo): Record<string, unknown> {
   return { environment: estado.environment, merchantId: estado.merchantId, sopClientId: estado.sopClientId, cardEnabled: estado.cardEnabled, pixEnabled: estado.pixEnabled }
 }
 
-export async function atualizarConfigGateway(params: { body: UpdatePaymentGatewayConfigInput; actor: AtorConfigGateway; request: RequisicaoConfigGateway }): Promise<{ camposAlterados: string[] }> {
+export async function atualizarConfigGateway(params: { body: UpdatePaymentGatewayConfigBody; actor: AtorConfigGateway; request: RequisicaoConfigGateway }): Promise<{ camposAlterados: string[] }> {
   const { body, actor, request } = params
   const segredosEnviados = SEGREDOS.filter((k) => body[k] !== undefined)
 
@@ -162,8 +162,10 @@ export async function atualizarConfigGateway(params: { body: UpdatePaymentGatewa
     return Object.keys(changes)
   })
 
-  // Só NOMES de campos — nunca valores (regra de log do projeto + dos segredos desta tela).
-  logger.info({ actorUserId: actor.userId, camposAlterados }, '[pagamentos] configuração do gateway atualizada pelo admin')
+  // ALERTA (M2): toda gravação bem-sucedida da conta que recebe o dinheiro da plataforma é um evento que o dono quer ver. Só NOMES de campos
+  // (os ENVIADOS, mesmo que o valor não tenha mudado, + os que mudaram) — nunca valores (regra de log do projeto + dos segredos desta tela).
+  const changedFields = [...new Set([...Object.keys(body).filter((k) => k !== 'confirmProduction'), ...camposAlterados])]
+  logger.warn({ alert: 'payment_config_changed', actorUserId: actor.userId, changedFields }, '[pagamentos] configuração do gateway atualizada pelo admin')
   invalidarCacheConfigGateway() // o processo que gravou enxerga a mudança na hora; o worker, no máximo no TTL
   return { camposAlterados }
 }

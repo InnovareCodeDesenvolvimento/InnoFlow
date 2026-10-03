@@ -39,3 +39,18 @@ const store: ThrottleStore = {
 }
 
 export const loginThrottle = createLoginThrottle(store)
+
+/**
+ * Step-up de senha da config do gateway de pagamento (`PUT /api/admin/payment-gateway`): MESMO mecanismo do login
+ * (reserva atômica antes do bcrypt, trancamento com backoff, fail-open se o Redis cair), mas o balde é por USUÁRIO
+ * logado e só conta senha ERRADA. 5 erradas em 15 min trancam o step-up (60 s, dobrando a cada reincidência até 15 min):
+ * quem tem só um token roubado não ganha tentativas ilimitadas de adivinhar a senha do ADMIN. A chave é `stepup:<userId>`
+ * (hasheada pelo throttle) — não colide com a de login, que é um e-mail.
+ */
+export const stepUpThrottle = createLoginThrottle(store, {
+  maxFailures: 5,
+  windowSeconds: 15 * 60,
+  baseLockSeconds: 60,
+  maxLockSeconds: 15 * 60,
+  strikesTtlSeconds: 24 * 60 * 60,
+})

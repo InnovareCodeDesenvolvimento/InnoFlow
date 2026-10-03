@@ -12,6 +12,7 @@ import { AppError } from '../middleware/errorHandler'
 import { paymentGatewayWriteRateLimit } from '../middleware/rateLimit'
 import { validateBody } from '../middleware/validate'
 import { updatePaymentGatewayConfigSchema, type UpdatePaymentGatewayConfigInput } from '../schemas/paymentGateway.schema'
+import { exigirSenhaAtual, StepUpRateLimitedError } from '../../services/auth/stepUpSenha'
 
 /**
  * Configuração do gateway de pagamento (F5.5) — `GET`/`PUT /api/admin/payment-gateway`. ADMIN-ONLY: a conta
@@ -55,7 +56,19 @@ router.put(
   paymentGatewayWriteRateLimit,
   validateBody(updatePaymentGatewayConfigSchema),
   asyncHandler(async (req, res) => {
-    const body = req.body as UpdatePaymentGatewayConfigInput
+    const { currentPassword, ...body } = req.body as UpdatePaymentGatewayConfigInput
+    // A senha não sobrevive nem em `req.body`: o middleware de auditoria (que lê o corpo ao fim da resposta) e qualquer handler de erro nunca a veem.
+    delete (req.body as Partial<UpdatePaymentGatewayConfigInput>).currentPassword
+
+    // STEP-UP (M2): ANTES de qualquer outra regra de negócio e antes de tocar na configuração. Ordem de erros do PUT: 400 validação -> 403 senha -> resto.
+    try {
+      await exigirSenhaAtual({ userId: req.user!.userId, senhaInformada: currentPassword })
+    } catch (err) {
+      if (err instanceof StepUpRateLimitedError) res.setHeader('Retry-After', String(err.retryAfterSeconds))
+      // Senha errada é sinal de segurança: grava DENIED na auditoria (o middleware genérico traduz o 403), sem corpo — nem os nomes dos campos.
+      if (err instanceof AppError && err.code === 'INVALID_CURRENT_PASSWORD') auditCtx(res).describe({ action: 'PAYMENT_CONFIG_CHANGE', actionDetail: 'stepup_failed', changes: null })
+      throw err
+    }
 
     // Ator completo (email/name — o JWT só carrega userId/role/operatorId), mesmo padrão do ajuste de saldo.
     const actor = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.userId }, select: { email: true, name: true } })

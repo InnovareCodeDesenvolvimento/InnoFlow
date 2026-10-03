@@ -56,6 +56,8 @@ const VALORES_SENSIVEIS = {
   merchantKeyCiphertext: 'ciphertext-merchant-key-base64==',
   sopClientSecretCiphertext: 'ciphertext-sop-secret-base64==',
   webhookHeaderSecretCiphertext: 'ciphertext-webhook-secret-base64==',
+  // F5.7 (M2) — senha ATUAL do ADMIN no corpo do PUT do gateway (step-up).
+  currentPassword: 'SenhaAtualDoAdmin#Step-up-2026',
   // F5.7 (B6) — dado pessoal do payload da Cielo e do Pix.
   Identity: 'identity-cpf-do-pagador-eco',
   Holder: 'holder-nome-impresso-no-cartao',
