@@ -1,9 +1,13 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
+import { withDeadline } from '../../lib/withDeadline'
 import { createQueue, LIQUIDAR_SESSAO_QUEUE_NAME, type LiquidarSessaoJobData } from '../../worker/queues'
 import { debitarSessao } from './walletLedger'
 import { emitWalletUpdated } from '../../realtime/emit'
+
+/** Mesmo prazo do enqueue da captura de cartão (`finalizarSessao`): o Stop do carregador não espera mais que isto pelo Redis. */
+const ENQUEUE_LIQUIDACAO_PRAZO_MS = 5_000
 
 export interface LiquidarSessaoResultado {
   userId: string
@@ -116,11 +120,21 @@ async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: stri
 
 /**
  * Enfileira o retry de liquidação — chamado pelo handler `StopTransaction`
- * quando a `$transaction` inline falha. Nunca lança: falha ao enfileirar não
- * pode derrubar a resposta `Accepted` já decidida para o carregador (o
- * `catch` de quem chama já loga o suficiente).
+ * quando a `$transaction` inline falha. Falha ao enfileirar não pode derrubar a
+ * resposta `Accepted` já decidida para o carregador: quem chama trata como
+ * best-effort (`.catch` + log).
+ *
+ * COM PRAZO (F5.8, achado da Íris): com o Redis FORA o ioredis (`maxRetriesPerRequest: null`,
+ * exigência do BullMQ) não rejeita — o `add` (e o `close` da fila) ficariam pendurados e o
+ * handler do StopTransaction, que existe para responder de qualquer jeito, nunca responderia.
+ * Estourado o prazo rejeita com `DeadlineExceededError`; a operação abandonada conclui (e fecha
+ * a fila) sozinha se o Redis voltar.
  */
 export async function enqueueLiquidarSessaoRetry(sessionId: string): Promise<void> {
+  await withDeadline(adicionarJobLiquidacao(sessionId), ENQUEUE_LIQUIDACAO_PRAZO_MS, 'enfileirar retry de liquidação')
+}
+
+async function adicionarJobLiquidacao(sessionId: string): Promise<void> {
   const queue = createQueue(LIQUIDAR_SESSAO_QUEUE_NAME)
   try {
     const jobData: LiquidarSessaoJobData = { sessionId }

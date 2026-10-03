@@ -61,7 +61,7 @@ describe('StopTransaction com a finalização FALHANDO e o Redis fora — o hand
     expect(Date.now() - t0).toBeLessThan(PRAZO_ESPERADO_MS)
   })
 
-  it.fails('(BUG) `enqueueLiquidarSessaoRetry` com o Redis FORA devolve dentro do prazo (hoje pendura até o Redis voltar)', async () => {
+  it('(BUG corrigido — F5.8) `enqueueLiquidarSessaoRetry` com o Redis FORA devolve dentro do prazo (withDeadline de 5 s)', async () => {
     await proxy.down()
     try {
       expect(await comPrazo(enqueueLiquidarSessaoRetry(`sessao-inexistente-${suffix}`), PRAZO_ESPERADO_MS)).toBe('respondeu')
@@ -70,7 +70,7 @@ describe('StopTransaction com a finalização FALHANDO e o Redis fora — o hand
     }
   }, 30_000)
 
-  it.fails('(BUG) o handler do StopTransaction responde `Accepted` dentro do prazo quando `finalizarSessao` lança E o Redis está fora (hoje pendura)', async () => {
+  it('(BUG corrigido — F5.8) o handler do StopTransaction responde `Accepted` dentro do prazo quando `finalizarSessao` lança E o Redis está fora', async () => {
     finalizarMock.mockRejectedValueOnce(new Error('simulado: a transação de finalização falhou (deadlock)'))
     const parada = fx.sessaoParada('liq-redis-fora', async () => {
       await proxy.down()
