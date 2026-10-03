@@ -53,6 +53,10 @@ const portasReais: PortasStepUp = {
       logger.error({ alert: alerta, ...campos }, '[stepup] throttle do step-up indisponível (Redis) — alteração da config do gateway RECUSADA com 503 (fail-closed), senha não avaliada')
       return
     }
+    if (alerta === 'payment_gateway_stepup_late_reservation_released') {
+      logger.warn({ alert: alerta, ...campos }, '[stepup] reserva abandonada por timeout executou tarde no Redis — vaga devolvida (a tentativa já tinha sido recusada com 503)')
+      return
+    }
     logger.warn({ alert: alerta, ...campos }, alerta === 'payment_gateway_stepup_failed' ? '[stepup] senha atual errada na confirmação da config do gateway' : '[stepup] step-up da config do gateway recusado/trancado por tentativas erradas')
   },
 }

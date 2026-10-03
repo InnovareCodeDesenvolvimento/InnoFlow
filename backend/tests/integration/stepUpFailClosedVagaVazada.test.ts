@@ -108,15 +108,15 @@ describe('step-up fail-closed: tentativas recusadas com 503 NÃO podem gastar va
     expect(r.depois.status).toBe(200)
   }, 120_000)
 
-  // ACHADO (it.fails — a asserção é o comportamento CORRETO; trocar por it quando corrigir): ver o comentário do topo e a recomendação ao Vega no relatório
-  it.fails('Redis TRAVADO (blackhole): idem', async () => {
+  // ACHADO A1 da Íris — CORRIGIDO (core/auth/stepUp.ts: a reserva abandonada por timeout tem a vaga devolvida se resolver tarde como allowed). Eram it.fails; agora it, mesmas asserções.
+  it('Redis TRAVADO (blackhole): idem', async () => {
     const r = await cenario(() => proxy.blackhole(), () => proxy.up(), 'blackhole')
     expect(r.durante.every((s) => s === 503 || s === 429)).toBe(true)
     expect(r.gastas).toBe(0)
     expect(r.depois.status).toBe(200)
   }, 120_000)
 
-  it.fails('Redis LENTO (vivo, 900 ms por comando): idem — o app desiste em 500 ms mas o INCR chega ao Redis depois', async () => {
+  it('Redis LENTO (vivo, 900 ms por comando): idem — o app desiste em 500 ms mas o INCR chega ao Redis depois', async () => {
     const r = await cenario(async () => proxy.latency(900), async () => proxy.latency(0), 'lento')
     expect(r.durante.every((s) => s === 503 || s === 429)).toBe(true)
     expect(r.gastas, 'o INCR atrasado não pode ficar como vaga gasta de uma tentativa que o app recusou').toBe(0)

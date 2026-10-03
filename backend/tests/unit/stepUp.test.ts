@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createLoginThrottle, DEFAULT_LOGIN_THROTTLE, type ThrottleStore } from '../../src/core/auth/loginThrottle'
+import { createLoginThrottle, DEFAULT_LOGIN_THROTTLE, type LoginGate, type LoginThrottle, type ThrottleStore } from '../../src/core/auth/loginThrottle'
 import { executarStepUp, type PortasStepUp } from '../../src/core/auth/stepUp'
 
 /** Armazenamento em memória do throttle (mesma semântica atômica do Lua, em JS síncrono) — sem Redis. */
@@ -136,5 +136,118 @@ describe('executarStepUp (núcleo puro do step-up de senha, M2)', () => {
     expect((await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).resultado).toBe('OK')
     chamadas = 0
     expect((await executarStepUp({ userId: 'u2', senhaInformada: 'errada' }, p)).resultado).toBe('SENHA_INCORRETA')
+  })
+})
+
+// A1 da Íris (F5.8): a reserva abandonada por timeout pode executar DEPOIS no Redis; se resolver tarde como allowed, a vaga tem de ser devolvida (senão o 503 tranca o admin).
+describe('executarStepUp — reserva abandonada por timeout que resolve TARDE (A1: vaga vazada)', () => {
+  /** throttle cuja reserva só resolve quando o teste manda; `release` é um espião. */
+  function throttleComReservaControlada() {
+    let resolver!: (g: LoginGate) => void
+    let rejeitar!: (e: Error) => void
+    const reserveAttempt = vi.fn(() => new Promise<LoginGate>((res, rej) => { resolver = res; rejeitar = rej }))
+    const release = vi.fn(async () => {})
+    const throttle = { reserveAttempt, release, registerFailure: vi.fn(async () => ({ lockedNow: false, lockSeconds: 0, failures: 0 })), registerSuccess: vi.fn(async () => {}) } as unknown as LoginThrottle
+    return { throttle, release, resolver: (g: LoginGate) => resolver(g), rejeitar: (e: Error) => rejeitar(e) }
+  }
+  /** `comTimeout` que DESISTE na hora (timeout de 500 ms simulado): dispara a ação, ignora o resultado e devolve o fallback — mas só para a reserva; o release devolve o que a ação fizer. */
+  const comTimeoutQueDesiste = (): PortasStepUp['comTimeout'] => {
+    let primeira = true
+    return async (acao, fallback) => {
+      if (primeira) {
+        primeira = false
+        void acao().catch(() => {}) // o comando já foi enviado ao Redis; o app só para de esperar
+        return fallback
+      }
+      return acao().catch(() => fallback)
+    }
+  }
+  const esvaziarMicrotarefas = () => new Promise((r) => setTimeout(r, 0))
+
+  it('reserva tardia ALLOWED (com vaga): 503 sem tentar a senha E release chamado UMA vez, com a chave do usuário', async () => {
+    const c = throttleComReservaControlada()
+    const buscar = vi.fn(async () => HASH)
+    const { p, alertas, compare } = portas({ throttle: c.throttle, comTimeout: comTimeoutQueDesiste(), buscarPasswordHash: buscar })
+    expect(await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).toEqual({ resultado: 'THROTTLE_INDISPONIVEL' }) // fail-closed intacto
+    expect(c.release).not.toHaveBeenCalled() // ainda não chegou ao Redis
+    c.resolver({ allowed: true, failures: 3 })
+    await esvaziarMicrotarefas()
+    expect(c.release).toHaveBeenCalledTimes(1)
+    expect(c.release).toHaveBeenCalledWith('stepup:u1')
+    expect(buscar).not.toHaveBeenCalled()
+    expect(compare).not.toHaveBeenCalled()
+    expect(alertas.map((a) => a.alerta)).toEqual(['payment_gateway_stepup_unavailable', 'payment_gateway_stepup_late_reservation_released'])
+    expect(JSON.stringify(alertas)).not.toContain(CERTA)
+  })
+
+  it('reserva tardia ALLOWED sem `failures` (não houve reserva): nada a devolver', async () => {
+    const c = throttleComReservaControlada()
+    const { p } = portas({ throttle: c.throttle, comTimeout: comTimeoutQueDesiste() })
+    await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)
+    c.resolver({ allowed: true })
+    await esvaziarMicrotarefas()
+    expect(c.release).not.toHaveBeenCalled()
+  })
+
+  it('reserva tardia NEGADA (locked/full — não escreveu nada no Redis): release NÃO é chamado', async () => {
+    const c = throttleComReservaControlada()
+    const { p, alertas } = portas({ throttle: c.throttle, comTimeout: comTimeoutQueDesiste() })
+    expect((await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).resultado).toBe('THROTTLE_INDISPONIVEL')
+    c.resolver({ allowed: false, retryAfterSeconds: 60 })
+    await esvaziarMicrotarefas()
+    expect(c.release).not.toHaveBeenCalled()
+    expect(alertas.map((a) => a.alerta)).toEqual(['payment_gateway_stepup_unavailable'])
+  })
+
+  it('reserva tardia com ERRO (rejeita): release NÃO é chamado e não vira unhandled rejection', async () => {
+    const naoTratadas: unknown[] = []
+    const ouvinte = (motivo: unknown) => naoTratadas.push(motivo)
+    process.on('unhandledRejection', ouvinte)
+    try {
+      const c = throttleComReservaControlada()
+      const { p } = portas({ throttle: c.throttle, comTimeout: comTimeoutQueDesiste() })
+      expect((await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).resultado).toBe('THROTTLE_INDISPONIVEL')
+      c.rejeitar(new Error('ECONNRESET'))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(c.release).not.toHaveBeenCalled()
+      expect(naoTratadas).toEqual([])
+    } finally {
+      process.off('unhandledRejection', ouvinte)
+    }
+  })
+
+  it('release que FALHA no caminho tardio é engolido (best-effort): sem unhandled rejection', async () => {
+    const naoTratadas: unknown[] = []
+    const ouvinte = (motivo: unknown) => naoTratadas.push(motivo)
+    process.on('unhandledRejection', ouvinte)
+    try {
+      const c = throttleComReservaControlada()
+      c.release.mockRejectedValue(new Error('redis caiu de novo'))
+      let primeiraFeita = false
+      const comTimeoutQuePropagaNoRelease: PortasStepUp['comTimeout'] = async (acao, fallback) => {
+        if (!primeiraFeita) { primeiraFeita = true; void acao().catch(() => {}); return fallback }
+        return acao() // propaga a rejeição do release: o pior caso para o `.catch` do núcleo
+      }
+      const { p } = portas({ throttle: c.throttle, comTimeout: comTimeoutQuePropagaNoRelease })
+      await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)
+      c.resolver({ allowed: true, failures: 1 })
+      await new Promise((r) => setTimeout(r, 20))
+      expect(c.release).toHaveBeenCalledTimes(1)
+      expect(naoTratadas).toEqual([])
+    } finally {
+      process.off('unhandledRejection', ouvinte)
+    }
+  })
+
+  it('CAMINHO NORMAL (a reserva responde dentro do prazo): nenhum release extra — a vaga usada de verdade não é devolvida (senha certa, errada e usuário inexistente)', async () => {
+    const store = storeEmMemoria()
+    const release = vi.spyOn(store, 'release')
+    const throttle = createLoginThrottle(store, { ...DEFAULT_LOGIN_THROTTLE, maxFailures: 5 })
+    const { p, alertas } = portas({ throttle })
+    expect((await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).resultado).toBe('OK')
+    expect((await executarStepUp({ userId: 'u1', senhaInformada: 'errada' }, p)).resultado).toBe('SENHA_INCORRETA')
+    await esvaziarMicrotarefas()
+    expect(release).not.toHaveBeenCalled()
+    expect(alertas.map((a) => a.alerta)).not.toContain('payment_gateway_stepup_late_reservation_released')
   })
 })

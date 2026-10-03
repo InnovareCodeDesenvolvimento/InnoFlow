@@ -13,6 +13,8 @@ import type { LoginGate, LoginThrottle } from './loginThrottle'
  *  - FAIL-CLOSED na RESERVA (F5.8, decisão do Atlas): se o Redis do throttle não responde, devolve `THROTTLE_INDISPONIVEL` SEM buscar a senha nem rodar o bcrypt
  *    (antes caía no limite por minuto em memória da rota: 10 erradas/min em vez de 5 por 15 min — janela de adivinhação da senha do ADMIN por quem tem só um token roubado).
  *    Só a RESERVA é fail-closed: depois dela, falha ao registrar/devolver/zerar continua fail-open (a vaga já foi gasta; não vale trancar o admin por isso).
+ *  - Reserva que o app abandonou por timeout mas que o Redis executa DEPOIS (lento/reenvio do ioredis) tem a vaga DEVOLVIDA quando resolve tarde como `allowed`
+ *    (`devolverVagaDeReservaTardia`) — senão o 503 "tente em instantes" gastaria vagas e acabaria trancando o admin legítimo.
  * A senha informada só é repassada a `compare` — nunca a `log`, nunca devolvida.
  */
 
@@ -31,17 +33,44 @@ export interface PortasStepUp {
   /** Falha/lentidão do Redis viram o `fallback` — o adaptador loga. Na RESERVA o fallback é `null` (fail-closed); nos demais passos é o valor neutro (fail-open). */
   comTimeout<T>(acao: () => Promise<T>, fallback: T): Promise<T>
   /** Só NOMES e ids — nunca a senha. */
-  alertar(alerta: 'payment_gateway_stepup_failed' | 'payment_gateway_stepup_locked' | 'payment_gateway_stepup_unavailable', campos: { actorUserId: string; lockSeconds?: number }): void
+  alertar(alerta: 'payment_gateway_stepup_failed' | 'payment_gateway_stepup_locked' | 'payment_gateway_stepup_unavailable' | 'payment_gateway_stepup_late_reservation_released', campos: { actorUserId: string; lockSeconds?: number }): void
 }
 
 const chaveDoUsuario = (userId: string): string => `stepup:${userId}`
+
+/**
+ * A reserva é um INCR atômico no Redis. Quando o app desiste dela por timeout (503, fail-closed) o comando pode AINDA executar depois (Redis lento, ou comando
+ * enfileirado/reenviado pelo ioredis na reconexão) e a vaga ficaria gasta por uma tentativa que o app recusou — 5 dessas trancam o admin legítimo por 15 min mesmo com
+ * a senha certa. Aqui, só no caminho em que o app JÁ desistiu: se a reserva original resolver tarde como `allowed` com vaga reservada, devolve essa vaga (best-effort).
+ * Recusa tardia (`locked`/`full`) não escreveu nada e rejeição não reservou nada: nada a devolver. Nunca rejeita (não gera unhandled rejection) e nunca é aguardada.
+ */
+function devolverVagaDeReservaTardia(reserva: Promise<LoginGate>, chave: string, userId: string, p: PortasStepUp): void {
+  reserva.then(
+    (tardio) => {
+      if (!tardio.allowed || tardio.failures === undefined) return
+      try {
+        p.alertar('payment_gateway_stepup_late_reservation_released', { actorUserId: userId })
+        void Promise.resolve(p.comTimeout(() => p.throttle.release(chave), undefined)).catch(() => {})
+      } catch {
+        // best-effort: nada aqui pode virar unhandled rejection
+      }
+    },
+    () => {}, // a reserva falhou de vez: não houve vaga; o motivo já foi logado pelo `comTimeout`
+  )
+}
 
 export async function executarStepUp(params: { userId: string; senhaInformada: string }, p: PortasStepUp): Promise<ResultadoStepUp> {
   const { userId, senhaInformada } = params
   const chave = chaveDoUsuario(userId)
 
-  const portao = await p.comTimeout<LoginGate | null>(() => p.throttle.reserveAttempt(chave), null)
+  // Guardo o promise ORIGINAL da reserva (o `comTimeout` só devolve o fallback quando desiste): ele segue vivo depois do 503 e pode ainda gastar a vaga no Redis.
+  const reserva: { promessa?: Promise<LoginGate> } = {}
+  const portao = await p.comTimeout<LoginGate | null>(() => {
+    reserva.promessa = p.throttle.reserveAttempt(chave)
+    return reserva.promessa
+  }, null)
   if (portao === null) {
+    if (reserva.promessa) devolverVagaDeReservaTardia(reserva.promessa, chave, userId, p)
     p.alertar('payment_gateway_stepup_unavailable', { actorUserId: userId })
     return { resultado: 'THROTTLE_INDISPONIVEL' }
   }
