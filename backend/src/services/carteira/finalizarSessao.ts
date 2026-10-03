@@ -1,7 +1,7 @@
 import type { ChargingSessionStatus, MeterStopSource, Prisma, SessionClosureSource, StopReason } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
-import { withDeadline } from '../../lib/withDeadline'
+import { DeadlineExceededError, withDeadline } from '../../lib/withDeadline'
 import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
 import { alertarSessaoLimitado } from '../sessao/alertasSessao'
@@ -52,6 +52,11 @@ export type FinalizarSessaoResultado =
   | { finalizada: true }
   /** `JA_ENCERRADA`: outra chamada fechou antes (corrida) — o StopTransaction tardio cai aqui e vira `registrarStopTardio`. */
   | { finalizada: false; motivo: 'JA_ENCERRADA' | 'STATUS_NAO_PERMITIDO' | 'FOTO_MUDOU' | 'ABORTADA'; causa?: 'CUSTO_NAO_CALCULADO' }
+
+/** M8: prazo do VOID na Cielo e quanto tempo os VOIDs seguintes deixam de ESPERAR depois de um estouro (disjuntor). */
+const VOID_PRAZO_MS = 5_000
+const VOID_DISJUNTOR_MS = 60_000
+let voidLentoAte = 0
 
 /** Prazo para ENFILEIRAR a captura (ver comentário no ponto de uso): o Stop não pode esperar o Redis voltar. */
 const ENQUEUE_CAPTURA_PRAZO_MS = 5_000
@@ -291,9 +296,22 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao enfileirar captura de sessão CARD (não bloqueante — o intent já está CAPTURE_PENDING no banco e o varredor periódico (reenfileirarCapturasPendentes, F5.7) o reenfileira em CARD_CAPTURE_RETRY_AFTER_MINUTES)'),
     )
   } else if (resultado.cardResultado?.action === 'VOID' && resultado.cardResultado.paymentIntentId) {
-    await cancelarPreAutorizacaoCartao(resultado.cardResultado.paymentIntentId).catch((err) =>
-      logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao cancelar pré-autorização de sessão sem consumo (não bloqueante — varredor não cobre AUTHORIZED com sessão vinculada; reavaliar se isto acontecer na prática)'),
+    // M8 (Órion): o VOID é chamada de REDE à Cielo, pós-commit — com a Cielo lenta/fora do ar ele segurava o handler do Stop e o loop do watchdog (100 sessões = ciclo
+    // de minutos). Agora: prazo (`VOID_PRAZO_MS`) e disjuntor — estourado o prazo, os próximos VOIDs nos `VOID_DISJUNTOR_MS` seguintes viram fire-and-forget (nem esperam). Falha/
+    // atraso NÃO perde o cancelamento: o intent segue AUTHORIZED com a sessão já STOPPED e o varredor de pré-autorizações (caso A, que cobre sessão STOPPED vinculada) repete.
+    const cancelamento = cancelarPreAutorizacaoCartao(resultado.cardResultado.paymentIntentId).catch((err) =>
+      logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao cancelar pré-autorização de sessão sem consumo (não bloqueante — o varredor de pré-autorizações, caso A, cobre intent AUTHORIZED com sessão já STOPPED e repete)'),
     )
+    if (Date.now() < voidLentoAte) {
+      void cancelamento
+    } else {
+      await withDeadline(cancelamento, VOID_PRAZO_MS, 'cancelar pré-autorização do cartão').catch((err) => {
+        if (err instanceof DeadlineExceededError) {
+          voidLentoAte = Date.now() + VOID_DISJUNTOR_MS
+          logger.error({ sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] cancelamento da pré-autorização estourou o prazo — seguindo sem esperar (o varredor repete); próximos VOIDs não esperam por um tempo')
+        }
+      })
+    }
   }
 
   return { finalizada: true }

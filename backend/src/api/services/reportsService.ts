@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { estimarIntervaloAmostragemMs } from '../../services/sessao/intervaloAmostragem'
 import { montarClosure, montarLateStop, type SessionClosureDto, type SessionLateStopDto } from '../../services/sessao/closureDto'
 import { prisma } from '../../lib/prisma'
 import type { ReportingScope } from '../lib/reportingScope'
@@ -506,6 +507,7 @@ export async function getSessionDetail(scope: ReportingScope, id: string, isAdmi
       stoppedAt: session.stoppedAt,
       cardAuthorizedAt: session.paymentIntents.find((p) => p.purpose === 'SESSION_CARD_CAPTURE' && p.status === 'AUTHORIZED')?.authorizedAt ?? null,
       carregador: session.chargePoint,
+      intervaloAmostragemMs: session.status === 'STOP_UNCONFIRMED' ? await estimarIntervaloAmostragemMs(prisma, session.id, session.chargePoint.id) : null,
     }),
     stopRequestedAt: session.stopRequestedAt,
     stopRequestedBy: session.stopRequestedBy,

@@ -9,6 +9,7 @@ import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
 import { pedirParadaSessao } from '../../services/sessao/pedirParadaSessao'
 import { listarEstadosSessaoAberta, isSessaoAberta } from '../../core/sessao/estadosSessao'
 import { montarClosure } from '../../services/sessao/closureDto'
+import { estimarIntervaloAmostragemMs } from '../../services/sessao/intervaloAmostragem'
 import { withDeadline } from '../../lib/withDeadline'
 import { sqlEstadosSessaoAberta } from '../lib/sessionStatusSql'
 import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
@@ -429,6 +430,7 @@ router.get(
         stoppedAt: session.stoppedAt,
         cardAuthorizedAt: cardIntent?.status === 'AUTHORIZED' ? (cardIntent.authorizedAt ?? null) : null,
         carregador: session.chargePoint,
+        intervaloAmostragemMs: session.status === 'STOP_UNCONFIRMED' ? await estimarIntervaloAmostragemMs(prisma, session.id, session.chargePointId) : null,
       }),
     })
   }),

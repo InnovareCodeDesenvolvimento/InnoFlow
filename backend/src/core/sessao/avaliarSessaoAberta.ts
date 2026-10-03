@@ -129,6 +129,12 @@ export interface SessaoParaAvaliar {
   cardAuthorizedAt: Date | null
   /** O medidor continuou avançando depois do `stopRequestedAt`? (R3: carregador que desobedece — `session_stop_not_obeyed`). */
   energyAdvancedSinceStopRequest: boolean
+  /**
+   * M7 (Órion) — só em STOP_UNCONFIRMED: a energia da amostra mais recente É MAIOR que a energia no momento da marcação? `true` = o carregador entregou
+   * energia NOVA; `false` = chegou MeterValues, mas sem avanço (buffer antigo depois de uma queda, ou ocioso) — NÃO reanima; `null`/ausente = desconhecido
+   * (chave de referência perdida): comportamento antigo (reanima por `lastMeterValuesAt`). Comparar energia é imune ao relógio misto servidor x carregador.
+   */
+  energiaAvancouDesdeAMarcacao?: boolean | null
 }
 
 export interface ConectorParaAvaliar {
@@ -159,6 +165,8 @@ export interface EntradaAvaliacao {
   provas: ProvasDeLeitura
   /** Cooldown do R4 (vive no Redis): quando o último TriggerMessage(MeterValues) desta sessão foi enviado. */
   ultimoTriggerMeterValuesEm: Date | null
+  /** M5 (Órion): intervalo de amostragem OBSERVADO (maior espaçamento entre as últimas amostras, relógio do carregador). Ver `janelaDeConfirmacaoMs`. */
+  intervaloAmostragemMs?: number | null
   config: ConfigWatchdogSessao
 }
 
@@ -242,8 +250,23 @@ function offlineDesde(carregador: PresencaCarregador, criadaEm: Date): Date {
   return lastSeenAt
 }
 
-function janelaDeConfirmacaoMs(online: boolean, config: Pick<ConfigWatchdogSessao, 'unconfirmedGraceOnlineMinutes' | 'unconfirmedGraceOfflineMinutes'>): number {
-  return (online ? config.unconfirmedGraceOnlineMinutes : config.unconfirmedGraceOfflineMinutes) * MINUTO_MS
+/** Margem sobre o intervalo de amostragem: a janela precisa caber 1 amostra + atraso de rede/fila, não só o intervalo exato. */
+export const MARGEM_SOBRE_INTERVALO_DE_AMOSTRAGEM = 1.5
+
+/**
+ * Janela de confirmação (U2). M5 (Órion): G1 (10 min) menor que o intervalo de amostragem do carregador (ex.: 15 min, ou o MeterValue chega só a cada 30) fechava a
+ * sessão ANTES de qualquer MeterValues poder reanimá-la — com o carro ainda carregando. Valida G contra o intervalo OBSERVADO: `max(G, 1,5 x intervalo)`,
+ * limitada a `max(G, G2)` (a espera máxima já aceita pelo dono para carregador sumido). Sem intervalo conhecido (< 2 amostras) vale G puro.
+ */
+function janelaDeConfirmacaoMs(
+  online: boolean,
+  config: Pick<ConfigWatchdogSessao, 'unconfirmedGraceOnlineMinutes' | 'unconfirmedGraceOfflineMinutes'>,
+  intervaloAmostragemMs?: number | null,
+): number {
+  const base = (online ? config.unconfirmedGraceOnlineMinutes : config.unconfirmedGraceOfflineMinutes) * MINUTO_MS
+  if (!intervaloAmostragemMs || !Number.isFinite(intervaloAmostragemMs) || intervaloAmostragemMs <= 0) return base
+  const teto = Math.max(base, config.unconfirmedGraceOfflineMinutes * MINUTO_MS)
+  return Math.min(Math.max(base, Math.ceil(intervaloAmostragemMs * MARGEM_SOBRE_INTERVALO_DE_AMOSTRAGEM)), teto)
 }
 
 function exigirUnconfirmedAt(sessao: Pick<SessaoParaAvaliar, 'unconfirmedAt'>): Date {
@@ -260,6 +283,8 @@ export interface EntradaConfirmDeadline {
   sessao: Pick<SessaoParaAvaliar, 'paymentMode' | 'cardAuthorizedAt' | 'unconfirmedAt'>
   carregador: PresencaCarregador
   config: Pick<ConfigWatchdogSessao, 'unconfirmedGraceOnlineMinutes' | 'unconfirmedGraceOfflineMinutes' | 'cardMaxHoldHours'>
+  /** Mesmo `intervaloAmostragemMs` de `EntradaAvaliacao` — a conta TEM de ser a mesma de U2. */
+  intervaloAmostragemMs?: number | null
 }
 
 /**
@@ -272,7 +297,7 @@ export function calcularConfirmDeadline(entrada: EntradaConfirmDeadline): Date {
   const { agora, sessao, carregador, config } = entrada
   const unconfirmedAt = exigirUnconfirmedAt(sessao)
   const online = isChargePointOnline(carregador, agora)
-  const prazoJanela = soma(unconfirmedAt, janelaDeConfirmacaoMs(online, config))
+  const prazoJanela = soma(unconfirmedAt, janelaDeConfirmacaoMs(online, config, entrada.intervaloAmostragemMs))
   const prazoCartao = prazoDoCartao(sessao, config)
   return prazoCartao && prazoCartao.getTime() < prazoJanela.getTime() ? prazoCartao : prazoJanela
 }
@@ -365,7 +390,8 @@ function avaliarNaoConfirmada(entrada: EntradaAvaliacao): DecisaoSessao {
   // isso vire vai-e-vem: se já esgotamos os RemoteStop, se a duração máxima/o prazo do cartão já venceram, reanimar só faria a regra
   // R3/R5 marcar de novo no ciclo seguinte (alerta de erro a cada minuto). Nesses casos a sessão segue em confirmação, o alerta
   // `session_stop_not_obeyed` avisa o plantão e U2 encerra no fim da janela (com as amostras que chegaram até lá como prova).
-  const entregandoDepois = sessao.lastMeterValuesAt !== null && sessao.lastMeterValuesAt.getTime() > unconfirmedAt.getTime()
+  // M7: MeterValues em buffer (uma fila antiga despejada depois da queda) move `lastMeterValuesAt` mas NÃO traz energia nova — só reanima quem ENTREGOU mais.
+  const entregandoDepois = sessao.lastMeterValuesAt !== null && sessao.lastMeterValuesAt.getTime() > unconfirmedAt.getTime() && sessao.energiaAvancouDesdeAMarcacao !== false
   const reanimacaoBloqueada =
     sessao.stopAttempts >= config.stopMaxAttempts || decorrido(sessao.createdAt, agora) >= config.maxOpenHours * HORA_MS || cartaoNoLimite
   if (entregandoDepois && !reanimacaoBloqueada) {
@@ -373,7 +399,7 @@ function avaliarNaoConfirmada(entrada: EntradaAvaliacao): DecisaoSessao {
   }
 
   // U2 — fim da janela de confirmação (G1 online / G2 offline), limitada pelo prazo do cartão: encerra com a melhor prova.
-  const prazoJanela = soma(unconfirmedAt, janelaDeConfirmacaoMs(online, config))
+  const prazoJanela = soma(unconfirmedAt, janelaDeConfirmacaoMs(online, config, entrada.intervaloAmostragemMs))
   const prazoEfetivo = prazoCartao && prazoCartao.getTime() < prazoJanela.getTime() ? prazoCartao : prazoJanela
   if (agora.getTime() >= prazoEfetivo.getTime()) {
     const prova: ProvaDeLeitura = provas.stopTransactionNoLog ? 'STOP_TRANSACTION' : provas.ultimaAmostra ? 'LAST_METER_SAMPLE' : 'NO_READING'

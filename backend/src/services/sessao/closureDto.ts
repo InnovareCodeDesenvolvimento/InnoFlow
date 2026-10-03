@@ -36,6 +36,8 @@ export interface EntradaClosureDto {
   /** `PaymentIntent.authorizedAt` do hold do cartão (só importa para o prazo em STOP_UNCONFIRMED). */
   cardAuthorizedAt: Date | null
   carregador: PresencaCarregador
+  /** M5: intervalo de amostragem observado (ver `estimarIntervaloAmostragemMs`) — a MESMA conta do watchdog. Só importa em STOP_UNCONFIRMED. */
+  intervaloAmostragemMs?: number | null
 }
 
 export function montarClosure(entrada: EntradaClosureDto, agora: Date = new Date()): SessionClosureDto {
@@ -51,6 +53,7 @@ export function montarClosure(entrada: EntradaClosureDto, agora: Date = new Date
           sessao: { paymentMode: entrada.paymentMode, cardAuthorizedAt: entrada.cardAuthorizedAt, unconfirmedAt: entrada.unconfirmedAt },
           carregador: entrada.carregador,
           config: configWatchdogDoEnv(),
+          intervaloAmostragemMs: entrada.intervaloAmostragemMs ?? null,
         })
       : null,
     billedUntil: entrada.closureSource === 'SERVER' ? entrada.stoppedAt : null,

@@ -3,14 +3,15 @@ import { prisma } from '../../lib/prisma'
 import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
 import { redis as redisPadrao } from '../../lib/redis'
-import { withDeadline } from '../../lib/withDeadline'
+import { DeadlineExceededError, withDeadline } from '../../lib/withDeadline'
 import { avaliarSessaoAberta, type ConfigWatchdogSessao, type DecisaoSessao, type EntradaAvaliacao, type ProvasDeLeitura, type StatusConectorOcpp, type TipoAlertaSessao } from '../../core/sessao/avaliarSessaoAberta'
 import { listarEstadosSessaoVigiada, isSessaoAberta, isSessaoNaoConfirmada } from '../../core/sessao/estadosSessao'
-import { sendCommand } from '../../ocpp/commands'
+import { dispararTriggerMeterValues, chaveTriggerMeterValues, reservarVagaDeComando, comandosEmVooAgora } from './triggerMeterValues'
+import { estimarIntervaloAmostragemMs } from './intervaloAmostragem'
 import { alertarSessao, alertarSessaoLimitado, chaveAlertaLimitado } from './alertasSessao'
 import { configWatchdogDoEnv } from './configWatchdog'
 import { avaliarGuardaDeSaldo, carregarSessaoParaGuarda, ultimaEnergiaConhecida } from './guardaDeSaldo'
-import { marcarSessaoNaoConfirmada } from './marcarSessaoNaoConfirmada'
+import { marcarSessaoNaoConfirmada, chaveEnergiaNaMarcacao } from './marcarSessaoNaoConfirmada'
 import { chaveEnergiaNoPedidoDeParada, pedirParadaSessao } from './pedirParadaSessao'
 import { reanimarSessao } from './reanimarSessao'
 import { encerrarSessaoPeloServidor } from './encerrarSessaoPeloServidor'
@@ -33,16 +34,20 @@ import type { FotoDaSessao } from './travarSessao'
  */
 
 const MAX_PAGINAS_POR_CICLO = 20
-const MAX_COMANDOS_EM_VOO = 20
 const REDIS_PRAZO_MS = 3_000
-const TRIGGER_TIMEOUT_MS = 35_000
 /** A guarda lê o Redis (dedupe do auto-stop): com o Redis fora o ioredis NÃO rejeita (fica na fila) e travaria o ciclo inteiro numa sessão. */
-const GUARDA_PRAZO_MS = 15_000
+const GUARDA_PRAZO_MS = 8_000
 
-let comandosEmVoo = 0
+export { chaveTriggerMeterValues, chaveAlertaLimitado }
 
-export const chaveTriggerMeterValues = (sessionId: string) => `session:trigger-meter:${sessionId}`
-export { chaveAlertaLimitado }
+/**
+ * Estado de UM ciclo. M8 (Órion): com o Redis fora, cada sessão pagava o prazo da guarda (R6) em sequência — 100 sessões = ciclo de 25 min e o R1-U2 das
+ * outras atrasados. Disjuntor por ciclo: a PRIMEIRA chamada ao Redis que estoura/falha marca `redisInstavel` e o R6 (que depende dele) é pulado no resto do ciclo.
+ */
+interface CicloWatchdog {
+  redisInstavel: boolean
+  guardaPrazoMs: number
+}
 
 export interface VigiarSessoesDeps {
   agora?: Date
@@ -53,6 +58,8 @@ export interface VigiarSessoesDeps {
   aguardarComandos?: boolean
   /** Só para teste: ignora o kill-switch `SESSION_WATCHDOG_ENABLED` (os testes de integração ligam a chave explicitamente; isto existe para o teste do próprio kill-switch). */
   habilitado?: boolean
+  /** Só teste: prazo da guarda de saldo (R6) por sessão (default 8 s) — o disjuntor de Redis do ciclo (M8) precisa ser provado sem esperar 8 s. */
+  guardaPrazoMs?: number
   /** Restringe o ciclo a estes carregadores (uso pontual/operacional e testes que dividem o banco com outras suítes). Omitido = todas as sessões vigiadas. */
   chargePointIds?: readonly string[]
 }
@@ -90,6 +97,7 @@ export async function vigiarSessoes(deps: VigiarSessoesDeps = {}): Promise<Vigia
   const config = deps.config ?? configWatchdogDoEnv()
   const batchSize = deps.batchSize ?? env.SESSION_WATCHDOG_BATCH_SIZE
   const resultado: VigiarSessoesResultado = { avaliadas: 0, porAcao: {}, falhas: 0, truncada: false }
+  const ciclo: CicloWatchdog = { redisInstavel: false, guardaPrazoMs: deps.guardaPrazoMs ?? GUARDA_PRAZO_MS }
   if (!(deps.habilitado ?? env.SESSION_WATCHDOG_ENABLED)) return { ...resultado, desligado: true } // kill-switch (M4): nenhum efeito, nem leitura
 
   // Paginação por CHAVE (`id > último`), não por `cursor`+`skip`: processar uma sessão a tira do filtro (vira STOPPED), e o cursor do Prisma
@@ -113,7 +121,7 @@ export async function vigiarSessoes(deps: VigiarSessoesDeps = {}): Promise<Vigia
       // `agora` por sessão (não por ciclo): um ciclo longo não pode avaliar a sessão 90 com o relógio da sessão 1.
       const agora = deps.agora ?? new Date()
       try {
-        const acao = await processarSessao(sessao, agora, config, redis, deps.aguardarComandos ?? false)
+        const acao = await processarSessao(sessao, agora, config, redis, deps.aguardarComandos ?? false, ciclo)
         resultado.avaliadas++
         resultado.porAcao[acao] = (resultado.porAcao[acao] ?? 0) + 1
       } catch (err) {
@@ -127,6 +135,9 @@ export async function vigiarSessoes(deps: VigiarSessoesDeps = {}): Promise<Vigia
     if (pagina === MAX_PAGINAS_POR_CICLO - 1) resultado.truncada = true
   }
 
+  if (ciclo.redisInstavel) {
+    logger.warn({ alert: 'session_watchdog_redis_unstable', skippedBalanceGuard: resultado.porAcao.REAVALIAR_GUARDA_PULADA ?? 0 }, '[watchdog] Redis instável neste ciclo — a guarda de saldo (R6) foi pulada para as demais sessões; o resto da vigilância seguiu')
+  }
   if (resultado.truncada) {
     logger.warn({ alert: 'session_watchdog_scan_truncated', evaluated: resultado.avaliadas, batchSize, maxPages: MAX_PAGINAS_POR_CICLO }, '[watchdog] o ciclo atingiu o teto de páginas — há mais sessões vigiadas do que ele alcança')
   }
@@ -139,7 +150,7 @@ export async function vigiarSessoes(deps: VigiarSessoesDeps = {}): Promise<Vigia
 
 type SessaoVigiada = Awaited<ReturnType<typeof prisma.chargingSession.findMany<{ select: typeof SELECT_VIGIADA }>>>[number]
 
-async function processarSessao(sessao: SessaoVigiada, agora: Date, config: ConfigWatchdogSessao, redis: Redis, aguardarComandos: boolean): Promise<string> {
+async function processarSessao(sessao: SessaoVigiada, agora: Date, config: ConfigWatchdogSessao, redis: Redis, aguardarComandos: boolean, ciclo: CicloWatchdog): Promise<string> {
   const foto: FotoDaSessao = {
     status: sessao.status,
     lastActivityAt: sessao.lastActivityAt,
@@ -152,15 +163,25 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
 
   // Provas de leitura: só interessam para quem pode ser encerrado (STOP_UNCONFIRMED).
   let provas: ProvasDeLeitura = { stopTransactionNoLog: false, ultimaAmostra: false }
+  let intervaloAmostragemMs: number | null = null
+  let energiaAvancouDesdeAMarcacao: boolean | null = null
   if (isSessaoNaoConfirmada(sessao.status)) {
-    const [stopNoLog, amostra] = await Promise.all([buscarStopTransactionNoLog(prisma, sessao), buscarUltimaAmostra(prisma, sessao.id, sessao.chargePointId)])
+    const [stopNoLog, amostra, intervalo] = await Promise.all([
+      buscarStopTransactionNoLog(prisma, sessao),
+      buscarUltimaAmostra(prisma, sessao.id, sessao.chargePointId),
+      estimarIntervaloAmostragemMs(prisma, sessao.id, sessao.chargePointId),
+    ])
     provas = { stopTransactionNoLog: stopNoLog !== null, ultimaAmostra: amostra !== null }
+    intervaloAmostragemMs = intervalo
+    // M7: energia da amostra mais recente x energia NA MARCAÇÃO (guardada no Redis ao marcar). Chave perdida ou sem amostra => null (desconhecido: comportamento antigo).
+    const naMarcacao = await redisSeguro(() => redis.get(chaveEnergiaNaMarcacao(sessao.id)), 'energia na marcação', ciclo)
+    if (naMarcacao !== null && naMarcacao !== undefined && amostra !== null) energiaAvancouDesdeAMarcacao = amostra.meterWh > Number(naMarcacao)
   }
 
   // R3: o medidor continuou subindo depois do pedido de parada? A energia no momento do pedido foi guardada no Redis (`pedirParadaSessao`).
   let energyAdvancedSinceStopRequest = false
   if (isSessaoAberta(sessao.status) && sessao.stopRequestedAt) {
-    const guardada = await redisSeguro(() => redis.get(chaveEnergiaNoPedidoDeParada(sessao.id)), 'energia no pedido de parada')
+    const guardada = await redisSeguro(() => redis.get(chaveEnergiaNoPedidoDeParada(sessao.id)), 'energia no pedido de parada', ciclo)
     if (guardada !== null && guardada !== undefined) {
       const amostra = await buscarUltimaAmostra(prisma, sessao.id, sessao.chargePointId)
       energyAdvancedSinceStopRequest = amostra !== null && amostra.meterWh > Number(guardada)
@@ -170,7 +191,7 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
   // R4: cooldown do TriggerMessage vive no Redis. Só consulta quando a regra pode disparar (conector carregando).
   let ultimoTriggerMeterValuesEm: Date | null = null
   if (isSessaoAberta(sessao.status) && conectorStatus === 'CHARGING') {
-    const valor = await redisSeguro(() => redis.get(chaveTriggerMeterValues(sessao.id)), 'cooldown do TriggerMessage')
+    const valor = await redisSeguro(() => redis.get(chaveTriggerMeterValues(sessao.id)), 'cooldown do TriggerMessage', ciclo)
     if (valor) ultimoTriggerMeterValuesEm = new Date(Number(valor))
   }
 
@@ -187,11 +208,13 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
       unconfirmedAt: sessao.unconfirmedAt,
       cardAuthorizedAt: sessao.paymentMode === 'CARD' ? (sessao.paymentIntents[0]?.authorizedAt ?? null) : null,
       energyAdvancedSinceStopRequest,
+      energiaAvancouDesdeAMarcacao,
     },
     carregador: { lastSeenAt: sessao.chargePoint.lastSeenAt, disconnectedAt: sessao.chargePoint.disconnectedAt },
     conector: { status: conectorStatus, statusReceivedAt: sessao.connector.statusReceivedAt },
     provas,
     ultimoTriggerMeterValuesEm,
+    intervaloAmostragemMs,
     config,
   }
 
@@ -199,11 +222,11 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
   if (decisao.acao !== 'NADA' && decisao.acao !== 'REAVALIAR_GUARDA') {
     logger.info({ sessionId: sessao.id, chargePointId: sessao.chargePointId, rule: decisao.regra, action: decisao.acao, status: sessao.status }, '[watchdog] decisão')
   }
-  await executar(decisao, sessao, foto, config, redis, aguardarComandos)
+  await executar(decisao, sessao, foto, config, redis, aguardarComandos, ciclo)
   return decisao.acao
 }
 
-async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: FotoDaSessao, config: ConfigWatchdogSessao, redis: Redis, aguardarComandos: boolean): Promise<void> {
+async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: FotoDaSessao, config: ConfigWatchdogSessao, redis: Redis, aguardarComandos: boolean, ciclo: CicloWatchdog): Promise<void> {
   const campos = { sessionId: sessao.id, chargePointId: sessao.chargePointId }
 
   switch (decisao.acao) {
@@ -211,16 +234,16 @@ async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: Fot
       return
 
     case 'REAVALIAR_GUARDA': {
-      await reavaliarGuarda(sessao.id, aguardarComandos)
+      await reavaliarGuarda(sessao.id, aguardarComandos, ciclo)
       return
     }
 
     case 'PEDIR_REMOTE_STOP': {
-      if (comandosEmVoo >= MAX_COMANDOS_EM_VOO) {
-        logger.warn({ ...campos, inFlight: comandosEmVoo }, '[watchdog] teto de comandos em voo atingido — RemoteStop fica para o próximo ciclo')
+      const liberar = reservarVagaDeComando()
+      if (!liberar) {
+        logger.warn({ ...campos, inFlight: comandosEmVooAgora() }, '[watchdog] teto de comandos em voo atingido — RemoteStop fica para o próximo ciclo')
         return
       }
-      comandosEmVoo++
       const execucao = pedirParadaSessao({
         sessionId: sessao.id,
         solicitante: decisao.solicitante,
@@ -229,29 +252,14 @@ async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: Fot
         onRegistrado: ({ tentativa }) => emitirAlertas(decisao.alertasExtras, { ...campos, attempt: tentativa }, `RemoteStop pedido pelo watchdog (${decisao.regra})`),
       })
         .catch((err) => logger.error({ err, ...campos }, '[watchdog] pedido de parada falhou'))
-        .finally(() => {
-          comandosEmVoo--
-        })
+        .finally(liberar)
       if (aguardarComandos) await execucao
       return
     }
 
     case 'TENTAR_TRIGGER_MESSAGE': {
-      // Cooldown de VERDADE no Redis (SET NX): só quem adquire envia; sem Redis, não envia (o R4 nunca fecha nada, pode esperar).
-      const ttl = config.meterTriggerCooldownMinutes * 60
-      const adquiriu = await redisSeguro(() => redis.set(chaveTriggerMeterValues(sessao.id), String(Date.now()), 'EX', ttl, 'NX'), 'cooldown do TriggerMessage')
-      if (adquiriu !== 'OK') return
-      emitirAlertas(decisao.alertasExtras, campos, 'sessão em CHARGING sem MeterValues — pedindo MeterValues ao carregador (TriggerMessage); NÃO é motivo para encerrar')
-      if (comandosEmVoo >= MAX_COMANDOS_EM_VOO) return
-      comandosEmVoo++
-      const envio = sendCommand(sessao.chargePointId, 'TriggerMessage', { requestedMessage: decisao.mensagem, connectorId: sessao.connector.connectorId }, { timeoutMs: TRIGGER_TIMEOUT_MS })
-        // NotImplemented/Rejected = o firmware não faz TriggerMessage: não há nada a fazer. Só registra.
-        .then((resposta) => logger.info({ ...campos, resposta }, '[watchdog] TriggerMessage(MeterValues) respondido'))
-        .catch((err) => logger.warn({ err, ...campos }, '[watchdog] TriggerMessage(MeterValues) sem resposta útil — nada a fazer'))
-        .finally(() => {
-          comandosEmVoo--
-        })
-      if (aguardarComandos) await envio
+      const r = await dispararTriggerMeterValues({ sessionId: sessao.id, chargePointId: sessao.chargePointId, connectorNumber: sessao.connector.connectorId, cooldownMinutes: config.meterTriggerCooldownMinutes, redis, aguardar: aguardarComandos, origem: 'R4' })
+      if (r === 'ENVIADO' || r === 'SEM_VAGA') emitirAlertas(decisao.alertasExtras, campos, 'sessão em CHARGING sem MeterValues — pedindo MeterValues ao carregador (TriggerMessage); NÃO é motivo para encerrar')
       return
     }
 
@@ -260,10 +268,10 @@ async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: Fot
       return
 
     case 'REANIMAR': {
-      const reanimada = await reanimarSessao({ sessionId: sessao.id, fotoEsperada: foto })
+      const reanimada = await reanimarSessao({ sessionId: sessao.id, fotoEsperada: foto, redis })
       if (reanimada === 'REANIMADA') {
         // Voltou a ser "aberta": a guarda de saldo precisa olhar de novo (ficou fora do ar enquanto estava em confirmação).
-        await reavaliarGuarda(sessao.id, aguardarComandos)
+        await reavaliarGuarda(sessao.id, aguardarComandos, ciclo)
       }
       return
     }
@@ -281,10 +289,17 @@ async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: Fot
 }
 
 /** R6: a guarda de saldo com a última energia conhecida (sem amostra, energia entregue 0 — o que cresce é o custo por tempo). Com prazo: ver `GUARDA_PRAZO_MS`. */
-async function reavaliarGuarda(sessionId: string, aguardarComandos: boolean): Promise<void> {
+async function reavaliarGuarda(sessionId: string, aguardarComandos: boolean, ciclo: CicloWatchdog): Promise<void> {
+  // M8: Redis já instável neste ciclo => pula (não paga o prazo de novo a cada sessão). A próxima rodada tenta de novo.
+  if (ciclo.redisInstavel) return
   const guarda = await carregarSessaoParaGuarda(sessionId)
   const energia = await ultimaEnergiaConhecida(sessionId, guarda.chargePointId, guarda.meterStartWh)
-  await withDeadline(avaliarGuardaDeSaldo(guarda, energia, { aguardarComando: aguardarComandos }), GUARDA_PRAZO_MS, 'guarda de saldo')
+  try {
+    await withDeadline(avaliarGuardaDeSaldo(guarda, energia, { aguardarComando: aguardarComandos }), ciclo.guardaPrazoMs, 'guarda de saldo')
+  } catch (err) {
+    if (err instanceof DeadlineExceededError) ciclo.redisInstavel = true // a guarda só trava assim quando o Redis não responde
+    throw err
+  }
 }
 
 function emitirAlertas(tipos: readonly TipoAlertaSessao[], campos: { sessionId: string; chargePointId: string; [k: string]: unknown }, mensagem: string): void {
@@ -292,10 +307,12 @@ function emitirAlertas(tipos: readonly TipoAlertaSessao[], campos: { sessionId: 
 }
 
 /** Redis com prazo e sem derrubar o ciclo: falha/prazo => `null` (e um aviso). */
-async function redisSeguro<T>(operacao: () => Promise<T>, rotulo: string): Promise<T | null> {
+async function redisSeguro<T>(operacao: () => Promise<T>, rotulo: string, ciclo?: CicloWatchdog): Promise<T | null> {
+  if (ciclo?.redisInstavel) return null // M8: já sabemos que o Redis não responde neste ciclo
   try {
     return await withDeadline(operacao(), REDIS_PRAZO_MS, rotulo)
   } catch (err) {
+    if (ciclo) ciclo.redisInstavel = true
     logger.warn({ err, label: rotulo }, '[watchdog] Redis indisponível para esta consulta — seguindo sem ela')
     return null
   }

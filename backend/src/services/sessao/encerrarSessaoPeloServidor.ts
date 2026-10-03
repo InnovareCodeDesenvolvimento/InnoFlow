@@ -3,7 +3,7 @@ import { logger } from '../../lib/logger'
 import type { PoliticaSemLeitura, ProvaDeLeitura } from '../../core/sessao/avaliarSessaoAberta'
 import { deveZerarCusto } from '../../core/sessao/leituraFinal'
 import { finalizarSessao } from '../carteira/finalizarSessao'
-import { alertarSessao } from './alertasSessao'
+import { alertarSessaoLimitado } from './alertasSessao'
 import { resolverLeituraFinal } from './resolverLeituraFinal'
 import type { FotoDaSessao } from './travarSessao'
 
@@ -66,16 +66,16 @@ export async function encerrarSessaoPeloServidor(params: EncerrarSessaoPeloServi
   }
 
   const campos = { sessionId, chargePointId: usado.chargePointId, meterProof: usado.prova, chargeZeroed: usado.custoZerado }
-  alertarSessao('session_closed_by_server', campos, 'sessão encerrada pelo servidor depois da janela de confirmação')
+  await alertarSessaoLimitado('session_closed_by_server', campos, 'sessão encerrada pelo servidor depois da janela de confirmação')
   if (usado.prova === 'NO_READING') {
-    alertarSessao(
+    await alertarSessaoLimitado(
       'session_closed_without_meter_reading',
       { ...campos, policy: politica },
       usado.custoZerado ? 'sessão encerrada SEM nenhuma leitura do medidor — NÃO cobrada (política NO_CHARGE); revisão manual' : 'sessão encerrada SEM nenhuma leitura do medidor — cobrada pela política MIN_FEE (taxa fixa/mínimo); revisão manual',
     )
   }
   if (params.forcadoPeloPrazoDoCartao) {
-    alertarSessao('card_session_hold_deadline', campos, 'encerramento forçado pelo prazo do hold da pré-autorização do cartão')
+    await alertarSessaoLimitado('card_session_hold_deadline', campos, 'encerramento forçado pelo prazo do hold da pré-autorização do cartão')
   }
   return { encerrada: true, prova: usado.prova, custoZerado: usado.custoZerado }
 }

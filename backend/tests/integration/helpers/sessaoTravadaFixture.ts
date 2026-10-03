@@ -72,8 +72,9 @@ export interface OpcoesSessao {
   /** Valor pré-autorizado (CARD). Default 5000. */
   autorizadoCents?: number
   meterStartWh?: number
-  /** Leituras cumulativas de `Energy.Active.Import.Register` (Wh), uma por minuto a partir do início. */
+  /** Leituras cumulativas de `Energy.Active.Import.Register` (Wh), uma a cada `espacamentoAmostrasMin` (default 1) minuto(s) a partir do início. */
   amostrasWh?: number[]
+  espacamentoAmostrasMin?: number
   /** `startedAt` (relógio do carregador) e `createdAt` (servidor) = agora - isto. */
   iniciouHaMin?: number
   /** `lastActivityAt` = agora - isto (omitido => agora). `null` => nulo. */
@@ -133,7 +134,7 @@ export async function criarSessao(c: Cenario, opts: OpcoesSessao) {
 
   for (const [i, wh] of (opts.amostrasWh ?? []).entries()) {
     await prisma.meterSample.create({
-      data: { sessionId: session.id, chargePointId: c.tenant.chargePointId, operatorId: c.tenant.operatorId, ts: new Date(inicio.getTime() + (i + 1) * 60_000), measurand: 'Energy.Active.Import.Register', value: wh, unit: 'Wh', context: 'Sample.Periodic' },
+      data: { sessionId: session.id, chargePointId: c.tenant.chargePointId, operatorId: c.tenant.operatorId, ts: new Date(inicio.getTime() + (i + 1) * (opts.espacamentoAmostrasMin ?? 1) * 60_000), measurand: 'Energy.Active.Import.Register', value: wh, unit: 'Wh', context: 'Sample.Periodic' },
     })
   }
 
