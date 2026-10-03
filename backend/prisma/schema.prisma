@@ -372,6 +372,15 @@ model ChargePoint {
   // `lastSeenAt` (que continua sendo o fato histórico "última mensagem") nem
   // `Connector.status` (OCPP: desconexão não implica status de conector).
   disconnectedAt DateTime? @db.Timestamptz(3)
+  // RELÓGIO DO SERVIDOR (nunca o do carregador): instante em que o WebSocket
+  // deste carregador (re)conectou, gravado pelo gateway OCPP no handshake.
+  // Par com `disconnectedAt` (que é o "caiu"): este é o "voltou". Existe para
+  // o watchdog de sessão travada saber HÁ QUANTO TEMPO o carregador está de
+  // volta (a janela online conta desde a reconexão, não desde o último
+  // `lastSeenAt` — achado M2 de docs/AUDITORIA-F5.9.md). NULL = desconhecido
+  // (legado sem backfill confiável): o leitor cai no comportamento antigo.
+  // Não é "online": quem decide online continua sendo `isChargePointOnline`.
+  connectedAt DateTime? @db.Timestamptz(3)
 
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz(3)
