@@ -219,6 +219,42 @@ trava, sandbox numa instância pública seria cobrança grátis (saldo/recarga s
 - A tela do gateway mostra um aviso permanente enquanto `sandboxRestricted` for verdadeiro.
 - A env não é lida pela tela: mudar a lista exige reiniciar a API.
 
+#### Rotação da `PAYMENT_SECRETS_KEY` e chave perdida (F5.7)
+
+Os segredos de pagamento (token do cartão salvo e os 3 segredos do gateway) são cifrados com AES-256-GCM
+no formato `v1:<kid>:<base64>` — o `kid` identifica a chave que cifrou (8 hex do SHA-256 da chave;
+**não é a chave**). Tudo o que a aplicação grava usa **sempre a chave atual** (`PAYMENT_SECRETS_KEY`);
+para **ler**, ela usa a atual ou, se existir, `PAYMENT_SECRETS_KEY_PREVIOUS`, conforme o `kid`. O formato
+antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e depois a anterior.
+
+**Rotacionar a chave (sem perder nada), na ordem:**
+
+1. **Gere** a chave nova: `openssl rand -base64 32`. Guarde as DUAS (a antiga ainda é necessária) no cofre de senhas.
+2. No App `api` (e `worker`, que também decifra), **troque**: `PAYMENT_SECRETS_KEY` = a chave NOVA e
+   `PAYMENT_SECRETS_KEY_PREVIOUS` = a chave ANTIGA. **Reinicie** os serviços. A partir daí tudo continua
+   lendo (a tela mostra `secretsDecryptable: true`) e o que for gravado já usa a chave nova.
+3. No terminal do serviço `api`, rode o **dry-run** (padrão, não grava nada):
+   `npm run payments:recifrar-segredos`
+   — ele conta quantos valores ainda estão na chave antiga e quantos são **ilegíveis** (nenhuma chave decifra).
+4. Se estiver como esperado, **aplique**: `npm run payments:recifrar-segredos -- --apply`. É **idempotente**
+   (pode rodar de novo), nunca imprime segredo nem ciphertext (só contagens), regrava cada valor só se ele não
+   mudou desde a leitura e deixa uma linha na auditoria (ator `system`, ação `PAYMENT_CONFIG_CHANGE`,
+   `actionDetail: secrets_reencrypted`). Código de saída **0** = concluído; **1** = há ilegíveis ou valores
+   alterados durante a execução (rode de novo / investigue); **2** = erro (chave ausente, argumento inválido).
+5. Com **0 ilegíveis** e tudo na chave atual, **remova** `PAYMENT_SECRETS_KEY_PREVIOUS` e reinicie. Só então a chave antiga pode ser descartada.
+
+Se `PAYMENT_SECRETS_KEY_PREVIOUS` estiver inválida (não decodifica para 32 bytes), ela é ignorada e o log traz
+`alert: payment_secrets_key_previous_invalid` — a chave atual segue funcionando.
+
+**Chave PERDIDA (ou trocada sem a anterior):** os valores cifrados com ela são **irrecuperáveis** (é a
+propriedade da criptografia, não um defeito). Sintomas: a tela do gateway mostra `secretsDecryptable: false`
+(alerta vermelho), Pix/cartão respondem 503 e o log traz `alert: payment_gateway_secrets_undecryptable`. Para
+recuperar: (1) coloque uma `PAYMENT_SECRETS_KEY` válida e reinicie; (2) **reenvie os 3 segredos** pela tela do
+admin (`merchantKey`, `sopClientSecret`, `webhookHeaderSecret`, todos no mesmo PUT; pede a sua senha) — não é
+preciso decifrar nada, o PUT só grava; (3) **os cartões salvos dos motoristas se perdem**: eles precisam
+cadastrar o cartão de novo (o dry-run lista os ids dos cartões ilegíveis; não há como lê-los). Pix, carteira,
+sessões e dívidas não dependem da chave e seguem intactos. **Faça backup da chave** junto com os demais segredos.
+
 **Envs que continuam SÓ no servidor** (a tela não edita; contam como "presentes" no `readiness` se
 estiverem setadas): `PAYMENT_SECRETS_KEY`, `CIELO_WEBHOOK_PATH_TOKEN` (compõe a URL do webhook),
 `CIELO_SOP_SCRIPT_URL`, `CIELO_SOP_OAUTH_TOKEN_URL` — e, opcionalmente, `PUBLIC_API_BASE_URL`

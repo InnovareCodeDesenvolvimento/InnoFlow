@@ -213,6 +213,9 @@ const envSchema = z.object({
   // cartão) falha, com erro claro. Gerar com `openssl rand -base64 32`
   // (precisa decodificar para exatos 32 bytes — AES-256).
   PAYMENT_SECRETS_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
+  // F5.7 — chave ANTERIOR da rotação de `PAYMENT_SECRETS_KEY`: só DECIFRA (o que for gravado usa sempre a atual). OPCIONAL; ver o runbook de rotação em
+  // `docs/DEPLOY-EASYPANEL.md` e `lib/crypto/paymentSecrets.ts`. Remova depois de rodar `scripts/recifrarSegredosDePagamento.ts --apply`.
+  PAYMENT_SECRETS_KEY_PREVIOUS: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
   // F5.7 (ALTO-2) — SANDBOX em servidor de PRODUÇÃO (`NODE_ENV=production` com ambiente efetivo do gateway = sandbox) só funciona para os
   // e-mails desta lista (separados por vírgula, sem distinguir maiúsculas; OPCIONAL — vazia/ausente = NINGUÉM: falha segura). Os cartões de

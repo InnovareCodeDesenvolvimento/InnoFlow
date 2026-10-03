@@ -40,6 +40,8 @@ COPY --from=builder /app/package.json ./package.json
 # MODULE_NOT_FOUND (erro real visto em produção, 16/09/2026), mesmo com
 # tudo compilado certo em dist/.
 COPY --from=builder /app/src ./src
+# scripts administrativos rodados à mão no terminal do serviço (F5.7: `npm run payments:recifrar-segredos` — rotação da PAYMENT_SECRETS_KEY, via tsx).
+COPY --from=builder /app/scripts ./scripts
 
 # Sobrescrito por `command:` em cada serviço do docker-compose.yml
 # (start:api / start:ocpp / start:worker).

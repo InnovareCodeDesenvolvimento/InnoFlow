@@ -24,6 +24,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "db:seed": "tsx prisma/seed.ts",
     "user:set-password": "tsx prisma/scripts/set-user-password.ts",
+    "payments:recifrar-segredos": "tsx scripts/recifrarSegredosDePagamento.ts",
     "db:seed:demo": "tsx prisma/seed-demo.ts",
     "db:test-partitioning": "tsx prisma/scripts/test-partitioning.ts"
   },

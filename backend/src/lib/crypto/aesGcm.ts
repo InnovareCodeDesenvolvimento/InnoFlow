@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
 /**
  * AES-256-GCM puro — sem `env`, sem `logger`, sem nada além de `node:crypto`.
@@ -68,4 +68,73 @@ export function decryptAesGcm(ciphertextBase64: string, key: Buffer): string {
   decipher.setAuthTag(authTag)
   const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()])
   return plaintext.toString('utf8')
+}
+
+// ----------------------------------------------------------------------------------------------
+// Formato VERSIONADO + rotação de chave (F5.7)
+// ----------------------------------------------------------------------------------------------
+//
+// `v1:<kid>:<base64(iv+tag+ct)>` — o mesmo corpo de `encryptAesGcm`, precedido da versão do formato e do `kid` (identificador da CHAVE que cifrou:
+// os 8 primeiros hex do SHA-256 da chave — nunca a chave, e 32 bits de um hash de 256 bits aleatórios não ajudam ninguém a recuperá-la). Serve para
+// ROTACIONAR `PAYMENT_SECRETS_KEY` sem perder os segredos já gravados: a chave nova cifra tudo o que for gravado dali em diante (sempre `v1` com a atual),
+// a antiga fica em `PAYMENT_SECRETS_KEY_PREVIOUS` só para DECIFRAR, e `backend/scripts/recifrarSegredosDePagamento.ts` regrava o que ficou com a antiga.
+// Ciphertext LEGADO (sem prefixo — tudo o que foi gravado até a F5.7) continua decifrando: tenta a chave atual e depois a anterior. O base64 padrão
+// não contém ':', então a presença do prefixo `v1:` é inequívoca.
+
+export const CIPHERTEXT_V1_PREFIX = 'v1'
+const KID_HEX_LENGTH = 8
+
+/** Identificador PÚBLICO da chave (não é segredo): 8 primeiros hex do SHA-256 da chave de 32 bytes. */
+export function keyId(key: Buffer): string {
+  if (key.length !== KEY_LENGTH_BYTES) throw new InvalidPaymentSecretsKeyError(key.length)
+  return createHash('sha256').update(key).digest('hex').slice(0, KID_HEX_LENGTH)
+}
+
+/** Nenhuma das chaves configuradas tem o `kid` do ciphertext — a chave que o cifrou foi trocada/perdida (ou `PAYMENT_SECRETS_KEY_PREVIOUS` não foi configurada na rotação). */
+export class UnknownKeyIdError extends Error {
+  constructor(readonly kid: string) {
+    super(`Ciphertext cifrado com a chave de id "${kid}", que não está configurada (PAYMENT_SECRETS_KEY / PAYMENT_SECRETS_KEY_PREVIOUS).`)
+    this.name = 'UnknownKeyIdError'
+  }
+}
+
+/** Cifra no formato `v1:<kid>:<base64>` com a chave dada (a ATUAL). */
+export function encryptAesGcmV1(plaintext: string, key: Buffer): string {
+  return `${CIPHERTEXT_V1_PREFIX}:${keyId(key)}:${encryptAesGcm(plaintext, key)}`
+}
+
+export type CiphertextAnalisado = { formato: 'v1'; kid: string; corpo: string } | { formato: 'legado'; corpo: string }
+
+/** Classifica o ciphertext SEM decifrar. Versão desconhecida (`v2:...`) ou `v1` mal formado => `MalformedCiphertextError`. */
+export function analisarCiphertext(ciphertext: string): CiphertextAnalisado {
+  if (!ciphertext.includes(':')) return { formato: 'legado', corpo: ciphertext }
+  const partes = ciphertext.split(':')
+  if (partes[0] !== CIPHERTEXT_V1_PREFIX) throw new MalformedCiphertextError(`versão de formato desconhecida "${partes[0]!.slice(0, 8)}"`)
+  if (partes.length !== 3 || !new RegExp(`^[0-9a-f]{${KID_HEX_LENGTH}}$`).test(partes[1]!) || !partes[2]) throw new MalformedCiphertextError('prefixo v1 mal formado')
+  return { formato: 'v1', kid: partes[1]!, corpo: partes[2]! }
+}
+
+export interface ChavesDeDecifragem {
+  atual: Buffer
+  anterior?: Buffer | null
+}
+
+/**
+ * Decifra qualquer formato. `v1`: escolhe a chave pelo `kid` (atual ou anterior; nenhuma bate => `UnknownKeyIdError`). Legado: tenta a atual e, se o auth tag
+ * não bater, a anterior (se houver) — nunca devolve texto parcial. Lança o erro nativo de `crypto` quando NENHUMA chave decifra.
+ */
+export function decryptAesGcmComChaves(ciphertext: string, chaves: ChavesDeDecifragem): string {
+  const analisado = analisarCiphertext(ciphertext)
+  if (analisado.formato === 'v1') {
+    for (const chave of [chaves.atual, chaves.anterior]) {
+      if (chave && keyId(chave) === analisado.kid) return decryptAesGcm(analisado.corpo, chave)
+    }
+    throw new UnknownKeyIdError(analisado.kid)
+  }
+  try {
+    return decryptAesGcm(analisado.corpo, chaves.atual)
+  } catch (err) {
+    if (!chaves.anterior) throw err
+    return decryptAesGcm(analisado.corpo, chaves.anterior)
+  }
 }
