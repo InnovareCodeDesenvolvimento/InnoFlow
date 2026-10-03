@@ -7,6 +7,7 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
 import { SYSTEM_ACTOR } from '../../core/auditoria/systemActor'
 import { cacheTopupDebtSettledCents } from './topupEphemeralCache'
 import { getPagamentoPort } from './pagamentoPortInstance'
+import { ambienteDoIntentConfere } from './ambienteDoIntent'
 
 /**
  * Crédito de recarga Pix — o coração da F5.2. Chamado por DOIS caminhos (o
@@ -54,6 +55,10 @@ export async function creditarTopupPix(paymentIntentId: string, pagamentoPortInj
     logger.warn({ paymentIntentId }, '[creditarTopupPix] intent sem cieloPaymentId ainda — nada a reconsultar')
     return null
   }
+
+  // F5.7 (M4d): intent de OUTRO ambiente que o gateway efetivo => NÃO consulta a Cielo (host errado) e NÃO decide nada (o Pix segue PENDING, o varredor
+  // de expiração também pula). O alerta `payment_intent_environment_mismatch` já foi logado.
+  if (!(await ambienteDoIntentConfere(intent, 'creditarTopupPix'))) return null
 
   // NUNCA confia no webhook — reconsulta antes de creditar (decisão §3 da Nova).
   const consulta = await pagamentoPort.consultarPix(intent.cieloPaymentId)

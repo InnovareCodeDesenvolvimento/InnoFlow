@@ -148,6 +148,16 @@ export async function getAmbienteEfetivoParaBanco(): Promise<'SANDBOX' | 'PRODUC
   return paraPaymentEnvironment(await getAmbienteEfetivo())
 }
 
+/** Como `getAmbienteEfetivoParaBanco`, mas config ilegível vira 503 `PAYMENT_GATEWAY_UNAVAILABLE` (fail-closed) — para as ROTAS que gravam a marca de ambiente. */
+export async function getAmbienteEfetivoParaBancoOu503(): Promise<'SANDBOX' | 'PRODUCTION'> {
+  try {
+    return await getAmbienteEfetivoParaBanco()
+  } catch (err) {
+    if (err instanceof ConfiguracaoGatewayIndisponivelError) throw new AppError('O pagamento está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+    throw err
+  }
+}
+
 /** `sandboxRestricted` do DTO: ambiente efetivo SANDBOX num servidor com `NODE_ENV=production`. */
 export function isSandboxRestrito(estado: Pick<EstadoEfetivo, 'environment'>): boolean {
   return sandboxRestrito(estado.environment, env.NODE_ENV)

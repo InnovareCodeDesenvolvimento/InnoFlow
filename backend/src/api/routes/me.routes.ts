@@ -13,7 +13,7 @@ import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { apenasDigitos, isValidCpf } from '../../core/pagamentos/validarCpf'
 import { valorTopupDentroDoLimite, TOPUP_MIN_AMOUNT_CENTS, TOPUP_MAX_AMOUNT_CENTS } from '../../core/pagamentos/validarValorTopup'
 import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
-import { assertMeioDePagamentoHabilitado } from '../../services/pagamentos/gatewayConfig'
+import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../../services/pagamentos/gatewayConfig'
 import { toMeTopupDto } from '../../services/pagamentos/topupDto'
 import { cacheTopupQrImage, getTopupDebtSettledCents, getTopupQrImage } from '../../services/pagamentos/topupEphemeralCache'
 import { env } from '../../lib/env'
@@ -568,10 +568,13 @@ router.post(
 
     const wallet = (await prisma.wallet.findUnique({ where: { userId } })) ?? (await prisma.wallet.create({ data: { userId } }))
 
+    // F5.7 (M4a): o intent nasce com o ambiente EFETIVO explícito — a coluna tem DEFAULT SANDBOX, e esquecer isto em produção rotularia dinheiro real como teste.
+    const environment = await getAmbienteEfetivoParaBancoOu503()
     const intent = await prisma.paymentIntent.create({
       data: {
         purpose: 'WALLET_TOPUP_PIX',
         provider: 'CIELO_PIX',
+        environment,
         userId,
         walletId: wallet.id,
         amountRequestedCents: amountCents,

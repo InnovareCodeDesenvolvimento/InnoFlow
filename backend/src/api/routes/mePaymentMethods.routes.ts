@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
-import { assertMeioDePagamentoHabilitado } from '../../services/pagamentos/gatewayConfig'
+import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../../services/pagamentos/gatewayConfig'
 import { encryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
 import { toMePaymentMethodDto } from '../../services/pagamentos/paymentMethodDto'
@@ -20,9 +20,16 @@ import { meCreatePaymentMethodSchema, meUpdatePaymentMethodSchema, type MeCreate
  * `req.user!.userId`; cartão de outro motorista => 404 (nunca 403).
  *
  * Contrato LITERAL de `frontend/src/types/api.ts` — ver handoff da tarefa.
+ *
+ * F5.7 (M4, marca de ambiente): TODA rota daqui enxerga só os cartões do ambiente EFETIVO do gateway (`PaymentMethod.environment` =
+ * `SANDBOX`/`PRODUCTION`); cartão do outro ambiente é "como se não existisse" (404). O padrão (`isDefault`) é resolvido por
+ * `(userId, environment)` na aplicação — o banco NÃO garante "um padrão por usuário" (e nunca poderia: há um por ambiente).
  */
 
-/** Teto de cartões ATIVOS por motorista — mitigação de fraude (Órion): sem isto, um script com uma lista de CardTokens roubados usaria esta rota para "testar" cada um. Fixo (não é parâmetro de negócio tunável como os limites de Pix). */
+/**
+ * Teto de cartões ATIVOS por motorista — mitigação de fraude (Órion): sem isto, um script com uma lista de CardTokens roubados usaria esta rota para "testar" cada um. Fixo (não é parâmetro de negócio tunável como os limites de Pix).
+ * F5.7 (M4): conta só os cartões do AMBIENTE EFETIVO — os do outro ambiente "não existem" para o motorista (e não ocupam vaga).
+ */
 const MAX_PAYMENT_METHODS_PER_USER = 5
 
 const router = Router()
@@ -83,10 +90,13 @@ router.post(
     // F5.5: cartão desligado na tela do gateway => não cadastra cartão novo (checagem ANTES de qualquer chamada à Cielo).
     await assertMeioDePagamentoHabilitado('CARD', userId)
 
+    // O cartão nasce com o ambiente EFETIVO (explícito: a coluna tem DEFAULT SANDBOX e esquecer isto em produção rotularia token real como teste).
+    const environment = await getAmbienteEfetivoParaBancoOu503()
+
     // Checagem RÁPIDA antes de gastar uma chamada de rede na Cielo — a
     // checagem de VERDADE (que fecha a maior parte da janela de corrida)
     // roda de novo dentro da transação, logo antes do INSERT.
-    const activeCountAntes = await prisma.paymentMethod.count({ where: { userId, active: true } })
+    const activeCountAntes = await prisma.paymentMethod.count({ where: { userId, active: true, environment } })
     if (activeCountAntes >= MAX_PAYMENT_METHODS_PER_USER) {
       throw new AppError('Você já tem o número máximo de cartões cadastrados.', 409, 'TOO_MANY_PAYMENT_METHODS')
     }
@@ -105,6 +115,11 @@ router.post(
       throw new AppError('Não foi possível verificar o cartão no momento. Tente novamente.', 502, 'CARD_VERIFICATION_FAILED')
     }
 
+    // Se o ambiente efetivo MUDOU durante a verificação na Cielo (o admin trocou o gateway), o token foi verificado num host e seria rotulado com o outro: recusa.
+    if ((await getAmbienteEfetivoParaBancoOu503()) !== environment) {
+      throw new AppError('O cadastro de cartão está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+    }
+
     // Cifra ANTES de qualquer log/erro subsequente poder tocar a variável —
     // `cardToken` em claro nunca é passado adiante depois deste ponto.
     const cieloCardTokenCiphertext = encryptPaymentSecret(cardToken)
@@ -114,17 +129,18 @@ router.post(
     const resolvedBrand = dadosCartao.brand ?? brand
 
     const created = await prisma.$transaction(async (tx) => {
-      const activeCountAgora = await tx.paymentMethod.count({ where: { userId, active: true } })
+      const activeCountAgora = await tx.paymentMethod.count({ where: { userId, active: true, environment } })
       if (activeCountAgora >= MAX_PAYMENT_METHODS_PER_USER) {
         throw new AppError('Você já tem o número máximo de cartões cadastrados.', 409, 'TOO_MANY_PAYMENT_METHODS')
       }
       const shouldBeDefault = makeDefault === true || activeCountAgora === 0
       if (shouldBeDefault) {
-        await tx.paymentMethod.updateMany({ where: { userId, active: true, isDefault: true }, data: { isDefault: false } })
+        await tx.paymentMethod.updateMany({ where: { userId, active: true, environment, isDefault: true }, data: { isDefault: false } })
       }
       return tx.paymentMethod.create({
         data: {
           userId,
+          environment,
           type: 'CREDIT_CARD',
           cieloCardTokenCiphertext,
           brand: resolvedBrand,
@@ -151,8 +167,9 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
+    const environment = await getAmbienteEfetivoParaBancoOu503()
     const items = await prisma.paymentMethod.findMany({
-      where: { userId, active: true },
+      where: { userId, active: true, environment },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     })
     res.json({ items: items.map(toMePaymentMethodDto) })
@@ -170,12 +187,13 @@ router.patch(
     const userId = req.user!.userId
     const { id } = req.params
     void (req.body as MeUpdatePaymentMethodInput) // validado — só existe isDefault: true
+    const environment = await getAmbienteEfetivoParaBancoOu503()
 
     const updated = await prisma.$transaction(async (tx) => {
-      const method = await tx.paymentMethod.findFirst({ where: { id, userId, active: true } })
+      const method = await tx.paymentMethod.findFirst({ where: { id, userId, active: true, environment } })
       if (!method) return null
       if (!method.isDefault) {
-        await tx.paymentMethod.updateMany({ where: { userId, active: true, isDefault: true }, data: { isDefault: false } })
+        await tx.paymentMethod.updateMany({ where: { userId, active: true, environment, isDefault: true }, data: { isDefault: false } })
       }
       return tx.paymentMethod.update({ where: { id: method.id }, data: { isDefault: true } })
     })
@@ -196,9 +214,10 @@ router.delete(
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
     const { id } = req.params
+    const environment = await getAmbienteEfetivoParaBancoOu503()
 
     const found = await prisma.$transaction(async (tx) => {
-      const method = await tx.paymentMethod.findFirst({ where: { id, userId, active: true } })
+      const method = await tx.paymentMethod.findFirst({ where: { id, userId, active: true, environment } })
       if (!method) return null
       await tx.paymentMethod.update({ where: { id: method.id }, data: { active: false, isDefault: false } })
       // Cartão removido era o padrão e sobraram outros ativos: promove o mais
@@ -206,7 +225,7 @@ router.delete(
       // padrão algum quando ele ainda tem opção; não faz parte do contrato
       // literal, sinalizado no handoff).
       if (method.isDefault) {
-        const proximo = await tx.paymentMethod.findFirst({ where: { userId, active: true }, orderBy: { createdAt: 'desc' } })
+        const proximo = await tx.paymentMethod.findFirst({ where: { userId, active: true, environment }, orderBy: { createdAt: 'desc' } })
         if (proximo) await tx.paymentMethod.update({ where: { id: proximo.id }, data: { isDefault: true } })
       }
       return method

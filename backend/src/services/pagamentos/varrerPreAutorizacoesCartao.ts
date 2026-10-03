@@ -3,6 +3,7 @@ import { logger } from '../../lib/logger'
 import { env } from '../../lib/env'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { getPagamentoPort } from './pagamentoPortInstance'
+import { ambienteDoIntentConfere } from './ambienteDoIntent'
 import { cancelarPreAutorizacaoCartao } from './cancelarPreAutorizacaoCartao'
 
 /**
@@ -82,6 +83,8 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
   })
   for (const intent of abandonadas) {
     try {
+      // F5.7 (M4d): intent de OUTRO ambiente => pula (nem chama a Cielo nem conta como cancelada).
+      if (!(await ambienteDoIntentConfere(intent, 'varrerPreAutorizacoesCartao:abandonada'))) continue
       await cancelarPreAutorizacaoCartao(intent.id, pagamentoPort)
       canceladasAbandonadas++
     } catch (err) {
@@ -96,6 +99,9 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
   })
   for (const intent of pendentesCriacao) {
     try {
+      // F5.7 (M4d): intent de OUTRO ambiente => NÃO reconsulta (host errado) e NÃO desiste (FAILED por "sem resposta" seria decidir sobre um erro nosso).
+      if (!(await ambienteDoIntentConfere(intent, 'varrerPreAutorizacoesCartao:created'))) continue
+
       const consulta = await pagamentoPort.consultarPorPedido(intent.id)
 
       if (!consulta) {

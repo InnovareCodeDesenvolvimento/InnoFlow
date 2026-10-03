@@ -14,7 +14,8 @@ export class AppError extends Error {
     public message: string,
     public statusCode: number = 400,
     public code: string = 'ERROR',
-    public details?: Array<Record<string, unknown> | string>,
+    // Array (lista de pendências/itens) OU objeto (`GATEWAY_HAS_INFLIGHT_PAYMENTS`: `{ count }`, contrato literal de `PaymentGatewayConfigErrorCode`).
+    public details?: Array<Record<string, unknown> | string> | Record<string, unknown>,
   ) {
     super(message)
     this.name = 'AppError'

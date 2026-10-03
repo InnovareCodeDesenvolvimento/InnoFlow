@@ -12,7 +12,7 @@ import { recordCommandResult, isAcceptedCommandResult } from '../../ocpp/command
 import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
-import { assertMeioDePagamentoHabilitado } from '../pagamentos/gatewayConfig'
+import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../pagamentos/gatewayConfig'
 
 const COMMAND_TIMEOUT_MS = 35_000
 
@@ -99,9 +99,12 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   // checagem de negócio (ordem literal do handoff): 404 se o cartão não é do
   // motorista, 409 se está soft-deletado.
   let paymentMethod: { id: string; cieloCardTokenCiphertext: string; brand: string | null } | null = null
+  // F5.7 (M4): o cartão só vale no ambiente EFETIVO em que foi tokenizado (token de sandbox não cobra em produção e vice-versa). Cartão do outro ambiente
+  // => "como se não existisse" (404 PAYMENT_METHOD_NOT_FOUND). O intent novo nasce com a MESMA marca.
+  const environment = mode === 'CARD' ? await getAmbienteEfetivoParaBancoOu503() : null
   if (payment && payment.mode === 'CARD') {
     const found = await prisma.paymentMethod.findFirst({
-      where: { id: payment.paymentMethodId, userId },
+      where: { id: payment.paymentMethodId, userId, environment: environment! },
       select: { id: true, active: true, cieloCardTokenCiphertext: true, brand: true },
     })
     if (!found) throw new AppError('Cartão não encontrado.', 404, 'PAYMENT_METHOD_NOT_FOUND')
@@ -165,6 +168,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       data: {
         purpose: 'SESSION_CARD_CAPTURE',
         provider: 'CIELO_CARD',
+        environment: environment!,
         userId,
         paymentMethodId: paymentMethod.id,
         walletId: null,

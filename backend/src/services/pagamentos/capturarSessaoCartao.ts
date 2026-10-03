@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { getPagamentoPort } from './pagamentoPortInstance'
+import { exigirAmbienteDoIntent } from './ambienteDoIntent'
 import { createQueue, CAPTURAR_SESSAO_CARTAO_QUEUE_NAME, type CapturarSessaoCartaoJobData } from '../../worker/queues'
 
 /**
@@ -63,6 +64,10 @@ export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPor
     logger.error({ paymentIntentId }, '[capturarSessaoCartao] invariantes quebradas (cieloPaymentId/captureAmountCents/chargingSessionId ausentes) — bug de dados anterior')
     return null
   }
+
+  // F5.7 (M4d): intent de OUTRO ambiente que o gateway efetivo => NÃO chama a Cielo (host errado devolveria "não encontrado" e o fluxo trataria como
+  // falha: FAILED + dívida por um erro nosso). Lança — o job retenta, o varredor reenfileira, e o alerta `payment_intent_environment_mismatch` avisa o dono.
+  await exigirAmbienteDoIntent(intent, 'capturarSessaoCartao')
 
   // Reconsulta ANTES de capturar (ver ressalva "a confirmar" acima) — nunca
   // chama capturar() se a Cielo já diz CAPTURED.

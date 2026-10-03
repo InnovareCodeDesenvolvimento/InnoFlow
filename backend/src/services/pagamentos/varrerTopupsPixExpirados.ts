@@ -3,6 +3,7 @@ import { logger } from '../../lib/logger'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { creditarTopupPix } from './creditarTopupPix'
 import { getPagamentoPort } from './pagamentoPortInstance'
+import { ambienteDoIntentConfere } from './ambienteDoIntent'
 import { emitTopupUpdated, emitWalletUpdated } from '../../realtime/emit'
 
 /**
@@ -51,6 +52,9 @@ export async function varrerTopupsPixExpirados(pagamentoPortInjetado?: Pagamento
     }
 
     try {
+      // F5.7 (M4d): intent de OUTRO ambiente => NÃO consulta (host errado) e, principalmente, NÃO expira (expirar seria decidir "não foi pago" sem ter perguntado).
+      if (!(await ambienteDoIntentConfere(intent, 'varrerTopupsPixExpirados'))) continue
+
       const consulta = await pagamentoPort.consultarPix(intent.cieloPaymentId)
 
       if (consulta.status === 'PAID') {

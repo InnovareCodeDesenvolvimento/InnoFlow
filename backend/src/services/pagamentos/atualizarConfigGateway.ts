@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { encryptPaymentSecret, isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
 import { diffEntity, type EntityDiff } from '../../core/auditoria/diffEntity'
-import { avaliarMudancaDeConfig, calcularReadiness, resolverEstadoEfetivo, type AmbienteGateway, type EstadoEfetivo, type LinhaConfigGateway } from '../../core/pagamentos/configGateway'
+import { avaliarMudancaDeConfig, calcularReadiness, paraPaymentEnvironment, resolverEstadoEfetivo, type AmbienteGateway, type EstadoEfetivo, type LinhaConfigGateway } from '../../core/pagamentos/configGateway'
 import { AppError } from '../../api/middleware/errorHandler'
 import type { UpdatePaymentGatewayConfigBody } from '../../api/schemas/paymentGateway.schema'
 import { writeAuditLog } from '../auditoria/writeAuditLog'
@@ -43,6 +43,9 @@ export interface RequisicaoConfigGateway {
   userAgent: string | null
   requestId: string | null
 }
+
+/** `PaymentIntent` "vivo": ainda vai falar com a Cielo (autorizar/reconsultar/capturar/creditar). Trocar o ambiente do gateway enquanto houver um é bloqueado (M4c). */
+export const STATUS_DE_INTENT_VIVO = ['CREATED', 'AUTHORIZED', 'PENDING', 'CAPTURE_PENDING'] as const
 
 /** Campos não secretos que entram na auditoria com antes/depois. */
 const CAMPOS_AUDITAVEIS = ['environment', 'merchantId', 'sopClientId', 'cardEnabled', 'pixEnabled'] as const
@@ -130,6 +133,15 @@ export async function atualizarConfigGateway(params: { body: UpdatePaymentGatewa
     }
     if (erro?.kind === 'GATEWAY_NOT_READY') {
       throw new AppError('O gateway não está pronto para este estado: faltam pré-requisitos.', 409, 'GATEWAY_NOT_READY', erro.missing)
+    }
+
+    // F5.7 (M4c): trocar o AMBIENTE (qualquer direção) com PaymentIntent VIVO do ambiente atual deixaria esses pagamentos sendo reconsultados/capturados/cancelados no
+    // host errado. Bloqueia até liquidarem. Dentro da mesma transação (a linha está travada FOR UPDATE: dois admins não furam a regra um do outro).
+    if (body.environment !== undefined && body.environment !== antesParaRegra.environment) {
+      const vivos = await tx.paymentIntent.count({ where: { environment: paraPaymentEnvironment(antesParaRegra.environment), status: { in: [...STATUS_DE_INTENT_VIVO] } } })
+      if (vivos > 0) {
+        throw new AppError('Há pagamentos em andamento no ambiente atual. Aguarde liquidarem para trocar o ambiente.', 409, 'GATEWAY_HAS_INFLIGHT_PAYMENTS', { count: vivos })
+      }
     }
 
     const changes: EntityDiff = { ...(diffEntity(snapshotAuditavel(antesParaRegra), snapshotAuditavel(estadoDepois), CAMPOS_AUDITAVEIS) ?? {}) }

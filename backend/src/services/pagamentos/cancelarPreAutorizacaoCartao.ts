@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { getPagamentoPort } from './pagamentoPortInstance'
+import { ambienteDoIntentConfere } from './ambienteDoIntent'
 
 /**
  * Cancela (VOID) uma pré-autorização de cartão que nunca vai virar cobrança
@@ -37,6 +38,10 @@ export async function cancelarPreAutorizacaoCartao(paymentIntentId: string, paga
     logger.error({ paymentIntentId }, '[cancelarPreAutorizacaoCartao] intent AUTHORIZED sem cieloPaymentId — não deveria acontecer')
     return
   }
+
+  // F5.7 (M4d): intent de OUTRO ambiente que o gateway efetivo => NÃO chama a Cielo (host errado) e NÃO muda nada local; o alerta já foi logado.
+  // Fica AUTHORIZED até o ambiente voltar (o varredor tenta de novo e cai aqui de novo, em silêncio — o alerta é limitado a 1 por 10 min por intent).
+  if (!(await ambienteDoIntentConfere(intent, 'cancelarPreAutorizacaoCartao'))) return
 
   let resultado
   try {
