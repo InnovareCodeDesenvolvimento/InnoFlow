@@ -139,6 +139,10 @@ describe('log REAL + AuditLog do servidor de verdade — step-up: rajada de senh
     for (const v of [SENHA_ADMIN_TESTE, SENHA_ERRADA, ...Object.values(SEG)]) expect(respostas, `vazou na resposta: ${v.slice(0, 12)}…`).not.toContain(v)
 
     // ...e em TODAS as linhas de AuditLog (serializadas inteiras, inclusive `changes`)
+    // A auditoria do 403 é gravada em FIRE-AND-FORGET depois da resposta (e do log): sob carga da suíte inteira a 5ª linha chegou depois da leitura (1 flaky em 3 rodadas, F5.8 Vega-4).
+    // Espera, com limite, as 5 linhas DENIED de senha errada — o que a asserção abaixo exige — antes de ler; não afrouxa nenhuma contagem.
+    const prazo = Date.now() + 15_000
+    while ((await appPrisma.auditLog.count({ where: { actionDetail: 'stepup_failed', outcome: 'DENIED' } })) < 5 && Date.now() < prazo) await new Promise((r) => setTimeout(r, 100))
     const linhas = await appPrisma.auditLog.findMany({ orderBy: { occurredAt: 'asc' } })
     expect(linhas.length).toBeGreaterThanOrEqual(1 + 5) // 1 sucesso da config + 5 DENIED de senha errada (controle positivo: a trilha existe)
     const auditoria = JSON.stringify(linhas)
