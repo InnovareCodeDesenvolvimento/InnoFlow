@@ -37,10 +37,45 @@ function semMockServiceWorkerNoBuild(): Plugin {
   }
 }
 
+/**
+ * A landing "/" é um chunk lazy (`pages/Public/Home`, nomeado `landing-*` em `chunkFileNames`). Lazy tira ~16 KB gzip
+ * do bundle de quem abre /login ou /app, mas cria uma corrente de requisições para quem abre "/":
+ * HTML -> entry -> (só então) landing.js + landing.css. Medido no Lighthouse mobile isso custou ~0,4 s de FCP.
+ * Este plugin quebra a corrente: o HTML já pede o chunk (modulepreload) e o CSS (preload, sem bloquear a
+ * renderização das outras rotas) em paralelo com o entry. Custo aceito: ~20 KB gzip, baixados em baixa prioridade e
+ * guardados no cache HTTP (nome com hash) por quem abre outra rota primeiro.
+ *
+ * Só no build (no dev não há bundle). Se o chunk não existir (renomeado), não injeta nada: a landing continua
+ * funcionando, só sem o atalho.
+ */
+function preloadLandingChunk(): Plugin {
+  return {
+    name: "inno:preload-landing-chunk",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler(_html, ctx) {
+        const bundle = ctx.bundle ?? {}
+        const tags: Array<{ tag: string; attrs: Record<string, string | boolean>; injectTo: "head" }> = []
+        for (const file of Object.values(bundle)) {
+          if (file.type === "chunk" && /^assets\/landing-[\w-]+\.js$/.test(file.fileName) && !file.fileName.includes("below")) {
+            tags.push({ tag: "link", attrs: { rel: "modulepreload", crossorigin: true, href: `/${file.fileName}` }, injectTo: "head" })
+          }
+          if (file.type === "asset" && /^assets\/landing-[\w-]+\.css$/.test(file.fileName)) {
+            tags.push({ tag: "link", attrs: { rel: "preload", as: "style", href: `/${file.fileName}` }, injectTo: "head" })
+          }
+        }
+        return tags
+      },
+    },
+  }
+}
+
 export default defineConfig({
   plugins: [
     react(),
     semMockServiceWorkerNoBuild(),
+    preloadLandingChunk(),
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
@@ -66,10 +101,14 @@ export default defineConfig({
         // linha, `navigator.serviceWorker.controller` ativo e a navegação
         // pra `/pagamento-cartao.html` voltava o HTML/título/conteúdo da
         // Home (`index.html` precacheado), não o formulário de cartão.
-        navigateFallbackDenylist: [/^\/api/, /^\/pagamento-cartao\.html$/],
+        navigateFallbackDenylist: [/^\/api/, /^\/pagamento-cartao\.html$/, /^\/robots\.txt$/, /^\/sitemap\.xml$/],
         // Worker do MSW (só dev/E2E) nunca entra no precache — 2ª trava além do plugin
         // `semMockServiceWorkerNoBuild` acima, que já o apaga do dist/.
-        globIgnores: ["**/mockServiceWorker.js"],
+        // Landing "/" (chunks `landing*`, ver `manualChunks` abaixo) fora do precache: é página de divulgação, o
+        // motorista do PWA abre em /app e não precisa baixar ~90 KB dela na instalação do service worker. Ela continua
+        // funcionando offline depois da 1ª visita, pela regra `static-assets` (CacheFirst para /assets/*.js|css).
+        // As imagens (webp) e o og-innoflow.jpg nunca entram: o precache padrão só pega js/css/html.
+        globIgnores: ["**/mockServiceWorker.js", "**/assets/landing*"],
         runtimeCaching: [
           {
             // CRÍTICO: saldo de carteira e status de sessão NUNCA podem vir
@@ -129,6 +168,21 @@ export default defineConfig({
       // problema pela raiz: grafos de dependência inteiramente distintos,
       // sem chance de um bundler fundir os dois.
       output: {
+        // Nomes dos chunks da landing "/" (lazy: `pages/Public/Home` e o `BelowFold` abaixo da dobra). Precisam de
+        // prefixo próprio por dois motivos: (1) `pages/App/Home` (o PWA do motorista) também se chama "Home" —
+        // só o caminho distingue; (2) o `globIgnores` do Workbox (abaixo) tira `assets/landing*` do precache.
+        // Tentativa descartada: `manualChunks` para a landing — fez o bundler fundir React/utilitários no chunk
+        // "landing" e o ENTRY passou a importá-lo de forma estática (modulepreload no index.html), isto é, a
+        // landing inteira entrou no bundle inicial de /login etc. (medido: index.html listava landing*.js).
+        chunkFileNames: (chunk) => {
+          const f = chunk.facadeModuleId ?? ""
+          if (f.includes("/src/pages/Public/Home")) return "assets/landing-[hash].js"
+          if (f.includes("/src/components/landing/BelowFold")) return "assets/landing-below-[hash].js"
+          return "assets/[name]-[hash].js"
+        },
+        // O CSS da landing nasce no chunk "Home" (só ele importa CSS próprio): mesmo prefixo, mesmo motivo.
+        assetFileNames: (asset) =>
+          (asset.names ?? []).includes("Home.css") ? "assets/landing-[hash][extname]" : "assets/[name]-[hash][extname]",
         // Sem isto, o code-splitting automático fragmenta em dezenas de
         // chunks de poucos bytes cada (um ícone lucide-react por arquivo,
         // um componente de UI por arquivo, um hook por arquivo) toda vez que
@@ -182,6 +236,7 @@ export default defineConfig({
           // compartilhados entre páginas assíncronas, hoje fragmentados
           // 1 arquivo por combinação de rotas que os consome em comum.
           if (id.includes("/src/hooks/")) return "app-hooks"
+
         },
       },
     },

@@ -1,0 +1,13 @@
+# InnoFlow — o que os buscadores podem rastrear.
+# Públicas: a landing "/" e a lista "/eletropostos". As áreas autenticadas (app do motorista, painel administrativo),
+# a API e as páginas de carregador abertas pelo QR code (/c/...) não têm nada a indexar.
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /app
+Disallow: /api/
+Disallow: /c/
+Disallow: /login
+Disallow: /cadastro
+
+Sitemap: https://innoflow.innovarecode.com.br/sitemap.xml

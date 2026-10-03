@@ -249,7 +249,9 @@ server {
     # arquivo) — as 3 locations abaixo já tinham `add_header` próprio antes
     # desta mudança, então os headers de segurança do server NÃO chegariam
     # aqui sem repetir.
-    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$ {
+    # `webp` entrou com a landing (mascote em src/assets/landing/*.webp, nome com hash): sem ele o arquivo caía em
+    # `location /` (Cache-Control: no-cache) e o navegador revalidava o mascote a cada visita.
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
         add_header X-Frame-Options "SAMEORIGIN" always;

@@ -22,7 +22,62 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
-    <title>InnoFlow</title>
+    <title>InnoFlow — Carregue um futuro melhor</title>
+    <!-- SEO e compartilhamento da landing "/". Ficam aqui (e não só no React) porque os rastreadores de link —
+         WhatsApp, LinkedIn, Facebook — leem o HTML servido e NÃO executam JavaScript. A imagem 1200x630 é gerada a
+         partir do mascote (public/brand/og-innoflow.jpg). O domínio é o de produção documentado em
+         docs/DEPLOY-EASYPANEL.md. -->
+    <meta
+      name="description"
+      content="InnoFlow: plataforma de recarga de veículos elétricos. Encontre eletropostos, escaneie o QR code do carregador e acompanhe a recarga em tempo real. Painel para quem opera."
+    />
+    <link rel="canonical" href="https://innoflow.innovarecode.com.br/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="InnoFlow" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:title" content="InnoFlow — Carregue um futuro melhor" />
+    <meta
+      property="og:description"
+      content="Encontre eletropostos, escaneie o QR code do carregador e acompanhe a recarga em tempo real. Painel para quem opera."
+    />
+    <meta property="og:url" content="https://innoflow.innovarecode.com.br/" />
+    <meta property="og:image" content="https://innoflow.innovarecode.com.br/brand/og-innoflow.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Mascote da InnoFlow, um robô azul-marinho com detalhes verdes, de joinha e com um carregador de veículo elétrico, ao lado do slogan Carregue um futuro melhor." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="InnoFlow — Carregue um futuro melhor" />
+    <meta
+      name="twitter:description"
+      content="Encontre eletropostos, escaneie o QR code do carregador e acompanhe a recarga em tempo real. Painel para quem opera."
+    />
+    <meta name="twitter:image" content="https://innoflow.innovarecode.com.br/brand/og-innoflow.jpg" />
+    <!-- JSON-LD básico e verdadeiro: só identifica a organização e o site (nada de avaliação, preço ou endereço). -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://innoflow.innovarecode.com.br/#organizacao",
+            "name": "InnoFlow",
+            "url": "https://innoflow.innovarecode.com.br/",
+            "logo": "https://innoflow.innovarecode.com.br/pwa-512x512.png",
+            "slogan": "Carregue um futuro melhor",
+            "description": "Plataforma de recarga de veículos elétricos para motoristas e operadores de eletropostos."
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://innoflow.innovarecode.com.br/#site",
+            "name": "InnoFlow",
+            "url": "https://innoflow.innovarecode.com.br/",
+            "inLanguage": "pt-BR",
+            "publisher": { "@id": "https://innoflow.innovarecode.com.br/#organizacao" }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
