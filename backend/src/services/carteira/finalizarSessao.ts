@@ -1,4 +1,4 @@
-import { Prisma, type StopReason } from '@prisma/client'
+import type { ChargingSessionStatus, MeterStopSource, Prisma, SessionClosureSource, StopReason } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { withDeadline } from '../../lib/withDeadline'
@@ -7,9 +7,10 @@ import { liquidarSessao } from './liquidarSessao'
 import { prepararFechamentoCartao } from '../pagamentos/fecharSessaoCartao'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
 import { enqueueCapturarSessaoCartao } from '../pagamentos/capturarSessaoCartao'
+import { travarSessao, fotoAindaVale, type FotoDaSessao, type SessaoTravada } from '../sessao/travarSessao'
 import { emitSessionStopped, emitWalletUpdated } from '../../realtime/emit'
 
-const ZERO_CUSTOS: CustoSessaoResultado = {
+export const ZERO_CUSTOS: CustoSessaoResultado = {
   energyCostCents: 0,
   timeCostCents: 0,
   idleFeeCents: 0,
@@ -24,10 +25,96 @@ export interface FinalizarSessaoInput {
   /** Instante em que a sessão terminou de verdade (nunca `now()` — vem da fonte da medição). */
   timestamp: Date
   stopReason: StopReason | null
+  /** Quem fecha (F5.9). Default `CHARGER` — o StopTransaction real. O servidor (watchdog) passa `SERVER`. */
+  closureSource?: SessionClosureSource
+  /** De onde veio a leitura (F5.9). Default `STOP_TRANSACTION`. */
+  meterStopSource?: MeterStopSource
+  /** Decisão D2 do dono (`NO_CHARGE` + `NO_READING`): grava custo ZERO (nem taxa fixa nem mínimo). Default `false` — fórmula normal. */
+  zerarCusto?: boolean
 }
+
+/**
+ * Forma "preguiçosa" da leitura final: calculada DENTRO do lock da sessão, com a linha já relida. Existe para o encerramento pelo
+ * servidor (F5.9) ver, sob o lock, um StopTransaction que acabou de ser logado, e poder desistir (`null`) se a realidade mudou.
+ */
+export type ResolverFinalSessao = (tx: Prisma.TransactionClient, sessao: SessaoTravada) => Promise<FinalizarSessaoInput | null>
+
+export interface FinalizarSessaoOpcoes {
+  /** Se informado, só fecha a sessão se o status ATUAL (sob o lock) estiver aqui. O watchdog usa `['STOP_UNCONFIRMED']`. */
+  statusPermitidos?: readonly ChargingSessionStatus[]
+  /** Se informado, só fecha se a foto em que a decisão foi tomada ainda vale sob o lock (compare-and-swap). */
+  fotoEsperada?: FotoDaSessao
+}
+
+export type FinalizarSessaoResultado =
+  | { finalizada: true }
+  /** `JA_ENCERRADA`: outra chamada fechou antes (corrida) — o StopTransaction tardio cai aqui e vira `registrarStopTardio`. */
+  | { finalizada: false; motivo: 'JA_ENCERRADA' | 'STATUS_NAO_PERMITIDO' | 'FOTO_MUDOU' | 'ABORTADA' }
 
 /** Prazo para ENFILEIRAR a captura (ver comentário no ponto de uso): o Stop não pode esperar o Redis voltar. */
 const ENQUEUE_CAPTURA_PRAZO_MS = 5_000
+
+export interface SessaoParaCalcularFechamento {
+  id: string
+  meterStartWh: number
+  startedAt: Date
+  chargingEndedAt: Date | null
+  tariffSnapshot: Prisma.JsonValue
+  site: { timezone: string }
+}
+
+export interface FechamentoCalculado {
+  energyDeliveredWh: number
+  stopReason: StopReason | null
+  idleSeconds: number | null
+  custos: CustoSessaoResultado
+}
+
+/**
+ * Cálculo de fechamento (energia, ociosidade, custo) — SEM efeitos. Extraído de `finalizarSessao` para o custo PROVISÓRIO de
+ * `marcarSessaoNaoConfirmada` e o `unbilledCostCents` do stop tardio usarem EXATAMENTE a mesma conta que o fechamento real (duas
+ * fórmulas = o provisório diverge do cobrado e ninguém percebe). Nunca lança: falha de cálculo cai no custo zerado, como sempre.
+ */
+export function calcularFechamentoSessao(session: SessaoParaCalcularFechamento, final: Pick<FinalizarSessaoInput, 'meterStopWh' | 'timestamp' | 'stopReason' | 'zerarCusto'>): FechamentoCalculado {
+  const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
+
+  let energyDeliveredWh = final.meterStopWh - session.meterStartWh
+  let stopReason = final.stopReason
+  if (energyDeliveredWh < 0) {
+    logger.warn({ sessionId: session.id, meterStopWh: final.meterStopWh, meterStartWh: session.meterStartWh }, '[finalizarSessao] energyDeliveredWh negativo — clampado em 0')
+    energyDeliveredWh = 0
+    stopReason = 'OTHER'
+  }
+
+  // Janela de ociosidade: [chargingEndedAt + carência, stoppedAt) — mesma
+  // fórmula documentada no schema (`ChargingSession.idleSeconds`).
+  let idleSeconds: number | null = null
+  if (session.chargingEndedAt) {
+    const idleStartMs = session.chargingEndedAt.getTime() + tariffSnapshot.idleGracePeriodSeconds * 1000
+    idleSeconds = Math.max(0, Math.round((final.timestamp.getTime() - idleStartMs) / 1000))
+  }
+
+  // NUNCA pode lançar daqui pra fora. `calcularCustoSessao` só lança para
+  // inconsistência estrutural (datas fora de ordem), que os clamps acima
+  // já deveriam prevenir — mesmo assim blindamos com fallback de custo
+  // zerado em vez de propagar.
+  let custos: CustoSessaoResultado = ZERO_CUSTOS
+  if (!final.zerarCusto) {
+    try {
+      custos = calcularCustoSessao(tariffSnapshot, {
+        energyDeliveredWh,
+        startedAt: session.startedAt,
+        chargingEndedAt: session.chargingEndedAt,
+        stoppedAt: final.timestamp,
+        timezone: session.site.timezone,
+      })
+    } catch (err) {
+      logger.error({ err, sessionId: session.id }, '[finalizarSessao] calcularCustoSessao lançou — usando custo zerado (nunca bloqueia o chamador)')
+    }
+  }
+
+  return { energyDeliveredWh, stopReason, idleSeconds, custos }
+}
 
 /**
  * Núcleo de "fechar uma `ChargingSession` de verdade": calcula energia
@@ -35,24 +122,22 @@ const ENQUEUE_CAPTURA_PRAZO_MS = 5_000
  * (`liquidarSessao`) — tudo dentro de UMA `$transaction` com lock pessimista
  * (`SELECT ... FOR UPDATE`), pra nunca correr com outra finalização
  * concorrente da MESMA sessão (ex.: `StopTransaction` real chegando ao mesmo
- * tempo que a reconciliação de sessão órfã no boot).
+ * tempo que o encerramento pelo servidor do watchdog).
  *
  * Extraído de `stopTransaction.ts` (F5, 2026-09-17) para ser reaproveitado
- * por `bootNotification.ts` (reconciliação de sessão que ficou aberta porque
- * o carregador desconectou/reconectou sem completar o `StopTransaction`) —
- * MESMA regra de cálculo, MESMA idempotência, sem duplicar a lógica.
+ * pela reconciliação de sessão órfã — hoje `encerrarSessaoPeloServidor` (F5.9,
+ * que substituiu `reconciliarSessaoOrfa`) — MESMA regra de cálculo, MESMA
+ * idempotência, sem duplicar a lógica.
  *
  * Idempotente: se a sessão já estiver `STOPPED` quando o lock é obtido
- * (corrida com outra chamada concorrente), não faz nada.
+ * (corrida com outra chamada concorrente), não faz nada e devolve
+ * `{ finalizada: false, motivo: 'JA_ENCERRADA' }`.
  *
- * Blindada contra falha de CÁLCULO (`calcularCustoSessao` só lança para
- * inconsistência estrutural, capturado aqui com fallback de custo zerado —
- * nunca deixa uma tarifa/medição incomum impedir o fechamento da sessão).
- * Falha de INFRAESTRUTURA (conexão/deadlock na `$transaction`) ainda
- * propaga — é responsabilidade de quem chama decidir o que fazer (o
- * `StopTransaction` real responde `Accepted` mesmo assim e enfileira retry
- * via `enqueueLiquidarSessaoRetry`; a reconciliação de boot loga e segue para
- * a próxima sessão órfã, sem travar o processamento do `BootNotification`).
+ * Blindada contra falha de CÁLCULO (ver `calcularFechamentoSessao`). Falha de
+ * INFRAESTRUTURA (conexão/deadlock na `$transaction`) ainda propaga — é
+ * responsabilidade de quem chama decidir o que fazer (o `StopTransaction` real
+ * responde `Accepted` mesmo assim e enfileira retry via
+ * `enqueueLiquidarSessaoRetry`; o watchdog loga e tenta no ciclo seguinte).
  *
  * F5.4 (2026-09-30): sessão `paymentMode === 'CARD'` NÃO passa por
  * `liquidarSessao` (isso é só WALLET) — em vez disso, `prepararFechamentoCartao`
@@ -60,16 +145,27 @@ const ENQUEUE_CAPTURA_PRAZO_MS = 5_000
  * deve ser capturada (`CAPTURE_PENDING`) ou cancelada (sessão sem consumo,
  * `totalCostCents <= 0`). A chamada de rede de verdade (capturar/cancelar na
  * Cielo) acontece DEPOIS do commit — rede nunca entra em transação de banco.
+ *
+ * F5.9 (2026-10-03): grava `closureSource`/`meterStopSource` (quem fechou e com que prova) e aceita fechar uma sessão
+ * `STOP_UNCONFIRMED` (o StopTransaction do carregador que chega durante a janela de confirmação fecha normalmente). O encerramento
+ * pelo servidor usa as `opcoes` para reconferir, SOB o lock, que a sessão continua exatamente como o watchdog a viu.
  */
-export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput): Promise<void> {
-  const resultado = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM "ChargingSession" WHERE id = ${sessionId} FOR UPDATE`)
+export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput | ResolverFinalSessao, opcoes: FinalizarSessaoOpcoes = {}): Promise<FinalizarSessaoResultado> {
+  type Aborto = { abortado: Extract<FinalizarSessaoResultado, { finalizada: false }>['motivo'] }
+  const resultado = await prisma.$transaction(async (tx): Promise<Aborto | { userId: string; chargePointId: string; operatorId: string; walletResultado: Awaited<ReturnType<typeof liquidarSessao>> | null; cardResultado: Awaited<ReturnType<typeof prepararFechamentoCartao>> | null }> => {
+    const travada = await travarSessao(tx, sessionId)
+
+    if (travada.status === 'STOPPED') return { abortado: 'JA_ENCERRADA' } // corrida: outra chamada já finalizou entre o read e o lock
+    if (opcoes.statusPermitidos && !opcoes.statusPermitidos.includes(travada.status)) return { abortado: 'STATUS_NAO_PERMITIDO' }
+    if (opcoes.fotoEsperada && !fotoAindaVale(travada, opcoes.fotoEsperada)) return { abortado: 'FOTO_MUDOU' }
+
+    const entrada = typeof final === 'function' ? await final(tx, travada) : final
+    if (!entrada) return { abortado: 'ABORTADA' }
 
     const session = await tx.chargingSession.findUniqueOrThrow({
       where: { id: sessionId },
       select: {
         id: true,
-        status: true,
         userId: true,
         chargePointId: true,
         operatorId: true,
@@ -82,56 +178,19 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       },
     })
 
-    if (session.status === 'STOPPED') return null // corrida: outra chamada já finalizou entre o read e o lock
-
-    const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
-
-    let energyDeliveredWh = final.meterStopWh - session.meterStartWh
-    let stopReason = final.stopReason
-    if (energyDeliveredWh < 0) {
-      logger.warn(
-        { sessionId: session.id, meterStopWh: final.meterStopWh, meterStartWh: session.meterStartWh },
-        '[finalizarSessao] energyDeliveredWh negativo — clampado em 0',
-      )
-      energyDeliveredWh = 0
-      stopReason = 'OTHER'
-    }
-
-    // Janela de ociosidade: [chargingEndedAt + carência, stoppedAt) — mesma
-    // fórmula documentada no schema (`ChargingSession.idleSeconds`).
-    let idleSeconds: number | null = null
-    if (session.chargingEndedAt) {
-      const idleStartMs = session.chargingEndedAt.getTime() + tariffSnapshot.idleGracePeriodSeconds * 1000
-      idleSeconds = Math.max(0, Math.round((final.timestamp.getTime() - idleStartMs) / 1000))
-    }
-
-    // NUNCA pode lançar daqui pra fora — ver contrato documentado no
-    // cabeçalho da função. `calcularCustoSessao` só lança para
-    // inconsistência estrutural (datas fora de ordem), que os clamps acima
-    // já deveriam prevenir — mesmo assim blindamos com fallback de custo
-    // zerado em vez de propagar.
-    let custos: CustoSessaoResultado = ZERO_CUSTOS
-    try {
-      custos = calcularCustoSessao(tariffSnapshot, {
-        energyDeliveredWh,
-        startedAt: session.startedAt,
-        chargingEndedAt: session.chargingEndedAt,
-        stoppedAt: final.timestamp,
-        timezone: session.site.timezone,
-      })
-    } catch (err) {
-      logger.error({ err, sessionId: session.id }, '[finalizarSessao] calcularCustoSessao lançou — usando custo zerado (nunca bloqueia o chamador)')
-    }
+    const { energyDeliveredWh, stopReason, idleSeconds, custos } = calcularFechamentoSessao(session, entrada)
 
     await tx.chargingSession.update({
       where: { id: session.id },
       data: {
         status: 'STOPPED',
-        meterStopWh: final.meterStopWh,
+        meterStopWh: entrada.meterStopWh,
         energyDeliveredWh,
-        stoppedAt: final.timestamp,
+        stoppedAt: entrada.timestamp,
         stopReason,
         idleSeconds,
+        closureSource: entrada.closureSource ?? 'CHARGER',
+        meterStopSource: entrada.meterStopSource ?? 'STOP_TRANSACTION',
         ...custos,
       },
     })
@@ -153,9 +212,9 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
 
   // Publicado DEPOIS do `$transaction` acima ter resolvido (= commit real) —
   // nunca de dentro dela (decisão 5 da Nova: rollback publicando saldo que
-  // não existe seria o pior cenário). `resultado === null` = corrida
-  // detectada (sessão já estava STOPPED), nada novo a publicar.
-  if (!resultado) return
+  // não existe seria o pior cenário). `abortado` = corrida/condição que mudou,
+  // nada novo a publicar.
+  if ('abortado' in resultado) return { finalizada: false, motivo: resultado.abortado }
 
   await emitSessionStopped({ operatorId: resultado.operatorId, userId: resultado.userId, sessionId, chargePointId: resultado.chargePointId }).catch((err) =>
     logger.error({ err, sessionId }, '[realtime] falha ao publicar session.stopped (não bloqueante)'),
@@ -183,4 +242,6 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       logger.error({ err, sessionId, paymentIntentId: resultado.cardResultado?.paymentIntentId }, '[finalizarSessao] falha ao cancelar pré-autorização de sessão sem consumo (não bloqueante — varredor não cobre AUTHORIZED com sessão vinculada; reavaliar se isto acontecer na prática)'),
     )
   }
+
+  return { finalizada: true }
 }
