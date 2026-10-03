@@ -3,7 +3,7 @@ import { createRedisConnection } from '../../lib/redis'
 import { logger } from '../../lib/logger'
 import { ehGatewayIndisponivelPorConfiguracao } from '../../core/pagamentos/erros'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
-import { capturarSessaoCartao } from '../../services/pagamentos/capturarSessaoCartao'
+import { capturarSessaoCartao, CapturaCartaoEmAndamentoError } from '../../services/pagamentos/capturarSessaoCartao'
 import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
 import { CAPTURAR_SESSAO_CARTAO_QUEUE_NAME, type CapturarSessaoCartaoJobData } from '../queues'
 
@@ -57,6 +57,11 @@ export function startCapturarSessaoCartaoWorker(options: CapturarSessaoCartaoWor
   )
 
   worker.on('failed', (job, err) => {
+    // Outro executor está capturando este intent (lock por intent): é esperado, o job retenta com backoff — não é alarme.
+    if (err instanceof CapturaCartaoEmAndamentoError) {
+      logger.warn({ paymentIntentId: job?.data.paymentIntentId, attemptsMade: job?.attemptsMade }, '[worker][capturar-sessao-cartao] captura em andamento em outro executor — job vai retentar')
+      return
+    }
     logger.error({ err, paymentIntentId: job?.data.paymentIntentId, attemptsMade: job?.attemptsMade }, '[worker][capturar-sessao-cartao] job falhou')
   })
   worker.on('completed', (job) => {

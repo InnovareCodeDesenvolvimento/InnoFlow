@@ -78,8 +78,8 @@ describe('captura de cartão — dois executores simultâneos do MESMO intent', 
   // CAUSA RAIZ: reconsultar -> capturar -> gravar não é serializado por intent; o `jobId` só impede dois JOBS vivos, não dois executores do mesmo job.
   // CORREÇÃO sugerida: "reservar" a captura antes do PUT (UPDATE condicional CAPTURE_PENDING -> CAPTURING com updatedAt, ou lock Redis/advisory
   // por intent com TTL > timeout do PUT) e só o dono do lock chama `capturar()`.
-  // `it.fails`: quando corrigido isto passa a FALHAR -> trocar por `it`.
-  it.fails('(BUG) `capturar()` é chamado NO MÁXIMO uma vez no gateway mesmo com dois executores simultâneos do mesmo intent', async () => {
+  // CORRIGIDO na F5.8: lock Redis por intent (`chaveLockCaptura`) em `capturarSessaoCartao`; o perdedor lança `CapturaCartaoEmAndamentoError` e o job retenta.
+  it('(BUG corrigido — F5.8, lock Redis por intent) `capturar()` é chamado NO MÁXIMO uma vez no gateway mesmo com dois executores simultâneos do mesmo intent', async () => {
     const { intent } = await fx.sessaoParada('uma-vez')
     const { porta, estado } = gatewayComLatencia(fake, 120)
 

@@ -2,6 +2,10 @@ import { Prisma } from '@prisma/client'
 import type { Queue } from 'bullmq'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
+import { env } from '../../lib/env'
+import { redis } from '../../lib/redis'
+import { adquirirLock, liberarLock } from '../../lib/redisLock'
+import { withDeadline } from '../../lib/withDeadline'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { getPagamentoPort } from './pagamentoPortInstance'
 import { exigirAmbienteDoIntent } from './ambienteDoIntent'
@@ -42,7 +46,56 @@ export class CapturaCartaoNaoDefinitivaError extends Error {
   }
 }
 
+/** Outro executor está capturando ESTE intent agora: lançar faz o job retentar (backoff) — quando o outro terminar, a volta seguinte só espelha. */
+export class CapturaCartaoEmAndamentoError extends Error {
+  constructor(readonly paymentIntentId: string) {
+    super(`captura do intent ${paymentIntentId} já está em andamento em outro executor — tentar de novo depois`)
+    this.name = 'CapturaCartaoEmAndamentoError'
+  }
+}
+
+/** Com o Redis fora o ioredis (`maxRetriesPerRequest: null`) não rejeita — enfileira e espera: sem prazo o job penduraria no lock. */
+const LOCK_REDIS_DEADLINE_MS = 5_000
+
+export const chaveLockCaptura = (paymentIntentId: string) => `card-capture:lock:${paymentIntentId}`
+
+/**
+ * TTL do lock por intent. Tem de COBRIR o pior caso de uma execução: consultar (timeout Cielo) + capturar (timeout Cielo) + a
+ * reconciliação do adaptador por PaymentId depois de um timeout (outro timeout) + a transação local; folga de 2x. Piso de 60 s.
+ * Passou disso, o dono é tratado como morto: o lock expira e a próxima tentativa (retry do job / varredor) assume.
+ */
+export function ttlLockCapturaMs(): number {
+  return Math.max(60_000, env.CIELO_TIMEOUT_MS * 6)
+}
+
+/**
+ * SERIALIZA a captura por intent. Sem isto, `reconsultar -> capturar() -> gravar` não é atômico: dois executores do mesmo intent (job
+ * "stalled" que o BullMQ devolve à fila enquanto o 1º ainda espera a Cielo, ou duas instâncias de worker — o `jobId` só impede dois JOBS
+ * vivos) passavam os dois pela reconsulta (ambos veem AUTHORIZED) e chamavam `capturar()` 2x. O dinheiro LOCAL já era consistente (o
+ * `FOR UPDATE` da transação), mas o 2º `PUT /capture` na Cielo é "a confirmar": numa captura parcial pode cobrar em dobro.
+ *
+ * Lock Redis com TTL (sem coluna/estado novo no banco). O perdedor lança `CapturaCartaoEmAndamentoError` (o job retenta; não retorna
+ * `null` de propósito: se o dono morrer, quem esperou ainda tem retries para assumir quando o TTL expirar). Redis fora => o `SET`
+ * propaga e o job retenta: FALHA FECHADA — melhor atrasar a cobrança do que arriscar cobrar duas vezes.
+ */
 export async function capturarSessaoCartao(paymentIntentId: string, pagamentoPortInjetado?: PagamentoPort): Promise<CapturarSessaoCartaoResultado | null> {
+  const chave = chaveLockCaptura(paymentIntentId)
+  const token = await withDeadline(adquirirLock(redis, chave, ttlLockCapturaMs()), LOCK_REDIS_DEADLINE_MS, 'adquirir o lock da captura')
+  if (token === null) {
+    logger.warn({ paymentIntentId }, '[capturarSessaoCartao] outro executor já está capturando este intent — não chama a Cielo, o job retenta')
+    throw new CapturaCartaoEmAndamentoError(paymentIntentId)
+  }
+  try {
+    return await capturarSessaoCartaoSobLock(paymentIntentId, pagamentoPortInjetado)
+  } finally {
+    // Best-effort: se falhar (Redis caiu), o TTL expira o lock — nunca mascara o resultado da captura.
+    await withDeadline(liberarLock(redis, chave, token), LOCK_REDIS_DEADLINE_MS, 'liberar o lock da captura').catch((err: unknown) => {
+      logger.warn({ err, paymentIntentId }, '[capturarSessaoCartao] não consegui liberar o lock da captura — expira sozinho pelo TTL')
+    })
+  }
+}
+
+async function capturarSessaoCartaoSobLock(paymentIntentId: string, pagamentoPortInjetado?: PagamentoPort): Promise<CapturarSessaoCartaoResultado | null> {
   const pagamentoPort = pagamentoPortInjetado ?? (await getPagamentoPort())
   const intent = await prisma.paymentIntent.findUnique({ where: { id: paymentIntentId } })
   if (!intent) {
