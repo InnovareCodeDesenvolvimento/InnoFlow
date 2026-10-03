@@ -7,6 +7,7 @@ import { resolveActiveTariff } from '../tariffResolution'
 import { checkAuthorization } from '../authorizationCheck'
 import { serializeTariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { defineOcppHandler } from './defineHandler'
+import { reconferirInicioWalletSobLock } from '../../services/carteira/saldoComprometido'
 import { emitSessionStarted } from '../../realtime/emit'
 
 /**
@@ -55,6 +56,11 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
   const userId = token.userId
 
   const session = await prisma.$transaction(async (tx) => {
+    // M3 (Órion): WALLET reconfere saldo + comprometido SOB O LOCK da carteira, aqui dentro, antes de a sessão existir (ver `reconferirInicioWalletSobLock`).
+    if (!cardPaymentIntent) {
+      const recusa = await reconferirInicioWalletSobLock(tx, userId)
+      if (recusa) return recusa
+    }
     const created = await tx.chargingSession.create({
       data: {
         // operatorId é reescrito por trigger a partir de connector.operatorId
@@ -93,6 +99,11 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
 
     return created
   })
+
+  if (typeof session === 'string') {
+    logger.warn({ chargePointId: ctx.chargePointId, connectorId: data.connectorId, decision: 'Blocked', reason: session }, '[ocpp] StartTransaction recusado na reconferência sob o lock da carteira (inicialização simultânea / saldo comprometido)')
+    return { transactionId: 0, idTagInfo: { status: 'Blocked' } }
+  }
 
   logger.info(
     { chargePointId: ctx.chargePointId, connectorId: data.connectorId, transactionId: session.ocppTransactionId, userId },

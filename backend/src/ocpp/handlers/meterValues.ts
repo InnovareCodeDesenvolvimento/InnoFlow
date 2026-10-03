@@ -10,6 +10,7 @@ import { emitSessionMetrics } from '../../realtime/emit'
 import { avaliarGuardaDeSaldo } from '../../services/sessao/guardaDeSaldo'
 import { alertarLimitadoPorEscopo, alertarSessaoLimitado } from '../../services/sessao/alertasSessao'
 import { tratarTransacaoNaoEncontrada } from '../transacaoDoCarregador'
+import { atualizarCustoProvisorio } from '../../services/sessao/custoProvisorio'
 
 const ENERGY_MEASURANDS = new Set([
   'Energy.Active.Import.Register',
@@ -133,6 +134,11 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
         },
       })
       .catch((err) => logger.error({ err, sessionId: session.id }, '[ocpp] falha ao atualizar campos ao vivo da sessão (não bloqueante)'))
+  }
+
+  // M3 (Órion): sessão em STOP_UNCONFIRMED que segue medindo — o custo provisório (que desconta o saldo comprometido) acompanha a energia nova.
+  if (session && session.status === 'STOP_UNCONFIRMED' && latestEnergyWh !== null) {
+    void atualizarCustoProvisorio(session, latestEnergyWh, latestTs ?? new Date()).catch((err) => logger.error({ err, sessionId: session.id }, '[ocpp] falha ao recalcular o custo provisório (não bloqueante)'))
   }
 
   // F5.9: leitura de energia que CHEGA numa sessão já STOPPED e maior que o `meterStopWh` cobrado = o carregador continuou entregando
