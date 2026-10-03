@@ -60,3 +60,32 @@ describe("topup.updated", () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: meKeys.topup("topup_1") })
   })
 })
+
+// F5.9 (sessão travada): `session.updated` = a sessão virou STOP_UNCONFIRMED ou foi reanimada.
+describe("session.updated", () => {
+  const updated: RealtimeEvent = { type: "session.updated", occurredAt: new Date().toISOString(), sessionId: "sess_1", chargePointId: "cp_1" }
+  const stopped: RealtimeEvent = { type: "session.stopped", occurredAt: new Date().toISOString(), sessionId: "sess_1", chargePointId: "cp_1" }
+
+  const invalidatedKeys = (event: RealtimeEvent) => {
+    const client = new QueryClient()
+    const spy = vi.spyOn(client, "invalidateQueries")
+    handleRealtimeEvent(event, client)
+    return spy.mock.calls.map(([filters]) => filters?.queryKey)
+  }
+
+  it("invalida as MESMAS chaves de session.stopped (sessão ativa, histórico, dashboard ao vivo) + o detalhe", () => {
+    const stoppedKeys = invalidatedKeys(stopped)
+    const updatedKeys = invalidatedKeys(updated)
+    for (const key of stoppedKeys) expect(updatedKeys).toContainEqual(key)
+    expect(updatedKeys).toContainEqual(meKeys.activeSession)
+    expect(updatedKeys).toContainEqual(["me", "sessions"])
+    expect(updatedKeys).toContainEqual(meKeys.sessionDetail("sess_1"))
+  })
+
+  it("de fato marca o recibo em cache como velho (o refetch do detalhe acontece sem esperar o polling)", () => {
+    const client = new QueryClient()
+    client.setQueryData(meKeys.sessionDetail("sess_1"), { id: "sess_1", status: "STOP_UNCONFIRMED" })
+    handleRealtimeEvent(updated, client)
+    expect(client.getQueryState(meKeys.sessionDetail("sess_1"))?.isInvalidated).toBe(true)
+  })
+})

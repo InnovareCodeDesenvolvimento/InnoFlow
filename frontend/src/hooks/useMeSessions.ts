@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { meService } from "@/services/me"
+import { isActiveSessionStatus } from "@/lib/sessionClosure"
 import { useRealtimeHealthy } from "@/store/realtimeStore"
 import type { MeCreateTopupRequest, MeSessionsQuery, MeStartSessionRequest } from "@/types/api"
 
@@ -25,7 +26,7 @@ export function useStartSession() {
  * (`RealtimeConnection`) como mecanismo PRINCIPAL: `session.metrics` atualiza
  * `energyDeliveredWh`/`lastPowerW`/`lastSoc`/`estimatedCostCents` direto via
  * `setQueryData` (ver `realtimeEventHandlers.ts`), `session.started`/
- * `session.stopped` invalidam esta query. O polling abaixo virou REDE DE
+ * `session.stopped`/`session.updated` invalidam esta query. O polling abaixo virou REDE DE
  * SEGURANÇA (Nova, `decisoes-tempo-real-sse.md` item 7): 5s/3s de sempre
  * quando o stream está fora do ar (ou nunca provou que está vivo — conexão
  * fresca, ainda sem heartbeat), 60s quando está saudável. Nunca desliga de
@@ -52,7 +53,8 @@ export function useActiveSession(options: { pollWhileIdle?: boolean; fastPollMs?
     refetchInterval: (query) => {
       if (fastPollMs) return fastPollMs
       const status = query.state.data?.session?.status
-      const isActive = status === "STARTED" || status === "CHARGING" || status === "FINISHING"
+      // F5.9: `FAULTED` agora é "ativa" (o motorista pode encerrá-la); `STOP_UNCONFIRMED` não (vai ao recibo).
+      const isActive = isActiveSessionStatus(status)
       // Sem sessão ativa mas a tela está ESPERANDO uma (`pollWhileIdle`: comando
       // aceito, `StartTransaction` ainda não chegou — ou confirmando que parou):
       // fica em 5s mesmo com o stream saudável. `session.started` deveria
@@ -126,12 +128,20 @@ export function useMeSessions(params: MeSessionsQuery = {}) {
  * outro caso (WALLET, ou CARD já resolvido) — comportamento IDÊNTICO ao de
  * antes da F5.4 para quem paga com carteira.
  */
+export const SESSION_DETAIL_UNCONFIRMED_POLL_MS = 15_000
+
 export function useMeSessionDetail(id: string | undefined) {
   return useQuery({
     queryKey: meKeys.sessionDetail(id ?? ""),
     queryFn: () => meService.sessionDetail(id as string),
     enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.payment?.card?.status === "CAPTURE_PENDING" ? 3000 : false),
+    refetchInterval: (query) => {
+      if (query.state.data?.payment?.card?.status === "CAPTURE_PENDING") return 3000
+      // F5.9: `STOP_UNCONFIRMED` resolve sozinho (carregador confirma ou a janela vence). `session.updated`/`session.stopped`
+      // por SSE já invalidam este detalhe; o polling lento é só a rede de segurança (mesmo espírito da sessão ativa).
+      if (query.state.data?.status === "STOP_UNCONFIRMED") return SESSION_DETAIL_UNCONFIRMED_POLL_MS
+      return false
+    },
     refetchIntervalInBackground: false,
   })
 }

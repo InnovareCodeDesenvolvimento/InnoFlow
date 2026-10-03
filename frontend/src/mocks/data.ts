@@ -73,6 +73,10 @@ export const mockUsers: MockUser[] = [
   // F5.7: servidor de produção em SANDBOX e motorista fora da lista de testadores — as mesmas rotas respondem
   // `reason: "SANDBOX_RESTRICTED"` (a PWA mostra o mesmo "indisponível no momento"). Nasce com 1 cartão, como o `gateway-off@`.
   { id: "user_driver_gateway_restrito", name: "Rita Restrita", email: "gateway-restrito@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // F5.9 (sessão travada): histórico PRÉ-SEMEADO com 3 recibos (em confirmação WALLET, em confirmação CARD, encerrado pelo
+  // servidor) + 1 sessão ATIVA em `FAULTED`. Conta separada pelo mesmo motivo das outras: o estado do mock vive na página,
+  // então semear nos motoristas existentes quebraria os E2E de sessão/recarga (`seedStuckDemoSessions` em `mocks/meData.ts`).
+  { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 
 export const mockSites: Site[] = [

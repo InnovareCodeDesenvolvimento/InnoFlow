@@ -426,7 +426,41 @@ export interface Operator {
   active: boolean
 }
 
-export type ChargingSessionStatus = "STARTED" | "CHARGING" | "FINISHING" | "STOPPED" | "FAULTED"
+/**
+ * F5.9 (sessão travada): `STOP_UNCONFIRMED` = o servidor acha que a sessão acabou, mas o carregador não confirmou. NÃO é terminal e NÃO é "ativa" para o
+ * motorista: nada foi cobrado ainda (WALLET não debitou; CARD continua só pré-autorizado). Vira `STOPPED` quando o carregador confirma ou quando a janela de
+ * confirmação vence (encerramento pelo servidor), ou volta a um estado aberto se o carregador voltar a medir ("reanima").
+ */
+export type ChargingSessionStatus = "STARTED" | "CHARGING" | "FINISHING" | "STOPPED" | "FAULTED" | "STOP_UNCONFIRMED"
+
+/** F5.9 — quem fechou a sessão: o próprio carregador (StopTransaction) ou o servidor (watchdog, com a melhor prova disponível). `null` = aberta/em confirmação/anterior à F5.9. */
+export type SessionClosureSource = "CHARGER" | "SERVER"
+/** F5.9 — de onde veio a leitura final do medidor usada na cobrança. */
+export type MeterStopSource = "STOP_TRANSACTION" | "LAST_METER_SAMPLE" | "NO_READING"
+/** F5.9 — por que a sessão entrou em `STOP_UNCONFIRMED`. */
+export type StopUnconfirmedReason = "STOP_REJECTED" | "STOP_NOT_CONFIRMED" | "CHARGER_UNREACHABLE" | "CHARGER_REBOOTED" | "CONNECTOR_IDLE" | "MAX_DURATION"
+export type SessionStopRequester = "DRIVER" | "ADMIN" | "GUARD" | "WATCHDOG"
+
+/** F5.9 — bloco `closure` do detalhe da sessão (motorista e admin). Todos os campos são `null` em sessão aberta e em sessão anterior à F5.9. */
+export interface SessionClosureInfo {
+  source: SessionClosureSource | null
+  meterStopSource: MeterStopSource | null
+  /** ISO — só em `STOP_UNCONFIRMED`. */
+  unconfirmedSince: string | null
+  unconfirmedReason: StopUnconfirmedReason | null
+  /** ISO — até quando o servidor espera o carregador (calculado na leitura pela mesma função pura do watchdog). Só em `STOP_UNCONFIRMED`. */
+  confirmDeadline: string | null
+  /** ISO — = `stoppedAt` quando `source = "SERVER"`: "cobramos só o que foi medido até este horário". */
+  billedUntil: string | null
+}
+
+/** F5.9 — só no detalhe ADMIN: StopTransaction que chegou DEPOIS de a sessão ser encerrada pelo servidor (informativo; não altera o total cobrado). O motorista nunca vê isto. */
+export interface SessionLateStop {
+  meterStopWh: number
+  stoppedAt: string
+  receivedAt: string
+  unbilledCostCents: number
+}
 
 export const STOP_REASONS = [
   "LOCAL",
@@ -652,6 +686,12 @@ export interface SessionDetail {
   chargingEndedAt: string | null
   stoppedAt: string | null
   stopReason: StopReason | null
+  /** F5.9 */
+  closure: SessionClosureInfo
+  stopRequestedAt: string | null
+  stopRequestedBy: SessionStopRequester | null
+  stopAttempts: number
+  lateStop: SessionLateStop | null
   meterStartWh: number
   meterStopWh: number | null
   energyDeliveredWh: number | null
@@ -1040,6 +1080,8 @@ export interface MeSessionDetail {
   debt: { id: string; amountCents: number } | null
   paymentMode: "WALLET" | "CARD"
   payment?: MeSessionPaymentInfo
+  /** F5.9 */
+  closure: SessionClosureInfo
 }
 
 export type MeSessionDetailErrorCode = "SESSION_NOT_FOUND"
@@ -1373,7 +1415,8 @@ export interface SessionMetricsEvent extends RealtimeEventBase {
 }
 
 export interface SessionStatusEvent extends RealtimeEventBase {
-  type: "session.started" | "session.stopped"
+  /** F5.9: `session.updated` = a sessão virou `STOP_UNCONFIRMED` ou foi reanimada; mesmo payload, o cliente invalida as mesmas chaves + o detalhe. */
+  type: "session.started" | "session.stopped" | "session.updated"
   sessionId: string
   chargePointId: string
 }

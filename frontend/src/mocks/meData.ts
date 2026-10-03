@@ -21,6 +21,7 @@ import type {
   MeSessionDetail,
   MeSessionListItem,
   MeSessionPaymentInfo,
+  SessionClosureInfo,
   MeStartSessionRequest,
   MeTopupDTO,
   MeTopupStatus,
@@ -166,10 +167,32 @@ interface MockSession {
   payment: MockSessionPayment
 }
 
+/** Fechamento normal (o carregador mandou o StopTransaction) — o default de toda sessão encerrada por este mock. */
+const CLOSURE_BY_CHARGER: SessionClosureInfo = {
+  source: "CHARGER",
+  meterStopSource: "STOP_TRANSACTION",
+  unconfirmedSince: null,
+  unconfirmedReason: null,
+  confirmDeadline: null,
+  billedUntil: null,
+}
+
 let pendingSession: (MockSession & { promoteAt: number }) | null = null
 let activeSession: MockSession | null = null
 let sessionCounter = 1
 const sessionsHistory: MeSessionDetail[] = []
+/**
+ * F5.9: o histórico acima é GLOBAL (simulação de motorista único). Os recibos pré-semeados do `user_driver_travado` têm
+ * dono explícito aqui — só ele os vê, e ele NÃO vê o histórico "de todo mundo". Sessão sem entrada neste mapa = comportamento
+ * de sempre (visível para qualquer motorista que não seja o travado).
+ */
+const sessionOwners = new Map<string, string>()
+const STUCK_DEMO_DRIVER_ID = "user_driver_travado"
+
+function isVisibleTo(sessionId: string, driverId: string): boolean {
+  const owner = sessionOwners.get(sessionId)
+  return owner ? owner === driverId : driverId !== STUCK_DEMO_DRIVER_ID
+}
 
 /**
  * Captura de cartão (F5.4) — lazy-resolve (mesmo padrão de
@@ -332,6 +355,7 @@ export function startMockSession(
 }
 
 export function getMockActiveSession(driverId: string): MeActiveSession | null {
+  if (driverId === STUCK_DEMO_DRIVER_ID) return stuckDemoFaultedSession()
   maybePromotePendingSession()
 
   if (activeSession && activeSession.driverId === driverId && activeSession.stopRequestedAt) {
@@ -386,6 +410,33 @@ export function getMockActiveSession(driverId: string): MeActiveSession | null {
             },
           }
         : { mode: "WALLET", card: null },
+  }
+}
+
+/**
+ * F5.9 (e): sessão `FAULTED` — o backend agora a devolve em `/active` (antes sumia do PWA e o hold do cartão ficava preso).
+ * Fixa e sem evolução no tempo: serve para provar em tela o aviso de falha + botão de encerrar.
+ */
+function stuckDemoFaultedSession(): MeActiveSession {
+  const tariff = toPublicTariff("tariff_1") as PublicTariffSummary
+  const site = mockSites.find((x) => x.id === "site_1")
+  return {
+    id: "me_seed_faulted",
+    status: "FAULTED",
+    startedAt: new Date(Date.now() - 25 * 60_000).toISOString(),
+    chargePoint: { ocppIdentity: "CP-VILA-NORTE-01", vendor: null, model: null },
+    site: { id: site?.id ?? "site_1", name: site?.name ?? "", addressLine: site?.addressLine ?? null, city: site?.city ?? null },
+    connector: { connectorId: 1, type: "DC_CCS2", maxPowerKw: null },
+    energyDeliveredWh: 3100,
+    lastPowerW: null,
+    lastSoc: 38,
+    lastSampleAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    estimatedCostCents: 817,
+    estimatedMaxCostCents: 11940,
+    minChargeCents: tariff.minChargeCents,
+    tariff,
+    paymentMode: "WALLET",
+    payment: { mode: "WALLET", card: null },
   }
 }
 
@@ -463,6 +514,7 @@ function finalizeSession() {
     walletEntry,
     debt: null,
     paymentMode: activeSession.payment.mode,
+    closure: CLOSURE_BY_CHARGER,
   }
 
   if (isCard && activeSession.payment.card) {
@@ -514,8 +566,8 @@ function resolveCardPayment(detail: MeSessionDetail): MeSessionPaymentInfo | und
   }
 }
 
-export function listMockSessions(page: number, pageSize: number): { items: MeSessionListItem[]; total: number; page: number; pageSize: number } {
-  const items: MeSessionListItem[] = sessionsHistory.map((s) => ({
+export function listMockSessions(driverId: string, page: number, pageSize: number): { items: MeSessionListItem[]; total: number; page: number; pageSize: number } {
+  const items: MeSessionListItem[] = sessionsHistory.filter((s) => isVisibleTo(s.id, driverId)).map((s) => ({
     id: s.id,
     status: s.status,
     startedAt: s.startedAt,
@@ -530,9 +582,9 @@ export function listMockSessions(page: number, pageSize: number): { items: MeSes
   return { items: items.slice(start, start + pageSize), total: items.length, page, pageSize }
 }
 
-export function getMockSessionDetail(id: string): MeSessionDetail | null {
+export function getMockSessionDetail(driverId: string, id: string): MeSessionDetail | null {
   const detail = sessionsHistory.find((s) => s.id === id)
-  if (!detail) return null
+  if (!detail || !isVisibleTo(id, driverId)) return null
   // `resolveCardPayment` pode mutar `detail.debt` (captura parcial resolvida
   // agora) — por isso roda ANTES de montar o retorno, não depois.
   const payment = resolveCardPayment(detail)
@@ -987,3 +1039,101 @@ export function removeMockPaymentMethod(driverId: string, id: string): boolean {
   }
   return true
 }
+
+// ---------------------------------------------------------------------------
+// F5.9 (sessão travada) — recibos pré-semeados do `user_driver_travado`
+// ---------------------------------------------------------------------------
+
+/** Hoje às HH:MM no fuso LOCAL — o E2E afirma o texto "HH:MM" exato, então o horário não pode depender de "agora". */
+function todayAtLocal(hours: number, minutes: number): Date {
+  const d = new Date()
+  d.setHours(hours, minutes, 0, 0)
+  return d
+}
+
+function seedStuckDemoSessions() {
+  const tariff = toPublicTariff("tariff_1") as PublicTariffSummary
+  const site = mockSites.find((x) => x.id === "site_1")
+  const siteInfo = { name: site?.name ?? "", addressLine: site?.addressLine ?? null, city: site?.city ?? null }
+  const common = {
+    site: siteInfo,
+    chargePoint: { ocppIdentity: "CP-VILA-NORTE-01" },
+    connector: { connectorId: 1, type: "DC_CCS2" as ConnectorType },
+    tariff,
+    walletEntry: null,
+    debt: null,
+    idleSeconds: null,
+    timeCostCents: null,
+    idleFeeCents: null,
+    stopReason: null,
+  }
+  const unconfirmedClosure: SessionClosureInfo = {
+    source: null,
+    meterStopSource: null,
+    unconfirmedSince: new Date(Date.now() - 12 * 60_000).toISOString(),
+    unconfirmedReason: "STOP_NOT_CONFIRMED",
+    confirmDeadline: todayAtLocal(18, 30).toISOString(),
+    billedUntil: null,
+  }
+  const serverBilledUntil = todayAtLocal(14, 7)
+
+  const seeds: MeSessionDetail[] = [
+    {
+      ...common,
+      id: "me_seed_unconfirmed_wallet",
+      status: "STOP_UNCONFIRMED",
+      startedAt: new Date(Date.now() - 3_600_000).toISOString(),
+      stoppedAt: null,
+      energyDeliveredWh: 7200,
+      energyCostCents: null,
+      sessionFeeCents: null,
+      minChargeAdjustmentCents: null,
+      totalCostCents: null,
+      paymentMode: "WALLET",
+      closure: unconfirmedClosure,
+    },
+    {
+      ...common,
+      id: "me_seed_unconfirmed_card",
+      status: "STOP_UNCONFIRMED",
+      startedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+      stoppedAt: null,
+      energyDeliveredWh: 11800,
+      energyCostCents: null,
+      sessionFeeCents: null,
+      minChargeAdjustmentCents: null,
+      totalCostCents: null,
+      paymentMode: "CARD",
+      payment: { mode: "CARD", card: { brand: "Visa", last4: "1234", authorizedCents: 6000, capturedCents: null, status: "AUTHORIZED" } },
+      closure: unconfirmedClosure,
+    },
+    {
+      ...common,
+      id: "me_seed_server_closed",
+      status: "STOPPED",
+      startedAt: new Date(serverBilledUntil.getTime() - 50 * 60_000).toISOString(),
+      stoppedAt: serverBilledUntil.toISOString(),
+      stopReason: "OTHER",
+      energyDeliveredWh: 15400,
+      energyCostCents: 3065,
+      sessionFeeCents: 200,
+      minChargeAdjustmentCents: null,
+      totalCostCents: 3265,
+      paymentMode: "WALLET",
+      walletEntry: { id: "we_seed_server_closed", amountCents: -3265, balanceAfterCents: 4735, createdAt: serverBilledUntil.toISOString() },
+      closure: {
+        source: "SERVER",
+        meterStopSource: "LAST_METER_SAMPLE",
+        unconfirmedSince: null,
+        unconfirmedReason: null,
+        confirmDeadline: null,
+        billedUntil: serverBilledUntil.toISOString(),
+      },
+    },
+  ]
+  for (const detail of seeds) {
+    sessionsHistory.push(detail)
+    sessionOwners.set(detail.id, STUCK_DEMO_DRIVER_ID)
+  }
+}
+seedStuckDemoSessions()

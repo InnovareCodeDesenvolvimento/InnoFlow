@@ -12,6 +12,7 @@ import { useActiveSession, useCommandStatus, useStopSession } from "@/hooks/useM
 import { useWakeLock } from "@/hooks/useWakeLock"
 import { getApiErrorMessage } from "@/services/api"
 import { formatCents } from "@/lib/utils"
+import { DRIVER_CLOSURE_COPY } from "@/lib/sessionClosureCopy"
 import type { MeActiveSession } from "@/types/api"
 
 interface StartLocationState {
@@ -179,6 +180,14 @@ export function Sessao() {
         >
           <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
           Sem conexão — sua recarga continua.
+        </div>
+      )}
+
+      {/* F5.9: `FAULTED` é "ativa" (o motorista pode encerrar), mas o carregador reportou falha — sem aviso a tela de "carregando" mentiria. */}
+      {session.status === "FAULTED" && (
+        <div role="status" className="mb-4 flex items-start gap-2 rounded-xl bg-danger-50 px-4 py-3 text-sm font-semibold text-danger-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {DRIVER_CLOSURE_COPY.faulted}
         </div>
       )}
 

@@ -30,6 +30,8 @@ import type {
   PaymentProvider,
   SessionPaymentMethod,
   SessionPaymentStatus,
+  SessionClosureInfo,
+  SessionStopRequester,
   StopReason,
 } from "@/types/api"
 
@@ -116,6 +118,12 @@ export interface GeneratedSession {
   costs: ReturnType<typeof computeCost> | null
   paymentMethod: SessionPaymentMethod | null
   paymentStatus: SessionPaymentStatus | null
+  /** F5.9 — ausente = fechamento normal pelo carregador (`closureOf` preenche o default). */
+  closure?: SessionClosureInfo
+  stopRequestedAt?: Date | null
+  stopRequestedBy?: SessionStopRequester | null
+  stopAttempts?: number
+  lateStop?: { meterStopWh: number; stoppedAt: Date; receivedAt: Date; unbilledCostCents: number } | null
   paymentIntents: Array<{
     id: string
     provider: PaymentProvider
@@ -310,6 +318,105 @@ function generateSessionsForSite(config: SiteGenConfig, now: Date): GeneratedSes
 const NOW = new Date()
 
 export const generatedSessions: GeneratedSession[] = SITE_CONFIGS.flatMap((config) => generateSessionsForSite(config, NOW))
+
+// ---------------------------------------------------------------------------
+// F5.9 (sessão travada) — duas sessões FIXAS, anexadas DEPOIS da geração aleatória (a sequência do `rng` não muda, então
+// o resto dos dados fica idêntico). IDs estáveis para o E2E: `demo_stuck_unconfirmed` e `demo_stuck_late_stop`.
+// ---------------------------------------------------------------------------
+
+function minutesAgo(minutes: number): Date {
+  return new Date(NOW.getTime() - minutes * 60_000)
+}
+
+function appendStuckSessions() {
+  const tariff = TARIFFS.tariff_1
+  const base = {
+    operatorId: OPERATOR_A_ID,
+    siteId: "site_1",
+    siteName: "Shopping Vila Norte",
+    chargePointId: "cp_1",
+    ocppIdentity: "CP-VILA-NORTE-01",
+    connectorId: 1,
+    driverName: "Tiago Travado",
+    driverEmail: "travado@innoelektron.com",
+    tariffId: tariff.id,
+    tariffName: tariff.name,
+    chargingEndedAt: null,
+  } as const
+
+  // (1) Em confirmação: carregador sumiu; nada cobrado, sem custos.
+  generatedSessions.push({
+    ...base,
+    id: "demo_stuck_unconfirmed",
+    ocppTransactionId: 990001,
+    status: "STOP_UNCONFIRMED",
+    startedAt: minutesAgo(150),
+    stoppedAt: null,
+    stopReason: null,
+    meterStartWh: 1200,
+    meterStopWh: null,
+    energyDeliveredWh: 14200,
+    idleSeconds: null,
+    costs: null,
+    paymentMethod: "WALLET",
+    paymentStatus: null,
+    paymentIntents: [],
+    stopRequestedAt: minutesAgo(40),
+    stopRequestedBy: "DRIVER",
+    stopAttempts: 2,
+    closure: {
+      source: null,
+      meterStopSource: null,
+      unconfirmedSince: minutesAgo(38).toISOString(),
+      unconfirmedReason: "STOP_NOT_CONFIRMED",
+      confirmDeadline: new Date(NOW.getTime() + 22 * 60_000).toISOString(),
+      billedUntil: null,
+    },
+    lateStop: null,
+  })
+
+  // (2) Encerrada pelo servidor e, depois, chegou um StopTransaction tardio com MAIS energia (informativo; total não muda).
+  const energyWh = 18000
+  const costs = computeCost(energyWh, 0, tariff)
+  const stoppedAt = minutesAgo(200)
+  generatedSessions.push({
+    ...base,
+    id: "demo_stuck_late_stop",
+    ocppTransactionId: 990002,
+    status: "STOPPED",
+    startedAt: minutesAgo(300),
+    stoppedAt,
+    stopReason: "OTHER",
+    meterStartWh: 5000,
+    meterStopWh: 5000 + energyWh,
+    energyDeliveredWh: energyWh,
+    idleSeconds: 0,
+    costs,
+    paymentMethod: "CARD",
+    paymentStatus: "CAPTURED",
+    paymentIntents: [
+      { id: "demo_pi_stuck_1", provider: "CIELO_CARD", status: "CAPTURED", amountRequestedCents: costs.totalCostCents, amountCapturedCents: costs.totalCostCents, createdAt: stoppedAt },
+    ],
+    stopRequestedAt: minutesAgo(215),
+    stopRequestedBy: "WATCHDOG",
+    stopAttempts: 3,
+    closure: {
+      source: "SERVER",
+      meterStopSource: "LAST_METER_SAMPLE",
+      unconfirmedSince: minutesAgo(215).toISOString(),
+      unconfirmedReason: "CHARGER_UNREACHABLE",
+      confirmDeadline: null,
+      billedUntil: stoppedAt.toISOString(),
+    },
+    lateStop: {
+      meterStopWh: 5000 + energyWh + 3500,
+      stoppedAt: minutesAgo(204),
+      receivedAt: minutesAgo(120),
+      unbilledCostCents: Math.round(3.5 * tariff.pricePerKwh * 100),
+    },
+  })
+}
+appendStuckSessions()
 
 /** Recarga de saldo (Pix) — passivo da rede, NUNCA entra em faturamento (regra 3 da Nova). Só visível para ADMIN. */
 export const walletTopups: Array<{ id: string; amountCents: number; createdAt: Date; userName: string }> = Array.from(

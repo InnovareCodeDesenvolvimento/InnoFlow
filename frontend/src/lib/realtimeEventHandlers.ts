@@ -57,10 +57,14 @@ export function handleRealtimeEvent(event: RealtimeEvent, queryClient: QueryClie
       })
       return
 
+    // `session.updated` (F5.9): sessão virou `STOP_UNCONFIRMED` ou foi reanimada — mesmas chaves de `session.stopped`.
     case "session.started":
     case "session.stopped":
+    case "session.updated":
       queryClient.invalidateQueries({ queryKey: meKeys.activeSession })
+      // Prefixo `["me","sessions"]` = lista E detalhe (`meKeys.sessionDetail` mora debaixo dele).
       queryClient.invalidateQueries({ queryKey: ["me", "sessions"] })
+      queryClient.invalidateQueries({ queryKey: meKeys.sessionDetail(event.sessionId) })
       queryClient.invalidateQueries({ queryKey: ["dashboard", "live"] })
       return
 

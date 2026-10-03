@@ -394,6 +394,15 @@ export function findSessionDetail(scope: Scope, id: string): SessionDetail | nul
     chargingEndedAt: s.chargingEndedAt ? s.chargingEndedAt.toISOString() : null,
     stoppedAt: s.stoppedAt ? s.stoppedAt.toISOString() : null,
     stopReason: s.stopReason,
+    closure: s.closure ?? { source: s.status === "STOPPED" ? "CHARGER" : null, meterStopSource: s.status === "STOPPED" ? "STOP_TRANSACTION" : null, unconfirmedSince: null, unconfirmedReason: null, confirmDeadline: null, billedUntil: null },
+    stopRequestedAt: s.stopRequestedAt ? s.stopRequestedAt.toISOString() : null,
+    stopRequestedBy: s.stopRequestedBy ?? null,
+    stopAttempts: s.stopAttempts ?? 0,
+    // Contrato: `lateStop` só no detalhe ADMIN (o OPERATOR nunca recebe).
+    lateStop:
+      scope.role === "ADMIN" && s.lateStop
+        ? { meterStopWh: s.lateStop.meterStopWh, stoppedAt: s.lateStop.stoppedAt.toISOString(), receivedAt: s.lateStop.receivedAt.toISOString(), unbilledCostCents: s.lateStop.unbilledCostCents }
+        : null,
     meterStartWh: s.meterStartWh,
     meterStopWh: s.meterStopWh,
     energyDeliveredWh: s.energyDeliveredWh,

@@ -13,6 +13,7 @@ import type {
   User,
   WalletEntryType,
 } from "@/types/api"
+import { STOP_UNCONFIRMED_LABEL } from "./sessionClosureCopy"
 
 /** Combina classes Tailwind com o tailwind-merge resolvendo conflitos (última classe conflitante vence). */
 export function cn(...inputs: ClassValue[]) {
@@ -147,6 +148,7 @@ export const CHARGING_SESSION_STATUS_LABELS: Record<ChargingSessionStatus, strin
   FINISHING: "Finalizando",
   STOPPED: "Encerrada",
   FAULTED: "Com falha",
+  STOP_UNCONFIRMED: STOP_UNCONFIRMED_LABEL,
 }
 
 export const SESSION_PAYMENT_STATUS_LABELS: Record<SessionPaymentStatus, string> = {
@@ -185,6 +187,7 @@ export function sessionStatusBadgeVariant(status: ChargingSessionStatus): BadgeV
       return "danger"
     case "STARTED":
     case "FINISHING":
+    case "STOP_UNCONFIRMED":
       return "warning"
   }
 }

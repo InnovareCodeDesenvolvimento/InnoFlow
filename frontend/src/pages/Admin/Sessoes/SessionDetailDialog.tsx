@@ -2,6 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/Badge"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { SessionClosureAdminSection } from "./SessionClosureAdminSection"
 import { useSessionDetail } from "@/hooks/useReports"
 import { getApiErrorMessage } from "@/services/api"
 import {
@@ -22,6 +23,8 @@ import {
  */
 export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: string | null; onOpenChange: (open: boolean) => void }) {
   const { data, isLoading, isError, error, refetch } = useSessionDetail(sessionId ?? undefined)
+  // F5.9: em `STOP_UNCONFIRMED` ainda não há custo calculado (campos `null`) — "R$ 0,00" diria que já foi apurado.
+  const money = (cents: number | null) => (data?.status === "STOP_UNCONFIRMED" && cents === null ? "—" : formatCents(cents))
 
   return (
     <Dialog open={Boolean(sessionId)} onOpenChange={onOpenChange}>
@@ -63,14 +66,16 @@ export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: st
               <Field label="Motivo de encerramento" value={data.stopReason ?? "—"} />
             </dl>
 
+            <SessionClosureAdminSection session={data} />
+
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-softer">Custos</p>
               <dl className="grid grid-cols-2 gap-2 rounded-xl border border-border-subtle p-3">
-                <Field label="Energia" value={formatCents(data.costs.energyCostCents)} compact />
-                <Field label="Ociosidade" value={formatCents(data.costs.idleFeeCents)} compact />
-                <Field label="Taxa de sessão" value={formatCents(data.costs.sessionFeeCents)} compact />
-                <Field label="Ajuste (mínimo)" value={formatCents(data.costs.minChargeAdjustmentCents)} compact />
-                <Field label="Total" value={formatCents(data.costs.totalCostCents)} compact strong />
+                <Field label="Energia" value={money(data.costs.energyCostCents)} compact />
+                <Field label="Ociosidade" value={money(data.costs.idleFeeCents)} compact />
+                <Field label="Taxa de sessão" value={money(data.costs.sessionFeeCents)} compact />
+                <Field label="Ajuste (mínimo)" value={money(data.costs.minChargeAdjustmentCents)} compact />
+                <Field label="Total" value={money(data.costs.totalCostCents)} compact strong />
               </dl>
             </div>
 

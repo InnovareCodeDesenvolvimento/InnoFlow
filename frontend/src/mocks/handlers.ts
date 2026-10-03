@@ -939,7 +939,7 @@ export const handlers = [
   http.get("/api/me/sessions/:id", ({ request, params }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
-    const detail = getMockSessionDetail(String(params.id))
+    const detail = getMockSessionDetail(scope.user.userId, String(params.id))
     if (!detail) return HttpResponse.json(errorBody("Sessão não encontrada.", "SESSION_NOT_FOUND"), { status: 404 })
     return HttpResponse.json(detail)
   }),
@@ -949,7 +949,7 @@ export const handlers = [
     if ("error" in scope) return scope.error
     const url = new URL(request.url)
     const { page, pageSize } = parsePagination(url, 15)
-    return HttpResponse.json(listMockSessions(page, pageSize))
+    return HttpResponse.json(listMockSessions(scope.user.userId, page, pageSize))
   }),
 
   http.post("/api/me/sessions/:id/stop", ({ request, params }) => {

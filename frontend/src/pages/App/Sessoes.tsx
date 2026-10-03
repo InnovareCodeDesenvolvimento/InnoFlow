@@ -8,7 +8,8 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { useMeSessions } from "@/hooks/useMeSessions"
 import { getApiErrorMessage } from "@/services/api"
-import { CHARGING_SESSION_STATUS_LABELS, formatCents, formatDateTime, formatEnergyWh, sessionStatusBadgeVariant } from "@/lib/utils"
+import { formatSessionAmount } from "@/lib/sessionClosure"
+import { CHARGING_SESSION_STATUS_LABELS, formatDateTime, formatEnergyWh, sessionStatusBadgeVariant } from "@/lib/utils"
 
 const PAGE_SIZE = 15
 
@@ -49,15 +50,15 @@ export function Sessoes() {
                 className={`pressable stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card transition-colors hover:border-primary/30 active:bg-primary-50`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-bold text-ink">{item.siteName}</p>
-                    <Badge variant={sessionStatusBadgeVariant(item.status)}>{CHARGING_SESSION_STATUS_LABELS[item.status]}</Badge>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <p className="max-w-full truncate text-sm font-bold text-ink">{item.siteName}</p>
+                    <Badge variant={sessionStatusBadgeVariant(item.status)} className="whitespace-nowrap">{CHARGING_SESSION_STATUS_LABELS[item.status]}</Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-ink-softer">
                     {formatDateTime(item.startedAt)} · {item.ocppIdentity} · Conector {item.connectorId}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-ink-soft">
-                    {formatEnergyWh(item.energyDeliveredWh)} · {formatCents(item.totalCostCents)}
+                    {formatEnergyWh(item.energyDeliveredWh)} · {formatSessionAmount(item.status, item.totalCostCents)}
                   </p>
                 </div>
                 <ChevronRight className="h-5 w-5 shrink-0 text-ink-subtle" aria-hidden="true" />

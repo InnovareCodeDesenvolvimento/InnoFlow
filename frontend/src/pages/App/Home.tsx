@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { NearbyStationsSection } from "@/components/estacoes/NearbyStationsSection"
 import { useActiveSession, useMeSessions, useMeWallet } from "@/hooks/useMeSessions"
 import { useAuthStore } from "@/store/authStore"
+import { formatSessionAmount } from "@/lib/sessionClosure"
 import { CHARGING_SESSION_STATUS_LABELS, formatCents, formatDateTime, formatEnergyWh, sessionStatusBadgeVariant } from "@/lib/utils"
 
 /** `/app` — home do motorista: saldo, sessão ativa (se houver), atalho de "como carregar" e as últimas recargas. */
@@ -102,12 +103,12 @@ export function Home() {
                 className={`pressable stagger-${Math.min(index + 3, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-3.5 shadow-card transition-colors hover:border-primary/30`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-bold text-ink">{item.siteName}</p>
-                    <Badge variant={sessionStatusBadgeVariant(item.status)}>{CHARGING_SESSION_STATUS_LABELS[item.status]}</Badge>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <p className="max-w-full truncate text-sm font-bold text-ink">{item.siteName}</p>
+                    <Badge variant={sessionStatusBadgeVariant(item.status)} className="whitespace-nowrap">{CHARGING_SESSION_STATUS_LABELS[item.status]}</Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-ink-softer">
-                    {formatDateTime(item.startedAt)} · {formatEnergyWh(item.energyDeliveredWh)} · {formatCents(item.totalCostCents)}
+                    {formatDateTime(item.startedAt)} · {formatEnergyWh(item.energyDeliveredWh)} · {formatSessionAmount(item.status, item.totalCostCents)}
                   </p>
                 </div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-ink-subtle" aria-hidden="true" />
