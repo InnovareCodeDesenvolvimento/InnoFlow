@@ -250,6 +250,42 @@ const envSchema = z.object({
   // corrigir a causa: apagar a chave Redis `card-capture:sweeps:<intentId>`.
   CARD_CAPTURE_MAX_SWEEP_RETRIES: z.coerce.number().int().positive().default(100),
 
+  // F5.9 (03/10/2026) — WATCHDOG DE SESSÃO TRAVADA (M5/M6). Desenho: .claude/agent-memory/nova/decisoes-f59-sessao-travada.md.
+  // Decisão em `core/sessao/avaliarSessaoAberta.ts` (função pura; os defaults aqui TÊM de bater com `CONFIG_WATCHDOG_PADRAO` de lá —
+  // um teste unitário trava isso). Todos têm default de propósito (campo novo sem default derrubaria os 3 entrypoints no boot).
+  // Cadência do job `vigiarSessoesJob` no worker (concurrency 1) e tamanho do lote por ciclo.
+  SESSION_WATCHDOG_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  SESSION_WATCHDOG_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+  // R1: carregador offline há >= isto E sessão sem atividade do servidor há >= SESSION_INACTIVITY_MINUTES => STOP_UNCONFIRMED.
+  SESSION_CHARGER_OFFLINE_MINUTES: z.coerce.number().int().positive().default(10),
+  SESSION_INACTIVITY_MINUTES: z.coerce.number().int().positive().default(15),
+  // R2: conector online que voltou a AVAILABLE/UNAVAILABLE depois de a sessão abrir, há >= isto => STOP_UNCONFIRMED(CONNECTOR_IDLE).
+  SESSION_CONNECTOR_IDLE_MINUTES: z.coerce.number().int().positive().default(5),
+  // R3: espera pelo StopTransaction depois de um RemoteStop, e teto de RemoteStop por sessão (contando o 1º). D4 do dono: 3 + alerta.
+  SESSION_STOP_CONFIRM_MINUTES: z.coerce.number().int().positive().default(5),
+  SESSION_STOP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  // R4: intervalo mínimo entre dois TriggerMessage(MeterValues) da mesma sessão (carregador online, CHARGING e mudo).
+  SESSION_METER_TRIGGER_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(15),
+  // R5 (D5 do dono): idade máxima de uma sessão aberta.
+  SESSION_MAX_OPEN_HOURS: z.coerce.number().int().positive().default(24),
+  // U2: janela de confirmação em STOP_UNCONFIRMED antes de o servidor encerrar — carregador ONLINE agora / OFFLINE agora (D1 do dono: 2 h).
+  SESSION_UNCONFIRMED_GRACE_ONLINE_MINUTES: z.coerce.number().int().positive().default(10),
+  SESSION_UNCONFIRMED_GRACE_OFFLINE_MINUTES: z.coerce.number().int().positive().default(120),
+  // Prazo máximo do hold da pré-autorização do cartão (horas desde `authorizedAt`): passou disso, encerra mesmo dentro da janela, com alerta
+  // `card_session_hold_deadline`. A Cielo ainda não confirmou o prazo real de captura; 48 h tem muita folga.
+  CARD_SESSION_MAX_HOLD_HOURS: z.coerce.number().int().positive().default(48),
+  // D2 (DECISÃO DO DONO, ainda NÃO confirmada — default = recomendação da Nova): sessão encerrada pelo servidor SEM NENHUMA leitura de medidor.
+  //   NO_CHARGE (D2a) = não cobra nada, alerta `session_closed_without_meter_reading` e fica para revisão manual. Nunca se estima energia por potência x tempo.
+  //   MIN_FEE (D2b)   = comportamento de hoje: cobra a taxa fixa + o mínimo da tarifa (energia 0).
+  // Valor fora dessas duas opções derruba o boot (não adivinhamos política de cobrança). Vazio = default.
+  SESSION_NO_READING_POLICY: z.preprocess(
+    (v) => (typeof v === 'string' ? (v.trim() === '' ? undefined : v.trim().toUpperCase()) : v),
+    z.enum(['NO_CHARGE', 'MIN_FEE']).default('NO_CHARGE'),
+  ),
+  // D7 (DECISÃO DO DONO, ainda NÃO confirmada — default = D7a): o motorista pode iniciar OUTRA recarga enquanto a anterior está em
+  // confirmação (STOP_UNCONFIRMED), descontando da carteira o saldo comprometido (`provisionalCostCents`)? false = D7b: bloqueia até confirmar.
+  SESSION_ALLOW_START_WHILE_UNCONFIRMED: envBoolean(true),
+
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem
   // trocou de rede); por IP e total REJEITAM o novo. Ver `core/realtime/streamLimiter.ts`.
@@ -273,6 +309,13 @@ function loadEnv(): Env {
   // `openssl rand -base64 48` e troque quando puder — trocar o segredo derruba todas as sessões.
   if (parsed.data.JWT_SECRET.length < 32) {
     console.warn(`[env] AVISO: JWT_SECRET tem ${parsed.data.JWT_SECRET.length} caracteres — recomendado >= 32 (openssl rand -base64 48). Trocar derruba as sessões abertas.`)
+  }
+  // F5.9: o hold do cartão vencendo ANTES da duração máxima faz o prazo do cartão (encerramento forçado) mandar na sessão e deixa
+  // SESSION_MAX_OPEN_HOURS sem efeito para pagamentos em cartão. Só AVISO: configuração incoerente não derruba o boot.
+  if (parsed.data.CARD_SESSION_MAX_HOLD_HOURS < parsed.data.SESSION_MAX_OPEN_HOURS) {
+    console.warn(
+      `[env] AVISO: CARD_SESSION_MAX_HOLD_HOURS (${parsed.data.CARD_SESSION_MAX_HOLD_HOURS}) < SESSION_MAX_OPEN_HOURS (${parsed.data.SESSION_MAX_OPEN_HOURS}) — sessões em cartão serão forçadas a encerrar pelo prazo do hold antes da duração máxima.`,
+    )
   }
   return parsed.data
 }
