@@ -121,7 +121,7 @@ describe('varredor da captura — intents com o teto atingido não podem fazer o
     expect(await queue.getJob(capturaJobId(novo))).toBeDefined()
   }, 60_000)
 
-  it.fails('(BUG) com 50 envenenados à frente, um intent NOVO e acionável ainda é reenfileirado (hoje o lote só enxerga os 50 mais antigos e o novo passa fome)', async () => {
+  it('(BUG corrigido — F5.8) com 50 envenenados à frente, um intent NOVO e acionável ainda é reenfileirado (a seleção pagina e não gasta vaga do lote com o teto atingido)', async () => {
     await intentParado(3 * 24 * 60 + 100, true) // o 50º envenenado: agora há 50 no começo da fila
     const novo2 = await intentParado(12, false)
 
@@ -130,5 +130,20 @@ describe('varredor da captura — intents com o teto atingido não podem fazer o
     expect(r.tetoAtingido).toBe(BATCH_SIZE) // o lote inteiro foi gasto com os envenenados...
     expect(await redis.get(chaveTentativas(novo2))).toBe('1') // ...e o novo NUNCA foi visto (null)
     expect(await queue.getJob(capturaJobId(novo2))).toBeDefined()
+  }, 60_000)
+
+  it('intents em COOLDOWN (reenfileirados há pouco) também não gastam vaga do lote: 50 deles à frente não escondem um intent novo', async () => {
+    const chaveCooldown = (await import('../../src/services/pagamentos/reenfileirarCapturasPendentes')).chaveCooldownCaptura
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      const id = await intentParado(2 * 24 * 60 + i, false)
+      await redis.set(chaveCooldown(id), '1', 'EX', 300)
+    }
+    const novo3 = await intentParado(15, false)
+
+    const r = await reenfileirar({ queue })
+
+    expect(r.reenfileiradas).toBeGreaterThanOrEqual(1)
+    expect(await redis.get(chaveTentativas(novo3))).toBe('1')
+    expect(await queue.getJob(capturaJobId(novo3))).toBeDefined()
   }, 60_000)
 })

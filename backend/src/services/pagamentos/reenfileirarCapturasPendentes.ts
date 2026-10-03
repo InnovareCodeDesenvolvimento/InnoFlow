@@ -1,3 +1,4 @@
+import type { PaymentIntent } from '@prisma/client'
 import type Redis from 'ioredis'
 import type { Queue } from 'bullmq'
 import { prisma } from '../../lib/prisma'
@@ -31,7 +32,16 @@ import { enqueueCapturarSessaoCartao, type OpcoesJobCaptura } from './capturarSe
  * só alerta, pelo mesmo escalonamento de idade.
  */
 
+/** Quantos intents ACIONÁVEIS (nem com teto atingido, nem em cooldown) uma rodada processa. */
 const BATCH_SIZE = 50
+/**
+ * Tamanho da página da varredura e teto de intents olhados por rodada. O lote antigo (`take 50 orderBy updatedAt asc`) passava FOME:
+ * intent com o teto atingido nunca muda `updatedAt`, então ficava para sempre no começo da fila e, com 50 deles, nenhum intent novo
+ * era visto. Agora a seleção PAGINA (cursor por `updatedAt, id`) pulando o que não é acionável até juntar `BATCH_SIZE` acionáveis.
+ * O teto de varredura limita o custo (1 round trip de Redis por página) caso muita gente deixe intents esgotados sem resolver.
+ */
+const SCAN_PAGE_SIZE = 200
+const MAX_SCANNED_INTENTS = 2000
 const SWEEP_COUNT_TTL_SECONDS = 30 * 24 * 3600
 const EXHAUSTED_ALERT_INTERVAL_SECONDS = 3600
 
@@ -66,21 +76,15 @@ export async function reenfileirarCapturasPendentes(deps: ReenfileirarCapturasPe
 
   const resultado: ReenfileirarCapturasPendentesResultado = { reenfileiradas: 0, jaEmAndamento: 0, tetoAtingido: 0, semGateway: 0, falhas: 0 }
 
-  const pendentes = await prisma.paymentIntent.findMany({
-    where: { purpose: 'SESSION_CARD_CAPTURE', status: 'CAPTURE_PENDING', updatedAt: { lt: limite } },
-    orderBy: { updatedAt: 'asc' }, // os mais antigos (mais perto de perder a pré-auth) primeiro
-    take: BATCH_SIZE,
-  })
+  const pendentes = await selecionarPendentesAcionaveis(redis, limite)
   if (pendentes.length === 0) return resultado
 
   const queue = deps.queue ?? createQueue(CAPTURAR_SESSAO_CARTAO_QUEUE_NAME)
   try {
-    for (const intent of pendentes) {
+    for (const { intent, tentativas } of pendentes) {
       const idadeMinutos = Math.floor((agora.getTime() - intent.updatedAt.getTime()) / 60_000)
       const severidade = severidadeCapturaPendente(idadeMinutos)
       try {
-        const tentativas = Number((await redis.get(chaveTentativasCaptura(intent.id))) ?? '0')
-
         if (decidirReenfileirarCaptura(tentativas, env.CARD_CAPTURE_MAX_SWEEP_RETRIES) === 'TETO_ATINGIDO') {
           // Para de martelar a Cielo, mas NÃO esconde: alerta 1x/h até um humano resolver (ou apagar o contador).
           if ((await redis.set(chaveCooldownCaptura(intent.id), '1', 'EX', EXHAUSTED_ALERT_INTERVAL_SECONDS, 'NX')) === 'OK') {
@@ -126,4 +130,78 @@ function logAlertaParada(severidade: 'normal' | 'alta' | 'critica', campos: Reco
   const texto = `[reenfileirarCapturasPendentes] ${mensagem}`
   if (severidade === 'normal') logger.warn(payload, texto)
   else logger.error(payload, texto)
+}
+
+interface PendenteSelecionado {
+  intent: PaymentIntent
+  /** Quantas vezes o varredor já reenfileirou (contador no Redis). */
+  tentativas: number
+}
+
+/**
+ * Junta até `BATCH_SIZE` intents ACIONÁVEIS, do mais antigo para o mais novo, paginando por cursor (`updatedAt, id`).
+ *  - com o teto atingido: ENTRA na lista (o loop principal ainda emite o alerta `payment_capture_retry_exhausted`, 1x/h), mas NÃO gasta
+ *    vaga do lote — é o que impede a inanição;
+ *  - em cooldown (reenfileirado há menos de `RETRY_AFTER`): fica de fora, não é acionável agora (o `SET NX` do loop continua sendo
+ *    quem decide de verdade; este `EXISTS` só evita que ele ocupe vaga);
+ *  - leitura do Redis que falha: entra como acionável e o `try/catch` por intent do loop conta `falhas` (nunca perde o intent de vista).
+ * Sem schema novo: o "marcador" do esgotado é o próprio contador do Redis, e retomar continua sendo apagar a chave.
+ */
+async function selecionarPendentesAcionaveis(redis: Redis, limite: Date): Promise<PendenteSelecionado[]> {
+  const selecionados: PendenteSelecionado[] = []
+  let acionaveis = 0
+  let varridos = 0
+  let cursorId: string | undefined
+  let ultimaPaginaCheia = false
+
+  while (acionaveis < BATCH_SIZE && varridos < MAX_SCANNED_INTENTS) {
+    const pagina = await prisma.paymentIntent.findMany({
+      where: { purpose: 'SESSION_CARD_CAPTURE', status: 'CAPTURE_PENDING', updatedAt: { lt: limite } },
+      orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }], // os mais antigos (mais perto de perder a pré-auth) primeiro
+      take: SCAN_PAGE_SIZE,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    })
+    if (pagina.length === 0) {
+      ultimaPaginaCheia = false
+      break
+    }
+    varridos += pagina.length
+    ultimaPaginaCheia = pagina.length === SCAN_PAGE_SIZE
+    cursorId = pagina[pagina.length - 1]!.id
+
+    const pipeline = redis.pipeline()
+    for (const intent of pagina) {
+      pipeline.get(chaveTentativasCaptura(intent.id))
+      pipeline.exists(chaveCooldownCaptura(intent.id))
+    }
+    const respostas = (await pipeline.exec()) ?? []
+
+    for (let i = 0; i < pagina.length && acionaveis < BATCH_SIZE; i++) {
+      const intent = pagina[i]!
+      const [erroTentativas, valorTentativas] = respostas[2 * i] ?? [new Error('sem resposta'), null]
+      const [erroCooldown, valorCooldown] = respostas[2 * i + 1] ?? [new Error('sem resposta'), null]
+      if (erroTentativas || erroCooldown) {
+        selecionados.push({ intent, tentativas: 0 })
+        acionaveis++
+        continue
+      }
+      const tentativas = Number(valorTentativas ?? '0')
+      if (decidirReenfileirarCaptura(tentativas, env.CARD_CAPTURE_MAX_SWEEP_RETRIES) === 'TETO_ATINGIDO') {
+        selecionados.push({ intent, tentativas })
+        continue
+      }
+      if (Number(valorCooldown) > 0) continue
+      selecionados.push({ intent, tentativas })
+      acionaveis++
+    }
+    if (pagina.length < SCAN_PAGE_SIZE) break
+  }
+
+  if (acionaveis < BATCH_SIZE && varridos >= MAX_SCANNED_INTENTS && ultimaPaginaCheia) {
+    logger.warn(
+      { alert: 'payment_capture_sweep_scan_truncated', scanned: varridos, actionable: acionaveis },
+      '[reenfileirarCapturasPendentes] a varredura atingiu o teto de intents olhados sem juntar um lote inteiro — há muitas capturas esgotadas esperando intervenção manual; podem existir pendentes acionáveis além do teto',
+    )
+  }
+  return selecionados
 }
