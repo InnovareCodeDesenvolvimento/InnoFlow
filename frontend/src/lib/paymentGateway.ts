@@ -439,6 +439,9 @@ export function parseGatewaySaveError(err: unknown): GatewaySaveError {
     case "INVALID_CURRENT_PASSWORD":
       // 403 (e não 401): a sessão continua válida. Quem trata é o diálogo de salvar, que fica aberto com o rascunho intacto.
       return { code, message: GATEWAY_WRONG_PASSWORD_MESSAGE, requirements: [], draftKept: true }
+    case "STEPUP_UNAVAILABLE":
+      // 503 fail-closed (F5.8): o servidor NÃO conseguiu conferir a senha (Redis do throttle fora) e não gravou nada. Não é senha errada nem sessão inválida.
+      return { code, message: "Não foi possível confirmar sua senha agora. Nada foi salvo. Tente de novo em instantes.", requirements: [], draftKept: true }
     case "GATEWAY_HAS_INFLIGHT_PAYMENTS":
       return { code, message: inflightPaymentsMessage(extractInflightCount(body?.details)), requirements: [], draftKept: true }
     case "FORBIDDEN":

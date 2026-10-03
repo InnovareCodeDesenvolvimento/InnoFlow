@@ -281,6 +281,13 @@ describe("extractRequirements / parseGatewaySaveError", () => {
     expect(parseGatewaySaveError(axiosError(500, { error: "boom", code: "INTERNAL" })).message).toMatch(/Não foi possível salvar/)
   })
 
+  it("STEPUP_UNAVAILABLE (503): mensagem própria, nada salvo, rascunho mantido (não é senha errada)", () => {
+    const parsed = parseGatewaySaveError(axiosError(503, { error: "x", code: "STEPUP_UNAVAILABLE" }))
+    expect(parsed).toMatchObject({ code: "STEPUP_UNAVAILABLE", draftKept: true })
+    expect(parsed.message).toContain("Nada foi salvo")
+    expect(parsed.message).not.toContain("incorreta")
+  })
+
   it("INVALID_CURRENT_PASSWORD (403): 'Senha incorreta.' e o rascunho continua (o diálogo trata, sem deslogar)", () => {
     const parsed = parseGatewaySaveError(axiosError(403, { error: "x", code: "INVALID_CURRENT_PASSWORD" }))
     expect(parsed).toMatchObject({ code: "INVALID_CURRENT_PASSWORD", message: "Senha incorreta.", draftKept: true })

@@ -1550,6 +1550,7 @@ export type PaymentGatewayConfigErrorCode =
   | "INTERNAL_ERROR" // 500 — a auditoria falhou: NADA foi gravado (fail-closed); pode tentar de novo
   | "INVALID_CURRENT_PASSWORD" // 403 — step-up: a senha atual informada está errada (conta o limite de tentativas)
   | "GATEWAY_HAS_INFLIGHT_PAYMENTS" // 409 — trocar `environment` com pagamentos em trânsito (CREATED/AUTHORIZED/PENDING/CAPTURE_PENDING) do ambiente atual; `details: { count }`; aguarde liquidarem
+  | "STEPUP_UNAVAILABLE" // 503 — step-up: o Redis do throttle de senha está fora; o servidor NÃO tentou a senha nem gravou nada (fail-closed). Sem `Retry-After`. Tela: "tente de novo", rascunho mantido, SEM deslogar
 
 /**
  * Regras do PUT que a tela precisa respeitar (comportamento real do servidor, F5.5):
