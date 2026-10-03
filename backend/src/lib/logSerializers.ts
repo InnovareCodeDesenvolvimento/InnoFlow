@@ -22,19 +22,30 @@ export const LINHA_REJEITADA_OMITIDA = '[linha rejeitada pelo banco omitida do l
 
 /** Nome do campo = último segmento do path (`*.CardNumber` -> `cardnumber`, `req.headers["set-cookie"]` -> `set-cookie`), minúsculo. */
 function nomeDoCampo(path: string): string {
-  const ultimo = path.split('.').pop() ?? path
-  return ultimo.replace(/^\["?/, '').replace(/"?\]$/, '').toLowerCase()
+  // Path com colchetes (`res.headers["set-cookie"]`): o nome é o que está DENTRO deles. Olhar o colchete ANTES de partir no último `.`
+  // é o que evita `headers["set-cookie` (só tirava os colchetes quando o segmento COMEÇAVA com `["`, e aqui começa com `headers`),
+  // nome que nunca casava com a chave real — `set-cookie` e o header do segredo do webhook saíam em claro dentro de um `err`.
+  const entreColchetes = /\["?([^"\]]+)"?\]$/.exec(path)
+  const nome = entreColchetes ? entreColchetes[1]! : (path.split('.').pop() ?? path)
+  return nome.toLowerCase()
 }
 
 export const CAMPOS_SENSIVEIS: ReadonlySet<string> = new Set(REDACT_PATHS.map(nomeDoCampo))
 
 /**
- * Trechos de TEXTO sensíveis. `Failing row contains (...)`: o `DETAIL` do Postgres numa violação de constraint despeja a linha
- * rejeitada — com os `*Ciphertext` das credenciais do gateway (truncados em 64 caracteres) — dentro da `message` do erro do Prisma
- * (B3 da Íris). Sai tudo da linha a partir daí (o conteúdo da linha pode ter parênteses); o resto da mensagem (qual constraint/tabela) continua útil.
+ * Trechos de TEXTO sensíveis.
+ *  1. `Failing row contains (...)`: o `DETAIL` do Postgres numa violação de constraint despeja a linha rejeitada — com os `*Ciphertext`
+ *     das credenciais do gateway (truncados em 64 caracteres) — dentro da `message` do erro do Prisma (B3 da Íris). Sai tudo da linha a
+ *     partir daí (o conteúdo da linha pode ter parênteses); o resto da mensagem (qual constraint/tabela) continua útil.
+ *  2. `campoSensivel: "valor"` (F5.8): o erro de VALIDAÇÃO do Prisma monta a `message` (e o `stack`) com a "invocação" e os VALORES dos
+ *     argumentos — `merchantKeyCiphertext: "v1:..."` saía inteiro. Troca só o valor entre aspas; o nome do campo e o resto da mensagem ficam
+ *     (o erro continua diagnosticável). Usa os MESMOS nomes de `CAMPOS_SENSIVEIS` (fonte única).
  */
+const NOMES_SENSIVEIS_REGEX = [...CAMPOS_SENSIVEIS].map((n) => n.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')).join('|')
+const PADRAO_CAMPO_SENSIVEL_NO_TEXTO = new RegExp(String.raw`(?<![\w-])(${NOMES_SENSIVEIS_REGEX})(\s*:\s*)"(?:[^"\\\n]|\\.)*"`, 'gi')
+
 export function limparTextoSensivel(texto: string): string {
-  return texto.replace(/Failing row contains \([^\n]*/g, LINHA_REJEITADA_OMITIDA)
+  return texto.replace(/Failing row contains \([^\n]*/g, LINHA_REJEITADA_OMITIDA).replace(PADRAO_CAMPO_SENSIVEL_NO_TEXTO, `$1$2"${CENSOR}"`)
 }
 
 export function varrerSensivel(valor: unknown, profundidade = 0, visto: WeakSet<object> = new WeakSet()): unknown {

@@ -45,7 +45,7 @@ describe('logger real: o `err` com segredo em profundidade não vaza', () => {
   // `req.headers["x-innoelektron-webhook-secret"]`) viram os nomes `headers["set-cookie` e `headers["x-innoelektron-webhook-secret` e NUNCA casam:
   // dentro de um `err` (ex.: `err.response.headers`) o cookie e o segredo do webhook saem EM CLARO. (O `redact` do pino ainda os cobre em `req`/`res` de topo.)
   // CORREÇÃO: no `nomeDoCampo`, extrair o nome com `/\["?([^"\]]+)"?\]$/` (ou escrever o path da lista sem colchetes). `it.fails`: ao corrigir, vira `it`.
-  it.fails('(BUG) `set-cookie` e o header do segredo do webhook dentro de um `err` também saem redigidos', () => {
+  it('(BUG corrigido — F5.8) `set-cookie` e o header do segredo do webhook dentro de um `err` também saem redigidos', () => {
     for (const v of ['SEG-SET-COOKIE', 'SEG-WEBHOOK-HEADER']) expect(saida).not.toContain(v)
   })
 
@@ -53,7 +53,7 @@ describe('logger real: o `err` com segredo em profundidade não vaza', () => {
   // campo: o `limparTextoSensivel` só conhece o padrão `Failing row contains (`. Sai a ciphertext COMPLETA (não truncada) em `message` e `stack`.
   // Só acontece por erro de programação (tipo errado em algum campo do mesmo `data`), nunca por entrada de usuário — por isso baixo. CORREÇÃO: no
   // `limparTextoSensivel`, trocar o valor das chaves `*Ciphertext`/`*Token` no texto, ou não logar `message` de `PrismaClientValidationError`.
-  it.fails('(BUG baixo) o erro de validação do Prisma não ecoa no log o valor de um campo `*Ciphertext` do `data`', () => {
+  it('(BUG baixo corrigido — F5.8) o erro de validação do Prisma não ecoa no log o valor de um campo `*Ciphertext` do `data`', () => {
     expect(saida).not.toContain('SEG-CIPHERTEXT-NO-ARGUMENTO')
   })
 })
