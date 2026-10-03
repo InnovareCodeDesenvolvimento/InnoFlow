@@ -13,6 +13,8 @@ import { executarStepUp, type PortasStepUp } from '../../core/auth/stepUp'
  * Contrato de erro (literal de `PaymentGatewayConfigErrorCode`): senha errada ou conta sem senha -> 403 `INVALID_CURRENT_PASSWORD`
  * (403 e NÃO 401: o interceptor do frontend desloga em 401); tentativas erradas demais -> 429 `RATE_LIMITED_PAYMENT_GATEWAY`
  * (mesmo código do limite por minuto do PUT — não criei código novo, o contrato já o lista) com `Retry-After`.
+ * Redis do throttle fora do ar (ou mudo além de 500 ms) -> 503 `STEPUP_UNAVAILABLE` (F5.8, fail-closed): SEM tentar a senha e SEM gravar nada. Código NOVO — o
+ * frontend ainda não o conhece (cai no tratamento genérico de 503 até a Lyra tipá-lo).
  * A senha NUNCA vai para log, auditoria, erro ou resposta.
  */
 
@@ -25,6 +27,13 @@ export class StepUpRateLimitedError extends AppError {
   }
 }
 
+export class StepUpIndisponivelError extends AppError {
+  constructor() {
+    super('Não foi possível confirmar sua senha agora. Tente novamente em instantes.', 503, 'STEPUP_UNAVAILABLE')
+    this.name = 'StepUpIndisponivelError'
+  }
+}
+
 const portasReais: PortasStepUp = {
   throttle: stepUpThrottle,
   buscarPasswordHash: async (userId) => (await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } }))?.passwordHash,
@@ -34,11 +43,16 @@ const portasReais: PortasStepUp = {
       // ioredis ENFILEIRA comando com o Redis fora do ar (exigência do BullMQ) — sem o timeout a rota penduraria junto.
       return await Promise.race([acao(), new Promise<never>((_, rejeitar) => setTimeout(() => rejeitar(new Error('timeout consultando o Redis')), THROTTLE_TIMEOUT_MS).unref())])
     } catch (err) {
-      logger.error({ err }, '[stepup] throttle por usuário indisponível (Redis) — seguindo sem ele (fail-open)')
+      // Na RESERVA isto vira 503 (fail-closed, ver `core/auth/stepUp.ts`); nos passos seguintes (registrar/devolver/zerar) segue sem o throttle.
+      logger.error({ err }, '[stepup] throttle por usuário indisponível (Redis)')
       return fallback
     }
   },
   alertar(alerta, campos) {
+    if (alerta === 'payment_gateway_stepup_unavailable') {
+      logger.error({ alert: alerta, ...campos }, '[stepup] throttle do step-up indisponível (Redis) — alteração da config do gateway RECUSADA com 503 (fail-closed), senha não avaliada')
+      return
+    }
     logger.warn({ alert: alerta, ...campos }, alerta === 'payment_gateway_stepup_failed' ? '[stepup] senha atual errada na confirmação da config do gateway' : '[stepup] step-up da config do gateway recusado/trancado por tentativas erradas')
   },
 }
@@ -53,6 +67,8 @@ export async function exigirSenhaAtual(params: { userId: string; senhaInformada:
       throw new AppError('Senha atual incorreta.', 403, 'INVALID_CURRENT_PASSWORD')
     case 'LIMITE_DE_TENTATIVAS':
       throw new StepUpRateLimitedError(r.retryAfterSeconds)
+    case 'THROTTLE_INDISPONIVEL':
+      throw new StepUpIndisponivelError()
     case 'USUARIO_INEXISTENTE':
       throw new AppError('Token inválido ou expirado.', 401, 'UNAUTHORIZED')
   }

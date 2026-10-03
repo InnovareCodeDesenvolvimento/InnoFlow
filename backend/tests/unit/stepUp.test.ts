@@ -115,9 +115,26 @@ describe('executarStepUp (núcleo puro do step-up de senha, M2)', () => {
     expect((await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).resultado).toBe('OK') // 10 erros nossos não trancaram ninguém
   })
 
-  it('Redis fora (fail-open): comTimeout devolve o fallback e a verificação da senha continua valendo', async () => {
-    const { p } = portas({ comTimeout: async (_acao, fallback) => fallback })
+  // MUDANÇA DELIBERADA (Vega, decisão do Atlas, F5.8): este teste documentava o FAIL-OPEN da reserva (Redis fora => a senha continuava sendo avaliada, limitada só pela rota:
+  // 10 erradas/min). Agora a RESERVA é fail-closed: Redis fora => THROTTLE_INDISPONIVEL, SEM buscar a senha nem rodar o compare, e com alerta. Os passos DEPOIS da reserva seguem fail-open.
+  it('Redis fora na RESERVA (fail-closed): THROTTLE_INDISPONIVEL, sem buscar a senha nem rodar o compare, com alerta payment_gateway_stepup_unavailable', async () => {
+    const buscar = vi.fn(async () => HASH)
+    const { p, alertas, compare } = portas({ comTimeout: async (_acao, fallback) => fallback, buscarPasswordHash: buscar })
+    expect(await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).toEqual({ resultado: 'THROTTLE_INDISPONIVEL' })
+    expect(await executarStepUp({ userId: 'u1', senhaInformada: 'errada' }, p)).toEqual({ resultado: 'THROTTLE_INDISPONIVEL' })
+    expect(buscar).not.toHaveBeenCalled()
+    expect(compare).not.toHaveBeenCalled()
+    expect(alertas).toEqual([
+      { alerta: 'payment_gateway_stepup_unavailable', campos: { actorUserId: 'u1' } },
+      { alerta: 'payment_gateway_stepup_unavailable', campos: { actorUserId: 'u1' } },
+    ])
+  })
+
+  it('Redis cai DEPOIS da reserva (registrar/zerar a falha): fail-open — o veredito da senha não muda', async () => {
+    let chamadas = 0
+    const { p } = portas({ comTimeout: async (acao, fallback) => (++chamadas === 1 ? acao() : fallback) })
     expect((await executarStepUp({ userId: 'u1', senhaInformada: CERTA }, p)).resultado).toBe('OK')
-    expect((await executarStepUp({ userId: 'u1', senhaInformada: 'errada' }, p)).resultado).toBe('SENHA_INCORRETA')
+    chamadas = 0
+    expect((await executarStepUp({ userId: 'u2', senhaInformada: 'errada' }, p)).resultado).toBe('SENHA_INCORRETA')
   })
 })

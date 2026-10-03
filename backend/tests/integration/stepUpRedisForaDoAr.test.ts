@@ -17,8 +17,7 @@ const { proxy, realRedisUrl } = await (async () => {
 })()
 
 /**
- * QA da Íris (F5.8, rodada Vega-2) — o step-up de senha do PUT do gateway com o Redis FORA DO AR (fail-open declarado no código: `comTimeout`
- * devolve `{ allowed: true }` e o registro da falha vira no-op). Pergunta: sem o limite por usuário do Redis, QUANTAS senhas erradas uma pessoa
+ * QA da Íris (F5.8, rodada Vega-2) — o step-up de senha do PUT do gateway com o Redis FORA DO AR. Pergunta: sem o limite por usuário do Redis, QUANTAS senhas erradas uma pessoa
  * com um token roubado consegue testar? O que sobra de proteção é o limite por minuto da própria rota (`paymentGatewayWriteRateLimit`, 10/min,
  * por USUÁRIO, em memória do processo) e o custo do bcrypt. Provado com Redis real atrás de um proxy (down e blackhole), não com porta falsa.
  *
@@ -29,6 +28,14 @@ const { proxy, realRedisUrl } = await (async () => {
 const ERRADA = 'SenhaErrada#Redis-fora-7c1d'
 const MSG_STEPUP = 'Muitas tentativas de confirmação de senha'
 const MSG_ROTA = 'Muitas requisições'
+
+/**
+ * MUDANÇA DELIBERADA (Vega, decisão do Atlas, F5.8): a Íris MEDIU aqui o FAIL-OPEN (Redis fora => 10 senhas erradas/min passavam, só o limite em memória da rota segurava,
+ * contra 5 por 15 min com o Redis). Isso foi considerado uma janela inaceitável para a senha do ADMIN. Agora o step-up é FAIL-CLOSED na reserva: Redis fora (morto ou
+ * travado além de 500 ms) => 503 `STEPUP_UNAVAILABLE` SEM avaliar a senha e SEM gravar a config — inclusive para o admin legítimo com a senha certa (o preço assumido
+ * do fail-closed; a leitura GET segue funcionando). Por isso os números esperados abaixo mudaram: 403 = 0 (a senha nem é avaliada) e o que sobra é 503 até a rota cortar em 429.
+ */
+const CODIGO_FAIL_CLOSED = 'STEPUP_UNAVAILABLE'
 
 type Mods = {
   createApp: typeof import('../../src/api/app').createApp
@@ -93,6 +100,7 @@ describe('step-up de senha com o Redis fora do ar — quanto sobra de proteção
       if (r.status === 403) desfechos.push('403')
       else if (r.status === 429 && String(r.body.error).includes(MSG_STEPUP)) desfechos.push('429-stepup')
       else if (r.status === 429 && String(r.body.error).includes(MSG_ROTA)) desfechos.push('429-rota')
+      else if (r.status === 503 && r.body.code === CODIGO_FAIL_CLOSED) desfechos.push('503-stepup')
       else desfechos.push(`${r.status}?`)
     }
     return { desfechos, ms: Date.now() - t0 }
@@ -107,7 +115,7 @@ describe('step-up de senha com o Redis fora do ar — quanto sobra de proteção
     expect(contar(desfechos, '429-rota')).toBe(0)
   })
 
-  it('Redis MORTO (conexão recusada): o step-up NÃO tranca — passam 10 tentativas erradas (403) por minuto, o teto vira o limite da ROTA (429 "Muitas requisições"); a senha certa ainda entra (200)', async () => {
+  it('Redis MORTO (conexão recusada): FAIL-CLOSED — nenhuma senha é avaliada (0 x 403), tudo é 503 STEPUP_UNAVAILABLE até o limite da ROTA cortar; a senha CERTA também leva 503 e NADA é gravado', async () => {
     const admin = await novoAdmin()
     await proxy.down()
     try {
@@ -116,28 +124,35 @@ describe('step-up de senha com o Redis fora do ar — quanto sobra de proteção
       while (m.redis.status === 'ready' && Date.now() < limite) await new Promise((r) => setTimeout(r, 50))
       const legitimo = await novoAdmin()
       const entrou = await request(app).put('/api/admin/payment-gateway').set({ Authorization: `Bearer ${legitimo.token}` }).send({ sopClientId: 'sop-redis-fora-ok', currentPassword: SENHA_ADMIN_TESTE })
-      expect(entrou.status, JSON.stringify(entrou.body)).toBe(200) // fail-open para quem sabe a senha: o admin legítimo não fica trancado do lado de fora
+      expect(entrou.status, JSON.stringify(entrou.body)).toBe(503) // ANTES era 200 (fail-open); agora nem a senha certa passa sem o Redis
+      expect(entrou.body.code).toBe(CODIGO_FAIL_CLOSED)
+      expect(JSON.stringify(entrou.body)).not.toContain(SENHA_ADMIN_TESTE)
+      expect(await m.prisma.paymentGatewayConfig.count({ where: { sopClientId: 'sop-redis-fora-ok' } }), 'o PUT recusado não pode gravar nada').toBe(0)
       const { desfechos, ms } = await tentativasErradas(admin, 14)
-      // MEDIDO: sem o Redis passam 10 erradas no 1º minuto (o limite por minuto da rota) — contra 5 por 15 min com o Redis
-      expect(contar(desfechos, '403'), `desfechos: ${desfechos.join(',')}`).toBe(10)
+      // ANTES (fail-open): 10 x 403 + 4 x 429-rota. AGORA: nenhuma senha avaliada — as 10 primeiras são 503 e a rota corta as 4 seguintes (o limite por minuto conta toda requisição)
+      expect(contar(desfechos, '403'), `desfechos: ${desfechos.join(',')}`).toBe(0)
+      expect(contar(desfechos, '503-stepup')).toBe(10)
       expect(contar(desfechos, '429-stepup')).toBe(0)
       expect(contar(desfechos, '429-rota')).toBe(4)
-      expect(ms).toBeLessThan(15_000) // Redis morto não pendura a rota (fail-open rápido)
+      expect(ms).toBeLessThan(15_000) // Redis morto não pendura a rota (falha rápida)
+      // a senha não foi avaliada: nenhuma linha de auditoria 'stepup_failed' (senha errada) para este admin
+      expect(await m.prisma.auditLog.count({ where: { actorUserId: admin.id, actionDetail: 'stepup_failed' } })).toBe(0)
     } finally {
       await proxy.up()
       await esperarRedisPronto()
     }
   }, 60_000)
 
-  it('Redis TRAVADO (blackhole: aceita e não responde): cada tentativa paga o timeout do throttle (≥ 1 s com os dois timeouts de 500 ms) e passam no máximo 10 por minuto; a rota não pendura', async () => {
+  it('Redis TRAVADO (blackhole: aceita e não responde): FAIL-CLOSED — cada tentativa paga UM timeout de 500 ms da reserva e vira 503 (nenhuma senha avaliada); a rota não pendura', async () => {
     const admin = await novoAdmin()
     await proxy.blackhole()
     try {
       const { desfechos, ms } = await tentativasErradas(admin, 12)
-      expect(contar(desfechos, '403'), `desfechos: ${desfechos.join(',')}`).toBe(10)
+      // ANTES (fail-open): 10 x 403, ~1 s cada (reserva 500 ms + registro da falha 500 ms). AGORA: a reserva já falha o pedido — 10 x 503 e ~500 ms cada.
+      expect(contar(desfechos, '403'), `desfechos: ${desfechos.join(',')}`).toBe(0)
+      expect(contar(desfechos, '503-stepup')).toBe(10)
       expect(contar(desfechos, '429-stepup')).toBe(0)
-      // custo por tentativa dentro do 403: reserva (500 ms de timeout) + registro da falha (500 ms): o atacante também fica mais lento
-      expect(ms / 10).toBeGreaterThan(800)
+      expect(ms / 10).toBeGreaterThan(400) // o timeout do throttle (500 ms) ainda é pago por tentativa: o atacante não ganha velocidade
       expect(ms).toBeLessThan(40_000)
     } finally {
       await proxy.up()
