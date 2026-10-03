@@ -186,7 +186,7 @@ sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
   (`readiness`); senão 409 `GATEWAY_NOT_READY` com a lista do que falta.
 - **Qualquer mudança de ambiente (sandbox ↔ produção, F5.8, M4c)** é SERIALIZADA com criações de pagamentos — 
   o lock consultivo no Postgres impede race conditions. Se houver pagamentos em trânsito, a tela responde
-  **409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`**: aguarde os intents finalizarem (capturas re-enfileiradas a cada 5 min).
+  **409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`**: aguarde os intents finalizarem (o varredor de capturas roda a cada 60 s por padrão, `CARD_PREAUTH_SCAN_INTERVAL_MS`).
 - **Cache e consistência:** a API invalida o próprio cache ao salvar; o `worker` é outro processo e
   enxerga a mudança em **até 10 s** (TTL). Para trocar credencial com segurança, desligue o meio na
   tela, troque, religue.

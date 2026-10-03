@@ -127,7 +127,7 @@ REDIS_URL=redis://host:6379
 
 ### Fase A: SANDBOX — Testar com Cielo (lista de testadores)
 
-**Pré-condição:** contas de testador **CRIADAS E COM IDENTIDADE VERIFICADA** no painel admin ANTES de listar no `PAYMENT_SANDBOX_TESTER_EMAILS`. Ver regra abaixo.
+**Pré-condição:** contas de testador **CRIADAS E COM IDENTIDADE VERIFICADA** ANTES de listar no `PAYMENT_SANDBOX_TESTER_EMAILS`. Ver regra abaixo.
 
 **Regra (F5.8, ALTO-2):** Um DRIVER cadastrado só com e-mail/senha (`POST /api/auth/register` NÃO confirma o endereço) **NUNCA** é testador, mesmo com o e-mail na lista — senão qualquer um que soubesse o e-mail de um testador usaria o sandbox de graça. Testador = e-mail na lista E identidade verificada:
 - **Login com Google:** `googleSub != null` (Google entregou email_verified) ✅
@@ -144,7 +144,7 @@ REDIS_URL=redis://host:6379
   - [ ] Confirmar que NÃO aparece o alerta vermelho "Segredos salvos ilegíveis" no topo da tela (chave de cifragem OK) e que o aviso "Ambiente SANDBOX em servidor de produção" aparece
 
 - [ ] **Configurar lista de testadores** — env `PAYMENT_SANDBOX_TESTER_EMAILS`:
-  - [ ] Criar as contas deles no painel (login/carteira vazias). Se for motorista (DRIVER), **deve logar com Google** (identidade verificada); staff/admin não precisa.
+  - [ ] Garantir que as contas deles existam. Motorista (DRIVER): a conta precisa ter entrado pelo menos uma vez com **Google** no app (identidade verificada) — cadastro só com senha não vale. Staff/admin não precisa de Google. Só depois liste o e-mail.
   - [ ] Listar e-mails: `PAYMENT_SANDBOX_TESTER_EMAILS=dono@empresa.com.br,teste@empresa.com.br`
   - [ ] Reiniciar a API (env é lida apenas no boot) — lista vazia ou ausente = NINGUÉM passa (falha segura)
 
@@ -203,7 +203,7 @@ REDIS_URL=redis://host:6379
 
 - [ ] **Cartões e pagamentos de sandbox** (nada manual a fazer):
   - [ ] Cartões salvos e pagamentos criados em sandbox ficam marcados SANDBOX no banco: ao virar para produção eles somem da lista do motorista e não podem ser usados
-  - [ ] A virada para produção é BLOQUEADA enquanto houver pagamentos em andamento (criações paralelas — F5.8, M4c). **409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`** com a contagem de intents: aguarde liquidarem ou consulte o log de auditorias quem estava criando
+  - [ ] A virada para produção é BLOQUEADA enquanto houver pagamentos em andamento (criações paralelas — F5.8, M4c). **409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`** com a contagem de intents: aguarde liquidarem
   - [ ] **Cartão escolhido antes da mudança de ambiente:** se o motorista escolheu um cartão salvo em sandbox e a troca para produção ocorreu depois, a pré-autorização recebe **503 `PAYMENT_GATEWAY_UNAVAILABLE`** (o cartão não existe no novo ambiente)
   - [ ] Os motoristas precisarão cadastrar o cartão real de novo (em "Meus cartões")
 
@@ -372,7 +372,7 @@ REDIS_URL=redis://host:6379
 | `payment_webhook_secret_decrypt_failed` | 🔴 Crítico | Segredo do webhook não decifra (chave perdida?) | Reenviar segredo pela tela do gateway (step-up) |
 | `payment_gateway_stepup_unavailable` | 🔴 Crítico | Redis do throttle fora do ar (fail-closed, F5.8) | Verificar Redis; o admin não consegue alterar o gateway enquanto estiver fora |
 | `payment_gateway_stepup_failed` | 🟡 Aviso | Admin digitou a senha errada no step-up | Normal; tente de novo com a senha correta |
-| `payment_gateway_stepup_locked` | ⚠️ Importante | Admin está trancado no step-up (muitas falhas: 5 em 15 min) | Aguardar dobrando de 60 s até 15 min; o limite mora no Redis (se cair, segue sem ele) |
+| `payment_gateway_stepup_locked` | ⚠️ Importante | Admin está trancado no step-up (muitas falhas: 5 em 15 min) | Aguardar dobrando de 60 s até 15 min; o limite mora no Redis (se o Redis cair, o servidor recusa com 503 em vez de afrouxar: ver `payment_gateway_stepup_unavailable`) |
 | `payment_capture_sweep_scan_truncated` | 🟠 Importante | Varredor atingiu teto de 2000 intents scaneados sem juntar um lote (muito com teto atingido) | Investigar capturas esgotadas travadas; pode haver pendentes acionáveis além do teto |
 
 **Alertas esperados (não mexer):**
@@ -416,7 +416,7 @@ REDIS_URL=redis://host:6379
 **Por quê:** criações paralelas de intents usam lock consultivo no Postgres — ou o intent entra na contagem (e bloqueia a troca) ou espera a troca commitar. Sem isso, um Pix criado no meio da transição nasceria no ambiente antigo, vivo, depois que o efetivo já virou (pago e não creditado).
 
 **O que fazer:**
-1. Aguardar os 3 intents finalizarem (capturas são re-enfileiradas a cada 5 min)
+1. Aguardar os 3 intents finalizarem (o varredor de capturas roda a cada 60 s por padrão, `CARD_PREAUTH_SCAN_INTERVAL_MS`)
 2. Manualmente investigar quais estão travadas (via SQL ou logs Cielo)
 3. **Só então** pode trocar ambiente para sandbox (tela deixa mudar)
 
