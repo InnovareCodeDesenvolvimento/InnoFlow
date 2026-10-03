@@ -1206,7 +1206,12 @@ export interface MeCreatePaymentMethodRequest {
   makeDefault?: boolean
 }
 
-export type MePaymentMethodErrorCode = "INVALID_CARD_TOKEN" | "CARD_VERIFICATION_FAILED" | "TOO_MANY_PAYMENT_METHODS" | "PAYMENT_METHOD_NOT_FOUND"
+export type MePaymentMethodErrorCode =
+  | "INVALID_CARD_TOKEN"
+  | "CARD_VERIFICATION_FAILED"
+  | "TOO_MANY_PAYMENT_METHODS"
+  | "PAYMENT_METHOD_NOT_FOUND"
+  | "PAYMENT_GATEWAY_UNAVAILABLE" // 503 — configuração do gateway ilegível (GET/POST) ou ambiente mudou durante a verificação do cartão (POST)
 
 // ---- PATCH /api/me/payment-methods/:id { isDefault: true } -> MePaymentMethodDTO ----
 export interface MeUpdatePaymentMethodRequest {
@@ -1514,7 +1519,7 @@ export interface UpdatePaymentGatewayConfigRequest {
   sopClientId?: string
   /** Só escrita. */
   sopClientSecret?: string
-  /** Só escrita. Mínimo de 8 caracteres. */
+  /** Só escrita. Mínimo de 32 caracteres (o servidor exige desde a F5.7; o gerador da tela faz 40). */
   webhookHeaderSecret?: string
   cardEnabled?: boolean
   pixEnabled?: boolean
@@ -1540,7 +1545,7 @@ export type PaymentGatewayConfigErrorCode =
   | "FORBIDDEN" // 403 — só ADMIN
   | "UNAUTHORIZED" // 401 — sem sessão válida
   | "RATE_LIMITED" // 429 — limite geral da API admin
-  | "RATE_LIMITED_PAYMENT_GATEWAY" // 429 — PUT: 10 por minuto por usuário
+  | "RATE_LIMITED_PAYMENT_GATEWAY" // 429 (com `Retry-After`) — PUT: 10 por minuto por usuário; TAMBÉM quando 5 senhas atuais erradas em 15 min trancam o step-up (60 s, dobrando até 15 min), inclusive com a senha certa
   | "PAYMENT_GATEWAY_UNAVAILABLE" // 503 — GET/PUT com a configuração ilegível (banco fora, segredo que não decifra): fail-closed
   | "INTERNAL_ERROR" // 500 — a auditoria falhou: NADA foi gravado (fail-closed); pode tentar de novo
   | "INVALID_CURRENT_PASSWORD" // 403 — step-up: a senha atual informada está errada (conta o limite de tentativas)

@@ -335,7 +335,7 @@ export interface GatewaySaveError {
 }
 
 /** Texto único para "nada foi alterado" em erros transitórios do servidor (429/503/500). */
-export const GATEWAY_RATE_LIMITED_MESSAGE = "Muitas alterações em pouco tempo. Aguarde um minuto e tente de novo."
+export const GATEWAY_RATE_LIMITED_MESSAGE = "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo."
 export const GATEWAY_UNAVAILABLE_MESSAGE =
   "O servidor não conseguiu ler a configuração do gateway — o banco pode estar fora do ar ou a PAYMENT_SECRETS_KEY foi trocada. Nada foi alterado."
 export const GATEWAY_INTERNAL_ERROR_MESSAGE = "Não foi possível salvar e nada foi alterado. Tente novamente."

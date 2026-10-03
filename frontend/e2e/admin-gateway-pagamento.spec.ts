@@ -507,7 +507,7 @@ test.describe("erros novos do servidor: 429 / 503 / 500 preservam o rascunho; GE
     await merchantId.fill("ERRO-429")
     await confirmSave(page)
     await expect(error).toHaveAttribute("data-code", "RATE_LIMITED_PAYMENT_GATEWAY")
-    await expect(error).toContainText("Muitas alterações em pouco tempo. Aguarde um minuto e tente de novo.")
+    await expect(error).toContainText("Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo.")
     await expect(error).toContainText("O que você preencheu continua na tela.")
     await expect(merchantId).toHaveValue("ERRO-429")
     await expect(page.getByRole("button", { name: "Salvar alterações" })).toBeEnabled()

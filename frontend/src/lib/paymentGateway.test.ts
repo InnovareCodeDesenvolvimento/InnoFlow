@@ -367,15 +367,15 @@ describe("PARES de credenciais (id + segredo no mesmo salvar)", () => {
 })
 
 describe("erros novos do servidor (F5.5): 401 / 429 / 503 / 500", () => {
-  it.each(["RATE_LIMITED", "RATE_LIMITED_PAYMENT_GATEWAY"])("429 %s => 'Aguarde um minuto', rascunho mantido", (code) => {
+  it.each(["RATE_LIMITED", "RATE_LIMITED_PAYMENT_GATEWAY"])("429 %s => 'Aguarde alguns minutos', rascunho mantido", (code) => {
     const parsed = parseGatewaySaveError(axiosError(429, { error: "x", code }))
-    expect(parsed.message).toBe("Muitas alterações em pouco tempo. Aguarde um minuto e tente de novo.")
+    expect(parsed.message).toBe("Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo.")
     expect(parsed.code).toBe(code)
     expect(parsed.draftKept).toBe(true)
   })
 
   it("429 sem code (proxy na frente) cai na mesma mensagem", () => {
-    expect(parseGatewaySaveError(axiosError(429, undefined)).message).toMatch(/Aguarde um minuto/)
+    expect(parseGatewaySaveError(axiosError(429, undefined)).message).toMatch(/Aguarde alguns minutos/)
   })
 
   it("503 PAYMENT_GATEWAY_UNAVAILABLE explica leitura da configuração e que nada mudou — e não confunde com PAYMENT_SECRETS_KEY_MISSING", () => {
@@ -406,7 +406,7 @@ describe("erros novos do servidor (F5.5): 401 / 429 / 503 / 500", () => {
 
   it("parseGatewayLoadError (GET): mesmas mensagens; 403/404 e rede ficam para o texto genérico (null)", () => {
     expect(parseGatewayLoadError(axiosError(503, { error: "x", code: "PAYMENT_GATEWAY_UNAVAILABLE" }))).toMatch(/não conseguiu ler a configuração/)
-    expect(parseGatewayLoadError(axiosError(429, { error: "x", code: "RATE_LIMITED" }))).toMatch(/Aguarde um minuto/)
+    expect(parseGatewayLoadError(axiosError(429, { error: "x", code: "RATE_LIMITED" }))).toMatch(/Aguarde alguns minutos/)
     expect(parseGatewayLoadError(axiosError(403, { error: "x", code: "FORBIDDEN" }))).toBeNull()
     expect(parseGatewayLoadError(new AxiosError("Network Error"))).toBeNull()
   })
