@@ -316,7 +316,7 @@ Neste estado:
 | `SESSION_MAX_OPEN_HOURS` | 24 | Duração máxima (R5, D5) | Sessão aberta há 24 h → RemoteStop e depois STOP_UNCONFIRMED |
 | `SESSION_UNCONFIRMED_GRACE_ONLINE_MINUTES` | 10 | Janela online (U2, G1) | Depois de marcar STOP_UNCONFIRMED com carregador online, aguarda 10 min — se StopTransaction não chegar, encerra com servidor |
 | `SESSION_UNCONFIRMED_GRACE_OFFLINE_MINUTES` | 120 | Janela offline (U2, G2) | Depois de marcar STOP_UNCONFIRMED com carregador offline, aguarda 2 h — se StopTransaction não chegar, encerra com servidor |
-| `CARD_SESSION_MAX_HOLD_HOURS` | 48 | Teto do hold do cartão | Pré-autorização vence em 48 h (prazo da Cielo) — sessão é encerrada antes disso com alerta |
+| `CARD_SESSION_MAX_HOLD_HOURS` | 48 | Teto do hold do cartão | Limite que NÓS configuramos para o hold do cartão (o prazo real da Cielo é a confirmar com ela) — ao atingi-lo a sessão é encerrada à força, com alerta |
 | **D2 — Sem nenhuma leitura** |
 | `SESSION_NO_READING_POLICY` | `NO_CHARGE` | Política de cobrança | `NO_CHARGE`: não cobra, alerta, revisão manual. `MIN_FEE`: cobra taxa fixa + mínimo (antigo) |
 | **D7 — Outra recarga durante confirmação** |
@@ -370,9 +370,9 @@ Se precisar voltar atrás:
 | `session_revived_after_unconfirmed` | 🔴 | MeterValues após STOP_UNCONFIRMED reanimou | Carregador continua entregando depois de queda — reanima com nova tentativa de RemoteStop |
 | `session_stop_not_obeyed` | 🔴 | Stop rejeitado, energia subindo | Carregador não obedeceu o stop (firmware? bugs?) — **investigar com fabricante** |
 | `session_metering_after_close` | 🔴 | MeterValues chegaram após STOPPED | Amostra tardia (muito raro); descartada, sem impacto financeiro |
-| `card_session_hold_deadline` | 🔴 | Pré-autorização expirou (48 h) | Normal; servidor encerrou antes que cartão vencesse; sem impacto financeiro |
-| `session_cost_calculation_failed` | 🔴 | Erro ao calcular provisório | Raro; verificar logs para causa — se repetir, escalate para atlas |
-| `ocpp_foreign_transaction` | 🔴 | Transação de carregador diferente | **CRÍTICO — pode ser ataque (ALTO-2 Órion)**; investigar IP, basicAuthSecret |
+| `card_session_hold_deadline` | 🔴 | Servidor forçou o encerramento porque a pré-autorização atingiu o prazo configurado (`CARD_SESSION_MAX_HOLD_HOURS`) | Conferir se a captura saiu com o valor certo e por que o carregador não confirmou a parada |
+| `session_cost_calculation_failed` | 🔴 | O cálculo do custo falhou; o fechamento foi ABORTADO (nada foi cobrado nem cancelado, a sessão segue como estava) | Revisão manual da sessão: ver as datas/leituras da sessão no admin e o log do alerta |
+| `ocpp_foreign_transaction` | 🔴 | Transação de carregador diferente | Um carregador citou uma transação de OUTRO carregador (ignorada). Pode ser firmware com defeito ou credencial comprometida: veja no alerta qual carregador enviou e investigue |
 | `ocpp_meter_values_without_transaction` | ⚠️ | MeterValues sem ID de transação | Firmware mal configurado; amostra descartada |
 
 ### 1.1 Frontend
@@ -536,7 +536,7 @@ Procure por `alert:` nos logs — devem estar limpos (nenhum erro) nos primeiros
 - [ ] **Decisão D7** (outra recarga):
   - Iniciar sessão, depois Logout/reconectar
   - Com D7=`true`: `POST /api/me/sessions/start` **pode** criar nova sessão (desconta `provisionalCostCents` da anterior como saldo comprometido)
-  - Com D7=`false`: devolve 409 `SESSION_ALREADY_UNCONFIRMED`, bloqueia até confirmação
+  - Com D7=`false`: devolve 409 `ALREADY_HAS_ACTIVE_SESSION` (com `pendingConfirmation: true` nos detalhes), bloqueia até a confirmação
 
 **Checklist de flags pós-validação:**
 - [ ] `SESSION_WATCHDOG_ENABLED=true` está ligado no worker

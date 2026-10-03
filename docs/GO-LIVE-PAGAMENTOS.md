@@ -379,7 +379,7 @@ F5.9 (watchdog) só interfere **quando cartão está envolvido** — Pix é inde
 | `session_cost_calculation_failed` | 🔴 | Custo provisório desconhecido (NULL) — saldo comprometido pode estar errado | Investigar timezones, timestamp de amostra; se persistir, escalate |
 | `session_closed_without_meter_reading` | 🔴 | **Com `MIN_FEE`**: energia cobrada por `MIN_FEE`; com `NO_CHARGE`: 0 (revisão manual) | **Importante:** confirmar que D2 (`SESSION_NO_READING_POLICY`) está como o dono decidiu |
 | `session_revived_after_unconfirmed` | 🔴 | Sessão reanimou (carregador entregou mais) → novo RemoteStop → pode refazer fechamento | Raro; no pior caso, `unbilledCostCents` registra a diferença (pura auditoria, não afeta receita) |
-| `card_session_hold_deadline` | 🔴 | Pré-auth expirou (48 h) — servidor encerrou com a última leitura sem esperar o carregador | Normal se sessão durou muito; sem impacto (captura sai com valor correto) |
+| `card_session_hold_deadline` | 🔴 | Servidor forçou o encerramento por atingir o prazo configurado do hold do cartão, usando a melhor leitura disponível | Conferir a captura e a leitura usada; investigar por que o carregador não confirmou |
 
 ### Alertas de Pagamento (F5 — Cielo)
 
