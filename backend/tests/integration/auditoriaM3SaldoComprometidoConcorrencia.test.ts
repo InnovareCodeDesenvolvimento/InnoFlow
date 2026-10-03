@@ -4,6 +4,7 @@ import { prisma } from '../../src/lib/prisma'
 import { redis } from '../../src/lib/redis'
 import { env } from '../../src/lib/env'
 import { handleStartTransaction } from '../../src/ocpp/handlers/startTransaction'
+import { handleAuthorize } from '../../src/ocpp/handlers/authorize'
 import { handleMeterValues } from '../../src/ocpp/handlers/meterValues'
 import { handleStopTransaction } from '../../src/ocpp/handlers/stopTransaction'
 import { checkAuthorization } from '../../src/ocpp/authorizationCheck'
@@ -95,8 +96,31 @@ describe('M3 — início de sessão sob o lock da carteira + saldo comprometido 
   })
 
   describe('o comprometido agora inclui sessões WALLET ABERTAS (Authorize / StartTransaction)', () => {
-    it('Authorize/checkAuthorization com OUTRA sessão aberta do mesmo motorista: o saldo disponível desconta a reserva dela', async () => {
-      const m = await motorista('auth-aberta', MIN + RESERVA - 1_000) // 6000 - 5000 (reserva da aberta) = 1000 < 2000
+    // MUDANÇA DELIBERADA (regressão do M3, achada pela Íris): este teste afirmava `Blocked` para o Authorize do MESMO idTag da sessão aberta — comportamento ERRADO. Esse
+    // Authorize é o tap-to-stop (encostar o cartão no poste para PARAR a recarga em firmware que exige Authorize): a reserva da PRÓPRIA sessão não pode contar contra ele.
+    // O que o M3 protege continua: a reserva das abertas desconta de uma sessão NOVA (StartTransaction) e de OUTRO idTag do mesmo motorista.
+    it('Authorize do idTag da PRÓPRIA sessão aberta (tap-to-stop): Accepted mesmo com saldo entre o mínimo e (mínimo + reserva) — a reserva dela não conta contra si', async () => {
+      const m = await motorista('auth-propria', MIN + RESERVA - 1_000) // 6000: o saldo cobre o início (2000) mas não "início + reserva da própria sessão"
+      await criarSessao(A, { mode: 'WALLET', motorista: { driver: m.driver, wallet: m.wallet, authToken: m.tokens[0]! } })
+      expect((await chamarHandler(handleAuthorize, A.ctx, { idTag: m.tokens[0]!.idTag })).idTagInfo.status).toBe('Accepted')
+    })
+
+    it('Authorize de OUTRO idTag do mesmo motorista com a sessão aberta: continua descontando a reserva dela (Blocked/INSUFFICIENT_BALANCE)', async () => {
+      const m = await motorista('auth-outro-token', MIN + RESERVA - 1_000, 2)
+      await criarSessao(A, { mode: 'WALLET', motorista: { driver: m.driver, wallet: m.wallet, authToken: m.tokens[0]! } })
+      expect((await chamarHandler(handleAuthorize, A.ctx, { idTag: m.tokens[1]!.idTag })).idTagInfo.status).toBe('Blocked')
+    })
+
+    it('StartTransaction de uma sessão NOVA (mesmo idTag, outro conector) com a primeira aberta: continua descontando a reserva — Blocked, e nenhuma sessão nova', async () => {
+      const m = await motorista('start-novo', MIN + RESERVA - 1_000)
+      await criarSessao(A, { mode: 'WALLET', motorista: { driver: m.driver, wallet: m.wallet, authToken: m.tokens[0]! } })
+      const c = await conectorLivre(A, ++numeroConector)
+      expect((await start(A, c.connectorId, m.tokens[0]!.idTag)).idTagInfo.status).toBe('Blocked')
+      expect(await prisma.chargingSession.count({ where: { userId: m.driver.id } })).toBe(1)
+    })
+
+    it('checkAuthorization no modo padrão (início de sessão) segue descontando a reserva; com saldo de sobra é Accepted', async () => {
+      const m = await motorista('auth-aberta', MIN + RESERVA - 1_000)
       await criarSessao(A, { mode: 'WALLET', motorista: { driver: m.driver, wallet: m.wallet, authToken: m.tokens[0]! } })
       expect((await checkAuthorization(m.tokens[0]!.idTag)).resultado).toEqual({ decision: 'Blocked', reason: 'INSUFFICIENT_BALANCE' })
 

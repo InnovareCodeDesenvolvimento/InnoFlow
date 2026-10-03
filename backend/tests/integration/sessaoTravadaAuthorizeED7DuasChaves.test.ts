@@ -55,7 +55,8 @@ describe('F5.9d — Authorize do idTag com sessão própria aberta e D7 no Start
       expect((await authorize(m.authToken.idTag)).idTagInfo.status).toBe('Accepted')
     })
 
-    it.fails('com saldo entre o mínimo e (mínimo + reserva), o Authorize do MESMO idTag que está carregando deveria ser Accepted (parar a recarga); hoje é Blocked/INSUFFICIENT_BALANCE', async () => {
+    // it.fails -> it, ASSERÇÃO INALTERADA (Vega, correção da regressão do M3: o Authorize ignora a reserva da sessão do PRÓPRIO idTag).
+    it('com saldo entre o mínimo e (mínimo + reserva), o Authorize do MESMO idTag que está carregando deve ser Accepted (parar a recarga) — regressão do M3 corrigida', async () => {
       const m = await motorista('tap-justo', MIN + RESERVA - 1_000) // 6.000: cobre o início (>= 2.000) mas não "início + reserva da própria sessão"
       const s = await criarSessao(cen, { mode: 'WALLET', motorista: { driver: m.driver, wallet: m.wallet, authToken: m.authToken } })
       // pré-condição: a própria sessão está aberta e é daquele idTag

@@ -33,7 +33,16 @@ export interface AuthorizationCheckResult {
   cardPaymentIntent: { id: string; amountAuthorizedCents: number } | null
 }
 
-export async function checkAuthorization(idTag: string, now: Date = new Date()): Promise<AuthorizationCheckResult> {
+export interface OpcoesCheckAuthorization {
+  /**
+   * `true` SÓ no `Authorize` (ambíguo: pode ser o início OU o tap-to-stop do cartão que já está carregando): a reserva da sessão WALLET aberta do PRÓPRIO
+   * idTag não é descontada do saldo disponível — parar a recarga não pode depender de saldo para uma sessão nova. O `StartTransaction` (sessão NOVA) usa o
+   * padrão `false` e continua descontando TODAS as abertas, e reconfere sob o lock da carteira.
+   */
+  authorizeDeParada?: boolean
+}
+
+export async function checkAuthorization(idTag: string, now: Date = new Date(), opcoes: OpcoesCheckAuthorization = {}): Promise<AuthorizationCheckResult> {
   const token = await prisma.authToken.findUnique({ where: { idTag }, include: { paymentIntent: true } })
 
   let walletBalanceCents = 0
@@ -58,7 +67,7 @@ export async function checkAuthorization(idTag: string, now: Date = new Date()):
     }
 
     // F5.9 (D7): MESMA regra de `iniciarSessaoRemota` — o Authorize/StartTransaction (RFID, ou o idTag virtual do app) enxerga o saldo já comprometido.
-    const pendentes = await carregarSessoesNaoConfirmadas(token.userId)
+    const pendentes = await carregarSessoesNaoConfirmadas(token.userId, opcoes.authorizeDeParada ? { ignorarAbertasDoAuthToken: token.id } : {})
     sessaoNaoConfirmada = { existe: pendentes.total > 0, permitirInicio: env.SESSION_ALLOW_START_WHILE_UNCONFIRMED }
     const saldoDisponivelCents = walletBalanceCents - pendentes.comprometidoCents
 

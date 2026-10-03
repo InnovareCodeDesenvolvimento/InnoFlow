@@ -35,7 +35,19 @@ export type SessoesNaoConfirmadasDoMotorista = Comprometimento
 
 type Cliente = Prisma.TransactionClient | typeof prisma
 
-export async function carregarSessoesNaoConfirmadas(userId: string, opcoes: { excetoSessionId?: string; cliente?: Cliente } = {}): Promise<Comprometimento> {
+export async function carregarSessoesNaoConfirmadas(
+  userId: string,
+  opcoes: {
+    excetoSessionId?: string
+    /**
+     * Regressão do M3 (Íris): o Authorize de tap-to-stop é do idTag que JÁ está carregando. A reserva (teto) das sessões WALLET ABERTAS desse MESMO idTag não pode
+     * entrar no comprometido — senão, com saldo entre o mínimo e (mínimo + reserva), o motorista não consegue parar a recarga com o cartão. Só afeta a reserva das
+     * ABERTAS; o provisório das STOP_UNCONFIRMED (D7) continua contando. O StartTransaction de uma sessão NOVA NÃO usa isto.
+     */
+    ignorarAbertasDoAuthToken?: string
+    cliente?: Cliente
+  } = {},
+): Promise<Comprometimento> {
   const db = opcoes.cliente ?? prisma
   const excecao = opcoes.excetoSessionId ? { id: { not: opcoes.excetoSessionId } } : {}
 
@@ -46,7 +58,7 @@ export async function carregarSessoesNaoConfirmadas(userId: string, opcoes: { ex
       orderBy: { createdAt: 'asc' },
     }),
     db.chargingSession.findMany({
-      where: { userId, paymentMode: 'WALLET', status: { in: listarEstadosSessaoAberta() }, ...excecao },
+      where: { userId, paymentMode: 'WALLET', status: { in: listarEstadosSessaoAberta() }, ...excecao, ...(opcoes.ignorarAbertasDoAuthToken ? { authTokenId: { not: opcoes.ignorarAbertasDoAuthToken } } : {}) },
       select: { tariffSnapshot: true, connector: { select: { maxPowerKw: true } } },
     }),
   ])

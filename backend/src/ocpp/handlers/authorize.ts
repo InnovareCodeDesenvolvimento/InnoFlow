@@ -12,7 +12,8 @@ import { defineOcppHandler } from './defineHandler'
  * acontece no `StopTransaction`.
  */
 export const handleAuthorize = defineOcppHandler('Authorize', authorizeReqSchema, async (data, ctx) => {
-  const { resultado } = await checkAuthorization(data.idTag)
+  // `authorizeDeParada`: o Authorize pode ser o tap-to-stop do idTag que já está carregando (ver `OpcoesCheckAuthorization`).
+  const { resultado } = await checkAuthorization(data.idTag, new Date(), { authorizeDeParada: true })
 
   if (resultado.decision !== 'Accepted') {
     logger.warn(
