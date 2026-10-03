@@ -71,4 +71,23 @@ export function serializarErro(err: unknown): unknown {
   }
 }
 
-export const LOG_SERIALIZERS = { err: serializarErro }
+/**
+ * O `pathToken` do webhook da Cielo (`/api/webhooks/cielo/<token>`) é um SEGREDO que viaja no CAMINHO: o `pino-http` loga `req.url` de TODA
+ * requisição, então ele ia em claro para o stdout da API (o nginx já o mascara no access log dele, mas o log do Node é outro). `redact` não
+ * serve (é por NOME de chave, aqui o segredo está no VALOR de `url`). Mascara tudo depois do prefixo, inclusive query. Defensivo: nunca lança.
+ */
+const PREFIXO_WEBHOOK_CIELO = '/api/webhooks/cielo/'
+
+export function mascararUrlComSegredo(url: string): string {
+  const i = url.toLowerCase().indexOf(PREFIXO_WEBHOOK_CIELO)
+  return i === -1 ? url : `${url.slice(0, i + PREFIXO_WEBHOOK_CIELO.length)}***`
+}
+
+/** Recebe o `req` JÁ serializado (o `pino-http` embrulha o serializer customizado com `wrapRequestSerializer`). */
+export function serializarReq(req: unknown): unknown {
+  if (req === null || typeof req !== 'object') return req
+  const { url } = req as { url?: unknown }
+  return typeof url === 'string' ? { ...req, url: mascararUrlComSegredo(url) } : req
+}
+
+export const LOG_SERIALIZERS = { err: serializarErro, req: serializarReq }
