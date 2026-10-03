@@ -236,13 +236,14 @@ ${saida.slice(-2000)}`)
     expect(log).not.toContain('Failing row contains') // a linha rejeitada (com os `*Ciphertext` truncados) é o que não deve ir para o log
   })
 
-  // DECISÃO REGISTRADA (não é defeito aberto): o `pathToken` do webhook vai NO CAMINHO, então o `url` que o `pino-http` loga em TODA
-  // notificação o traz em claro. O desenho aceita isso — o `pathToken` é só roteamento e o segredo DE VERDADE é o header
-  // (`webhooksCielo.routes.ts`), que o redact protege (testes acima). Fixado aqui para que mudar isto (redact do `url`) seja
-  // deliberado e visível, e para o Órion saber que quem lê o log do EasyPanel vê metade do par de segredos.
-  it('documentado: o `pathToken` do webhook aparece em claro no `req.url` do log (o segredo de verdade é o header, que NÃO aparece)', async () => {
+  // MUDANÇA DELIBERADA (Atlas, 02/10/2026, achado do Vulcano na F5.8): antes este teste FIXAVA que o `pathToken` do webhook (que vai NO
+  // CAMINHO) aparecia em claro no `req.url` do `pino-http` — decisão aceita enquanto o segredo de verdade era o header. Deixou de ser
+  // aceitável: quem lê o log do EasyPanel via metade do par de segredos. O serializer `req` (`lib/logSerializers.ts`) agora mascara tudo
+  // depois de `/api/webhooks/cielo/`; a asserção foi INVERTIDA de propósito (não é afrouxamento: o log passou a ser mais estrito).
+  it('o `pathToken` do webhook NÃO aparece no `req.url` do log (sai mascarado) e o header secreto também não', async () => {
     const log = await logAssentado()
-    expect(log).toContain(`/api/webhooks/cielo/${PATH_TOKEN}`)
+    expect(log).not.toContain(PATH_TOKEN)
+    expect(log).toContain('/api/webhooks/cielo/***')
     expect(log).not.toContain(HEADER_SECRET_ENV)
   })
 })
