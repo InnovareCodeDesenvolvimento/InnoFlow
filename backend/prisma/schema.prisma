@@ -78,6 +78,48 @@ enum ChargingSessionStatus {
   FINISHING // carro parou de puxar energia, ainda plugado — janela de ociosidade aberta
   STOPPED
   FAULTED
+  // F5.9 (2026-10-03): o SERVIDOR tentou parar/fechar a sessão (stop rejeitado,
+  // sem confirmação, carregador sumido/reiniciado, conector ocioso, duração
+  // máxima) mas ainda não há prova do carregador. Estado PROVISÓRIO: nada é
+  // debitado nem capturado aqui; o watchdog encerra (STOPPED) depois da janela
+  // de confirmação com a melhor prova disponível. Fora do índice único
+  // ux_charging_session_active_per_connector (ver migration 20261003120100).
+  STOP_UNCONFIRMED
+}
+
+// Quem fechou a sessão (F5.9): o próprio carregador (StopTransaction real) ou
+// o servidor (watchdog/reconciliação, sem StopTransaction). NULL = sessão
+// aberta ou STOPPED legada anterior à F5.9 (não inventamos valor).
+enum SessionClosureSource {
+  CHARGER
+  SERVER
+}
+
+// De onde veio o meterStopWh do fechamento (F5.9), do mais para o menos
+// confiável: StopTransaction do carregador > última amostra
+// Energy.Active.Import.Register > nenhuma leitura (energia 0).
+enum MeterStopSource {
+  STOP_TRANSACTION
+  LAST_METER_SAMPLE
+  NO_READING
+}
+
+// Por que a sessão entrou em STOP_UNCONFIRMED (F5.9).
+enum StopUnconfirmedReason {
+  STOP_REJECTED // RemoteStopTransaction recusado pelo carregador
+  STOP_NOT_CONFIRMED // stop enviado, sem StopTransaction dentro da janela
+  CHARGER_UNREACHABLE // carregador offline além da janela
+  CHARGER_REBOOTED // BootNotification com a sessão ainda aberta
+  CONNECTOR_IDLE // conector Available/Faulted enquanto a sessão seguia aberta
+  MAX_DURATION // estourou a duração máxima configurada
+}
+
+// Quem pediu a parada (F5.9) — gravado em stopRequestedBy.
+enum SessionStopRequester {
+  DRIVER
+  ADMIN
+  GUARD // guarda de saldo/teto do cartão
+  WATCHDOG
 }
 
 // Como esta sessão é cobrada (F5.4, 2026-09-30). Nome segue a convenção
@@ -639,12 +681,57 @@ model ChargingSession {
   lastPowerW   Int?
   lastSoc      Int? // 0-100, percentual de carga da bateria (OCPP SoC) — CHECK na migration
 
+  // --- Sessão travada / watchdog (F5.9, 2026-10-03) ---
+  // Desenho: .claude/agent-memory/nova/decisoes-f59-sessao-travada.md.
+  // RELÓGIOS: lastActivityAt e os *RequestedAt/unconfirmedAt/lateStopReceivedAt
+  // são relógio do SERVIDOR (now()); lastSampleAt/lateStopAt usam o relógio do
+  // carregador (payload). O watchdog decide só com o relógio do servidor; a
+  // cobrança só com o do carregador. Misturar os dois é bug.
+  // lastActivityAt: última atividade OCPP observada para a sessão (qualquer
+  // mensagem útil). NULL em linha antiga/STOPPED; o watchdog usa
+  // COALESCE(lastActivityAt, startedAt) por segurança.
+  lastActivityAt DateTime? @db.Timestamptz(3)
+
+  // Pedido de parada (colunas ortogonais ao status — o StatusNotification é a
+  // fonte de verdade do status físico e sobrescreveria um "STOPPING").
+  stopRequestedAt DateTime?             @db.Timestamptz(3)
+  stopRequestedBy SessionStopRequester?
+  stopAttempts    Int                   @default(0) // CHECK >= 0 na migration
+
+  // Entrada em STOP_UNCONFIRMED (CHECK: status STOP_UNCONFIRMED exige os dois).
+  unconfirmedAt     DateTime?              @db.Timestamptz(3)
+  unconfirmedReason StopUnconfirmedReason?
+
+  // Custo PROVISÓRIO calculado no fechamento do servidor, para exibir ao
+  // motorista/admin. Informativo: não debita, não captura. CHECK >= 0.
+  provisionalCostCents Int?
+
+  // Como a sessão foi fechada e com que prova de medidor.
+  closureSource   SessionClosureSource?
+  meterStopSource MeterStopSource?
+
+  // StopTransaction que chegou DEPOIS de a sessão já estar STOPPED (carregador
+  // enfileira offline e manda após o Boot). STOPPED é terminal: só REGISTRA.
+  // lateStopMeterWh no mesmo tipo de meterStopWh (Int). unbilledCostCents é a
+  // diferença de custo não cobrada — apenas informativo (igual ao REFUND);
+  // cobrar a diferença é decisão do dono. CHECK >= 0.
+  lateStopMeterWh    Int?
+  lateStopAt         DateTime? @db.Timestamptz(3) // timestamp do payload do carregador
+  lateStopReceivedAt DateTime? @db.Timestamptz(3) // now() do servidor ao receber
+  unbilledCostCents  Int?
+
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   meterSamples   MeterSample[]
   paymentIntents PaymentIntent[]
   debts          Debt[]
+  // Índice parcial do watchdog (F5.9) NÃO aparece aqui — Prisma não expressa
+  // WHERE em índice não-único. Vive só na migration 20261003120100:
+  //   ix_charging_session_watchdog (status, "lastActivityAt")
+  //   WHERE status IN (STARTED, CHARGING, FINISHING, FAULTED, STOP_UNCONFIRMED)
+  // `migrate diff --from-url` contra o banco migrado NÃO o acusa (verificado: só
+  // aparece o ux_ocpp_message_dedupe de sempre).
 
   @@index([operatorId, startedAt])
   @@index([siteId, startedAt])
