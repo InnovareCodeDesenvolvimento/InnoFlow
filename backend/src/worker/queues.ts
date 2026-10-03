@@ -69,3 +69,13 @@ export const VARRER_PREAUTORIZACOES_CARTAO_QUEUE_NAME = 'varrer-preautorizacoes-
 
 /** Sem dado próprio — mesmo espírito de `ExpirarTopupsPixJobData`. */
 export type VarrerPreAutorizacoesCartaoJobData = Record<string, never>
+
+/**
+ * Watchdog de sessões de recarga travadas (F5.9, 9b1) — job REPEATABLE (`upsertJobScheduler`, mesmo padrão de
+ * `varrerPreAutorizacoesCartaoJob.ts`), sem dado próprio: cada disparo reavalia TODAS as sessões abertas/em confirmação no momento em
+ * que roda. Ver `services/sessao/vigiarSessoes.ts`.
+ */
+export const VIGIAR_SESSOES_QUEUE_NAME = 'vigiar-sessoes'
+
+/** Sem dado próprio — mesmo espírito de `VarrerPreAutorizacoesCartaoJobData`. */
+export type VigiarSessoesJobData = Record<string, never>

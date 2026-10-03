@@ -5,6 +5,7 @@ import { startCreditarTopupPixWorker } from '../worker/jobs/creditarTopupPixJob'
 import { startExpirarTopupsPixWorker, scheduleExpirarTopupsPixScan } from '../worker/jobs/expirarTopupsPixJob'
 import { startCapturarSessaoCartaoWorker } from '../worker/jobs/capturarSessaoCartaoJob'
 import { startVarrerPreAutorizacoesCartaoWorker, scheduleVarrerPreAutorizacoesCartaoScan } from '../worker/jobs/varrerPreAutorizacoesCartaoJob'
+import { startVigiarSessoesWorker, scheduleVigiarSessoesScan } from '../worker/jobs/vigiarSessoesJob'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -25,6 +26,13 @@ startCapturarSessaoCartaoWorker()
 startVarrerPreAutorizacoesCartaoWorker()
 scheduleVarrerPreAutorizacoesCartaoScan().catch((err) =>
   logger.error({ err }, '[worker] falha ao agendar a varredura de pré-autorizações de cartão — o worker segue de pé, mas sem varredura automática até reiniciar'),
+)
+
+// F5.9 (Vega, 2026-10-03): watchdog de sessões travadas (M5/M6) — reavalia as sessões abertas/em confirmação a cada
+// SESSION_WATCHDOG_INTERVAL_MS (ver services/sessao/vigiarSessoes.ts). Falhar ao agendar não derruba o worker.
+startVigiarSessoesWorker()
+scheduleVigiarSessoesScan().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar o watchdog de sessões — o worker segue de pé, mas sem vigilância automática até reiniciar'),
 )
 
 logger.info('worker ok')
