@@ -12,25 +12,18 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend — lint, typecheck, migrate, test (Postgres + Redis reais)
+    name: Backend — lint, typecheck, migrate, test (Postgres 16 + Redis 7 reais)
     runs-on: ubuntu-latest
+    # Trava contra suíte pendurada (o default do GitHub é 360 min). A suíte de integração leva alguns minutos;
+    # 30 é folga larga, não um alvo.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
+    # Redis 7 como service (o passo "Confirmar versões" falha se não for 7.x). O Postgres NÃO é `services:` de
+    # propósito — ver o passo "Postgres 16": service container do GitHub não aceita argumentos de comando
+    # (`-c max_connections=...`); só `docker run` aceita.
     services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: innoelektron_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
       redis:
         image: redis:7-alpine
         ports:
@@ -46,7 +39,45 @@ jobs:
       # CI-only — JWT_SECRET virou obrigatório na Fase 3 (Vega, auth da API).
       # Nunca reutilizar este valor fora de CI.
       JWT_SECRET: ci-test-secret-nao-usar-em-producao-0000000000
+      # `PAYMENT_SECRETS_KEY` NÃO entra aqui: a chave de teste vem fixa do `test.env` do `vitest.config.mts`
+      # (precisa existir ANTES do 1º import de `env.ts`, o que só o `test.env` garante). Os demais segredos de
+      # pagamento (CIELO_*) os próprios testes definem.
     steps:
+      # Postgres 16 com `max_connections` alto. A suíte de integração abre muitas conexões: cada arquivo de teste tem
+      # o seu PrismaClient, em workers paralelos, mais os bancos próprios de `bancoProprio.ts` (`CREATE DATABASE` +
+      # `migrate deploy` + um PrismaClient admin) — medido em ~60-90 no dev; o default do Postgres é 100, margem
+      # curta demais se a CI ganhar núcleos (= mais workers). O usuário `postgres` é superuser (tem o CREATEDB que
+      # `bancoProprio.ts` exige).
+      - name: Postgres 16 (max_connections=300)
+        working-directory: .
+        shell: bash
+        run: |
+          docker run -d --name pg-ci \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=innoelektron_test \
+            -p 5432:5432 \
+            --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d innoelektron_test" \
+            --health-interval 5s --health-timeout 5s --health-retries 12 \
+            postgres:16-alpine -c max_connections=300
+          # `-h 127.0.0.1` de propósito: durante o initdb a imagem sobe um servidor TEMPORÁRIO só em socket unix
+          # (sem TCP) e depois reinicia; `pg_isready` pelo socket diria "pronto" cedo demais.
+          for i in $(seq 1 40); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' pg-ci)" = "healthy" ]; then echo "Postgres healthy"; exit 0; fi
+            sleep 3
+          done
+          echo "::error::Postgres nao ficou healthy em 2 min"
+          docker logs pg-ci
+          exit 1
+      - name: Confirmar versões e limites (Postgres 16, Redis 7, max_connections)
+        working-directory: .
+        shell: bash
+        run: |
+          pg_ver=$(docker exec pg-ci psql -U postgres -tAc "SHOW server_version_num")
+          pg_max=$(docker exec pg-ci psql -U postgres -tAc "SHOW max_connections")
+          redis_ver=$(docker exec "$(docker ps -q --filter ancestor=redis:7-alpine)" redis-cli INFO server | tr -d '\r' | sed -n 's/^redis_version://p')
+          echo "postgres server_version_num=$pg_ver max_connections=$pg_max redis_version=$redis_ver"
+          case "$pg_ver" in 16*) ;; *) echo "::error::Postgres nao e 16.x ($pg_ver)"; exit 1;; esac
+          [ "$pg_max" = "300" ] || { echo "::error::max_connections=$pg_max (esperado 300)"; exit 1; }
+          case "$redis_ver" in 7.*) ;; *) echo "::error::Redis nao e 7.x ($redis_ver)"; exit 1;; esac
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -65,8 +96,34 @@ jobs:
         run: npx prisma migrate deploy
       - name: Typecheck
         run: npm run typecheck
+      # Auditoria de dependências: INFORMATIVA (não bloqueia). Vira anotação amarela no run; quem decide o que
+      # corrigir é o dono/Órion — um CVE novo numa dependência transitiva não pode travar um deploy de segurança.
+      - name: npm audit (informativo)
+        run: npm audit --audit-level=high || echo "::warning title=npm audit (backend)::vulnerabilidades high/critical encontradas - informativo, nao bloqueia. Rode 'npm audit' em backend/."
+      # A suíte inteira (unit + integração, Postgres/Redis REAIS — os testes NÃO têm skip por falta de banco; só o
+      # PROVA_TEMPO_REAL é opt-in e fica desligado). Duas travas contra "verde falso":
+      #  1. `shell: bash` + `pipefail`: sem isso, `npm test | tee` devolveria o exit do `tee` (sempre 0) e esconderia
+      #     o do Vitest. O Vitest já sai com 1 quando há "Unhandled Rejection" mesmo com todos os testes passando
+      #     (reproduzido: "Tests 1 passed / Errors 1 error" -> exit 1) — foi o que a Íris viu na suíte "verde".
+      #  2. o passo seguinte greppa o log (2ª guarda, independente do exit code).
       - name: Tests (Vitest — unit + integração com Postgres/Redis reais)
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/vitest.log"
+      - name: Guarda — suíte verde não pode esconder erro não tratado
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          # Se o passo de testes nem rodou (job já falhou antes), não há log — o job já está vermelho, não polua.
+          [ -f "$RUNNER_TEMP/vitest.log" ] || { echo "sem log do Vitest (passo de testes nao rodou)"; exit 0; }
+          sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/vitest.log" > "$RUNNER_TEMP/vitest.plain.log"
+          if grep -nE 'Unhandled (Rejection|Error)|caught [0-9]+ unhandled|^ *Errors +[0-9]+ error' "$RUNNER_TEMP/vitest.plain.log"; then
+            echo "::error title=Vitest::erro nao tratado durante a suite (Unhandled Rejection/Errors) - mesmo com testes verdes, isto e falha"
+            exit 1
+          fi
+          grep -qE '^ *Test Files ' "$RUNNER_TEMP/vitest.plain.log" || { echo "::error title=Vitest::sem o resumo final do Vitest (suite nao terminou?)"; exit 1; }
+          echo "ok: sem erros nao tratados e com resumo final"
 
   frontend:
     name: Frontend — lint, typecheck, build, test
@@ -86,8 +143,20 @@ jobs:
         run: npm run lint
       - name: Typecheck + build
         run: npm run build
+      # O worker do MSW (`public/mockServiceWorker.js`) é só de dev/E2E: não pode estar no site de produção nem no
+      # precache do PWA (portão final da F5). `vite.config.ts` o remove; aqui a CI garante que não regrida.
+      - name: dist sem mockServiceWorker (build de produção)
+        shell: bash
+        run: |
+          if [ -e dist/mockServiceWorker.js ]; then echo "::error::dist/mockServiceWorker.js presente no build de producao"; exit 1; fi
+          if grep -rl "mockServiceWorker" dist; then echo "::error::referencia a mockServiceWorker no dist/ (precache do PWA?)"; exit 1; fi
+          test -f dist/sw.js && test -f dist/pagamento-cartao.html && test -f dist/index.html
+          echo "ok: dist limpo"
       - name: Unit tests (Vitest)
         run: npm test
+      # Informativo, não bloqueia (ver o passo equivalente no backend).
+      - name: npm audit (informativo)
+        run: npm audit --audit-level=high || echo "::warning title=npm audit (frontend)::vulnerabilidades high/critical encontradas - informativo, nao bloqueia. Rode 'npm audit' em frontend/."
 
   e2e:
     name: E2E — smoke (Playwright)
