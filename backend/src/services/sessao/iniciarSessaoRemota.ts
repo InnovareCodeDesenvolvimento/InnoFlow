@@ -7,6 +7,7 @@ import { isChargePointOnline } from '../../core/estacoes/disponibilidade'
 import { sendCommand, OcppCommandTimeoutError } from '../../ocpp/commands'
 import { resolveActiveTariff } from '../../ocpp/tariffResolution'
 import { avaliarInicioSessao } from '../../core/carteira/avaliarInicioSessao'
+import { carregarSessoesNaoConfirmadas } from '../carteira/saldoComprometido'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { recordCommandResult, isAcceptedCommandResult } from '../../ocpp/commandResultCache'
 import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
@@ -130,6 +131,15 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
     walletBalanceCents = lastEntry?.balanceAfterCents ?? 0
   }
 
+  // F5.9 (D7): sessão do motorista em STOP_UNCONFIRMED. `SESSION_ALLOW_START_WHILE_UNCONFIRMED=false` => 409 (mesmo código de "já tem recarga em andamento",
+  // que é o contrato do app: a sessão ainda não foi confirmada como encerrada). `true` (padrão) => inicia, mas a carteira só conta o que a sessão pendente NÃO
+  // consome: saldo disponível = saldo - custo provisório das sessões WALLET em confirmação. Cartão: a pré-autorização nova é independente (não olha a carteira).
+  const pendentes = await carregarSessoesNaoConfirmadas(userId)
+  if (pendentes.total > 0 && !env.SESSION_ALLOW_START_WHILE_UNCONFIRMED) {
+    throw new AppError('Sua recarga anterior ainda está sendo confirmada. Aguarde para iniciar outra.', 409, 'ALREADY_HAS_ACTIVE_SESSION', [{ sessionId: pendentes.sessionId, pendingConfirmation: true }])
+  }
+  const availableBalanceCents = walletBalanceCents - pendentes.comprometidoCents
+
   if (mode === 'CARD') {
     // Dívida em aberto AINDA bloqueia — CARD não é isenção de dívida
     // (reconfirmado na decisão da Nova para a F5.4). Sem reusar
@@ -142,13 +152,13 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       token: { status: 'ACCEPTED', expiresAt: null, userId },
       now: new Date(),
       openDebt: !!openDebt,
-      funding: { kind: 'WALLET', balanceCents: walletBalanceCents, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS },
+      funding: { kind: 'WALLET', balanceCents: availableBalanceCents, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS },
     })
 
     if (resultado.decision !== 'Accepted') {
       if (resultado.reason === 'OPEN_DEBT') throw new AppError('Motorista tem dívida em aberto.', 409, 'DRIVER_HAS_OPEN_DEBT')
       throw new AppError('Saldo insuficiente para iniciar a recarga.', 409, 'INSUFFICIENT_BALANCE', [
-        { walletBalanceCents, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS },
+        { walletBalanceCents, committedCents: pendentes.comprometidoCents, availableBalanceCents, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS },
       ])
     }
   }

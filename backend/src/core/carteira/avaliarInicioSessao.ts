@@ -56,6 +56,12 @@ export interface AvaliarInicioSessaoInput {
   /** Já resolvido pelo chamador: existe `Debt` com `status='OPEN'` para este usuário? */
   openDebt: boolean
   funding: FundingSource
+  /**
+   * F5.9 (D7): o motorista tem sessão em `STOP_UNCONFIRMED` (o servidor acha que acabou, o carregador não confirmou)? `permitirInicio` é a chave
+   * `SESSION_ALLOW_START_WHILE_UNCONFIRMED` do dono. Existe e NÃO permitido => `Blocked`. Quando permitido, o chamador já desconta o saldo
+   * comprometido (`provisionalCostCents` das sessões WALLET em confirmação) de `funding.balanceCents` — esta função continua pura e só compara.
+   */
+  sessaoNaoConfirmada?: { existe: boolean; permitirInicio: boolean }
 }
 
 export type AvaliarInicioSessaoReason =
@@ -65,16 +71,17 @@ export type AvaliarInicioSessaoReason =
   | 'TOKEN_INVALID'
   | 'TOKEN_EXPIRED'
   | 'OPEN_DEBT'
+  | 'SESSION_PENDING_CONFIRMATION'
   | 'INSUFFICIENT_BALANCE'
 
 export type AvaliarInicioSessaoResultado =
   | { decision: 'Accepted' }
   | { decision: 'Invalid'; reason: 'UNKNOWN_TOKEN' | 'TOKEN_NOT_LINKED_TO_USER' | 'TOKEN_INVALID' }
-  | { decision: 'Blocked'; reason: 'TOKEN_BLOCKED' | 'OPEN_DEBT' | 'INSUFFICIENT_BALANCE' }
+  | { decision: 'Blocked'; reason: 'TOKEN_BLOCKED' | 'OPEN_DEBT' | 'SESSION_PENDING_CONFIRMATION' | 'INSUFFICIENT_BALANCE' }
   | { decision: 'Expired'; reason: 'TOKEN_EXPIRED' }
 
 export function avaliarInicioSessao(input: AvaliarInicioSessaoInput): AvaliarInicioSessaoResultado {
-  const { token, now, openDebt, funding } = input
+  const { token, now, openDebt, funding, sessaoNaoConfirmada } = input
 
   if (!token) {
     return { decision: 'Invalid', reason: 'UNKNOWN_TOKEN' }
@@ -98,6 +105,10 @@ export function avaliarInicioSessao(input: AvaliarInicioSessaoInput): AvaliarIni
 
   if (openDebt) {
     return { decision: 'Blocked', reason: 'OPEN_DEBT' }
+  }
+
+  if (sessaoNaoConfirmada?.existe && !sessaoNaoConfirmada.permitirInicio) {
+    return { decision: 'Blocked', reason: 'SESSION_PENDING_CONFIRMATION' }
   }
 
   if (funding.kind === 'WALLET' && funding.balanceCents < funding.minStartBalanceCents) {

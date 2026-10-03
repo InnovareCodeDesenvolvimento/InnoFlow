@@ -5,6 +5,7 @@ import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
+import { carregarSessoesNaoConfirmadas } from '../carteira/saldoComprometido'
 import { pedirParadaSessao } from './pedirParadaSessao'
 import { buscarUltimaAmostra } from './resolverLeituraFinal'
 
@@ -84,7 +85,9 @@ export async function avaliarGuardaDeSaldo(session: SessaoParaGuarda, latestEner
       { pisoCents: env.RESERVA_PISO_CENTS, tetoCents: env.RESERVA_TETO_CENTS },
     )
 
-    limiteCents = Math.min(saldoDisponivelCents, tetoEfetivoCents)
+    // F5.9 (D7): outra sessão do motorista em STOP_UNCONFIRMED ainda vai debitar o custo provisório dela — esse saldo já está comprometido.
+    const outras = await carregarSessoesNaoConfirmadas(session.userId, { excetoSessionId: session.id })
+    limiteCents = Math.min(Math.max(0, saldoDisponivelCents - outras.comprometidoCents), tetoEfetivoCents)
   }
 
   const energyDeliveredWh = Math.max(0, latestEnergyWh - session.meterStartWh)

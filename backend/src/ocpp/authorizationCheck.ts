@@ -1,6 +1,7 @@
 import type { AuthToken } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { env } from '../lib/env'
+import { carregarSessoesNaoConfirmadas } from '../services/carteira/saldoComprometido'
 import { avaliarInicioSessao, type AvaliarInicioSessaoResultado, type FundingSource } from '../core/carteira/avaliarInicioSessao'
 
 /**
@@ -38,6 +39,7 @@ export async function checkAuthorization(idTag: string, now: Date = new Date()):
   let walletBalanceCents = 0
   let openDebt = false
   let cardPaymentIntent: { id: string; amountAuthorizedCents: number } | null = null
+  let sessaoNaoConfirmada: { existe: boolean; permitirInicio: boolean } | undefined
   let funding: FundingSource = { kind: 'WALLET', balanceCents: 0, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS }
 
   if (token?.userId) {
@@ -55,12 +57,17 @@ export async function checkAuthorization(idTag: string, now: Date = new Date()):
       walletBalanceCents = lastEntry?.balanceAfterCents ?? 0
     }
 
+    // F5.9 (D7): MESMA regra de `iniciarSessaoRemota` — o Authorize/StartTransaction (RFID, ou o idTag virtual do app) enxerga o saldo já comprometido.
+    const pendentes = await carregarSessoesNaoConfirmadas(token.userId)
+    sessaoNaoConfirmada = { existe: pendentes.total > 0, permitirInicio: env.SESSION_ALLOW_START_WHILE_UNCONFIRMED }
+    const saldoDisponivelCents = walletBalanceCents - pendentes.comprometidoCents
+
     const intent = token.paymentIntent
     if (intent && intent.purpose === 'SESSION_CARD_CAPTURE' && intent.status === 'AUTHORIZED') {
       cardPaymentIntent = { id: intent.id, amountAuthorizedCents: intent.amountAuthorizedCents ?? 0 }
       funding = { kind: 'CARD_PREAUTH', authorizedCents: cardPaymentIntent.amountAuthorizedCents }
     } else {
-      funding = { kind: 'WALLET', balanceCents: walletBalanceCents, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS }
+      funding = { kind: 'WALLET', balanceCents: saldoDisponivelCents, minStartBalanceCents: env.WALLET_MIN_START_BALANCE_CENTS }
     }
   }
 
@@ -69,6 +76,7 @@ export async function checkAuthorization(idTag: string, now: Date = new Date()):
     now,
     openDebt,
     funding,
+    sessaoNaoConfirmada,
   })
 
   return { resultado, token, walletBalanceCents, cardPaymentIntent }
