@@ -11,8 +11,8 @@ import { encerrarSessaoPeloServidor } from '../../src/services/sessao/encerrarSe
 import { chaveCooldownParada, chaveToquesHumanos, LIMITE_TOQUES_HUMANOS, pedirParadaSessao } from '../../src/services/sessao/pedirParadaSessao'
 import { chaveTriggerMeterValues } from '../../src/services/sessao/triggerMeterValues'
 import { vigiarSessoes } from '../../src/services/sessao/vigiarSessoes'
-import { chamarHandler, comFakeGateway, criarCenario, cenariosCriados, criarSessao, minutosAtras, resolverCapturasPendentes, tokenDoMotorista, type Cenario } from './helpers/sessaoTravadaFixture'
-import { createUser, uniqueSuffix, waitFor, settle } from './helpers/fixtures'
+import { comFakeGateway, criarCenario, cenariosCriados, criarSessao, minutosAtras, resolverCapturasPendentes, tokenDoMotorista, type Cenario } from './helpers/sessaoTravadaFixture'
+import { uniqueSuffix, waitFor, settle } from './helpers/fixtures'
 import type { FotoDaSessao } from '../../src/services/sessao/travarSessao'
 
 const cancelar = vi.hoisted(() => ({ travar: false }))
