@@ -86,7 +86,7 @@ export async function pedirParadaSessao(params: PedirParadaSessaoParams): Promis
   if (registro.tipo !== 'OK') return { registrado: false, motivo: registro.tipo }
 
   params.onRegistrado?.({ tentativa: registro.tentativa })
-  await guardarEnergiaNoPedido(redis, sessionId).catch((err) => logger.warn({ err, sessionId }, '[sessao] não guardou a energia do pedido de parada (só enfraquece o alerta session_stop_not_obeyed)'))
+  await guardarEnergiaNoPedido(redis, sessionId, registro.chargePointId).catch((err) => logger.warn({ err, sessionId }, '[sessao] não guardou a energia do pedido de parada (só enfraquece o alerta session_stop_not_obeyed)'))
 
   // 3. Comando — fora de qualquer transação.
   logger.info({ sessionId, chargePointId: registro.chargePointId, requestedBy: solicitante, attempt: registro.tentativa }, '[sessao] RemoteStopTransaction disparado')
@@ -111,8 +111,8 @@ export async function pedirParadaSessao(params: PedirParadaSessaoParams): Promis
   return { registrado: true, tentativa: registro.tentativa, comando, marcacao }
 }
 
-async function guardarEnergiaNoPedido(redis: typeof redisPadrao, sessionId: string): Promise<void> {
-  const amostra = await buscarUltimaAmostra(prisma, sessionId)
+async function guardarEnergiaNoPedido(redis: typeof redisPadrao, sessionId: string, chargePointId: string): Promise<void> {
+  const amostra = await buscarUltimaAmostra(prisma, sessionId, chargePointId)
   if (!amostra) return
   await withDeadline(redis.set(chaveEnergiaNoPedidoDeParada(sessionId), String(amostra.meterWh), 'EX', ENERGIA_NO_PEDIDO_TTL_SEGUNDOS), REDIS_PRAZO_MS, 'energia no pedido de parada')
 }

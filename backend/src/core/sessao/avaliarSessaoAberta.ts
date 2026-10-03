@@ -181,6 +181,8 @@ export type TipoAlertaSessao =
   | 'session_cost_calculation_failed'
   // ALTO-2 (Órion): StopTransaction/MeterValues de um carregador com o transactionId de OUTRO carregador.
   | 'ocpp_foreign_transaction'
+  // BAIXO-3 (Órion): MeterValues sem transactionId — não vira prova de leitura e pode empurrar a sessão para NO_READING.
+  | 'ocpp_meter_values_without_transaction'
 
 export type RegraSessao = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R5_CARTAO' | 'R6' | 'U1' | 'U2' | 'NENHUMA'
 

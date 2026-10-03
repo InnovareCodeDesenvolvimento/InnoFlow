@@ -8,7 +8,8 @@ import { meterValuesReqSchema } from '../schemas/meterValues'
 import { defineOcppHandler } from './defineHandler'
 import { emitSessionMetrics } from '../../realtime/emit'
 import { avaliarGuardaDeSaldo } from '../../services/sessao/guardaDeSaldo'
-import { alertarSessaoLimitado } from '../../services/sessao/alertasSessao'
+import { alertarLimitadoPorEscopo, alertarSessaoLimitado } from '../../services/sessao/alertasSessao'
+import { tratarTransacaoNaoEncontrada } from '../transacaoDoCarregador'
 
 const ENERGY_MEASURANDS = new Set([
   'Energy.Active.Import.Register',
@@ -29,9 +30,10 @@ function normalizeEnergyToWh(measurand: string, rawValue: number, unit: string |
 }
 
 export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReqSchema, async (data, ctx) => {
+  // ALTO-2: a transação tem de ser DESTE carregador (o id é sequencial e global) — senão forjava MeterValues em sessão alheia.
   const session = data.transactionId
-    ? await prisma.chargingSession.findUnique({
-        where: { ocppTransactionId: data.transactionId },
+    ? await prisma.chargingSession.findFirst({
+        where: { ocppTransactionId: data.transactionId, chargePointId: ctx.chargePointId },
         select: {
           id: true,
           userId: true,
@@ -49,6 +51,18 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
         },
       })
     : null
+
+  if (data.transactionId !== undefined && !session) {
+    await tratarTransacaoNaoEncontrada(ctx, data.transactionId, 'MeterValues')
+  } else if (data.transactionId === undefined && data.connectorId > 0) {
+    // BAIXO-3 (Órion): MeterValues sem transactionId não vira prova de leitura (sessionId nulo) e a sessão do conector pode cair em NO_READING.
+    void alertarLimitadoPorEscopo(
+      'ocpp_meter_values_without_transaction',
+      `${ctx.chargePointId}:${data.connectorId}`,
+      { chargePointId: ctx.chargePointId, connectorId: data.connectorId },
+      'MeterValues SEM transactionId — as amostras são gravadas sem sessão e NÃO contam como leitura de nenhuma recarga (firmware/configuração?)',
+    ).catch(() => undefined)
+  }
 
   let latestEnergyWh: number | null = null
   let latestPowerW: number | null = null

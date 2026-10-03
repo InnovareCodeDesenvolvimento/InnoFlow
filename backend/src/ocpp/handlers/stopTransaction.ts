@@ -5,6 +5,7 @@ import { finalizarSessao } from '../../services/carteira/finalizarSessao'
 import { enqueueLiquidarSessaoRetry } from '../../services/carteira/liquidarSessao'
 import { registrarStopTardio } from '../../services/sessao/registrarStopTardio'
 import { defineOcppHandler } from './defineHandler'
+import { tratarTransacaoNaoEncontrada } from '../transacaoDoCarregador'
 
 /**
  * F4 (2026-09-17): agora calcula custo de verdade e liquida a carteira via
@@ -31,12 +32,14 @@ import { defineOcppHandler } from './defineHandler'
  * passa a ser só `StatusNotification`, ver `statusNotification.ts`).
  */
 export const handleStopTransaction = defineOcppHandler('StopTransaction', stopTransactionReqSchema, async (data, ctx) => {
-  const existing = await prisma.chargingSession.findUnique({
-    where: { ocppTransactionId: data.transactionId },
+  // ALTO-2: a transação tem de ser DESTE carregador (o id é sequencial e global).
+  const existing = await prisma.chargingSession.findFirst({
+    where: { ocppTransactionId: data.transactionId, chargePointId: ctx.chargePointId },
     select: { id: true, status: true },
   })
 
   if (!existing) {
+    await tratarTransacaoNaoEncontrada(ctx, data.transactionId, 'StopTransaction')
     logger.warn({ chargePointId: ctx.chargePointId, transactionId: data.transactionId }, '[ocpp] StopTransaction: transactionId desconhecido')
     return { idTagInfo: { status: 'Accepted' } }
   }

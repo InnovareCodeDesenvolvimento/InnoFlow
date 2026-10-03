@@ -148,7 +148,7 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
   // Provas de leitura: só interessam para quem pode ser encerrado (STOP_UNCONFIRMED).
   let provas: ProvasDeLeitura = { stopTransactionNoLog: false, ultimaAmostra: false }
   if (isSessaoNaoConfirmada(sessao.status)) {
-    const [stopNoLog, amostra] = await Promise.all([buscarStopTransactionNoLog(prisma, sessao), buscarUltimaAmostra(prisma, sessao.id)])
+    const [stopNoLog, amostra] = await Promise.all([buscarStopTransactionNoLog(prisma, sessao), buscarUltimaAmostra(prisma, sessao.id, sessao.chargePointId)])
     provas = { stopTransactionNoLog: stopNoLog !== null, ultimaAmostra: amostra !== null }
   }
 
@@ -157,7 +157,7 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
   if (isSessaoAberta(sessao.status) && sessao.stopRequestedAt) {
     const guardada = await redisSeguro(() => redis.get(chaveEnergiaNoPedidoDeParada(sessao.id)), 'energia no pedido de parada')
     if (guardada !== null && guardada !== undefined) {
-      const amostra = await buscarUltimaAmostra(prisma, sessao.id)
+      const amostra = await buscarUltimaAmostra(prisma, sessao.id, sessao.chargePointId)
       energyAdvancedSinceStopRequest = amostra !== null && amostra.meterWh > Number(guardada)
     }
   }
@@ -278,7 +278,7 @@ async function executar(decisao: DecisaoSessao, sessao: SessaoVigiada, foto: Fot
 /** R6: a guarda de saldo com a última energia conhecida (sem amostra, energia entregue 0 — o que cresce é o custo por tempo). Com prazo: ver `GUARDA_PRAZO_MS`. */
 async function reavaliarGuarda(sessionId: string, aguardarComandos: boolean): Promise<void> {
   const guarda = await carregarSessaoParaGuarda(sessionId)
-  const energia = await ultimaEnergiaConhecida(sessionId, guarda.meterStartWh)
+  const energia = await ultimaEnergiaConhecida(sessionId, guarda.chargePointId, guarda.meterStartWh)
   await withDeadline(avaliarGuardaDeSaldo(guarda, energia, { aguardarComando: aguardarComandos }), GUARDA_PRAZO_MS, 'guarda de saldo')
 }
 

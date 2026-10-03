@@ -19,6 +19,7 @@ const SEVERIDADE: Record<Exclude<TipoAlertaSessao, 'session_late_stop_transactio
   card_session_hold_deadline: 'error',
   session_cost_calculation_failed: 'error',
   ocpp_foreign_transaction: 'error',
+  ocpp_meter_values_without_transaction: 'warn',
 }
 
 export function severidadeDoAlerta(tipo: TipoAlertaSessao, contexto: { diferencaCents?: number } = {}): SeveridadeAlerta {

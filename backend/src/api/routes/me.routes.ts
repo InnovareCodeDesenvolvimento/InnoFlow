@@ -219,7 +219,7 @@ router.get(
       JOIN "Tariff" t ON t.id = cs."tariffId"
       LEFT JOIN LATERAL (
         SELECT ms.value FROM "MeterSample" ms
-        WHERE ms."sessionId" = cs.id AND ms.measurand = 'Energy.Active.Import.Register'
+        WHERE ms."sessionId" = cs.id AND ms."chargePointId" = cs."chargePointId" AND ms.measurand = 'Energy.Active.Import.Register'
         ORDER BY ms.ts DESC LIMIT 1
       ) latest_meter ON true
       LEFT JOIN LATERAL (

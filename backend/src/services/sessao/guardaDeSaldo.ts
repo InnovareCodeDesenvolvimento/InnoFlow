@@ -152,7 +152,7 @@ export async function carregarSessaoParaGuarda(sessionId: string): Promise<Sessa
  * Última energia conhecida (Wh, medidor cumulativo). Sem nenhuma amostra, o próprio `meterStartWh` — energia entregue 0, NUNCA uma
  * estimativa: o que cresce sem amostra é só o custo por tempo/ociosidade, e é isso que a R6 quer reavaliar.
  */
-export async function ultimaEnergiaConhecida(sessionId: string, meterStartWh: number): Promise<number> {
-  const amostra = await buscarUltimaAmostra(prisma, sessionId)
+export async function ultimaEnergiaConhecida(sessionId: string, chargePointId: string, meterStartWh: number): Promise<number> {
+  const amostra = await buscarUltimaAmostra(prisma, sessionId, chargePointId)
   return amostra ? amostra.meterWh : meterStartWh
 }

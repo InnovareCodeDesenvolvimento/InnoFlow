@@ -13,7 +13,7 @@ import { severidadeDoAlerta } from '../../core/sessao/severidadeAlertas'
  * Nunca nome, e-mail, idTag ou userId. Quem chama passa `campos` já limpos.
  */
 export interface CamposAlertaSessao {
-  sessionId: string
+  sessionId?: string
   chargePointId?: string
   [chave: string]: unknown
 }
@@ -41,6 +41,20 @@ const REDIS_PRAZO_MS = 2_000
  */
 export async function alertarSessaoLimitado(
   tipo: TipoAlertaSessao,
+  campos: CamposAlertaSessao & { sessionId: string },
+  mensagem: string,
+  opcoes: { redis?: Redis; janelaSegundos?: number } = {},
+): Promise<boolean> {
+  return alertarLimitadoPorEscopo(tipo, campos.sessionId, campos, mensagem, opcoes)
+}
+
+/**
+ * Mesma ideia para alertas que NÃO são de uma sessão específica (ex.: `ocpp_foreign_transaction`, MeterValues sem transactionId): o limite é por
+ * (tipo, `escopo`) — o chamador escolhe a chave (ex.: `carregador:transação`). Sem dado pessoal no `escopo` nem nos campos.
+ */
+export async function alertarLimitadoPorEscopo(
+  tipo: TipoAlertaSessao,
+  escopo: string,
   campos: CamposAlertaSessao,
   mensagem: string,
   opcoes: { redis?: Redis; janelaSegundos?: number } = {},
@@ -48,7 +62,7 @@ export async function alertarSessaoLimitado(
   const redis = opcoes.redis ?? redisPadrao
   let emitir = true
   try {
-    const r = await withDeadline(redis.set(chaveAlertaLimitado(tipo, campos.sessionId), '1', 'EX', opcoes.janelaSegundos ?? ALERTA_LIMITADO_PADRAO_SEGUNDOS, 'NX'), REDIS_PRAZO_MS, 'limite de alerta repetido')
+    const r = await withDeadline(redis.set(chaveAlertaLimitado(tipo, escopo), '1', 'EX', opcoes.janelaSegundos ?? ALERTA_LIMITADO_PADRAO_SEGUNDOS, 'NX'), REDIS_PRAZO_MS, 'limite de alerta repetido')
     emitir = r === 'OK'
   } catch (err) {
     logger.warn({ err, label: 'limite de alerta repetido' }, '[sessao][watchdog] Redis indisponível para limitar o alerta — emitindo sem limite')

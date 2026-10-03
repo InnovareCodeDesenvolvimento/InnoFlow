@@ -52,9 +52,10 @@ export async function buscarStopTransactionNoLog(tx: Prisma.TransactionClient, s
   return null
 }
 
-export async function buscarUltimaAmostra(tx: Prisma.TransactionClient, sessionId: string): Promise<LeituraAmostra | null> {
+/** ALTO-2: filtra TAMBÉM pelo carregador da sessão — amostra gravada com o `sessionId` certo mas por OUTRO carregador não é prova. */
+export async function buscarUltimaAmostra(tx: Prisma.TransactionClient, sessionId: string, chargePointId: string): Promise<LeituraAmostra | null> {
   const amostra = await tx.meterSample.findFirst({
-    where: { sessionId, measurand: 'Energy.Active.Import.Register' },
+    where: { sessionId, chargePointId, measurand: 'Energy.Active.Import.Register' },
     orderBy: { ts: 'desc' },
     select: { value: true, ts: true },
   })
@@ -62,7 +63,7 @@ export async function buscarUltimaAmostra(tx: Prisma.TransactionClient, sessionI
 }
 
 export async function resolverLeituraFinal(tx: Prisma.TransactionClient, sessao: SessaoParaLeitura): Promise<LeituraResolvida> {
-  const [stopNoLog, ultimaAmostra] = await Promise.all([buscarStopTransactionNoLog(tx, sessao), buscarUltimaAmostra(tx, sessao.id)])
+  const [stopNoLog, ultimaAmostra] = await Promise.all([buscarStopTransactionNoLog(tx, sessao), buscarUltimaAmostra(tx, sessao.id, sessao.chargePointId)])
   const leitura = escolherLeituraFinal({ stopNoLog, ultimaAmostra, meterStartWh: sessao.meterStartWh, startedAt: sessao.startedAt, chargingEndedAt: sessao.chargingEndedAt })
   const reason = leitura.reason && leitura.reason in STOP_REASON_MAP ? STOP_REASON_MAP[leitura.reason as keyof typeof STOP_REASON_MAP] : null
   return { ...leitura, stopReason: reason }
