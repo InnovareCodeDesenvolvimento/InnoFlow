@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { redis as redisPadrao } from '../../lib/redis'
 import { logger } from '../../lib/logger'
 import { withDeadline } from '../../lib/withDeadline'
+import { incrWithTtl } from '../../lib/redisCounter'
 import { listarEstadosSessaoAberta } from '../../core/sessao/estadosSessao'
 import { sendCommand, OcppCommandTimeoutError } from '../../ocpp/commands'
 import { isAcceptedCommandResult } from '../../ocpp/commandResultCache'
@@ -42,7 +43,7 @@ export interface PedirParadaSessaoParams {
 export type ResultadoComandoParada = 'ACCEPTED' | 'REJECTED' | 'TIMEOUT' | 'UNREACHABLE'
 
 export type PedirParadaSessaoResultado =
-  | { registrado: false; motivo: 'NAO_ABERTA' | 'EM_COOLDOWN' | 'CONDICAO_MUDOU' }
+  | { registrado: false; motivo: 'NAO_ABERTA' | 'EM_COOLDOWN' | 'CONDICAO_MUDOU' | 'LIMITE_DE_TOQUES' }
   | { registrado: true; tentativa: number; comando: ResultadoComandoParada; marcacao: MarcarSessaoNaoConfirmadaResultado | null }
 
 const COMMAND_TIMEOUT_MS = 35_000
@@ -51,6 +52,15 @@ const REDIS_PRAZO_MS = 3_000
 const COOLDOWN_SEGUNDOS: Record<SessionStopRequester, number> = { DRIVER: 10, ADMIN: 10, GUARD: 10, WATCHDOG: 60 }
 const ENERGIA_NO_PEDIDO_TTL_SEGUNDOS = 24 * 3600
 
+/**
+ * M6 (Órion): o teto `SESSION_STOP_MAX_ATTEMPTS` é do SERVIDOR (guarda e watchdog). Toque de motorista/admin NÃO conta para ele — 3 toques espaçados de 10 s levavam
+ * `stopAttempts` a 3: o R3 passava a só marcar e a reanimação ficava bloqueada para sempre (e com o Redis fora o cooldown some). Humanos têm limite PRÓPRIO,
+ * em janela, para não martelar o carregador: passou disso, o toque é ignorado (o pedido em curso já cobre).
+ */
+export const LIMITE_TOQUES_HUMANOS = 6
+const JANELA_TOQUES_HUMANOS_SEGUNDOS = 300
+
+export const chaveToquesHumanos = (sessionId: string) => `session:stop-human:${sessionId}`
 export const chaveCooldownParada = (sessionId: string) => `session:stop-cooldown:${sessionId}`
 /** Última energia (Wh) conhecida NO MOMENTO do pedido de parada — base do alerta `session_stop_not_obeyed` (energia que continua subindo). */
 export const chaveEnergiaNoPedidoDeParada = (sessionId: string) => `session:stop-energy:${sessionId}`
@@ -67,21 +77,30 @@ export async function pedirParadaSessao(params: PedirParadaSessaoParams): Promis
     logger.warn({ err, sessionId }, '[sessao] cooldown do pedido de parada indisponível (Redis) — seguindo sem ele')
   }
 
+  const humano = solicitante === 'DRIVER' || solicitante === 'ADMIN'
+  if (humano) {
+    try {
+      const toques = await withDeadline(incrWithTtl(redis, chaveToquesHumanos(sessionId), JANELA_TOQUES_HUMANOS_SEGUNDOS), REDIS_PRAZO_MS, 'limite de toques humanos')
+      if (toques > LIMITE_TOQUES_HUMANOS) return { registrado: false, motivo: 'LIMITE_DE_TOQUES' }
+    } catch (err) {
+      logger.warn({ err, sessionId }, '[sessao] limite de toques humanos indisponível (Redis) — seguindo (toque humano não conta para o teto do servidor de qualquer forma)')
+    }
+  }
+
   // 2. Registro do pedido, sob lock.
   const registro = await prisma.$transaction(async (tx) => {
     const travada = await travarSessao(tx, sessionId)
     if (!(listarEstadosSessaoAberta() as string[]).includes(travada.status)) return { tipo: 'NAO_ABERTA' as const }
     if (params.fotoEsperada && !fotoAindaVale(travada, params.fotoEsperada)) return { tipo: 'CONDICAO_MUDOU' as const }
 
-    const humano = solicitante === 'DRIVER' || solicitante === 'ADMIN'
     // O 1º solicitante vence nas repetições do watchdog (quem PEDIU primeiro é a informação útil); um humano sempre assume.
     const quem = travada.stopRequestedBy === null || humano ? solicitante : travada.stopRequestedBy
     const atualizadas = await tx.chargingSession.updateMany({
       where: { id: sessionId, status: { in: listarEstadosSessaoAberta() } },
-      data: { stopRequestedAt: new Date(), stopRequestedBy: quem, stopAttempts: { increment: 1 } },
+      data: { stopRequestedAt: new Date(), stopRequestedBy: quem, ...(humano ? {} : { stopAttempts: { increment: 1 } }) }, // M6: só GUARD/WATCHDOG contam
     })
     if (atualizadas.count !== 1) return { tipo: 'NAO_ABERTA' as const }
-    return { tipo: 'OK' as const, tentativa: travada.stopAttempts + 1, chargePointId: travada.chargePointId, ocppTransactionId: travada.ocppTransactionId }
+    return { tipo: 'OK' as const, tentativa: travada.stopAttempts + (humano ? 0 : 1), chargePointId: travada.chargePointId, ocppTransactionId: travada.ocppTransactionId }
   })
   if (registro.tipo !== 'OK') return { registrado: false, motivo: registro.tipo }
 

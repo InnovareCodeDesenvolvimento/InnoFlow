@@ -399,7 +399,7 @@ describe('API da sessão travada (Postgres + Redis reais)', () => {
         expect(resultado).toBe('REJECTED') // o resultado REAL do carregador, para os dois toques
         expect(recebidos.filter((x) => x.method === 'RemoteStopTransaction')).toHaveLength(1)
       })
-      expect((await sessao(s.session.id)).stopAttempts).toBe(1)
+      expect((await sessao(s.session.id)).stopAttempts).toBe(0) // M6: toque humano não conta para o teto do servidor
     })
 
     it('toque simultâneo (Promise.all): mesma coisa — um correlationId, um comando', async () => {

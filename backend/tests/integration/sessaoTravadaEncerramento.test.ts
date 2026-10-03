@@ -94,13 +94,14 @@ describe('Serviços de sessão travada (Postgres + Redis reais)', () => {
       const s = await criarSessao(cen, { mode: 'WALLET', saldoCents: 5_000, amostrasWh: [2_000] })
       await comFakeGateway(cen.tenant.chargePointId, { RemoteStopTransaction: 'Accepted' }, async (recebidos) => {
         const r = await pedirParadaSessao({ sessionId: s.session.id, solicitante: 'DRIVER' })
-        expect(r).toMatchObject({ registrado: true, tentativa: 1, comando: 'ACCEPTED', marcacao: null })
+        // MUDANÇA DELIBERADA (M6 do Órion): pedido de DRIVER/ADMIN não conta para o teto de tentativas do servidor — `stopAttempts` fica 0 (só GUARD/WATCHDOG contam).
+        expect(r).toMatchObject({ registrado: true, tentativa: 0, comando: 'ACCEPTED', marcacao: null })
         expect(recebidos).toEqual([{ method: 'RemoteStopTransaction', params: { transactionId: s.session.ocppTransactionId } }])
       })
       const linha = await sessao(s.session.id)
       expect(linha.status).toBe('CHARGING')
       expect(linha.stopRequestedBy).toBe('DRIVER')
-      expect(linha.stopAttempts).toBe(1)
+      expect(linha.stopAttempts).toBe(0) // M6: toque humano não conta
       expect(linha.stopRequestedAt).not.toBeNull()
       expect(await debitosDaSessao(s.session.id)).toHaveLength(0)
     })
@@ -144,7 +145,7 @@ describe('Serviços de sessão travada (Postgres + Redis reais)', () => {
       })
       const linha = await sessao(s.session.id)
       expect(linha.status).toBe('CHARGING')
-      expect(linha.stopAttempts).toBe(1)
+      expect(linha.stopAttempts).toBe(0) // M6: toque humano não conta
       expect(linha.unconfirmedAt).toBeNull()
     })
 
@@ -164,7 +165,7 @@ describe('Serviços de sessão travada (Postgres + Redis reais)', () => {
         await redis.del(chaveCooldownParada(s.session.id))
         await pedirParadaSessao({ sessionId: s.session.id, solicitante: 'DRIVER' })
         const terceira = await sessao(s.session.id)
-        expect(terceira.stopAttempts).toBe(3)
+        expect(terceira.stopAttempts).toBe(2) // M6: o toque do DRIVER não conta (só GUARD e WATCHDOG)
         expect(terceira.stopRequestedBy).toBe('DRIVER')
       })
     })
@@ -177,7 +178,7 @@ describe('Serviços de sessão travada (Postgres + Redis reais)', () => {
         expect([a, b].find((x) => !x.registrado)).toEqual({ registrado: false, motivo: 'EM_COOLDOWN' })
         expect(recebidos.filter((c) => c.method === 'RemoteStopTransaction')).toHaveLength(1)
       })
-      expect((await sessao(s.session.id)).stopAttempts).toBe(1)
+      expect((await sessao(s.session.id)).stopAttempts).toBe(0) // M6: toque humano não conta; o que importa é UM comando só
     })
 
     it.each(['STOPPED', 'STOP_UNCONFIRMED'] as const)('sessão %s: NAO_ABERTA, nada gravado e nenhum comando', async (status) => {

@@ -44,7 +44,8 @@ describe('pedirParadaSessao — classificação da resposta do carregador', () =
   it('Accepted: registra o pedido, manda o comando com o transactionId e NÃO marca a sessão', async () => {
     sendCommandMock.mockResolvedValue({ status: 'Accepted' })
     const r = await pedirParadaSessao({ sessionId: 's1', solicitante: 'DRIVER' })
-    expect(r).toEqual({ registrado: true, tentativa: 1, comando: 'ACCEPTED', marcacao: null })
+    // MUDANÇA DELIBERADA (M6 do Órion): pedido de DRIVER/ADMIN não conta para o teto de tentativas do servidor — `stopAttempts` fica 0 (só GUARD/WATCHDOG contam).
+    expect(r).toEqual({ registrado: true, tentativa: 0, comando: 'ACCEPTED', marcacao: null })
     expect(sendCommandMock).toHaveBeenCalledWith('cp1', 'RemoteStopTransaction', { transactionId: 77 }, expect.objectContaining({ timeoutMs: 35_000 }))
     expect(marcarMock).not.toHaveBeenCalled()
   })
@@ -66,7 +67,8 @@ describe('pedirParadaSessao — classificação da resposta do carregador', () =
   it('timeout é ambíguo (carregador lento): SÓ registra — quem decide é o R3 do watchdog', async () => {
     sendCommandMock.mockRejectedValue(new FakeTimeout('35s'))
     const r = await pedirParadaSessao({ sessionId: 's1', solicitante: 'DRIVER' })
-    expect(r).toEqual({ registrado: true, tentativa: 1, comando: 'TIMEOUT', marcacao: null })
+    // MUDANÇA DELIBERADA (M6 do Órion): pedido de DRIVER/ADMIN não conta para o teto de tentativas do servidor — `stopAttempts` fica 0 (só GUARD/WATCHDOG contam).
+    expect(r).toEqual({ registrado: true, tentativa: 0, comando: 'TIMEOUT', marcacao: null })
     expect(marcarMock).not.toHaveBeenCalled()
   })
 
