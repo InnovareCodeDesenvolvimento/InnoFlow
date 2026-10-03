@@ -1,15 +1,46 @@
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import { VitePWA } from "vite-plugin-pwa"
 import path from "path"
+import { rmSync } from "node:fs"
 import { buildDefine } from "./buildInfo.ts"
 
 // Alvo do proxy de desenvolvimento: a API local (entrypoints/api.ts).
 const API_DEV_TARGET = process.env.VITE_DEV_API_TARGET || "http://localhost:3000"
 
+/**
+ * `public/mockServiceWorker.js` é o worker do MSW — existe SÓ para `dev:mock` e para os E2E (que rodam em dev,
+ * `playwright.config.ts`), e o `msw init` o gera/espera exatamente em `public/` (ver `"msw".workerDirectory` no
+ * package.json). O Vite copia TODO `public/` para o `dist/`, então ele ia parar no site de produção E no precache do
+ * service worker do PWA (achado do portão final da F5): ~9 KB de código de mock servido e baixado por todo motorista,
+ * e um worker que intercepta fetch publicado sem necessidade.
+ *
+ * Por que tirar aqui (e não mover o arquivo): mover quebraria o `msw init`/`dev:mock`. O arquivo continua em `public/`
+ * para o dev; só é removido do `dist/` no build. `closeBundle` com `order: "pre"` roda ANTES do `closeBundle` do
+ * vite-plugin-pwa (que é quem varre `dist/` para montar o precache) — e o `globIgnores` do workbox, abaixo, é a 2ª
+ * trava caso a ordem dos plugins mude um dia. O CI ainda confere o `dist/` (job `frontend`, passo "dist sem mock").
+ */
+function semMockServiceWorkerNoBuild(): Plugin {
+  let outDir = "dist"
+  return {
+    name: "inno:sem-mock-service-worker",
+    apply: "build",
+    configResolved(cfg) {
+      outDir = path.resolve(cfg.root, cfg.build.outDir)
+    },
+    closeBundle: {
+      order: "pre",
+      handler() {
+        rmSync(path.join(outDir, "mockServiceWorker.js"), { force: true })
+      },
+    },
+  }
+}
+
 export default defineConfig({
   plugins: [
     react(),
+    semMockServiceWorkerNoBuild(),
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
@@ -36,6 +67,9 @@ export default defineConfig({
         // pra `/pagamento-cartao.html` voltava o HTML/título/conteúdo da
         // Home (`index.html` precacheado), não o formulário de cartão.
         navigateFallbackDenylist: [/^\/api/, /^\/pagamento-cartao\.html$/],
+        // Worker do MSW (só dev/E2E) nunca entra no precache — 2ª trava além do plugin
+        // `semMockServiceWorkerNoBuild` acima, que já o apaga do dist/.
+        globIgnores: ["**/mockServiceWorker.js"],
         runtimeCaching: [
           {
             // CRÍTICO: saldo de carteira e status de sessão NUNCA podem vir

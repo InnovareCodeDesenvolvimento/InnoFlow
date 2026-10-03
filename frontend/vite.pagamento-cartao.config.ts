@@ -25,6 +25,10 @@ import path from "path"
  */
 export default defineConfig({
   plugins: [react()],
+  // O documento isolado não usa nada de `public/` (ícones/manifest/MSW são do app principal, que já os copiou para
+  // `dist/` na 1ª build). Sem isto esta 2ª build RE-COPIARIA `public/` inteiro por cima — inclusive o
+  // `mockServiceWorker.js` que a 1ª build acabou de remover do `dist/`.
+  publicDir: false,
   build: {
     outDir: "dist",
     emptyOutDir: false,
