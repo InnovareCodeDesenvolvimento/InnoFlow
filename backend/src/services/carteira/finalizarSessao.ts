@@ -3,6 +3,8 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { withDeadline } from '../../lib/withDeadline'
 import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
+import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
+import { alertarSessaoLimitado } from '../sessao/alertasSessao'
 import { liquidarSessao } from './liquidarSessao'
 import { prepararFechamentoCartao } from '../pagamentos/fecharSessaoCartao'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
@@ -49,7 +51,7 @@ export interface FinalizarSessaoOpcoes {
 export type FinalizarSessaoResultado =
   | { finalizada: true }
   /** `JA_ENCERRADA`: outra chamada fechou antes (corrida) — o StopTransaction tardio cai aqui e vira `registrarStopTardio`. */
-  | { finalizada: false; motivo: 'JA_ENCERRADA' | 'STATUS_NAO_PERMITIDO' | 'FOTO_MUDOU' | 'ABORTADA' }
+  | { finalizada: false; motivo: 'JA_ENCERRADA' | 'STATUS_NAO_PERMITIDO' | 'FOTO_MUDOU' | 'ABORTADA'; causa?: 'CUSTO_NAO_CALCULADO' }
 
 /** Prazo para ENFILEIRAR a captura (ver comentário no ponto de uso): o Stop não pode esperar o Redis voltar. */
 const ENQUEUE_CAPTURA_PRAZO_MS = 5_000
@@ -68,12 +70,32 @@ export interface FechamentoCalculado {
   stopReason: StopReason | null
   idleSeconds: number | null
   custos: CustoSessaoResultado
+  /** Instante final EFETIVO da cobrança (já normalizado: nunca antes de `startedAt`). É este que vai para `stoppedAt`. */
+  stoppedAt: Date
+  /** `true` se a janela precisou ser corrigida (RTC resetado, `chargingEndedAt` depois do fim...) — o chamador loga. */
+  janelaAjustada: boolean
+}
+
+/**
+ * `calcularCustoSessao` lançou mesmo com a janela normalizada. NUNCA vira custo zero (ALTO-1 do Órion): o cálculo de dinheiro que falha é um bug a
+ * corrigir, não receita a perder. Quem fecha aborta (`ABORTADA`) e a sessão fica como estava para revisão manual; quem só informa (custo provisório,
+ * diferença do stop tardio) grava `null`/alerta.
+ */
+export class CustoNaoCalculadoError extends Error {
+  constructor(readonly sessionId: string, causa: unknown) {
+    super(`cálculo de custo falhou para a sessão ${sessionId}`)
+    this.name = 'CustoNaoCalculadoError'
+    this.cause = causa
+  }
 }
 
 /**
  * Cálculo de fechamento (energia, ociosidade, custo) — SEM efeitos. Extraído de `finalizarSessao` para o custo PROVISÓRIO de
  * `marcarSessaoNaoConfirmada` e o `unbilledCostCents` do stop tardio usarem EXATAMENTE a mesma conta que o fechamento real (duas
- * fórmulas = o provisório diverge do cobrado e ninguém percebe). Nunca lança: falha de cálculo cai no custo zerado, como sempre.
+ * fórmulas = o provisório diverge do cobrado e ninguém percebe).
+ *
+ * ALTO-1 (Órion): a janela é NORMALIZADA antes da conta (`normalizarJanelaDeCobranca`) e, se ainda assim `calcularCustoSessao` lançar, lança
+ * `CustoNaoCalculadoError` — antes isto caía em custo ZERO silencioso e a sessão fechava de graça (no cartão, a pré-autorização era cancelada).
  */
 export function calcularFechamentoSessao(session: SessaoParaCalcularFechamento, final: Pick<FinalizarSessaoInput, 'meterStopWh' | 'timestamp' | 'stopReason' | 'zerarCusto'>): FechamentoCalculado {
   const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
@@ -86,34 +108,39 @@ export function calcularFechamentoSessao(session: SessaoParaCalcularFechamento, 
     stopReason = 'OTHER'
   }
 
+  const janela = normalizarJanelaDeCobranca({ startedAt: session.startedAt, chargingEndedAt: session.chargingEndedAt, stoppedAt: final.timestamp })
+  if (janela.ajustada) {
+    logger.warn(
+      { sessionId: session.id, startedAt: session.startedAt, chargingEndedAt: session.chargingEndedAt, stoppedAtInformado: final.timestamp, stoppedAtEfetivo: janela.stoppedAt },
+      '[finalizarSessao] janela de cobrança fora de ordem (relógio do carregador?) — normalizada antes de calcular o custo',
+    )
+  }
+
   // Janela de ociosidade: [chargingEndedAt + carência, stoppedAt) — mesma
   // fórmula documentada no schema (`ChargingSession.idleSeconds`).
   let idleSeconds: number | null = null
-  if (session.chargingEndedAt) {
-    const idleStartMs = session.chargingEndedAt.getTime() + tariffSnapshot.idleGracePeriodSeconds * 1000
-    idleSeconds = Math.max(0, Math.round((final.timestamp.getTime() - idleStartMs) / 1000))
+  if (janela.chargingEndedAt) {
+    const idleStartMs = janela.chargingEndedAt.getTime() + tariffSnapshot.idleGracePeriodSeconds * 1000
+    idleSeconds = Math.max(0, Math.round((janela.stoppedAt.getTime() - idleStartMs) / 1000))
   }
 
-  // NUNCA pode lançar daqui pra fora. `calcularCustoSessao` só lança para
-  // inconsistência estrutural (datas fora de ordem), que os clamps acima
-  // já deveriam prevenir — mesmo assim blindamos com fallback de custo
-  // zerado em vez de propagar.
+  // `ZERO_CUSTOS` SÓ por decisão explícita (D2 NO_CHARGE + NO_READING). Falha de cálculo NUNCA vira zero: ver `CustoNaoCalculadoError`.
   let custos: CustoSessaoResultado = ZERO_CUSTOS
   if (!final.zerarCusto) {
     try {
       custos = calcularCustoSessao(tariffSnapshot, {
         energyDeliveredWh,
-        startedAt: session.startedAt,
-        chargingEndedAt: session.chargingEndedAt,
-        stoppedAt: final.timestamp,
+        startedAt: janela.startedAt,
+        chargingEndedAt: janela.chargingEndedAt,
+        stoppedAt: janela.stoppedAt,
         timezone: session.site.timezone,
       })
     } catch (err) {
-      logger.error({ err, sessionId: session.id }, '[finalizarSessao] calcularCustoSessao lançou — usando custo zerado (nunca bloqueia o chamador)')
+      throw new CustoNaoCalculadoError(session.id, err)
     }
   }
 
-  return { energyDeliveredWh, stopReason, idleSeconds, custos }
+  return { energyDeliveredWh, stopReason, idleSeconds, custos, stoppedAt: janela.stoppedAt, janelaAjustada: janela.ajustada }
 }
 
 /**
@@ -151,7 +178,7 @@ export function calcularFechamentoSessao(session: SessaoParaCalcularFechamento, 
  * pelo servidor usa as `opcoes` para reconferir, SOB o lock, que a sessão continua exatamente como o watchdog a viu.
  */
 export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput | ResolverFinalSessao, opcoes: FinalizarSessaoOpcoes = {}): Promise<FinalizarSessaoResultado> {
-  type Aborto = { abortado: Extract<FinalizarSessaoResultado, { finalizada: false }>['motivo'] }
+  type Aborto = { abortado: Extract<FinalizarSessaoResultado, { finalizada: false }>['motivo']; causa?: 'CUSTO_NAO_CALCULADO'; chargePointId?: string }
   const resultado = await prisma.$transaction(async (tx): Promise<Aborto | { userId: string; chargePointId: string; operatorId: string; walletResultado: Awaited<ReturnType<typeof liquidarSessao>> | null; cardResultado: Awaited<ReturnType<typeof prepararFechamentoCartao>> | null }> => {
     const travada = await travarSessao(tx, sessionId)
 
@@ -178,7 +205,18 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       },
     })
 
-    const { energyDeliveredWh, stopReason, idleSeconds, custos } = calcularFechamentoSessao(session, entrada)
+    let fechamento: FechamentoCalculado
+    try {
+      fechamento = calcularFechamentoSessao(session, entrada)
+    } catch (err) {
+      // ALTO-1: NÃO fecha com custo zero. A transação é desfeita sem escrever nada; a sessão fica como estava (STOP_UNCONFIRMED -> revisão manual).
+      if (err instanceof CustoNaoCalculadoError) {
+        logger.error({ err, sessionId, cause: err.cause instanceof Error ? err.cause.message : String(err.cause) }, '[finalizarSessao] cálculo de custo falhou — fechamento ABORTADO (nunca fecha com custo zero)')
+        return { abortado: 'ABORTADA', causa: 'CUSTO_NAO_CALCULADO', chargePointId: session.chargePointId }
+      }
+      throw err
+    }
+    const { energyDeliveredWh, stopReason, idleSeconds, custos } = fechamento
 
     await tx.chargingSession.update({
       where: { id: session.id },
@@ -186,7 +224,7 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
         status: 'STOPPED',
         meterStopWh: entrada.meterStopWh,
         energyDeliveredWh,
-        stoppedAt: entrada.timestamp,
+        stoppedAt: fechamento.stoppedAt,
         stopReason,
         idleSeconds,
         closureSource: entrada.closureSource ?? 'CHARGER',
@@ -214,7 +252,14 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
   // nunca de dentro dela (decisão 5 da Nova: rollback publicando saldo que
   // não existe seria o pior cenário). `abortado` = corrida/condição que mudou,
   // nada novo a publicar.
-  if ('abortado' in resultado) return { finalizada: false, motivo: resultado.abortado }
+  if ('abortado' in resultado) {
+    if (resultado.causa === 'CUSTO_NAO_CALCULADO') {
+      // Alerta de ERRO sem dado pessoal; limitado a 1x/h por sessão (o watchdog tenta de novo a cada ciclo e repetiria o alerta por minuto).
+      void alertarSessaoLimitado('session_cost_calculation_failed', { sessionId, chargePointId: resultado.chargePointId }, 'o cálculo do custo falhou — a sessão NÃO foi fechada (nem de graça): revisão manual').catch(() => undefined)
+      return { finalizada: false, motivo: 'ABORTADA', causa: 'CUSTO_NAO_CALCULADO' }
+    }
+    return { finalizada: false, motivo: resultado.abortado }
+  }
 
   await emitSessionStopped({ operatorId: resultado.operatorId, userId: resultado.userId, sessionId, chargePointId: resultado.chargePointId }).catch((err) =>
     logger.error({ err, sessionId }, '[realtime] falha ao publicar session.stopped (não bloqueante)'),

@@ -21,6 +21,8 @@ export interface SessaoParaLeitura {
   ocppTransactionId: number
   meterStartWh: number
   startedAt: Date
+  /** Para o `max(...)` do instante final (ALTO-1). */
+  chargingEndedAt?: Date | null
 }
 
 export interface LeituraResolvida extends LeituraFinal {
@@ -61,7 +63,7 @@ export async function buscarUltimaAmostra(tx: Prisma.TransactionClient, sessionI
 
 export async function resolverLeituraFinal(tx: Prisma.TransactionClient, sessao: SessaoParaLeitura): Promise<LeituraResolvida> {
   const [stopNoLog, ultimaAmostra] = await Promise.all([buscarStopTransactionNoLog(tx, sessao), buscarUltimaAmostra(tx, sessao.id)])
-  const leitura = escolherLeituraFinal({ stopNoLog, ultimaAmostra, meterStartWh: sessao.meterStartWh, startedAt: sessao.startedAt })
+  const leitura = escolherLeituraFinal({ stopNoLog, ultimaAmostra, meterStartWh: sessao.meterStartWh, startedAt: sessao.startedAt, chargingEndedAt: sessao.chargingEndedAt })
   const reason = leitura.reason && leitura.reason in STOP_REASON_MAP ? STOP_REASON_MAP[leitura.reason as keyof typeof STOP_REASON_MAP] : null
   return { ...leitura, stopReason: reason }
 }

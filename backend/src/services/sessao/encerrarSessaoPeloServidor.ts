@@ -42,8 +42,8 @@ export async function encerrarSessaoPeloServidor(params: EncerrarSessaoPeloServi
   const resultado = await finalizarSessao(
     sessionId,
     async (tx, sessao) => {
-      const dados = await tx.chargingSession.findUniqueOrThrow({ where: { id: sessionId }, select: { meterStartWh: true, startedAt: true } })
-      const leitura = await resolverLeituraFinal(tx, { id: sessionId, chargePointId: sessao.chargePointId, ocppTransactionId: sessao.ocppTransactionId, meterStartWh: dados.meterStartWh, startedAt: dados.startedAt })
+      const dados = await tx.chargingSession.findUniqueOrThrow({ where: { id: sessionId }, select: { meterStartWh: true, startedAt: true, chargingEndedAt: true } })
+      const leitura = await resolverLeituraFinal(tx, { id: sessionId, chargePointId: sessao.chargePointId, ocppTransactionId: sessao.ocppTransactionId, meterStartWh: dados.meterStartWh, startedAt: dados.startedAt, chargingEndedAt: dados.chargingEndedAt })
       const zerarCusto = deveZerarCusto(leitura.prova, politica)
       usado.prova = leitura.prova
       usado.custoZerado = zerarCusto

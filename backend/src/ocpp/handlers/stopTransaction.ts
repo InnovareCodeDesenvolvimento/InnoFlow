@@ -60,6 +60,11 @@ export const handleStopTransaction = defineOcppHandler('StopTransaction', stopTr
     if (resultado && !resultado.finalizada && resultado.motivo === 'JA_ENCERRADA') {
       await tratarStopSobreSessaoEncerrada(existing.id, data, ctx.chargePointId)
     }
+    if (resultado && !resultado.finalizada && resultado.causa === 'CUSTO_NAO_CALCULADO') {
+      // ALTO-1: o cálculo de custo falhou e `finalizarSessao` já abortou (alerta de erro emitido): a sessão NÃO foi fechada de graça. Retry de liquidação
+      // não adiantaria (não há o que liquidar); o carregador recebe Accepted e a sessão fica para revisão manual / para o watchdog.
+      logger.error({ chargePointId: ctx.chargePointId, transactionId: data.transactionId, sessionId: existing.id }, '[ocpp] StopTransaction: custo não calculado — sessão mantida aberta para revisão manual')
+    }
   } catch (err) {
     logger.error(
       { err, chargePointId: ctx.chargePointId, transactionId: data.transactionId, sessionId: existing.id },

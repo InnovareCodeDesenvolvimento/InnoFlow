@@ -1,7 +1,7 @@
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
-import { calcularFechamentoSessao } from '../carteira/finalizarSessao'
-import { alertarSessao } from './alertasSessao'
+import { calcularFechamentoSessao, CustoNaoCalculadoError } from '../carteira/finalizarSessao'
+import { alertarSessao, alertarSessaoLimitado } from './alertasSessao'
 import { travarSessao } from './travarSessao'
 
 /**
@@ -25,7 +25,7 @@ export interface RegistrarStopTardioParams {
 }
 
 export type RegistrarStopTardioResultado =
-  | { registrado: true; unbilledCostCents: number }
+  | { registrado: true; unbilledCostCents: number | null }
   | { registrado: false; motivo: 'NAO_ENCERRADA' | 'NAO_E_TARDIO' | 'JA_REGISTRADO' }
 
 export async function registrarStopTardio(params: RegistrarStopTardioParams): Promise<RegistrarStopTardioResultado> {
@@ -43,9 +43,14 @@ export async function registrarStopTardio(params: RegistrarStopTardioParams): Pr
     if (sessao.lateStopReceivedAt) return { tipo: 'JA_REGISTRADO' as const }
 
     // Quanto o Stop do carregador teria custado pela MESMA fórmula do fechamento real (cálculo puro, nenhum efeito).
-    const hipotetico = calcularFechamentoSessao(sessao, { meterStopWh: params.meterStopWh, timestamp: params.timestamp, stopReason: 'OTHER' })
+    // ALTO-1: se o cálculo falhar, a diferença fica NULL (desconhecida) e o alerta de erro sai — o Stop tardio é registrado do mesmo jeito.
     const cobrado = sessao.totalCostCents ?? 0
-    const unbilledCostCents = Math.max(0, hipotetico.custos.totalCostCents - cobrado)
+    let unbilledCostCents: number | null = null
+    try {
+      unbilledCostCents = Math.max(0, calcularFechamentoSessao(sessao, { meterStopWh: params.meterStopWh, timestamp: params.timestamp, stopReason: 'OTHER' }).custos.totalCostCents - cobrado)
+    } catch (err) {
+      if (!(err instanceof CustoNaoCalculadoError)) throw err
+    }
 
     await tx.chargingSession.update({
       where: { id: sessionId },
@@ -56,11 +61,14 @@ export async function registrarStopTardio(params: RegistrarStopTardioParams): Pr
 
   if (resultado.tipo !== 'REGISTRADO') return { registrado: false, motivo: resultado.tipo }
 
+  if (resultado.unbilledCostCents === null) {
+    void alertarSessaoLimitado('session_cost_calculation_failed', { sessionId, chargePointId: resultado.chargePointId, where: 'late_stop' }, 'não foi possível calcular a diferença do Stop tardio — fica desconhecida (null)').catch(() => undefined)
+  }
   alertarSessao(
     'session_late_stop_transaction',
     { sessionId, chargePointId: resultado.chargePointId, lateStopMeterWh: params.meterStopWh, billedMeterStopWh: resultado.meterStopWh, billedCostCents: resultado.cobrado, unbilledCostCents: resultado.unbilledCostCents },
-    resultado.unbilledCostCents > 0 ? 'StopTransaction TARDIO com consumo maior que o cobrado — registrado, NÃO cobrado (D3: absorve)' : 'StopTransaction tardio confere com o que foi cobrado — registrado',
-    { diferencaCents: resultado.unbilledCostCents },
+    (resultado.unbilledCostCents ?? 0) > 0 ? 'StopTransaction TARDIO com consumo maior que o cobrado — registrado, NÃO cobrado (D3: absorve)' : 'StopTransaction tardio confere com o que foi cobrado — registrado',
+    { diferencaCents: resultado.unbilledCostCents ?? 0 },
   )
   logger.info({ sessionId }, '[sessao] stop tardio registrado')
   return { registrado: true, unbilledCostCents: resultado.unbilledCostCents }

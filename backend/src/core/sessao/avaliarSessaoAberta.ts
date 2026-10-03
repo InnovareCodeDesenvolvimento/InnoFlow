@@ -177,6 +177,10 @@ export type TipoAlertaSessao =
   // para a camada de log ter um vocabulário único.
   | 'session_metering_after_close'
   | 'session_late_stop_transaction'
+  // ALTO-1 (Órion): o cálculo de custo lançou — a sessão NÃO é fechada de graça, fica para revisão manual.
+  | 'session_cost_calculation_failed'
+  // ALTO-2 (Órion): StopTransaction/MeterValues de um carregador com o transactionId de OUTRO carregador.
+  | 'ocpp_foreign_transaction'
 
 export type RegraSessao = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R5_CARTAO' | 'R6' | 'U1' | 'U2' | 'NENHUMA'
 

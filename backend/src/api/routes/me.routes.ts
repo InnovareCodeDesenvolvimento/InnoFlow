@@ -11,6 +11,7 @@ import { listarEstadosSessaoAberta, isSessaoAberta } from '../../core/sessao/est
 import { montarClosure } from '../../services/sessao/closureDto'
 import { withDeadline } from '../../lib/withDeadline'
 import { sqlEstadosSessaoAberta } from '../lib/sessionStatusSql'
+import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { apenasDigitos, isValidCpf } from '../../core/pagamentos/validarCpf'
@@ -247,11 +248,13 @@ router.get(
     // MESMA função (`calcularCustoSessao`) que a guarda ao vivo do
     // MeterValues usa (ver `ocpp/handlers/meterValues.ts:runBalanceGuard`) —
     // nunca pode divergir do que decide o auto-stop (regra 6 da Nova).
+    // Janela normalizada: "agora" (servidor) contra `startedAt` (carregador) com o relógio dele adiantado fazia o cálculo LANÇAR e o app tomava 500.
+    const janela = normalizarJanelaDeCobranca({ startedAt: row.startedAt, chargingEndedAt: row.chargingEndedAt, stoppedAt: new Date() })
     const { totalCostCents: estimatedCostCents } = calcularCustoSessao(tariffSnapshot, {
       energyDeliveredWh,
-      startedAt: row.startedAt,
-      chargingEndedAt: row.chargingEndedAt,
-      stoppedAt: new Date(),
+      startedAt: janela.startedAt,
+      chargingEndedAt: janela.chargingEndedAt,
+      stoppedAt: janela.stoppedAt,
       timezone: row.siteTimezone,
     })
 

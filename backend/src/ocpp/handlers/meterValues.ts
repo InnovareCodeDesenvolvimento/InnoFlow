@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
+import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { isSessaoAberta, isSessaoNaoConfirmada } from '../../core/sessao/estadosSessao'
 import { meterValuesReqSchema } from '../schemas/meterValues'
@@ -146,11 +147,12 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
     // diverge do que pode disparar o auto-stop.
     try {
       const energyDeliveredWh = Math.max(0, latestEnergyWh - session.meterStartWh)
+      const janela = normalizarJanelaDeCobranca({ startedAt: session.startedAt, chargingEndedAt: session.chargingEndedAt, stoppedAt: new Date() })
       const { totalCostCents } = calcularCustoSessao(session.tariffSnapshot as unknown as TariffSnapshot, {
         energyDeliveredWh,
-        startedAt: session.startedAt,
-        chargingEndedAt: session.chargingEndedAt,
-        stoppedAt: new Date(),
+        startedAt: janela.startedAt,
+        chargingEndedAt: janela.chargingEndedAt,
+        stoppedAt: janela.stoppedAt,
         timezone: session.site.timezone,
       })
       void emitSessionMetrics({

@@ -6,8 +6,8 @@ import { env } from '../../lib/env'
 import { listarEstadosSessaoAberta } from '../../core/sessao/estadosSessao'
 import { deveZerarCusto } from '../../core/sessao/leituraFinal'
 import type { TipoAlertaSessao } from '../../core/sessao/avaliarSessaoAberta'
-import { calcularFechamentoSessao } from '../carteira/finalizarSessao'
-import { alertarSessao } from './alertasSessao'
+import { calcularFechamentoSessao, CustoNaoCalculadoError } from '../carteira/finalizarSessao'
+import { alertarSessao, alertarSessaoLimitado } from './alertasSessao'
 import { resolverLeituraFinal } from './resolverLeituraFinal'
 import { travarSessao, fotoAindaVale, type FotoDaSessao } from './travarSessao'
 
@@ -48,26 +48,37 @@ export async function marcarSessaoNaoConfirmada(params: MarcarSessaoNaoConfirmad
       select: { id: true, userId: true, meterStartWh: true, startedAt: true, chargingEndedAt: true, tariffSnapshot: true, site: { select: { timezone: true } } },
     })
     const leitura = await resolverLeituraFinal(tx, { id: sessionId, chargePointId: travada.chargePointId, ocppTransactionId: travada.ocppTransactionId, meterStartWh: sessao.meterStartWh, startedAt: sessao.startedAt })
-    const { custos } = calcularFechamentoSessao(sessao, {
-      meterStopWh: leitura.meterStopWh,
-      timestamp: leitura.timestamp,
-      stopReason: 'OTHER',
-      zerarCusto: deveZerarCusto(leitura.prova, env.SESSION_NO_READING_POLICY),
-    })
+    // ALTO-1: se o cálculo falhar, o provisório fica NULL ("desconhecido", nunca 0) — marcar não move dinheiro e não pode travar por isso.
+    let provisionalCostCents: number | null = null
+    let custoFalhou = false
+    try {
+      provisionalCostCents = calcularFechamentoSessao(sessao, {
+        meterStopWh: leitura.meterStopWh,
+        timestamp: leitura.timestamp,
+        stopReason: 'OTHER',
+        zerarCusto: deveZerarCusto(leitura.prova, env.SESSION_NO_READING_POLICY),
+      }).custos.totalCostCents
+    } catch (err) {
+      if (!(err instanceof CustoNaoCalculadoError)) throw err
+      custoFalhou = true
+    }
 
     const agora = new Date()
     // Update condicional: só vira STOP_UNCONFIRMED se continua aberta (cinto e suspensório do lock acima).
     const alteradas = await tx.chargingSession.updateMany({
       where: { id: sessionId, status: { in: listarEstadosSessaoAberta() } },
-      data: { status: 'STOP_UNCONFIRMED', unconfirmedAt: agora, unconfirmedReason: motivo, provisionalCostCents: custos.totalCostCents },
+      data: { status: 'STOP_UNCONFIRMED', unconfirmedAt: agora, unconfirmedReason: motivo, provisionalCostCents },
     })
     if (alteradas.count !== 1) return { tipo: 'NAO_ABERTA' as const }
 
-    return { tipo: 'MARCADA' as const, chargePointId: travada.chargePointId, operatorId: travada.operatorId, userId: sessao.userId, provisionalCostCents: custos.totalCostCents, prova: leitura.prova, statusAnterior: travada.status }
+    return { tipo: 'MARCADA' as const, chargePointId: travada.chargePointId, operatorId: travada.operatorId, userId: sessao.userId, provisionalCostCents, custoFalhou, prova: leitura.prova, statusAnterior: travada.status }
   })
 
   if (resultado.tipo !== 'MARCADA') return resultado.tipo
 
+  if (resultado.custoFalhou) {
+    void alertarSessaoLimitado('session_cost_calculation_failed', { sessionId, chargePointId: resultado.chargePointId, where: 'provisional_cost' }, 'não foi possível calcular o custo provisório — fica desconhecido (null)').catch(() => undefined)
+  }
   const alertas = new Set<TipoAlertaSessao>(['session_stop_unconfirmed', ...(params.alertasExtras ?? [])])
   for (const alerta of alertas) {
     alertarSessao(

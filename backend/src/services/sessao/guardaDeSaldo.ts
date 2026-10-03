@@ -4,6 +4,8 @@ import { redis } from '../../lib/redis'
 import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
+import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
+import { alertarSessaoLimitado } from './alertasSessao'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { carregarSessoesNaoConfirmadas } from '../carteira/saldoComprometido'
 import { pedirParadaSessao } from './pedirParadaSessao'
@@ -39,7 +41,7 @@ export interface SessaoParaGuarda {
   site: { timezone: string }
 }
 
-export type ResultadoGuardaDeSaldo = 'DISPARADA' | 'ABAIXO_DO_LIMITE' | 'JA_DISPARADA'
+export type ResultadoGuardaDeSaldo = 'DISPARADA' | 'ABAIXO_DO_LIMITE' | 'JA_DISPARADA' | 'CUSTO_NAO_CALCULADO'
 
 export interface OpcoesGuardaDeSaldo {
   /** Só para teste: espera o comando RemoteStop terminar (em produção é fire-and-forget). */
@@ -91,13 +93,24 @@ export async function avaliarGuardaDeSaldo(session: SessaoParaGuarda, latestEner
   }
 
   const energyDeliveredWh = Math.max(0, latestEnergyWh - session.meterStartWh)
-  const { totalCostCents } = calcularCustoSessao(tariffSnapshot, {
-    energyDeliveredWh,
-    startedAt: session.startedAt,
-    chargingEndedAt: session.chargingEndedAt,
-    stoppedAt: new Date(),
-    timezone: session.site.timezone,
-  })
+  // BAIXO-2 (Órion): "agora" é relógio do SERVIDOR e `startedAt`/`chargingEndedAt` são do CARREGADOR. Com o relógio do carregador adiantado `agora < startedAt`
+  // e `calcularCustoSessao` LANÇAVA — a guarda nunca disparava (fail-open silencioso). A janela é normalizada antes da conta.
+  const janela = normalizarJanelaDeCobranca({ startedAt: session.startedAt, chargingEndedAt: session.chargingEndedAt, stoppedAt: new Date() })
+  let totalCostCents: number
+  try {
+    totalCostCents = calcularCustoSessao(tariffSnapshot, {
+      energyDeliveredWh,
+      startedAt: janela.startedAt,
+      chargingEndedAt: janela.chargingEndedAt,
+      stoppedAt: janela.stoppedAt,
+      timezone: session.site.timezone,
+    }).totalCostCents
+  } catch (err) {
+    // A guarda NÃO sabe avaliar: não para a recarga por um bug (ficaria o motorista sem energia por erro nosso), mas o alerta de ERRO obriga a olhar.
+    logger.error({ err, sessionId: session.id }, '[ocpp][guard] cálculo do custo parcial falhou — guarda não avaliou esta amostra')
+    void alertarSessaoLimitado('session_cost_calculation_failed', { sessionId: session.id, chargePointId: session.chargePointId, where: 'balance_guard' }, 'a guarda de saldo não conseguiu calcular o custo parcial').catch(() => undefined)
+    return 'CUSTO_NAO_CALCULADO'
+  }
 
   if (totalCostCents < limiteCents) return 'ABAIXO_DO_LIMITE'
 
