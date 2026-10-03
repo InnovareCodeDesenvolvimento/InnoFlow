@@ -189,6 +189,35 @@ sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
   Captura, cancelamento, webhook, varredores e crédito de Pix já gerado continuam funcionando.
 - O `FakeAdapter` continua **proibido em produção**: sem credencial (banco **nem** env) o gateway
   responde 503; falha ao ler/decifrar a config também (fail-closed).
+- **Trocar a config exige a SENHA ATUAL do admin (F5.7, step-up).** Todo `PUT` leva `currentPassword`;
+  errada (ou conta sem senha) = 403 `INVALID_CURRENT_PASSWORD`, conferida **antes** de qualquer outra
+  regra. 5 senhas erradas em 15 min trancam o step-up daquele usuário (429 `RATE_LIMITED_PAYMENT_GATEWAY`,
+  60 s dobrando até 15 min — vale até com a senha certa durante o trancamento). O limite mora no Redis
+  (se ele cair, segue sem o limite por usuário, mas o PUT continua limitado a 10/min e a senha continua
+  sendo conferida). **Alertas no log** (procure por `alert`): `payment_config_changed` (toda gravação —
+  traz o id do admin e só os NOMES dos campos, nunca valores), `payment_gateway_stepup_failed` (senha
+  errada) e `payment_gateway_stepup_locked`. A senha nunca é logada nem auditada.
+
+#### Sandbox em servidor de produção — só para testadores (F5.7)
+
+Se o ambiente efetivo do gateway é **sandbox** e o servidor roda com `NODE_ENV=production` (o caso de
+uma instância pública ainda sem a conta real), Pix e cartão **só funcionam para os motoristas cujo
+e-mail está em `PAYMENT_SANDBOX_TESTER_EMAILS`** (lista separada por vírgula, sem distinguir maiúsculas;
+ex.: `dono@empresa.com.br,teste@empresa.com.br`). Qualquer outro motorista recebe 409
+`PAYMENT_METHOD_DISABLED` (`reason: "SANDBOX_RESTRICTED"`) com a **mesma** mensagem de "indisponível no
+momento" — sem revelar que existe uma lista.
+
+**Por quê:** os cartões de teste da Cielo são **públicos** e o cadastro do app é **aberto**; sem esta
+trava, sandbox numa instância pública seria cobrança grátis (saldo/recarga sem pagar) para qualquer um.
+
+- A env é **opcional**: **vazia ou ausente = NINGUÉM** passa (falha segura). Não há curinga nem domínio inteiro.
+- **Crie as contas dos testadores ANTES de listar o e-mail**: o cadastro por e-mail/senha não confirma o
+  e-mail, então um e-mail listado e ainda sem conta poderia ser registrado por qualquer pessoa.
+- Só bloqueia **começos novos** (cadastro de cartão, pré-autorização, novo Pix). Captura, cancelamento,
+  webhook, varredores e crédito de Pix já pago seguem; a carteira nunca é bloqueada.
+- Em **production** (dinheiro real) a restrição não existe; em dev/CI (`NODE_ENV` ≠ production) também não.
+- A tela do gateway mostra um aviso permanente enquanto `sandboxRestricted` for verdadeiro.
+- A env não é lida pela tela: mudar a lista exige reiniciar a API.
 
 **Envs que continuam SÓ no servidor** (a tela não edita; contam como "presentes" no `readiness` se
 estiverem setadas): `PAYMENT_SECRETS_KEY`, `CIELO_WEBHOOK_PATH_TOKEN` (compõe a URL do webhook),

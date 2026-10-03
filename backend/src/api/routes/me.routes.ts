@@ -81,7 +81,7 @@ router.post(
     const body = req.body as MeStartSessionInput
 
     // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED já na porta (sem lock, sem consulta). `iniciarSessaoRemota` repete a checagem (defesa em profundidade); a carteira nunca passa por aqui.
-    if (body.payment?.mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD')
+    if (body.payment?.mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD', userId)
 
     // Lock anti-duplo-toque: duas requisições de start quase simultâneas do
     // MESMO motorista (ex.: usuário toca duas vezes o botão no PWA antes do
@@ -545,7 +545,7 @@ router.post(
     const { amountCents, cpf } = req.body as MeCreateTopupInput
 
     // F5.5: admin pode desligar o Pix na tela do gateway — só bloqueia COMEÇOS novos (QR já gerado continua pagável/creditável).
-    await assertMeioDePagamentoHabilitado('PIX')
+    await assertMeioDePagamentoHabilitado('PIX', userId)
 
     // Faixa de valor e CPF respondem com `code` ESPECÍFICO (contrato de
     // `frontend/src/lib/topupAmount.ts`), por isso são checados aqui — não

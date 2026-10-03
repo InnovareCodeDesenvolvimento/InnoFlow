@@ -214,6 +214,12 @@ const envSchema = z.object({
   // (precisa decodificar para exatos 32 bytes — AES-256).
   PAYMENT_SECRETS_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
+  // F5.7 (ALTO-2) — SANDBOX em servidor de PRODUÇÃO (`NODE_ENV=production` com ambiente efetivo do gateway = sandbox) só funciona para os
+  // e-mails desta lista (separados por vírgula, sem distinguir maiúsculas; OPCIONAL — vazia/ausente = NINGUÉM: falha segura). Os cartões de
+  // teste da Cielo são públicos e o cadastro do app é aberto: sem a trava, sandbox numa instância pública seria cobrança grátis para qualquer um.
+  // O valor são e-mails (dado pessoal): nunca vai para log nem para a resposta. Ver `core/pagamentos/configGateway.ts` (`sandboxRestrito`).
+  PAYMENT_SANDBOX_TESTER_EMAILS: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(4000).optional()),
+
   // F5.5 (02/10/2026) — URL pública da API (ex.: https://api.exemplo.com.br), usada só para MONTAR a
   // `webhookUrl` que a tela do gateway mostra ao dono (cadastrar no Site Cielo). OPCIONAL: sem ela a rota
   // deriva do próprio request (protocolo/host respeitando `TRUST_PROXY_HOPS`) — que funciona quando o proxy

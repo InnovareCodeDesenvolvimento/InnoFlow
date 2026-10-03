@@ -228,6 +228,42 @@ export function avaliarMudancaDeConfig(input: {
 }
 
 // ----------------------------------------------------------------------------------------------
+// Sandbox restrito a testadores (F5.7, ALTO-2)
+// ----------------------------------------------------------------------------------------------
+
+/**
+ * `true` = ambiente efetivo SANDBOX num servidor de PRODUÇÃO (`NODE_ENV=production`). Os cartões de teste da Cielo são públicos e o cadastro
+ * do app é aberto — sandbox numa instância pública seria cobrança grátis para qualquer um —, então Pix e cartão só funcionam para os
+ * testadores (`PAYMENT_SANDBOX_TESTER_EMAILS`). Em desenvolvimento/CI (`NODE_ENV` ≠ production) nada é restrito. Ambiente PRODUCTION (dinheiro real)
+ * nunca é restrito por isto.
+ */
+export function sandboxRestrito(ambiente: AmbienteGateway, nodeEnv: string): boolean {
+  return ambiente === 'sandbox' && nodeEnv === 'production'
+}
+
+/** Lista de testadores: separada por vírgula, aparada, minúscula; vazia/ausente => conjunto VAZIO (ninguém passa — falha segura). */
+export function parseListaDeTestadores(bruto: string | null | undefined): ReadonlySet<string> {
+  if (!bruto) return new Set()
+  return new Set(
+    bruto
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.length > 0),
+  )
+}
+
+/** E-mail do motorista está na lista? Comparação exata (sem curinga, sem domínio inteiro) e sem distinguir maiúsculas/espaços nas bordas. */
+export function emailEhTestador(email: string | null | undefined, testadores: ReadonlySet<string>): boolean {
+  if (!email) return false
+  return testadores.has(email.trim().toLowerCase())
+}
+
+/** `AmbienteGateway` (minúsculo, coluna String de `PaymentGatewayConfig`) -> enum `PaymentEnvironment` do Prisma (maiúsculo, `PaymentIntent`/`PaymentMethod`). */
+export function paraPaymentEnvironment(ambiente: AmbienteGateway): 'SANDBOX' | 'PRODUCTION' {
+  return ambiente === 'production' ? 'PRODUCTION' : 'SANDBOX'
+}
+
+// ----------------------------------------------------------------------------------------------
 // Ambiente -> URLs
 // ----------------------------------------------------------------------------------------------
 

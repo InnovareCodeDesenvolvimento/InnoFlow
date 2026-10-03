@@ -78,7 +78,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   const mode = payment?.mode ?? 'WALLET'
 
   // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED ANTES de qualquer efeito (nem PaymentIntent, nem pré-auth). Só COMEÇOS novos: a carteira não passa por aqui.
-  if (mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD')
+  if (mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD', userId)
 
   const chargePoint = await prisma.chargePoint.findFirst({ where: { id: chargePointId, ...chargePointScope } })
   if (!chargePoint) throw new AppError('Charge point não encontrado.', 404, 'CHARGE_POINT_NOT_FOUND')

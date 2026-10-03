@@ -2,7 +2,7 @@ import { Router, type Request } from 'express'
 import { prisma } from '../../lib/prisma'
 import { env } from '../../lib/env'
 import { atualizarConfigGateway } from '../../services/pagamentos/atualizarConfigGateway'
-import { getConfigEfetiva } from '../../services/pagamentos/gatewayConfig'
+import { getConfigEfetiva, isSandboxRestrito, verificarSegredosDecifraveis } from '../../services/pagamentos/gatewayConfig'
 import { toPaymentGatewayConfigDto } from '../../services/pagamentos/gatewayConfigDto'
 import { ConfiguracaoGatewayIndisponivelError } from '../../core/pagamentos/erros'
 import { asyncHandler } from '../middleware/asyncHandler'
@@ -44,10 +44,19 @@ async function lerConfigOu503() {
   }
 }
 
+/**
+ * DTO da config efetiva. `secretsDecryptable` (M3) tenta decifrar os segredos salvos e NUNCA lança: o GET precisa continuar respondendo mesmo com o gateway em
+ * 503 (chave trocada/perdida) — é por aqui que o admin enxerga o problema e reenvia os segredos.
+ */
+async function dtoDaConfigAtual(req: Request) {
+  const config = await lerConfigOu503()
+  return toPaymentGatewayConfigDto(config, urlPublicaDaApi(req), { secretsDecryptable: verificarSegredosDecifraveis(config.linha), sandboxRestricted: isSandboxRestrito(config.estado) })
+}
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    res.json(toPaymentGatewayConfigDto(await lerConfigOu503(), urlPublicaDaApi(req)))
+    res.json(await dtoDaConfigAtual(req))
   }),
 )
 
@@ -89,7 +98,7 @@ router.put(
     // A linha de auditoria JÁ foi gravada (fail-closed, dentro da MESMA transação da config) — `skip` evita o middleware genérico duplicar.
     auditCtx(res).describe({ skip: true })
 
-    res.json(toPaymentGatewayConfigDto(await lerConfigOu503(), urlPublicaDaApi(req)))
+    res.json(await dtoDaConfigAtual(req))
   }),
 )
 

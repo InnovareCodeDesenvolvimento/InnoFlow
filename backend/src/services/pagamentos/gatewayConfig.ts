@@ -1,13 +1,18 @@
 import { prisma } from '../../lib/prisma'
 import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
-import { isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
+import { decryptPaymentSecret, isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
 import { AppError } from '../../api/middleware/errorHandler'
 import { ConfiguracaoGatewayIndisponivelError } from '../../core/pagamentos/erros'
 import {
   calcularReadiness,
+  emailEhTestador,
   meioHabilitadoParaNovosPagamentos,
+  paraPaymentEnvironment,
+  parseListaDeTestadores,
   resolverEstadoEfetivo,
+  sandboxRestrito,
+  type AmbienteGateway,
   type EnvGateway,
   type EstadoEfetivo,
   type LinhaConfigGateway,
@@ -129,23 +134,85 @@ export function readinessDe(config: Pick<ConfigEfetiva, 'estado' | 'envGateway'>
   return calcularReadiness(config.estado, config.envGateway)
 }
 
+/** Ambiente EFETIVO agora (`sandbox`/`production`) — banco manda, env é reserva. Config ilegível => `ConfiguracaoGatewayIndisponivelError`. */
+export async function getAmbienteEfetivo(): Promise<AmbienteGateway> {
+  return (await getConfigEfetiva()).estado.environment
+}
+
 /**
- * Guarda de COMEÇOS NOVOS: `409 PAYMENT_METHOD_DISABLED` se o admin desligou o meio. `details[0].reason ===
- * 'GATEWAY_DISABLED'` distingue de "este cartão foi removido" (mesmo `code` em `sessions/start`).
- * Config ilegível => 503 `PAYMENT_GATEWAY_UNAVAILABLE` (fail-closed).
+ * Ambiente efetivo no formato do enum `PaymentEnvironment` do Prisma (`SANDBOX`/`PRODUCTION`, maiúsculo) — é o que TODO `PaymentIntent`/`PaymentMethod`
+ * NOVO grava em `environment` (F5.7, M4). A coluna tem DEFAULT SANDBOX: quem esquecer de passar isto nasce SANDBOX mesmo em produção.
+ * (`PaymentGatewayConfig.environment` é String minúscula — o mapeamento é feito aqui, na borda.)
  */
-export async function assertMeioDePagamentoHabilitado(meio: MeioPagamento): Promise<void> {
-  let linha: LinhaConfigGateway | null
+export async function getAmbienteEfetivoParaBanco(): Promise<'SANDBOX' | 'PRODUCTION'> {
+  return paraPaymentEnvironment(await getAmbienteEfetivo())
+}
+
+/** `sandboxRestricted` do DTO: ambiente efetivo SANDBOX num servidor com `NODE_ENV=production`. */
+export function isSandboxRestrito(estado: Pick<EstadoEfetivo, 'environment'>): boolean {
+  return sandboxRestrito(estado.environment, env.NODE_ENV)
+}
+
+let avisouSegredosIlegiveis = false
+
+/**
+ * `secretsDecryptable` do DTO (F5.7, M3): tenta DECIFRAR os segredos SALVOS NO BANCO agora. `null` = não há segredo salvo no banco
+ * (sem linha / `source: 'env'` / só campos não secretos); `false` = ao menos um não decifra (`PAYMENT_SECRETS_KEY` trocada/perdida ou dado
+ * corrompido) — o gateway está em 503 mesmo com os chips "Configurada"; `true` = todos decifram. NUNCA lança (o GET da config não pode
+ * falhar por causa disto — é justamente pela tela que o admin lê o estado e REENVIA os segredos) e nunca devolve nem loga o texto decifrado.
+ * Loga UMA vez por processo (`payment_gateway_secrets_undecryptable`). Barato: no máximo 3 decifragens AES-GCM.
+ */
+export function verificarSegredosDecifraveis(linha: LinhaConfigGateway | null): boolean | null {
+  if (!linha) return null
+  const salvos = [linha.merchantKeyCiphertext, linha.sopClientSecretCiphertext, linha.webhookHeaderSecretCiphertext].filter((c): c is string => Boolean(c))
+  if (salvos.length === 0) return null
   try {
-    linha = await carregarLinha()
+    for (const ciphertext of salvos) decryptPaymentSecret(ciphertext)
+    return true
+  } catch (err) {
+    if (!avisouSegredosIlegiveis) {
+      avisouSegredosIlegiveis = true
+      logger.error(
+        { alert: 'payment_gateway_secrets_undecryptable', reason: err instanceof Error ? err.name : 'erro' },
+        '[pagamentos] os segredos do gateway salvos no banco NÃO decifram (PAYMENT_SECRETS_KEY trocada/perdida ou dado corrompido) — gateway indisponível até reenviar os 3 segredos pela tela do admin',
+      )
+    }
+    return false
+  }
+}
+
+/** Só para teste — o aviso de "segredos ilegíveis" é UMA vez por processo. */
+export function resetAvisoSegredosIlegiveisParaTeste(): void {
+  avisouSegredosIlegiveis = false
+}
+
+/**
+ * Guarda de COMEÇOS NOVOS: `409 PAYMENT_METHOD_DISABLED` quando o meio não pode COMEÇAR algo novo para este motorista:
+ *  - `reason: 'GATEWAY_DISABLED'` — o admin desligou o meio na tela do gateway (distingue de "este cartão foi removido", mesmo `code`);
+ *  - `reason: 'SANDBOX_RESTRICTED'` (F5.7, ALTO-2) — ambiente efetivo SANDBOX num servidor `NODE_ENV=production` e o e-mail do motorista não está em
+ *    `PAYMENT_SANDBOX_TESTER_EMAILS` (lista vazia/ausente = ninguém). MESMA mensagem de "desativado": não revela a existência da lista de testadores.
+ * Config ilegível => 503 `PAYMENT_GATEWAY_UNAVAILABLE` (fail-closed). Só COMEÇOS novos (cartão novo, pré-auth, Pix novo): captura, cancelamento,
+ * webhook, varredores e Pix já pago NUNCA passam por aqui — dinheiro em trânsito precisa liquidar; a carteira também nunca é bloqueada.
+ */
+export async function assertMeioDePagamentoHabilitado(meio: MeioPagamento, userId: string): Promise<void> {
+  let config: ConfigEfetiva
+  try {
+    config = await getConfigEfetiva()
   } catch (err) {
     if (err instanceof ConfiguracaoGatewayIndisponivelError) {
       throw new AppError('O pagamento está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
     }
     throw err
   }
-  if (!meioHabilitadoParaNovosPagamentos(linha, meio)) {
-    const mensagem = meio === 'CARD' ? 'O pagamento com cartão está desativado no momento.' : 'A recarga por Pix está desativada no momento.'
+  const mensagem = meio === 'CARD' ? 'O pagamento com cartão está desativado no momento.' : 'A recarga por Pix está desativada no momento.'
+  if (!meioHabilitadoParaNovosPagamentos(config.linha, meio)) {
     throw new AppError(mensagem, 409, 'PAYMENT_METHOD_DISABLED', [{ method: meio, reason: 'GATEWAY_DISABLED' }])
   }
+  if (isSandboxRestrito(config.estado)) {
+    const motorista = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } })
+    if (!emailEhTestador(motorista?.email, parseListaDeTestadores(env.PAYMENT_SANDBOX_TESTER_EMAILS))) {
+      throw new AppError(mensagem, 409, 'PAYMENT_METHOD_DISABLED', [{ method: meio, reason: 'SANDBOX_RESTRICTED' }])
+    }
+  }
 }
+

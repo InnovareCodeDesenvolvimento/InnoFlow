@@ -46,7 +46,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
     // F5.5: cartão desligado na tela do gateway => nem sessão de tokenização (cadastro de cartão novo).
-    await assertMeioDePagamentoHabilitado('CARD')
+    await assertMeioDePagamentoHabilitado('CARD', userId)
     let sessao
     try {
       sessao = await (await getPagamentoPort()).sessaoTokenizacao()
@@ -81,7 +81,7 @@ router.post(
     const { cardToken, brand, makeDefault } = req.body as MeCreatePaymentMethodInput
 
     // F5.5: cartão desligado na tela do gateway => não cadastra cartão novo (checagem ANTES de qualquer chamada à Cielo).
-    await assertMeioDePagamentoHabilitado('CARD')
+    await assertMeioDePagamentoHabilitado('CARD', userId)
 
     // Checagem RÁPIDA antes de gastar uma chamada de rede na Cielo — a
     // checagem de VERDADE (que fecha a maior parte da janela de corrida)

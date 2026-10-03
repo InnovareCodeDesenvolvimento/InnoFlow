@@ -16,10 +16,14 @@ export interface PaymentGatewayConfigDto {
   cardEnabled: boolean
   pixEnabled: boolean
   readiness: { card: ReadinessMeio; pix: ReadinessMeio }
+  /** M3: `true` = segredos salvos no banco decifram agora; `false` = ao menos um não decifra (gateway em 503); `null` = não há segredo salvo no banco. */
+  secretsDecryptable: boolean | null
+  /** ALTO-2: ambiente efetivo SANDBOX em servidor `NODE_ENV=production` — Pix/cartão só para os testadores do servidor. */
+  sandboxRestricted: boolean
   updatedAt: string | null
 }
 
-export function toPaymentGatewayConfigDto(config: ConfigEfetiva, publicBaseUrl: string | null): PaymentGatewayConfigDto {
+export function toPaymentGatewayConfigDto(config: ConfigEfetiva, publicBaseUrl: string | null, derivados: { secretsDecryptable: boolean | null; sandboxRestricted: boolean }): PaymentGatewayConfigDto {
   const { estado, envGateway } = config
   return {
     source: estado.source,
@@ -34,6 +38,8 @@ export function toPaymentGatewayConfigDto(config: ConfigEfetiva, publicBaseUrl: 
     cardEnabled: estado.cardEnabled,
     pixEnabled: estado.pixEnabled,
     readiness: calcularReadiness(estado, envGateway),
+    secretsDecryptable: derivados.secretsDecryptable,
+    sandboxRestricted: derivados.sandboxRestricted,
     updatedAt: estado.updatedAt ? estado.updatedAt.toISOString() : null,
   }
 }

@@ -251,7 +251,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       expect(res.body.readiness.card.missing).toEqual(['SOP_CLIENT_ID', 'SOP_CLIENT_SECRET', 'SOP_SCRIPT_URL', 'SOP_OAUTH_TOKEN_URL'])
       expectSemSegredos(res.body)
       expect(Object.keys(res.body).sort()).toEqual(
-        ['source', 'environment', 'merchantId', 'merchantKeySet', 'sopClientId', 'sopClientSecretSet', 'webhookHeaderSecretSet', 'webhookUrl', 'webhookHeaderName', 'cardEnabled', 'pixEnabled', 'readiness', 'updatedAt'].sort(),
+        ['source', 'environment', 'merchantId', 'merchantKeySet', 'sopClientId', 'sopClientSecretSet', 'webhookHeaderSecretSet', 'webhookUrl', 'webhookHeaderName', 'cardEnabled', 'pixEnabled', 'readiness', 'secretsDecryptable', 'sandboxRestricted', 'updatedAt'].sort(),
       )
     })
 
