@@ -82,28 +82,33 @@ async function syncChargingSessionStatus(connectorId: string, ocppStatus: string
   // sobre a transação — move `lastActivityAt` (RELÓGIO DO SERVIDOR; `eventAt` abaixo é o do carregador e não entra aqui).
   const atividade = ATIVIDADE_DO_CONECTOR.has(ocppStatus) ? { lastActivityAt: new Date() } : {}
 
+  // M1 (Órion): TODO update da sessão é CONDICIONAL ao status ainda ser aberto (`updateMany`, atômico contra o UPDATE do fechamento). O `findFirst` acima
+  // roda fora de qualquer lock: entre ele e o update o StopTransaction/watchdog podia commitar STOPPED, e um `update({ status })` incondicional RESSUSCITAVA a
+  // sessão — que o watchdog fechava de novo, recalculando e sobrescrevendo `totalCostCents` com débito/captura já gravados (conciliação quebrada).
+  const aindaAberta = { id: session.id, status: { in: listarEstadosSessaoAberta() } }
+
   if (ocppStatus === 'SuspendedEVSE') {
     // Decisão do dono: não é ociosidade cobrável (problema da estação) — só registra a atividade, não mexe no status da sessão.
-    await prisma.chargingSession.update({ where: { id: session.id }, data: atividade })
+    await prisma.chargingSession.updateMany({ where: aindaAberta, data: atividade })
     return
   }
 
   if (ocppStatus === 'Charging') {
     // Inclusive FAULTED -> CHARGING: o carregador voltou a carregar, a falha passou.
-    await prisma.chargingSession.update({ where: { id: session.id }, data: { status: 'CHARGING', chargingEndedAt: null, ...atividade } })
+    await prisma.chargingSession.updateMany({ where: aindaAberta, data: { status: 'CHARGING', chargingEndedAt: null, ...atividade } })
     return
   }
 
   if (ocppStatus === 'SuspendedEV' || ocppStatus === 'Finishing') {
-    await prisma.chargingSession.update({
-      where: { id: session.id },
+    await prisma.chargingSession.updateMany({
+      where: aindaAberta,
       data: { status: 'FINISHING', ...(session.chargingEndedAt ? {} : { chargingEndedAt: eventAt }), ...atividade },
     })
     return
   }
 
   if (ocppStatus === 'Faulted') {
-    await prisma.chargingSession.update({ where: { id: session.id }, data: { status: 'FAULTED' } })
+    await prisma.chargingSession.updateMany({ where: aindaAberta, data: { status: 'FAULTED' } })
   }
 
   // Outros status (Available, Preparing, Reserved, Unavailable) não afetam a

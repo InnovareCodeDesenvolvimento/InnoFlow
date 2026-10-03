@@ -183,6 +183,14 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
     const travada = await travarSessao(tx, sessionId)
 
     if (travada.status === 'STOPPED') return { abortado: 'JA_ENCERRADA' } // corrida: outra chamada já finalizou entre o read e o lock
+    if (travada.stoppedAt !== null) {
+      // M1 (Órion): sessão que JÁ foi fechada (stoppedAt gravado) mas voltou a um estado aberto — ressuscitada por um update tardio. Fechar de novo
+      // recalcularia e SOBRESCREVERIA `totalCostCents` com débito/captura já gravados (identidade de conciliação quebrada). Recusa, não toca nos totais,
+      // e só desfaz a ressurreição (volta a STOPPED) — o dinheiro desta sessão já foi movido pelo fechamento original.
+      logger.error({ sessionId, status: travada.status }, '[finalizarSessao] sessão com stoppedAt já gravado fora de STOPPED — recusando refechar (totais intactos) e restaurando STOPPED')
+      await tx.chargingSession.updateMany({ where: { id: sessionId, status: { not: 'STOPPED' } }, data: { status: 'STOPPED' } })
+      return { abortado: 'JA_ENCERRADA' }
+    }
     if (opcoes.statusPermitidos && !opcoes.statusPermitidos.includes(travada.status)) return { abortado: 'STATUS_NAO_PERMITIDO' }
     if (opcoes.fotoEsperada && !fotoAindaVale(travada, opcoes.fotoEsperada)) return { abortado: 'FOTO_MUDOU' }
 

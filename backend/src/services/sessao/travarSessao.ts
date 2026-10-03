@@ -19,6 +19,8 @@ export interface FotoDaSessao {
 
 export interface SessaoTravada extends FotoDaSessao {
   id: string
+  /** Preenchido SÓ no fechamento: quem vê `stoppedAt != null` numa sessão que não está STOPPED achou uma sessão RESSUSCITADA (M1). */
+  stoppedAt: Date | null
   chargePointId: string
   operatorId: string
   connectorId: string
@@ -46,6 +48,7 @@ export async function travarSessao(tx: Prisma.TransactionClient, sessionId: stri
       lastMeterValuesAt: true,
       stopRequestedAt: true,
       stopRequestedBy: true,
+      stoppedAt: true,
       stopAttempts: true,
       unconfirmedAt: true,
       ocppTransactionId: true,
