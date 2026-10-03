@@ -13,6 +13,7 @@ import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../pagamentos/gatewayConfig'
+import { criarPaymentIntentNoAmbienteEfetivo } from '../pagamentos/criarIntentNoAmbiente'
 
 const COMMAND_TIMEOUT_MS = 35_000
 
@@ -164,18 +165,20 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   let authorizedCents: number | null = null
 
   if (mode === 'CARD' && paymentMethod) {
-    const intent = await prisma.paymentIntent.create({
-      data: {
+    // F5.8 (M4c): a marca de ambiente vem da leitura SOB LOCK, serializada com a troca de ambiente do gateway; `ambienteEsperado` = o ambiente em que o cartão foi
+    // escolhido acima — se a troca aconteceu no meio, recusa (503) em vez de rotular o intent com um ambiente que não é o do cartão.
+    const intent = await criarPaymentIntentNoAmbienteEfetivo(
+      {
         purpose: 'SESSION_CARD_CAPTURE',
         provider: 'CIELO_CARD',
-        environment: environment!,
         userId,
         paymentMethodId: paymentMethod.id,
         walletId: null,
         amountRequestedCents: estimatedMaxCostCents,
         status: 'CREATED',
       },
-    })
+      { ambienteEsperado: environment! },
+    )
 
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
 

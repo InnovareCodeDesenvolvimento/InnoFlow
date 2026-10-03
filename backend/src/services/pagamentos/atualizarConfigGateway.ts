@@ -8,6 +8,7 @@ import { AppError } from '../../api/middleware/errorHandler'
 import type { UpdatePaymentGatewayConfigBody } from '../../api/schemas/paymentGateway.schema'
 import { writeAuditLog } from '../auditoria/writeAuditLog'
 import { invalidarCacheConfigGateway, lerEnvGateway } from './gatewayConfig'
+import { travarConfigGatewayParaTroca } from './criarIntentNoAmbiente'
 
 /**
  * Grava a configuração do gateway (F5.5) — `PUT /api/admin/payment-gateway`.
@@ -17,7 +18,7 @@ import { invalidarCacheConfigGateway, lerEnvGateway } from './gatewayConfig'
  * (mesmo padrão do ajuste manual de saldo, `walletLedger.ts`). A rota marca `skip: true` no `auditCtx` para o
  * middleware genérico não duplicar a linha.
  *
- * CONCORRÊNCIA: `INSERT ... ON CONFLICT DO NOTHING` garante a linha singleton e `SELECT ... FOR UPDATE` a
+ * CONCORRÊNCIA: lock consultivo exclusivo (F5.8, M4c) serializa a troca com a CRIAÇÃO de `PaymentIntent`; depois, `INSERT ... ON CONFLICT DO NOTHING` garante a linha singleton e `SELECT ... FOR UPDATE` a
  * trava até o commit — dois admins gravando juntos se serializam (o segundo calcula o "antes" sobre o resultado
  * do primeiro, nada de último-escreve-silenciosamente-por-cima). A linha semeada na PRIMEIRA gravação parte do
  * que já valia pelo ambiente (ambiente e "habilitado = há credenciais"), para salvar um campo qualquer não
@@ -95,6 +96,9 @@ export async function atualizarConfigGateway(params: { body: UpdatePaymentGatewa
   const semeadoHabilitado = Boolean(envGateway.merchantId && envGateway.temMerchantKey)
 
   const camposAlterados = await prisma.$transaction(async (tx) => {
+    // F5.8 (M4c): PRIMEIRA coisa da transação — lock consultivo EXCLUSIVO, o par do lock COMPARTILHADO de quem cria PaymentIntent (`criarIntentNoAmbiente.ts`). Cria-intent e
+    // troca-de-ambiente se serializam: o intent ou entra na contagem de vivos abaixo, ou espera a troca e nasce no ambiente novo. Vem ANTES do INSERT/FOR UPDATE (mesma ordem em todo mundo).
+    await travarConfigGatewayParaTroca(tx)
     const inseridas = await tx.$executeRaw`
       INSERT INTO "PaymentGatewayConfig" ("id", "environment", "cardEnabled", "pixEnabled", "createdAt", "updatedAt")
       VALUES (1, ${semeadoAmbiente}, ${semeadoHabilitado}, ${semeadoHabilitado}, NOW(), NOW())

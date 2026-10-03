@@ -1,3 +1,4 @@
+import type { PaymentGatewayConfig } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
@@ -48,9 +49,8 @@ let carregando: Promise<LinhaConfigGateway | null> | null = null
 /** Incrementa a cada invalidação; uma leitura iniciada ANTES de uma gravação não pode repovoar o cache com dado velho. */
 let geracao = 0
 
-async function lerLinhaDoBanco(): Promise<LinhaConfigGateway | null> {
-  const row = await prisma.paymentGatewayConfig.findUnique({ where: { id: 1 } })
-  if (!row) return null
+/** Linha crua do Prisma -> `LinhaConfigGateway`. Ambiente inválido na coluna => `ConfiguracaoGatewayIndisponivelError` (fail-closed). */
+export function linhaDeRowDoBanco(row: PaymentGatewayConfig): LinhaConfigGateway {
   if (row.environment !== 'sandbox' && row.environment !== 'production') {
     throw new ConfiguracaoGatewayIndisponivelError(`PaymentGatewayConfig.environment inválido ("${row.environment}")`)
   }
@@ -65,6 +65,11 @@ async function lerLinhaDoBanco(): Promise<LinhaConfigGateway | null> {
     pixEnabled: row.pixEnabled,
     updatedAt: row.updatedAt,
   }
+}
+
+async function lerLinhaDoBanco(): Promise<LinhaConfigGateway | null> {
+  const row = await prisma.paymentGatewayConfig.findUnique({ where: { id: 1 } })
+  return row ? linhaDeRowDoBanco(row) : null
 }
 
 async function carregarLinha(): Promise<LinhaConfigGateway | null> {

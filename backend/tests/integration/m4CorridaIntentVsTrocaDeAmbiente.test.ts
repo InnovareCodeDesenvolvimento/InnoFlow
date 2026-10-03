@@ -164,29 +164,49 @@ describe('M4c — corrida: intent criado entre a contagem do PUT e o commit da t
     const put = putConfig(admin, { environment: 'production', confirmProduction: true, pixEnabled: false }).then((r) => r)
     await Promise.race([dentro, new Promise((_, rej) => setTimeout(() => rej(new Error('o PUT nunca chegou ao portão (writeAuditLog dentro da transação)')), 15_000))])
 
-    // o PUT está DENTRO da transação, com a contagem de vivos já feita (0) e a linha travada — a config ainda diz sandbox
-    const pix = await request(app).post('/api/me/wallet/topups').set(auth(motorista)).send({ amountCents: 2000 })
+    // o PUT está DENTRO da transação, com a contagem de vivos já feita (0) e a linha travada — a config ainda diz sandbox.
+    // MUDANÇA DELIBERADA NO ROTEIRO (Vega, correção do M4c): com a criação do intent serializada com a troca (lock consultivo), o Pix NÃO termina enquanto o PUT está
+    // parado — o `await` direto aqui travaria o teste. Dispara o Pix SEM esperar, espera até haver um lock consultivo À ESPERA no banco (prova de que o criador chegou ao
+    // lock e ficou preso) ou o Pix terminar sozinho (comportamento antigo, sem lock), e só então solta o PUT. Nenhuma asserção dos testes foi afrouxada por isto.
+    const pixEmVoo = request(app).post('/api/me/wallet/topups').set(auth(motorista)).send({ amountCents: 2000 }).then((r) => r)
+    let pixTerminouAntes = false
+    void pixEmVoo.then(() => (pixTerminouAntes = true))
+    const limite = Date.now() + 8_000
+    while (!pixTerminouAntes && Date.now() < limite) {
+      const [esperando] = await m.prisma.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`
+      if ((esperando?.n ?? 0) > 0) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    const pixFicouEsperandoATroca = !pixTerminouAntes
     soltar()
-    const resPut = await put
+    const [resPut, pix] = await Promise.all([put, pixEmVoo])
     m.invalidarCacheConfigGateway() // o PUT já invalidou o cache do processo; isto só explicita
-    return { admin, motorista, resPut, pix }
+    return { admin, motorista, resPut, pix, pixFicouEsperandoATroca }
   }
 
-  it('FORÇADA: a troca passa (200) e o Pix criado no meio nasce SANDBOX e fica PENDING, vivo, com o ambiente efetivo já em PRODUCTION (o escape que o Vega admite)', async () => {
-    const { resPut, pix } = await trocaDeAmbienteComPixCriadoNoMeio()
+  // INVERTIDO DE PROPÓSITO (Vega, correção do M4c): a asserção original fixava o ESCAPE (Pix criado no meio nascia SANDBOX com o efetivo já em PRODUCTION). Com a criação do
+  // intent serializada com a troca (lock consultivo + ambiente lido SOB o lock, não do cache de 10 s), o Pix criado no meio ESPERA a troca commitar e nasce no ambiente NOVO.
+  it('FORÇADA: a troca passa (200) e o Pix criado no meio ESPERA a troca e nasce PRODUCTION (ambiente lido sob o lock, não do cache) — o escape foi fechado', async () => {
+    // o cache do processo diz SANDBOX no momento do pedido do Pix (é o que o código antigo gravaria): aquece-o antes
+    expect(await m.getAmbienteEfetivoParaBanco()).toBe('SANDBOX')
+    const { resPut, pix, pixFicouEsperandoATroca } = await trocaDeAmbienteComPixCriadoNoMeio()
     expect(resPut.status, dump(resPut.body)).toBe(200)
     expect(resPut.body.environment).toBe('production')
+    expect(pixFicouEsperandoATroca, 'o criador do intent tem que ficar preso no lock enquanto a troca está em andamento').toBe(true)
     expect(pix.status, dump(pix.body)).toBe(201)
 
     const intent = await m.prisma.paymentIntent.findUniqueOrThrow({ where: { id: pix.body.id } })
     expect(await m.getAmbienteEfetivoParaBanco()).toBe('PRODUCTION')
-    expect(intent.environment).toBe('SANDBOX')
+    expect(intent.environment).toBe('PRODUCTION')
     expect(intent.status).toBe('PENDING')
   })
 
+  // ADAPTADO (Vega, correção do M4c): o escape não se reproduz mais pela rota, mas a guarda (d) continua sendo a rede de segurança (e há legado sem marca real). O estado que o
+  // escape produzia — intent vivo SANDBOX com o efetivo em PRODUCTION — é montado direto no banco; TODAS as asserções abaixo seguem como a Íris as escreveu.
   it('o escapado fica PROTEGIDO pela guarda (d): a Cielo não é consultada nem o intent expirado/creditado, o alerta sai e o crédito só acontece quando o ambiente volta', async () => {
     const { admin, motorista, pix } = await trocaDeAmbienteComPixCriadoNoMeio()
     const intentId = pix.body.id as string
+    await m.prisma.paymentIntent.update({ where: { id: intentId }, data: { environment: 'SANDBOX' } }) // reproduz o estado do escape (agora impossível pela rota)
     const intent = await m.prisma.paymentIntent.findUniqueOrThrow({ where: { id: intentId } })
     fake.marcarPixComoPago(intent.cieloPaymentId!) // o motorista PAGOU o Pix de verdade
 
@@ -214,13 +234,13 @@ describe('M4c — corrida: intent criado entre a contagem do PUT e o commit da t
     void motorista
   })
 
-  // ACHADO (severidade baixa-média, NÃO corrigido por regra da rodada): depois que a troca de ambiente COMMITA não pode restar PaymentIntent vivo do
+  // ACHADO (severidade baixa-média, CORRIGIDO por Vega — o it.fails virou it, asserção intacta; o texto abaixo descreve o comportamento ANTIGO): depois que a troca de ambiente COMMITA não pode restar PaymentIntent vivo do
   // ambiente antigo — foi exatamente o que o bloqueio M4c prometeu. Causa raiz: a contagem de vivos roda na transação do PUT (linha de config travada),
   // mas a CRIAÇÃO do intent (`me.routes.ts` topups; `iniciarSessaoRemota.ts`) lê o ambiente do cache e grava sem tocar essa linha — não há lock
   // compartilhado entre "criar intent" e "trocar ambiente". Correção sugerida: o INSERT do intent pegar `FOR SHARE` na linha de config e conferir o
   // ambiente DENTRO da mesma transação (a troca, que pega `FOR UPDATE`, espera o intent commitar e o conta; ou o intent espera a troca e nasce no
   // ambiente novo). Se for corrigido, trocar `it.fails` por `it`.
-  it.fails('ACHADO: nenhum PaymentIntent vivo do ambiente ANTIGO pode sobrar depois da troca (hoje sobra 1)', async () => {
+  it('ACHADO: nenhum PaymentIntent vivo do ambiente ANTIGO pode sobrar depois da troca (hoje sobra 1)', async () => {
     const { resPut } = await trocaDeAmbienteComPixCriadoNoMeio()
     expect(resPut.status).toBe(200)
     const efetivo = await m.getAmbienteEfetivoParaBanco()
