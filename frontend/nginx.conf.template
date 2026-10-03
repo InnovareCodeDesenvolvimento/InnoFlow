@@ -1,8 +1,47 @@
 # Template processado pelo entrypoint da imagem nginx (envsubst):
 # ${API_UPSTREAM} vem do ambiente do container (default no frontend/Dockerfile).
+
+# ---- Declarações de contexto `http` (este arquivo é incluído DENTRO de `http {}`) ----
+# Webhook da Cielo (F5.8, portão final da F5 — Órion): o `pathToken` é um SEGREDO e vai no CAMINHO
+# (`/api/webhooks/cielo/<token>`), então o access log padrão do nginx o gravaria em claro. Usado só pela
+# location do webhook, mais abaixo.
+#
+# Máscara: `$request_uri` bruto -> `/api/webhooks/cielo/***` (query descartada). Se o regex NÃO casar (URI com
+# `//`, `%2F` etc. — o nginx normaliza para escolher a location, mas `$request_uri` fica cru), cai no `default`
+# `-`: perde-se o caminho no log, nunca vaza o token.
+map $request_uri $webhook_uri_mascarado {
+    default                      "-";
+    ~^(/api/webhooks/cielo/)     "$1***";
+}
+
+# Mesmo log do access log padrão + o que importa para operar um webhook sem o token: status, tempo e o status
+# do upstream (o erro de fundo vai para o `error_log`, que na location abaixo é silenciado — ver lá).
+log_format webhook_mascarado '$remote_addr xff="$http_x_forwarded_for" [$time_local] '
+                             '"$request_method $webhook_uri_mascarado $server_protocol" $status $body_bytes_sent '
+                             '"$http_user_agent" rt=$request_time urt=$upstream_response_time us=$upstream_status';
+
+# IP "de verdade" para o limite do webhook. Atrás do edge do EasyPanel `$remote_addr` é SEMPRE o IP do proxy
+# (medido em produção, ver docs/DEPLOY-EASYPANEL.md — `TRUST_PROXY_HOPS=2`), então limitar por `$remote_addr`
+# viraria UM balde global. O ÚLTIMO item do `X-Forwarded-For` que chega aqui é o que o edge (confiável) acrescentou
+# = o cliente real; itens anteriores podem ser forjados pelo próprio cliente, por isso o último. Sem XFF (acesso
+# direto à porta 80), cai no `$remote_addr`. Se a topologia mudar (proxy a mais/a menos), o pior caso é o limite
+# do nginx ficar frouxo/global — o limite do backend (60/min/IP) continua valendo por baixo.
+map $http_x_forwarded_for $webhook_cliente_ip {
+    default                      $remote_addr;
+    ~(?<ultimo>[^,\s]+)\s*$      $ultimo;
+}
+
+# 10 req/s por IP (= 600/min), BEM acima dos 60/min do backend (`webhookCieloRateLimit`): aqui é só proteção
+# contra inundação antes de chegar no Node; o limite "de negócio" continua sendo o do backend.
+limit_req_zone $webhook_cliente_ip zone=webhook_cielo:1m rate=10r/s;
+
 server {
     listen 80;
     server_name _;
+
+    # Não anuncia a versão do nginx no header `Server` nem nas páginas de erro.
+    server_tokens off;
+
     root /usr/share/nginx/html;
     index index.html;
 
@@ -142,6 +181,45 @@ server {
         add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    }
+
+    # ---- Webhook da Cielo (F5.8) — token no CAMINHO, nunca no log ---------
+    # `POST /api/webhooks/cielo/<pathToken>` (público, sem JWT; segredo = pathToken + header estático, ver F5.2).
+    #
+    # `^~` AQUI é de propósito e NÃO contradiz o aviso sobre `/api/` mais abaixo: `^~` só desliga a checagem de
+    # regex para URLs cujo prefixo mais longo é ESTA location (`/api/webhooks/cielo/...`). O webhook não é SSE, e
+    # sem o `^~` um token terminado em `.js`/`.css`/`/events` cairia no regex de estáticos/SSE em vez daqui. O
+    # resto de `/api/` continua sem `^~` e continua alcançando a location regex de SSE.
+    #
+    # - Log: SEM o caminho (formato `webhook_mascarado`, acima) — o token não fica no disco/stdout do nginx.
+    # - `error_log ... crit`: o nginx grava a linha de requisição CRUA ("request: POST /api/webhooks/cielo/<token>")
+    #   em toda linha de erro (upstream caiu, timeout, body grande, limit_req) e NÃO há como mascarar isso. Nesta
+    #   location só erros críticos vão ao error_log; o diagnóstico (502/504/413/429) fica no access log mascarado
+    #   (`us=`/`urt=`). Trade-off consciente: se precisar depurar um webhook, suba o nível TEMPORARIAMENTE e lembre
+    #   que o token vai junto.
+    # - `client_max_body_size 64k`: a notificação da Cielo é um JSON minúsculo (ids), 10m do `/api/` é folga demais
+    #   para uma rota pública sem autenticação.
+    # - `limit_req`: ver o comentário da zona. `burst=100 nodelay` absorve rajada de retry da Cielo sem atrasar;
+    #   estourou, responde 429 (a Cielo reenvia).
+    # - Proxy: IGUAL ao `/api/` (mesmos headers e timeout). Sem `add_header` nesta location, então os headers de
+    #   segurança do `server` são herdados normalmente — NÃO precisa de 6ª cópia.
+    location ^~ /api/webhooks/cielo/ {
+        access_log /var/log/nginx/access.log webhook_mascarado;
+        error_log /var/log/nginx/error.log crit;
+
+        client_max_body_size 64k;
+        limit_req zone=webhook_cielo burst=100 nodelay;
+        limit_req_status 429;
+
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $api_upstream ${API_UPSTREAM};
+        proxy_pass $api_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
     }
 
     # ---- API na MESMA ORIGEM ----
