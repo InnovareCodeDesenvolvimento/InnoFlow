@@ -127,6 +127,14 @@ REDIS_URL=redis://host:6379
 
 ### Fase A: SANDBOX — Testar com Cielo (lista de testadores)
 
+**Checagem de dados em produção (uma vez, antes de ligar o sandbox para testadores):** contas antigas que diferem só pela caixa do e-mail (o cadastro novo não as cria, mas as de antes continuam existindo; num login com Google a escolha entre elas seria arbitrária). Peça a quem tem acesso ao banco de produção para rodar:
+
+```sql
+select lower(email), count(*) from "User" group by 1 having count(*) > 1;
+```
+
+Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de seguir (é preciso decidir qual conta fica).
+
 **Pré-condição:** contas de testador **CRIADAS E COM IDENTIDADE VERIFICADA** ANTES de listar no `PAYMENT_SANDBOX_TESTER_EMAILS`. Ver regra abaixo.
 
 **Regra (F5.8, ALTO-2):** Um DRIVER cadastrado só com e-mail/senha (`POST /api/auth/register` NÃO confirma o endereço) **NUNCA** é testador, mesmo com o e-mail na lista — senão qualquer um que soubesse o e-mail de um testador usaria o sandbox de graça. Testador = e-mail na lista E identidade verificada:

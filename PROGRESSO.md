@@ -1046,3 +1046,13 @@ Só desenho; nada implementado. Detalhe completo na memória da Nova (`.claude/a
 - Pendência externa: confirmar com a Cielo o prazo de captura de pré-autorização (projetado com encerramento forçado em 48 h).
 
 D2 e D7 mudam código; a 9b pode começar com os defaults recomendados atrás de env, mas precisam de resposta antes do portão da Íris. Só o carregador real prova: se o firmware enfileira o Stop após queda de energia (e a ordem em relação ao Boot), intervalo de amostragem, suporte a TriggerMessage, desvio de relógio.
+
+## F5.8 fechada (02/10/2026) — endurecimento antes do sandbox
+
+Entregas validadas pelo Atlas (diff + suíte completa contra PG18/Redis reais, 106 arquivos, ~1004 testes, 0 Unhandled; tsc/lint limpos): Vega-3 (varredor de capturas sem fome, lock Redis por intent na captura, prazo no enqueue de liquidação, logs), Vulcano (CI com PG16, nginx do webhook mascarado, mockServiceWorker fora do dist), Vega-4 (ALTO-2 testador só com identidade verificada, M4c por lock consultivo, rotação decifra antes de contar, step-up fail-closed 503 `STEPUP_UNAVAILABLE`), Vega-5 (A1: vaga do step-up devolvida em reserva tardia), Atlas (token do webhook mascarado no log da API; contrato `STEPUP_UNAVAILABLE`). Íris revalidou a Vega-4: APROVADO nos 6 itens (57 mutantes). Guias `docs/GO-LIVE-PAGAMENTOS.md` e `docs/DEPLOY-EASYPANEL.md` atualizados e auditados.
+
+**Para testar o sandbox como motorista:** e-mail em `PAYMENT_SANDBOX_TESTER_EMAILS` E login com Google (cadastro só com senha nunca vale).
+
+**Pendências (todas do dono ou externas):** push dos commits locais; repontar os 4 Apps do EasyPanel para o repositório InnoFlow e redeploy (a versão implantada TEM de incluir `0cb5569`, o guard do FakeAdapter, e o frontend precisa ser rebuildado p/ o nginx novo); credenciais Cielo sandbox + perguntas abertas à Cielo; `PAYMENT_SECRETS_KEY`; `PAYMENT_SANDBOX_TESTER_EMAILS`; consulta SQL de contas duplicadas por caixa de e-mail (no guia, Fase A); resposta sobre TLS na porta 9000; decisões D1–D7 da F5.9 (seção acima); Órion re-revisar antes de produção (pontos: lock consultivo, release tardio do step-up, `role != DRIVER` = staff). Nunca provado contra a Cielo real (tudo com FakeAdapter).
+
+**Resíduos aceitos (baixos):** janela de `iat` <1 s e cache de 10–30 s com mais de uma réplica da API na revogação de sessão no vínculo Google; se a reserva do step-up rejeitar depois de o Redis executá-la, a vaga expira no TTL de 15 min; pool pequeno acopla criadores de intent presos enquanto um PUT do gateway durar. Backlog de infra (Vulcano, sem Docker para provar): Node 22/24, `USER node`, 2 roles de banco.
