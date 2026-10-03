@@ -84,22 +84,79 @@ async function safeLogMessage(entry: {
   }
 }
 
+/** Janela em que uma resposta OUTBOUND ainda vale como "replay" (ALTO-3): messageId reaproveitado depois disto é mensagem NOVA. */
+export const JANELA_REPLAY_MS = 24 * 3_600_000
+
+/**
+ * Códigos de erro OCPP que são resposta DETERMINÍSTICA do nosso lado (payload inválido, propriedade fora da regra, não implementado...): repetir a mesma
+ * mensagem daria o mesmo erro, então o CALL_ERROR pode ser cacheado. `GenericError`/`InternalError` e qualquer exceção que não seja RPCError (banco
+ * fora, enum desconhecido, deploy rolante...) são TRANSITÓRIOS: cacheá-los fazia o carregador receber a MESMA falha para sempre, mesmo depois de o
+ * problema passar (ALTO-3 do Órion — o Stop enfileirado nunca seria processado).
+ */
+const CODIGOS_RPC_DETERMINISTICOS = new Set([
+  'FormatViolation',
+  'FormationViolation',
+  'PropertyConstraintViolation',
+  'OccurenceConstraintViolation',
+  'OccurrenceConstraintViolation',
+  'TypeConstraintViolation',
+  'ProtocolError',
+  'NotImplemented',
+  'NotSupported',
+  'SecurityError',
+])
+
+export function isErroDeterministico(err: unknown): boolean {
+  const codigo = err && typeof err === 'object' ? (err as { rpcErrorCode?: unknown }).rpcErrorCode : undefined
+  return typeof codigo === 'string' && CODIGOS_RPC_DETERMINISTICOS.has(codigo)
+}
+
+/** JSON canônico (chaves ordenadas): o payload volta do JSONB com outra ordem de chaves, e a comparação não pode depender disso. */
+export function jsonCanonico(valor: unknown): string {
+  if (valor === null || typeof valor !== 'object') return JSON.stringify(valor) ?? 'undefined'
+  if (Array.isArray(valor)) return `[${valor.map(jsonCanonico).join(',')}]`
+  const o = valor as Record<string, unknown>
+  return `{${Object.keys(o).sort().filter((k) => o[k] !== undefined).map((k) => `${JSON.stringify(k)}:${jsonCanonico(o[k])}`).join(',')}}`
+}
+
+/**
+ * Replay só quando é, de fato, a MESMA mensagem repetida. O `messageId` do OCPP-J só é único por conexão/tempo: firmware com contador que zera no reboot
+ * (exatamente o incidente do D-A) reaproveita ids, e a versão anterior devolvia a resposta de OUTRA mensagem — o Stop enfileirado nunca executava
+ * (`run()` pulado) e o carregador achava que fora confirmado. Agora o replay exige: mesmo `action`, dentro da janela de 24 h e MESMO payload INBOUND que
+ * o da primeira vez. Qualquer diferença => é mensagem nova: executa.
+ */
 export async function withIdempotency<T extends Record<string, unknown>>(opts: WithIdempotencyOptions<T>): Promise<T> {
   const { chargePointId, operatorId, ocppMessageId, action, rawPayload, run } = opts
   const occurredAt = extractEventTimestamp(rawPayload)
+  const desde = new Date(Date.now() - JANELA_REPLAY_MS)
+
+  // O INBOUND anterior (se houver) é lido ANTES de gravar o desta chamada — senão o comparador acharia a si mesmo.
+  const inboundAnterior = await prisma.ocppMessage
+    .findFirst({
+      where: { chargePointId, ocppMessageId, direction: 'INBOUND', action, receivedAt: { gte: desde } },
+      orderBy: { receivedAt: 'desc' },
+      select: { payload: true },
+    })
+    .catch(() => null)
 
   await safeLogMessage({ chargePointId, operatorId, direction: 'INBOUND', messageType: 'CALL', ocppMessageId, action, payload: rawPayload, occurredAt })
 
   const cached = await prisma.ocppMessage.findFirst({
-    where: { chargePointId, ocppMessageId, direction: 'OUTBOUND' },
+    where: { chargePointId, ocppMessageId, direction: 'OUTBOUND', action, receivedAt: { gte: desde } },
     orderBy: { receivedAt: 'desc' },
   })
 
-  if (cached) {
+  // Sem INBOUND anterior para comparar (log que falhou) mantém o comportamento antigo: confia no OUTBOUND achado.
+  const mesmaMensagem = cached !== null && (inboundAnterior === null || jsonCanonico(inboundAnterior.payload) === jsonCanonico(rawPayload))
+  if (cached && !mesmaMensagem) {
+    logger.warn({ chargePointId, ocppMessageId, action }, '[ocpp] messageId reaproveitado com payload DIFERENTE — tratado como mensagem nova (executando)')
+  }
+
+  if (cached && mesmaMensagem) {
     logger.info({ chargePointId, ocppMessageId, action }, '[ocpp] mensagem duplicada — devolvendo resposta já processada, sem reexecutar')
     if (cached.messageType === 'CALL_ERROR') {
-      const errPayload = cached.payload as { message?: string }
-      throw new Error(errPayload.message ?? `${action} já havia falhado anteriormente`)
+      const errPayload = cached.payload as { message?: string; rpcErrorCode?: string }
+      throw Object.assign(new Error(errPayload.message ?? `${action} já havia falhado anteriormente`), errPayload.rpcErrorCode ? { rpcErrorCode: errPayload.rpcErrorCode } : {})
     }
     return cached.payload as T
   }
@@ -110,7 +167,11 @@ export async function withIdempotency<T extends Record<string, unknown>>(opts: W
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    await safeLogMessage({ chargePointId, operatorId, direction: 'OUTBOUND', messageType: 'CALL_ERROR', ocppMessageId, action, payload: { message }, occurredAt: new Date() })
+    // Só erro DETERMINÍSTICO é cacheado. Transitório (banco, deploy, bug) NÃO deixa rastro OUTBOUND: o próximo envio do mesmo messageId executa de novo.
+    if (isErroDeterministico(err)) {
+      const rpcErrorCode = (err as { rpcErrorCode: string }).rpcErrorCode
+      await safeLogMessage({ chargePointId, operatorId, direction: 'OUTBOUND', messageType: 'CALL_ERROR', ocppMessageId, action, payload: { message, rpcErrorCode }, occurredAt: new Date() })
+    }
     throw err
   }
 }
