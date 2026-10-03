@@ -399,12 +399,20 @@ model Connector {
   // Número OCPP do conector dentro do charge point. connectorId = 0 no OCPP
   // significa "o carregador inteiro" — NUNCA cria linha aqui para ele
   // (reforçado por CHECK connector_id <> 0 na migration).
-  connectorId     Int
-  type            ConnectorType
-  maxPowerKw      Decimal?        @db.Decimal(6, 2)
-  status          ConnectorStatus @default(AVAILABLE)
-  statusUpdatedAt DateTime?       @db.Timestamptz(3)
-  errorCode       String?
+  connectorId      Int
+  type             ConnectorType
+  maxPowerKw       Decimal?        @db.Decimal(6, 2)
+  status           ConnectorStatus @default(AVAILABLE)
+  // statusUpdatedAt: relógio do CARREGADOR (data.timestamp do StatusNotification,
+  // com fallback para now()) — serve à exibição/cobrança, NUNCA ao watchdog.
+  statusUpdatedAt  DateTime?       @db.Timestamptz(3)
+  // statusReceivedAt (F5.9, 2026-10-03): instante do SERVIDOR (now()) em que o
+  // último StatusNotification foi registrado. É a única base do watchdog para
+  // "há quanto tempo o conector está nesse status" (regra R2): relógio do
+  // carregador pode estar errado/atrasado. NULL = nunca recebeu (o backfill da
+  // migration 20261003130000 preencheu os existentes com now()).
+  statusReceivedAt DateTime?       @db.Timestamptz(3)
+  errorCode        String?
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
@@ -690,7 +698,14 @@ model ChargingSession {
   // lastActivityAt: última atividade OCPP observada para a sessão (qualquer
   // mensagem útil). NULL em linha antiga/STOPPED; o watchdog usa
   // COALESCE(lastActivityAt, startedAt) por segurança.
-  lastActivityAt DateTime? @db.Timestamptz(3)
+  lastActivityAt    DateTime? @db.Timestamptz(3)
+  // lastMeterValuesAt (F5.9, 2026-10-03): instante do SERVIDOR (now()) do último
+  // MeterValues DA TRANSAÇÃO. Distinto de lastActivityAt, que também se move com
+  // StatusNotification etc.: a regra U1 ("reanimar" sessão não confirmada) só
+  // pode considerar leitura de medidor de verdade. NULL = nenhum MeterValues
+  // visto (o backfill da migration 20261003130000 copiou lastActivityAt nas
+  // sessões abertas). Relógio do carregador fica em lastSampleAt.
+  lastMeterValuesAt DateTime? @db.Timestamptz(3)
 
   // Pedido de parada (colunas ortogonais ao status — o StatusNotification é a
   // fonte de verdade do status físico e sobrescreveria um "STOPPING").
