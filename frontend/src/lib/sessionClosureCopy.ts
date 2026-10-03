@@ -27,7 +27,7 @@ export const DRIVER_CLOSURE_COPY = {
       ? `O carregador parou de responder. Cobramos só o que foi medido até ${time}.`
       : "O carregador parou de responder. Cobramos só o que foi medido.",
   /** Sessão `FAULTED` ainda aparecendo como "em andamento" na tela de sessão. */
-  faulted: "O carregador informou uma falha nesta recarga. Você pode encerrá-la; cobramos só o que foi medido.",
+  faulted: "O carregador informou uma falha nesta recarga. Você pode encerrá-la a qualquer momento.",
   /** Recibo aberto de uma sessão que voltou a andar (carregador voltou a medir). */
   reanimated: "O carregador voltou a responder e a recarga continua.",
   reanimatedLink: "Ver a recarga em andamento",
