@@ -166,11 +166,11 @@ describe('rotação de PAYMENT_SECRETS_KEY — ponta a ponta e bordas — Postgr
     expect(m.sec.decryptPaymentSecret((await m.prisma.paymentMethod.findUniqueOrThrow({ where: { id: atual.id } })).cieloCardTokenCiphertext)).toBe('tok-atual-lixo')
   })
 
-  // ACHADO (severidade baixa, NÃO corrigido): `avaliar()` em `recifrarSegredos.ts` decide "JA_NA_ATUAL" olhando só o PREFIXO (`ciphertextEstaNaChaveAtual`
+  // ACHADO (severidade baixa, CORRIGIDO por Vega — o it.fails virou it, asserção intacta; o texto abaixo descreve o comportamento ANTIGO): `avaliar()` em `recifrarSegredos.ts` decide "JA_NA_ATUAL" olhando só o PREFIXO (`ciphertextEstaNaChaveAtual`
   // compara o `kid`), sem decifrar. Um `v1:<kid atual>:<corpo corrompido/truncado>` entra como "já na chave atual": `ilegíveis: 0`, exit 0 e a frase
   // "Concluído: tudo está na chave atual" — para um valor que NÃO decifra. O script é justamente o portão que o dono usa para decidir se já pode remover a chave
   // anterior; ele deveria acusar esse valor como ilegível (decifrar uma vez custa 1 AES-GCM). Se for corrigido, trocar `it.fails` por `it`.
-  it.fails('5) ACHADO: `v1:<kid atual>:<corpo corrompido>` deveria ser contado como ILEGÍVEL (hoje é "já na chave atual" e o script diz Concluído)', async () => {
+  it('5) ACHADO: `v1:<kid atual>:<corpo corrompido>` deveria ser contado como ILEGÍVEL (hoje é "já na chave atual" e o script diz Concluído)', async () => {
     await limparTudo()
     chaves(CHAVE_B, CHAVE_A)
     const bom = m.aes.encryptAesGcmV1('tok-vai-corromper', CHAVE_B)

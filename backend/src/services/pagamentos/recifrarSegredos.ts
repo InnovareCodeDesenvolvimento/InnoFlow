@@ -11,7 +11,7 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
  *
  * Regras:
  *  - DRY-RUN por padrão (`apply: false` não grava NADA, só conta); `apply: true` grava.
- *  - IDEMPOTENTE: o que já está em `v1:<kid atual>:...` é pulado — rodar de novo não muda nada.
+ *  - IDEMPOTENTE: o que já está em `v1:<kid atual>:...` E DECIFRA é pulado — rodar de novo não muda nada. `v1` da chave atual que não decifra é ilegível, não "já na atual".
  *  - Decifra com `decryptPaymentSecret` (atual ou `PAYMENT_SECRETS_KEY_PREVIOUS`, `v1` ou legado) e regrava com `encryptPaymentSecret` (sempre `v1` + chave atual).
  *    O que NÃO decifra com nenhuma das chaves é CONTADO como ilegível e deixado como está (nunca apagado) — a rotação só pode ser dada como concluída com ilegíveis = 0.
  *  - Compare-and-set por linha: a regravação só vale se a coluna ainda tem o ciphertext lido (uma gravação concorrente da API não é pisada).
@@ -62,9 +62,14 @@ function novoAlvo(alvo: AlvoRecifragem): RelatorioAlvo {
 /** Classifica UM valor. `novo` só vem preenchido quando precisa regravar. Nunca lança nem expõe o texto. */
 function avaliar(ciphertext: string): { situacao: 'JA_NA_ATUAL' | 'A_RECIFRAR' | 'ILEGIVEL'; novo?: string } {
   try {
-    if (ciphertextEstaNaChaveAtual(ciphertext)) return { situacao: 'JA_NA_ATUAL' }
+    // "Já na chave atual" só vale se DECIFRA: o prefixo `v1:<kid atual>:` sozinho não prova nada — um corpo corrompido/truncado com o kid certo contava como
+    // "ok" e o relatório dizia "Concluído / ilegíveis: 0" (achado da Íris, F5.8). Custa 1 AES-GCM por valor; o texto decifrado é descartado na hora.
+    if (ciphertextEstaNaChaveAtual(ciphertext)) {
+      decryptPaymentSecret(ciphertext)
+      return { situacao: 'JA_NA_ATUAL' }
+    }
   } catch {
-    return { situacao: 'ILEGIVEL' } // formato desconhecido/mal formado
+    return { situacao: 'ILEGIVEL' } // formato desconhecido/mal formado, ou `v1` da chave atual que não decifra (corpo corrompido)
   }
   try {
     return { situacao: 'A_RECIFRAR', novo: encryptPaymentSecret(decryptPaymentSecret(ciphertext)) }
