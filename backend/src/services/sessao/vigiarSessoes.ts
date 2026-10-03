@@ -51,6 +51,8 @@ export interface VigiarSessoesDeps {
   batchSize?: number
   /** Só para teste: espera os comandos OCPP (RemoteStop/TriggerMessage) terminarem. Em produção ficam em segundo plano. */
   aguardarComandos?: boolean
+  /** Só para teste: ignora o kill-switch `SESSION_WATCHDOG_ENABLED` (os testes de integração ligam a chave explicitamente; isto existe para o teste do próprio kill-switch). */
+  habilitado?: boolean
   /** Restringe o ciclo a estes carregadores (uso pontual/operacional e testes que dividem o banco com outras suítes). Omitido = todas as sessões vigiadas. */
   chargePointIds?: readonly string[]
 }
@@ -61,6 +63,8 @@ export interface VigiarSessoesResultado {
   falhas: number
   /** `true` quando o teto de páginas do ciclo cortou a varredura (há mais sessões vigiadas do que o ciclo alcança). */
   truncada: boolean
+  /** `true` quando o kill-switch (`SESSION_WATCHDOG_ENABLED=false`) impediu o ciclo. */
+  desligado?: boolean
 }
 
 const SELECT_VIGIADA = {
@@ -86,6 +90,7 @@ export async function vigiarSessoes(deps: VigiarSessoesDeps = {}): Promise<Vigia
   const config = deps.config ?? configWatchdogDoEnv()
   const batchSize = deps.batchSize ?? env.SESSION_WATCHDOG_BATCH_SIZE
   const resultado: VigiarSessoesResultado = { avaliadas: 0, porAcao: {}, falhas: 0, truncada: false }
+  if (!(deps.habilitado ?? env.SESSION_WATCHDOG_ENABLED)) return { ...resultado, desligado: true } // kill-switch (M4): nenhum efeito, nem leitura
 
   // Paginação por CHAVE (`id > último`), não por `cursor`+`skip`: processar uma sessão a tira do filtro (vira STOPPED), e o cursor do Prisma
   // sobre uma linha que já não casa com o `where` faz o `skip: 1` pular uma sessão VÁLIDA (achado dos testes: 4 de 5 processadas).

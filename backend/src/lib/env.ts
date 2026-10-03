@@ -253,6 +253,11 @@ const envSchema = z.object({
   // F5.9 (03/10/2026) — WATCHDOG DE SESSÃO TRAVADA (M5/M6). Desenho: .claude/agent-memory/nova/decisoes-f59-sessao-travada.md.
   // Decisão em `core/sessao/avaliarSessaoAberta.ts` (função pura; os defaults aqui TÊM de bater com `CONFIG_WATCHDOG_PADRAO` de lá —
   // um teste unitário trava isso). Todos têm default de propósito (campo novo sem default derrubaria os 3 entrypoints no boot).
+  // KILL-SWITCH do watchdog (M4 do Órion). DEFAULT FALSE: no 1º deploy o watchdog NASCE desligado. Ordem de rollout: migration -> API e gateway ->
+  // SÓ ENTÃO ligar (true) e subir o worker — um worker novo gerando STOP_UNCONFIRMED enquanto API/gateway antigos ainda não conhecem o enum quebra
+  // handlers no meio do deploy rolante. Desligado: o job NÃO é agendado (o agendador antigo, se existir, é REMOVIDO), o processador ignora disparos
+  // atrasados e `vigiarSessoes()` não age. Os handlers OCPP e as rotas (marcar no Boot, parar, stop tardio) seguem funcionando — só a vigilância periódica para.
+  SESSION_WATCHDOG_ENABLED: envBoolean(false),
   // Cadência do job `vigiarSessoesJob` no worker (concurrency 1) e tamanho do lote por ciclo.
   SESSION_WATCHDOG_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   SESSION_WATCHDOG_BATCH_SIZE: z.coerce.number().int().positive().default(100),

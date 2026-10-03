@@ -7,6 +7,7 @@ import { CONFIG_WATCHDOG_PADRAO } from '../../src/core/sessao/avaliarSessaoAbert
  */
 
 const VARS_SESSAO = [
+  'SESSION_WATCHDOG_ENABLED',
   'SESSION_WATCHDOG_INTERVAL_MS',
   'SESSION_WATCHDOG_BATCH_SIZE',
   'SESSION_CHARGER_OFFLINE_MINUTES',
@@ -118,6 +119,24 @@ describe('defaults — nenhum campo novo é obrigatório (campo novo sem default
   })
 })
 
+describe('kill-switch do watchdog (M4 do Órion)', () => {
+  it('SESSION_WATCHDOG_ENABLED nasce FALSE (default seguro do 1º deploy) e aceita true/1/yes/on e false/0/no/off', async () => {
+    expect((await carregar()).env.SESSION_WATCHDOG_ENABLED).toBe(false)
+    for (const v of ['true', '1', 'yes', 'on', 'TRUE']) {
+      vi.resetModules()
+      expect((await carregar({ SESSION_WATCHDOG_ENABLED: v })).env.SESSION_WATCHDOG_ENABLED, v).toBe(true)
+    }
+    for (const v of ['false', '0', 'no', 'off', '']) {
+      vi.resetModules()
+      expect((await carregar({ SESSION_WATCHDOG_ENABLED: v })).env.SESSION_WATCHDOG_ENABLED, v).toBe(false)
+    }
+  })
+
+  it('valor que não é booleano derruba o boot (não adivinhamos se o watchdog está ligado)', async () => {
+    await recusa({ SESSION_WATCHDOG_ENABLED: 'talvez' })
+  })
+})
+
 describe('valores informados', () => {
   it('numéricos viram number', async () => {
     const { env } = await carregar({
@@ -162,7 +181,7 @@ describe('valores inválidos derrubam o boot (não adivinhamos política de cobr
   it.each(['TALVEZ', 'NONE', 'cobrar', 'NO-CHARGE'])('SESSION_NO_READING_POLICY=%j', async (v) => recusa({ SESSION_NO_READING_POLICY: v }))
   it.each(['talvez', 'sim', '2'])('SESSION_ALLOW_START_WHILE_UNCONFIRMED=%j', async (v) => recusa({ SESSION_ALLOW_START_WHILE_UNCONFIRMED: v }))
 
-  it.each(VARS_SESSAO.filter((k) => k !== 'SESSION_NO_READING_POLICY' && k !== 'SESSION_ALLOW_START_WHILE_UNCONFIRMED'))(
+  it.each(VARS_SESSAO.filter((k) => k !== 'SESSION_NO_READING_POLICY' && k !== 'SESSION_ALLOW_START_WHILE_UNCONFIRMED' && k !== 'SESSION_WATCHDOG_ENABLED'))(
     '%s recusa 0, negativo, decimal e texto',
     async (nome) => {
       for (const ruim of ['0', '-1', '1.5', 'abc']) {

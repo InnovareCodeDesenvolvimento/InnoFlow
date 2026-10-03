@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { prisma } from '../../src/lib/prisma'
 import { redis } from '../../src/lib/redis'
+import { env } from '../../src/lib/env'
 import { logger } from '../../src/lib/logger'
 import { handleStopTransaction } from '../../src/ocpp/handlers/stopTransaction'
 import { handleMeterValues } from '../../src/ocpp/handlers/meterValues'
@@ -18,12 +19,16 @@ describe('ALTO-2 — transactionId de OUTRO carregador não mexe na sessão alhe
   let A: Cenario
   let B: Cenario
 
+  const killSwitchOriginal = env.SESSION_WATCHDOG_ENABLED
+
   beforeAll(async () => {
+    ;(env as { SESSION_WATCHDOG_ENABLED: boolean }).SESSION_WATCHDOG_ENABLED = true // M4: o watchdog nasce DESLIGADO (default false); estes testes o ligam EXPLICITAMENTE
     A = await criarCenario(suffix, 'alto2a')
     B = await criarCenario(suffix, 'alto2b') // OUTRO operador, OUTRO carregador
   })
   afterEach(() => vi.restoreAllMocks())
   afterAll(async () => {
+    ;(env as { SESSION_WATCHDOG_ENABLED: boolean }).SESSION_WATCHDOG_ENABLED = killSwitchOriginal
     await prisma.$disconnect()
     redis.disconnect()
   })

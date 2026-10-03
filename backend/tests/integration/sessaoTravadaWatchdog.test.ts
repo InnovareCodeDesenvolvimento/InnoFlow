@@ -1,7 +1,8 @@
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../src/lib/prisma'
 import { redis } from '../../src/lib/redis'
+import { env } from '../../src/lib/env'
 import { logger } from '../../src/lib/logger'
 import { handleStopTransaction } from '../../src/ocpp/handlers/stopTransaction'
 import { vigiarSessoes, chaveAlertaLimitado, chaveTriggerMeterValues } from '../../src/services/sessao/vigiarSessoes'
@@ -53,12 +54,18 @@ const TARIFA_POR_MINUTO: Prisma.InputJsonValue = {
 
 describe('Watchdog de sessões (vigiarSessoes) — Postgres + Redis reais', () => {
   const suffix = uniqueSuffix()
+  const killSwitchOriginal = env.SESSION_WATCHDOG_ENABLED
+
+  beforeAll(() => {
+    ;(env as { SESSION_WATCHDOG_ENABLED: boolean }).SESSION_WATCHDOG_ENABLED = true // M4: o watchdog nasce DESLIGADO (default false); estes testes o ligam EXPLICITAMENTE
+  })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
   afterAll(async () => {
+    ;(env as { SESSION_WATCHDOG_ENABLED: boolean }).SESSION_WATCHDOG_ENABLED = killSwitchOriginal
     await resolverCapturasPendentes(cenariosCriados) // hermético: não deixa CAPTURE_PENDING velho para o varredor de outras suítes
     await prisma.$disconnect()
     redis.disconnect()
