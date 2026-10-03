@@ -39,7 +39,10 @@ async function notificarConectores(ctx: OcppHandlerCtx): Promise<void> {
 /** Handshake autenticado + handlers registrados = prova de presença: marca "visto agora" e avisa o mapa para o carregador voltar a verde na hora. */
 export async function registrarConexao(ctx: OcppHandlerCtx): Promise<void> {
   try {
-    await touchLastSeen(ctx.chargePointId, new Date())
+    const agora = new Date()
+    await touchLastSeen(ctx.chargePointId, agora)
+    // M2 (Órion): RELÓGIO DO SERVIDOR da (re)conexão — o watchdog conta a janela de confirmação a partir daqui (`ChargePoint.connectedAt`).
+    await prisma.chargePoint.update({ where: { id: ctx.chargePointId }, data: { connectedAt: agora } })
     await notificarConectores(ctx)
   } catch (err) {
     logger.error({ err, chargePointId: ctx.chargePointId }, '[ocpp][presenca] falha ao registrar conexão (não bloqueante)')

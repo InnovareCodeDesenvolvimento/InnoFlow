@@ -250,6 +250,29 @@ function offlineDesde(carregador: PresencaCarregador, criadaEm: Date): Date {
   return lastSeenAt
 }
 
+/**
+ * Quando termina a janela de confirmação (U2), para um carregador cujo estado ONLINE/OFFLINE já foi decidido por quem chama.
+ *
+ * M2 (Órion): a janela ONLINE conta desde a RECONEXÃO — `max(unconfirmedAt, connectedAt) + G`. Antes contava sempre desde `unconfirmedAt`: com a sessão em
+ * confirmação há 30 min (carregador fora do ar) e o carregador visto há 6 s, a janela G1 já tinha "vencido" e o servidor encerrava no 1º ciclo, ANTES de o
+ * StopTransaction enfileirado ser entregue (o D-A de volta para quedas de 25 min a 2 h). Agora o carregador que acabou de voltar ganha G1 inteira para entregar
+ * o Stop. Tetos: nunca depois de `unconfirmedAt + G2` (um carregador que reconecta em loop não segura a sessão para sempre) — o hold do cartão limita por fora.
+ * `connectedAt` nulo/anterior à marcação => comportamento antigo. Offline (G2) não muda: já conta desde a marcação.
+ */
+function prazoDaJanela(
+  unconfirmedAt: Date,
+  carregador: PresencaCarregador,
+  online: boolean,
+  config: Pick<ConfigWatchdogSessao, 'unconfirmedGraceOnlineMinutes' | 'unconfirmedGraceOfflineMinutes'>,
+  intervaloAmostragemMs?: number | null,
+): Date {
+  const janelaMs = janelaDeConfirmacaoMs(online, config, intervaloAmostragemMs)
+  if (!online || !carregador.connectedAt || carregador.connectedAt.getTime() <= unconfirmedAt.getTime()) return soma(unconfirmedAt, janelaMs)
+  const desdeAReconexao = soma(carregador.connectedAt, janelaMs)
+  const teto = soma(unconfirmedAt, Math.max(janelaMs, config.unconfirmedGraceOfflineMinutes * MINUTO_MS))
+  return desdeAReconexao.getTime() < teto.getTime() ? desdeAReconexao : teto
+}
+
 /** Margem sobre o intervalo de amostragem: a janela precisa caber 1 amostra + atraso de rede/fila, não só o intervalo exato. */
 export const MARGEM_SOBRE_INTERVALO_DE_AMOSTRAGEM = 1.5
 
@@ -297,7 +320,7 @@ export function calcularConfirmDeadline(entrada: EntradaConfirmDeadline): Date {
   const { agora, sessao, carregador, config } = entrada
   const unconfirmedAt = exigirUnconfirmedAt(sessao)
   const online = isChargePointOnline(carregador, agora)
-  const prazoJanela = soma(unconfirmedAt, janelaDeConfirmacaoMs(online, config, entrada.intervaloAmostragemMs))
+  const prazoJanela = prazoDaJanela(unconfirmedAt, carregador, online, config, entrada.intervaloAmostragemMs)
   const prazoCartao = prazoDoCartao(sessao, config)
   return prazoCartao && prazoCartao.getTime() < prazoJanela.getTime() ? prazoCartao : prazoJanela
 }
@@ -399,7 +422,7 @@ function avaliarNaoConfirmada(entrada: EntradaAvaliacao): DecisaoSessao {
   }
 
   // U2 — fim da janela de confirmação (G1 online / G2 offline), limitada pelo prazo do cartão: encerra com a melhor prova.
-  const prazoJanela = soma(unconfirmedAt, janelaDeConfirmacaoMs(online, config, entrada.intervaloAmostragemMs))
+  const prazoJanela = prazoDaJanela(unconfirmedAt, carregador, online, config, entrada.intervaloAmostragemMs)
   const prazoEfetivo = prazoCartao && prazoCartao.getTime() < prazoJanela.getTime() ? prazoCartao : prazoJanela
   if (agora.getTime() >= prazoEfetivo.getTime()) {
     const prova: ProvaDeLeitura = provas.stopTransactionNoLog ? 'STOP_TRANSACTION' : provas.ultimaAmostra ? 'LAST_METER_SAMPLE' : 'NO_READING'

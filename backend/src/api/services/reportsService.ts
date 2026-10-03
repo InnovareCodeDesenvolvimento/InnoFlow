@@ -471,7 +471,7 @@ export async function getSessionDetail(scope: ReportingScope, id: string, isAdmi
     },
     include: {
       site: { select: { id: true, name: true } },
-      chargePoint: { select: { id: true, ocppIdentity: true, lastSeenAt: true, disconnectedAt: true } },
+      chargePoint: { select: { id: true, ocppIdentity: true, lastSeenAt: true, disconnectedAt: true, connectedAt: true } },
       connector: { select: { connectorId: true } },
       user: { select: { name: true, email: true } },
       tariff: { select: { name: true } },

@@ -29,6 +29,11 @@ export interface PresencaCarregador {
   lastSeenAt: Date | null
   /** Instante do último close do WebSocket (`ChargePoint.disconnectedAt`); `null`/`undefined` = nunca registrado. */
   disconnectedAt?: Date | null
+  /**
+   * Instante (relógio do SERVIDOR) da última (re)conexão do WebSocket (`ChargePoint.connectedAt`, gravado no handshake). NÃO entra em `isChargePointOnline` — é só para
+   * o watchdog saber HÁ QUANTO TEMPO o carregador voltou (M2 do Órion). `null`/ausente = desconhecido: comportamento antigo.
+   */
+  connectedAt?: Date | null
 }
 
 export function isChargePointOnline(presenca: PresencaCarregador, now: Date = new Date()): boolean {

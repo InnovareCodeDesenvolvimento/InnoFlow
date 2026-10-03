@@ -87,7 +87,7 @@ const SELECT_VIGIADA = {
   unconfirmedAt: true,
   chargePointId: true,
   ocppTransactionId: true,
-  chargePoint: { select: { lastSeenAt: true, disconnectedAt: true } },
+  chargePoint: { select: { lastSeenAt: true, disconnectedAt: true, connectedAt: true } },
   connector: { select: { connectorId: true, status: true, statusReceivedAt: true } },
   paymentIntents: { where: { purpose: 'SESSION_CARD_CAPTURE' as const, status: 'AUTHORIZED' as const }, select: { authorizedAt: true }, take: 1 },
 } as const
@@ -210,7 +210,7 @@ async function processarSessao(sessao: SessaoVigiada, agora: Date, config: Confi
       energyAdvancedSinceStopRequest,
       energiaAvancouDesdeAMarcacao,
     },
-    carregador: { lastSeenAt: sessao.chargePoint.lastSeenAt, disconnectedAt: sessao.chargePoint.disconnectedAt },
+    carregador: { lastSeenAt: sessao.chargePoint.lastSeenAt, disconnectedAt: sessao.chargePoint.disconnectedAt, connectedAt: sessao.chargePoint.connectedAt },
     conector: { status: conectorStatus, statusReceivedAt: sessao.connector.statusReceivedAt },
     provas,
     ultimoTriggerMeterValuesEm,

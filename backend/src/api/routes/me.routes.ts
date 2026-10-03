@@ -361,7 +361,7 @@ router.get(
       where: { id: req.params.id, userId },
       include: {
         site: { select: { name: true, addressLine: true, city: true } },
-        chargePoint: { select: { ocppIdentity: true, lastSeenAt: true, disconnectedAt: true } },
+        chargePoint: { select: { ocppIdentity: true, lastSeenAt: true, disconnectedAt: true, connectedAt: true } },
         connector: { select: { connectorId: true, type: true } },
         tariff: { select: { name: true, currency: true } },
       },
