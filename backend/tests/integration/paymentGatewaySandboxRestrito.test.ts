@@ -26,7 +26,6 @@ type Mods = {
   FakeAdapter: typeof import('../../src/services/pagamentos/fakeAdapter').FakeAdapter
 }
 
-const CHAVE_A = 'N9kxeAXn4BnqUUoF1v+dbfdbLGJLH0WPqIdGIqbbK28=' // a do vitest.config
 const CHAVE_B = 'rO0r0cC8l3MZXV9yXQeQ8mR9Zf7M8wUQ1mC0pZ2dQhY=' // outra, 32 bytes
 // Renovados a cada teste (beforeEach): o e-mail é UNIQUE no banco e os testes criam o motorista-testador de novo.
 let testerEmail = ''
