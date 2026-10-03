@@ -6,16 +6,19 @@ import { updatePaymentGatewayConfigSchema } from '../../src/api/schemas/paymentG
  * F5.7 (B2): segredos do webhook fracos. PUT exige >= 32; as ENVs seguem aceitando >= 8 (não derrubam o boot) mas o USO loga `warn`
  * com o TAMANHO (nunca o valor), no máximo 1x por hora.
  */
+// `currentPassword` é obrigatório em todo PUT (M2, step-up): sem ele TODO corpo falharia — o que se prova aqui é o limite do segredo, não a senha.
+const SENHA = { currentPassword: 'senha-qualquer-do-teste' }
+
 describe('B2 — PUT do gateway: segredo do webhook >= 32 caracteres', () => {
   it('31 é recusado (inclusive com espaços nas bordas, que o schema apara); 32 e 40 passam', () => {
-    expect(updatePaymentGatewayConfigSchema.safeParse({ webhookHeaderSecret: 'a'.repeat(SEGREDO_WEBHOOK_TAMANHO_MINIMO - 1) }).success).toBe(false)
-    expect(updatePaymentGatewayConfigSchema.safeParse({ webhookHeaderSecret: `  ${'a'.repeat(31)}  ` }).success).toBe(false)
-    expect(updatePaymentGatewayConfigSchema.safeParse({ webhookHeaderSecret: 'a'.repeat(32) }).success).toBe(true)
-    expect(updatePaymentGatewayConfigSchema.safeParse({ webhookHeaderSecret: 'a'.repeat(40) }).success).toBe(true)
+    expect(updatePaymentGatewayConfigSchema.safeParse({ ...SENHA, webhookHeaderSecret: 'a'.repeat(SEGREDO_WEBHOOK_TAMANHO_MINIMO - 1) }).success).toBe(false)
+    expect(updatePaymentGatewayConfigSchema.safeParse({ ...SENHA, webhookHeaderSecret: `  ${'a'.repeat(31)}  ` }).success).toBe(false)
+    expect(updatePaymentGatewayConfigSchema.safeParse({ ...SENHA, webhookHeaderSecret: 'a'.repeat(32) }).success).toBe(true)
+    expect(updatePaymentGatewayConfigSchema.safeParse({ ...SENHA, webhookHeaderSecret: 'a'.repeat(40) }).success).toBe(true)
   })
 
   it('a mensagem de erro diz o mínimo (a tela pode mostrá-la)', () => {
-    const r = updatePaymentGatewayConfigSchema.safeParse({ webhookHeaderSecret: 'curto-demais' })
+    const r = updatePaymentGatewayConfigSchema.safeParse({ ...SENHA, webhookHeaderSecret: 'curto-demais' })
     expect(r.success).toBe(false)
     if (!r.success) expect(r.error.issues[0].message).toContain('32')
   })
