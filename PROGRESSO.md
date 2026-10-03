@@ -1021,3 +1021,28 @@ chave sem perder cartões salvos.
 ## Guia operacional de go-live (02/10/2026)
 
 📖 **`docs/GO-LIVE-PAGAMENTOS.md`** entregue — guia completo para o dono (não-programador) ligar pagamento real com segurança. Contém: roteiro em fases (sandbox → produção), tabela de todas variáveis de ambiente com explicações, pré-condições Órion do portão final, como rodar testes com R$ real, alertas de log a monitorar, plano de rollback, rotações de segredos (webhook, chave de cifragem, credenciais), e lista de decisões operacionais prioritizadas. Nada foi testado contra a Cielo real; lista 5 perguntas abertas para o comercial dela fechar (credenciais sandbox, URLs de SOP/produção, validação de campos). Sandbox liberado com restrições (testadores listados); produção bloqueada até Porto 9000 responder (TLS ou crua?) + credenciais de produção da Cielo chegarem.
+
+## F5.9 desenhada (Nova, 2026-10-02) — sessão travada (M5/M6) — AGUARDA DECISÕES DO DONO
+
+Só desenho; nada implementado. Detalhe completo na memória da Nova (`.claude/agent-memory/nova/decisoes-f59-sessao-travada.md`, não versionada).
+
+**Causa raiz comum (M5, M6 e D-A):** o servidor tratava o próprio palpite ("o carregador esqueceu a sessão") como fato e movia dinheiro com ele, num protocolo em que o carregador pode chegar atrasado legitimamente. Regra nova: fechamento pelo servidor é provisório antes de mexer em dinheiro.
+
+**Defeitos antigos achados (confirmados pelo Atlas no código):**
+- **D-A:** `bootNotification.ts` reconcilia a sessão aberta com a última amostra; o StopTransaction enfileirado que o carregador manda DEPOIS do Boot cai em "já STOPPED, ignorando" (`stopTransaction.ts`). Cobramos a menos no incidente mais comum (queda de energia).
+- **D-B:** sessão `FAULTED` não consta em nenhuma das listas de "status aberto"; nunca volta a CHARGING, não é reconciliada, não pode ser parada e some do PWA (pré-autorização do cartão fica presa).
+- **D-C:** a guarda de saldo só roda quando chega MeterValues; tarifa por tempo/ociosidade cresce sem amostra.
+
+**Desenho:** novo status `STOP_UNCONFIRMED` (sem dinheiro, pré-autorização continua de pé, `provisionalCostCents`), watchdog repetível no worker (`vigiarSessoesJob`, decide só pelo relógio do servidor), encerramento pelo servidor com prova na ordem StopTransaction no log bruto → última amostra → sem leitura; stop tardio só registrado (`lateStop*`, `unbilledCostCents`), conciliação não muda. Fases: 9a Cronos (2 migrations + backfill `lastActivityAt=now()`), 9b0/9b Vega, 9c Lyra, 9d Íris (cenários S1–S8 no simulador), 9e Órion.
+
+**Decisões em aberto do dono (recomendação da Nova):**
+- D1 — quanto esperar o carregador que sumiu antes de encerrar pelo servidor: **2 h** (configurável).
+- D2 — sessão sem nenhuma leitura de medidor: (a) não cobra, alerta e revisão manual **(recomendada)**; (b) cobra taxa fixa+mínimo (hoje); (c) estima (nunca).
+- D3 — StopTransaction tardio com mais consumo após o encerramento: (a) registra, alerta e absorve **(recomendada)**; (b) vira dívida; (c) cobra abaixo de um limite.
+- D4 — carregador que recusa o stop e segue entregando: (a) 3 tentativas + alerta, Reset manual pelo admin **(recomendada)**; (b) Reset automático.
+- D5 — duração máxima de sessão aberta: **24 h**.
+- D6 — texto ao motorista em confirmação ("Encerramento em confirmação com o carregador. Nada foi cobrado ainda. Valor final até HH:MM.") — aprovar ou ajustar.
+- D7 — durante "em confirmação", motorista pode iniciar outra recarga? (a) sim, descontando o saldo comprometido **(recomendada)**; (b) bloqueia.
+- Pendência externa: confirmar com a Cielo o prazo de captura de pré-autorização (projetado com encerramento forçado em 48 h).
+
+D2 e D7 mudam código; a 9b pode começar com os defaults recomendados atrás de env, mas precisam de resposta antes do portão da Íris. Só o carregador real prova: se o firmware enfileira o Stop após queda de energia (e a ordem em relação ao Boot), intervalo de amostragem, suporte a TriggerMessage, desvio de relógio.
