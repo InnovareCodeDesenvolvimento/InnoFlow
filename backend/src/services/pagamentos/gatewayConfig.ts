@@ -6,7 +6,7 @@ import { AppError } from '../../api/middleware/errorHandler'
 import { ConfiguracaoGatewayIndisponivelError } from '../../core/pagamentos/erros'
 import {
   calcularReadiness,
-  emailEhTestador,
+  identidadeEhTestador,
   meioHabilitadoParaNovosPagamentos,
   paraPaymentEnvironment,
   parseListaDeTestadores,
@@ -200,7 +200,8 @@ export function resetAvisoSegredosIlegiveisParaTeste(): void {
  * Guarda de COMEÇOS NOVOS: `409 PAYMENT_METHOD_DISABLED` quando o meio não pode COMEÇAR algo novo para este motorista:
  *  - `reason: 'GATEWAY_DISABLED'` — o admin desligou o meio na tela do gateway (distingue de "este cartão foi removido", mesmo `code`);
  *  - `reason: 'SANDBOX_RESTRICTED'` (F5.7, ALTO-2) — ambiente efetivo SANDBOX num servidor `NODE_ENV=production` e o e-mail do motorista não está em
- *    `PAYMENT_SANDBOX_TESTER_EMAILS` (lista vazia/ausente = ninguém). MESMA mensagem de "desativado": não revela a existência da lista de testadores.
+ *    `PAYMENT_SANDBOX_TESTER_EMAILS` (lista vazia/ausente = ninguém) OU a identidade não é verificada (DRIVER só com senha nunca é testador — ver
+ *    `identidadeEhTestador`: exige `googleSub` ou role de staff). MESMA mensagem de "desativado": não revela a existência da lista de testadores.
  * Config ilegível => 503 `PAYMENT_GATEWAY_UNAVAILABLE` (fail-closed). Só COMEÇOS novos (cartão novo, pré-auth, Pix novo): captura, cancelamento,
  * webhook, varredores e Pix já pago NUNCA passam por aqui — dinheiro em trânsito precisa liquidar; a carteira também nunca é bloqueada.
  */
@@ -219,8 +220,8 @@ export async function assertMeioDePagamentoHabilitado(meio: MeioPagamento, userI
     throw new AppError(mensagem, 409, 'PAYMENT_METHOD_DISABLED', [{ method: meio, reason: 'GATEWAY_DISABLED' }])
   }
   if (isSandboxRestrito(config.estado)) {
-    const motorista = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } })
-    if (!emailEhTestador(motorista?.email, parseListaDeTestadores(env.PAYMENT_SANDBOX_TESTER_EMAILS))) {
+    const motorista = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, googleSub: true, role: true } })
+    if (!identidadeEhTestador(motorista, parseListaDeTestadores(env.PAYMENT_SANDBOX_TESTER_EMAILS))) {
       throw new AppError(mensagem, 409, 'PAYMENT_METHOD_DISABLED', [{ method: meio, reason: 'SANDBOX_RESTRICTED' }])
     }
   }

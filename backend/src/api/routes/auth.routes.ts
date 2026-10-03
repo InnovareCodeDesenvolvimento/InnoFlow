@@ -116,7 +116,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const { name, email, password, phone } = req.body as RegisterInput
 
-    const existing = await prisma.user.findUnique({ where: { email } })
+    // Em QUALQUER caixa: `User.email` é único COM caixa, então `DONO@x.com` e `dono@x.com` coexistiriam como contas distintas — e a lista de testadores do
+    // sandbox (F5.8, ALTO-2) e a regra de staff do login com Google comparam sem caixa. Mesma resposta do duplicado exato (não cria enumeração nova).
+    // O login continua exato (`findUnique`): contas antigas com caixa mista seguem entrando como antes.
+    const existing = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } })
     if (existing) throw new AppError('Já existe uma conta com este e-mail.', 409, 'EMAIL_TAKEN')
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)

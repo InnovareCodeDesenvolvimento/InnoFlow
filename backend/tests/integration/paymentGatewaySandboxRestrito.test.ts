@@ -109,11 +109,12 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
     m.resetPaymentSecretsKeyCacheParaTeste()
   })
 
-  async function novoUsuario(role: 'ADMIN' | 'DRIVER', email?: string) {
+  /** `verificado`: identidade provada pelo Google (`googleSub`) — é o que torna um DRIVER elegível a testador (F5.8, ALTO-2: DRIVER só com senha nunca é). */
+  async function novoUsuario(role: 'ADMIN' | 'DRIVER', email?: string, opcoes: { verificado?: boolean } = {}) {
     contador += 1
     const sufixo = `${contador}-${Math.random().toString(36).slice(2, 7)}`
     const user = await m.prisma.user.create({
-      data: { role, name: `${role} ${sufixo}`, email: email ?? `${role.toLowerCase()}-${sufixo}@example.com`, passwordHash: role === 'ADMIN' ? HASH_SENHA_ADMIN_TESTE : null },
+      data: { role, name: `${role} ${sufixo}`, email: email ?? `${role.toLowerCase()}-${sufixo}@example.com`, passwordHash: role === 'ADMIN' ? HASH_SENHA_ADMIN_TESTE : null, googleSub: opcoes.verificado ? `g-${sufixo}` : null },
     })
     return { id: user.id, email: user.email, token: m.issueToken({ id: user.id, role, operatorId: null }) }
   }
@@ -172,7 +173,7 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
 
     it('TESTADOR da lista (case-insensitive, com espaços) passa a guarda nas 4 entradas', async () => {
       servidorDeProducaoEmSandbox(`outro@example.com, ${TESTADOR_NA_LISTA} `)
-      const testador = await novoUsuario('DRIVER', testerEmail) // caixa/espaços diferentes da lista
+      const testador = await novoUsuario('DRIVER', testerEmail, { verificado: true }) // caixa/espaços diferentes da lista
 
       const sessao = await entradas['POST /api/me/payment-methods/tokenization-session'].chamar(testador)
       expect(sessao.status, dump(sessao.body)).toBe(200)
@@ -191,10 +192,20 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
 
     it('na MESMA instância: o testador passa e o outro motorista leva 409 (a decisão é por e-mail do motorista logado)', async () => {
       servidorDeProducaoEmSandbox(TESTADOR_NA_LISTA)
-      const testador = await novoUsuario('DRIVER', testerEmail.toUpperCase())
+      const testador = await novoUsuario('DRIVER', testerEmail.toUpperCase(), { verificado: true })
       const outro = await novoUsuario('DRIVER')
       expect((await entradas['POST /api/me/wallet/topups'].chamar(testador)).status).toBe(201)
       expect((await entradas['POST /api/me/wallet/topups'].chamar(outro)).status).toBe(409)
+    })
+
+    it('DRIVER só com senha (sem googleSub) com o e-mail NA LISTA continua barrado nas 4 entradas (F5.8, ALTO-2: o e-mail do cadastro por senha não é confirmado)', async () => {
+      servidorDeProducaoEmSandbox(TESTADOR_NA_LISTA)
+      const semGoogle = await novoUsuario('DRIVER', testerEmail)
+      for (const [nome, entrada] of Object.entries(entradas)) {
+        const res = await entrada.chamar(semGoogle)
+        expect(res.status, nome + ' ' + dump(res.body)).toBe(409)
+        expect(res.body.details).toEqual([{ method: entrada.method, reason: 'SANDBOX_RESTRICTED' }])
+      }
     })
 
     it('NÃO restringe fora de produção: NODE_ENV=test com lista vazia => qualquer motorista passa', async () => {
@@ -231,7 +242,7 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
       servidorDeProducaoEmSandbox(TESTADOR_NA_LISTA)
       await m.prisma.paymentGatewayConfig.create({ data: { id: 1, environment: 'sandbox', cardEnabled: true, pixEnabled: false } })
       m.invalidarCacheConfigGateway()
-      const testador = await novoUsuario('DRIVER', testerEmail)
+      const testador = await novoUsuario('DRIVER', testerEmail, { verificado: true })
       const res = await entradas['POST /api/me/wallet/topups'].chamar(testador)
       expect(res.status).toBe(409)
       expect(res.body.details).toEqual([{ method: 'PIX', reason: 'GATEWAY_DISABLED' }])

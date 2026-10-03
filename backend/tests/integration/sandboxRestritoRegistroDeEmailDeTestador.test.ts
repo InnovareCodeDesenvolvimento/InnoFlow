@@ -76,9 +76,12 @@ describe('ALTO-2 — risco residual: e-mail de testador não é provado (registe
   const registrar = (email: string) => request(app).post('/api/auth/register').send({ name: 'Quem Registrou', email, password: 'Senha-Forte-123' })
   const pix = (token: string) => request(app).post('/api/me/wallet/topups').set({ Authorization: `Bearer ${token}` }).send({ amountCents: 2000 })
 
-  it('CONTROLE: motorista comum (e-mail fora da lista) leva 409 SANDBOX_RESTRICTED e o testador legítimo (e-mail IGUAL) passa', async () => {
+  it('CONTROLE: motorista comum (e-mail fora da lista) leva 409 SANDBOX_RESTRICTED e o testador legítimo (e-mail IGUAL, identidade verificada pelo Google) passa', async () => {
     const legitimo = await registrar(testador)
     expect(legitimo.status, JSON.stringify(legitimo.body)).toBe(201)
+    // MUDANÇA DELIBERADA (Vega, correção do ALTO-2): o testador legítimo precisa ter a identidade VERIFICADA (googleSub — o login com o Google entrega
+    // email_verified). O vínculo é simulado direto no banco; antes bastava o cadastro por senha, que é justamente o furo dos ACHADOS 1 e 2.
+    await m.prisma.user.update({ where: { id: legitimo.body.user.id }, data: { googleSub: `g-${Math.random().toString(36).slice(2, 12)}`, passwordHash: null } })
     expect((await pix(legitimo.body.token)).status).toBe(201)
 
     const comum = await registrar(`comum.${Math.random().toString(36).slice(2, 10)}@example.com`)
@@ -87,15 +90,21 @@ describe('ALTO-2 — risco residual: e-mail de testador não é provado (registe
     expect(barrado.body.details).toEqual([{ method: 'PIX', reason: 'SANDBOX_RESTRICTED' }])
   })
 
-  it('PROVA (a unicidade é sensível a caixa): o testador JÁ tem conta e o cadastro de "DONO.…@EXAMPLE.COM" é ACEITO como outra conta (201)', async () => {
-    expect((await registrar(testador)).status).toBe(201)
+  // INVERTIDO DE PROPÓSITO (Vega, correção do ALTO-2a): a asserção original fixava o furo (201 + 2 contas) e o próprio comentário dizia 'se isto virar 409 o achado 1
+  // foi corrigido no register'. Agora o register recusa o e-mail em QUALQUER caixa, com a MESMA resposta do duplicado exato.
+  it('PROVA (o register recusa o e-mail em outra caixa): o testador JÁ tem conta e o cadastro de "DONO.…@EXAMPLE.COM" leva 409 EMAIL_TAKEN, igual ao duplicado exato', async () => {
+    const exato = await registrar(testador)
+    expect(exato.status).toBe(201)
+    const duplicadoExato = await registrar(testador)
     const variante = await registrar(testador.toUpperCase())
-    expect(variante.status, 'se isto virar 409 o achado 1 foi corrigido no register').toBe(201)
+    expect(variante.status).toBe(409)
+    expect({ status: variante.status, code: variante.body.code, error: variante.body.error }).toEqual({ status: duplicadoExato.status, code: duplicadoExato.body.code, error: duplicadoExato.body.error })
+    expect(variante.body.code).toBe('EMAIL_TAKEN')
     const contas = await m.prisma.user.count({ where: { email: { equals: testador, mode: 'insensitive' } } })
-    expect(contas).toBe(2)
+    expect(contas).toBe(1)
   })
 
-  it.fails('ACHADO 1: o testador JÁ tem conta; um terceiro que cadastra a mesma caixa-alta NÃO pode ganhar o Pix/cartão de sandbox do testador', async () => {
+  it('ACHADO 1: o testador JÁ tem conta; um terceiro que cadastra a mesma caixa-alta NÃO pode ganhar o Pix/cartão de sandbox do testador', async () => {
     expect((await registrar(testador)).status).toBe(201)
     const terceiro = await registrar(testador.toUpperCase())
     const token = terceiro.body.token as string | undefined
@@ -104,7 +113,7 @@ describe('ALTO-2 — risco residual: e-mail de testador não é provado (registe
     expect((await pix(token)).status, 'a variante em caixa alta entrou como testador e usou o sandbox').toBe(409)
   })
 
-  it.fails('ACHADO 2: e-mail de testador AINDA SEM conta, registrado por um terceiro (sem confirmação do endereço), NÃO pode liberar o sandbox', async () => {
+  it('ACHADO 2: e-mail de testador AINDA SEM conta, registrado por um terceiro (sem confirmação do endereço), NÃO pode liberar o sandbox', async () => {
     const terceiro = await registrar(testador) // ninguém provou ser dono deste e-mail
     expect(terceiro.status).toBe(201)
     expect((await pix(terceiro.body.token)).status, 'o terceiro passou na guarda só por digitar o e-mail da lista').toBe(409)

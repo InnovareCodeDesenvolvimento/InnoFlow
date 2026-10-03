@@ -258,6 +258,27 @@ export function emailEhTestador(email: string | null | undefined, testadores: Re
   return testadores.has(email.trim().toLowerCase())
 }
 
+/** O que a guarda de testador precisa saber do usuário (nada além disto — sem hash, sem token). */
+export interface IdentidadeParaTestador {
+  email: string | null | undefined
+  /** `User.googleSub`: preenchido só por login/vínculo com o Google, que entrega `email_verified`. */
+  googleSub: string | null | undefined
+  role: string
+}
+
+/**
+ * Testador = e-mail na lista E identidade VERIFICADA (F5.8, ALTO-2). Estar na lista é decidido por um TEXTO; só vale quando alguém PROVOU ser dono dele:
+ *  - `googleSub != null`: o Google entregou o e-mail verificado (ver `autenticarComGoogle`);
+ *  - role diferente de DRIVER: staff é criado pelo admin/seed, nunca se auto-registra.
+ * Um DRIVER cadastrado só com e-mail/senha (`POST /api/auth/register` NÃO confirma o endereço) nunca é testador, mesmo com o e-mail na lista —
+ * senão qualquer um que soubesse o e-mail de um testador (ou o registrasse antes dele) usaria o sandbox de graça. Lista vazia = ninguém.
+ */
+export function identidadeEhTestador(usuario: IdentidadeParaTestador | null | undefined, testadores: ReadonlySet<string>): boolean {
+  if (!usuario) return false
+  if (!emailEhTestador(usuario.email, testadores)) return false
+  return usuario.role !== 'DRIVER' || Boolean(usuario.googleSub)
+}
+
 /** `AmbienteGateway` (minúsculo, coluna String de `PaymentGatewayConfig`) -> enum `PaymentEnvironment` do Prisma (maiúsculo, `PaymentIntent`/`PaymentMethod`). */
 export function paraPaymentEnvironment(ambiente: AmbienteGateway): 'SANDBOX' | 'PRODUCTION' {
   return ambiente === 'production' ? 'PRODUCTION' : 'SANDBOX'
