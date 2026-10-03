@@ -187,6 +187,13 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
 
 **Bloqueantes (Órion portão final, 2026-10-02):**
 
+- [ ] **F5.9 (Watchdog de sessão travada):** ✅ Deploy completado e testado
+  - [ ] Migrations rodadas (3 novas, aplicadas no boot)
+  - [ ] API e gateway OCPP atualizados (entendem `STOP_UNCONFIRMED`)
+  - [ ] Worker rodando com `SESSION_WATCHDOG_ENABLED=true`
+  - [ ] Alertas novos monitorados (procure por `alert:` dos tipos `session_*`, `card_session_hold_deadline`, `ocpp_foreign_transaction`)
+  - **Por quê:** sem o watchdog, sessão com cartão que o carregador não confirma fica aberta para sempre — pré-autorização prisioneira por 48 h, saldo comprometido congelado, motorista não consegue sair
+
 - [ ] **Porta 9000 do OCPP:** ✅ Responder: crua `ws://` ou WSS (`wss://`)? 
   - [ ] Se crua: fechar a porta 9000 direta do mundo; carregadores vêm do seu lado (firewall/IP whitelist)
   - [ ] Se WSS: certificado TLS instalado e carregadores falam `wss://...`
@@ -360,6 +367,22 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
 
 **Procure por `alert:` nos logs do EasyPanel.** Cada um significa algo específico; alguns são críticos.
 
+### Alertas de Sessão Travada (F5.9) que impactam pagamentos
+
+F5.9 (watchdog) só interfere **quando cartão está envolvido** — Pix é independente. Sessões que ficam STOP_UNCONFIRMED podem impactar:
+- **Pré-autorização (CARD):** fica congelada em AUTHORIZED até a sessão ser confirmada pelo servidor ou o carregador enviar StopTransaction
+- **Saldo comprometido (WALLET com D7):** outro início desconta o `provisionalCostCents` como reserva — se essa estimativa for errada, o saldo real fica diferente
+
+| Alerta F5.9 | Severidade | Impacto em pagamentos | O que fazer |
+|---|---|---|---|
+| `session_stop_unconfirmed` | ⚠️ | Nenhum direto; pré-auth fica AUTHORIZED, não vai para CAPTURE_PENDING ainda | Monitor frequência — muitas pode indicar carregador com reconexão instável |
+| `session_cost_calculation_failed` | 🔴 | Custo provisório desconhecido (NULL) — saldo comprometido pode estar errado | Investigar timezones, timestamp de amostra; se persistir, escalate |
+| `session_closed_without_meter_reading` | 🔴 | **Com `MIN_FEE`**: energia cobrada por `MIN_FEE`; com `NO_CHARGE`: 0 (revisão manual) | **Importante:** confirmar que D2 (`SESSION_NO_READING_POLICY`) está como o dono decidiu |
+| `session_revived_after_unconfirmed` | 🔴 | Sessão reanimou (carregador entregou mais) → novo RemoteStop → pode refazer fechamento | Raro; no pior caso, `unbilledCostCents` registra a diferença (pura auditoria, não afeta receita) |
+| `card_session_hold_deadline` | 🔴 | Pré-auth expirou (48 h) — servidor encerrou com a última leitura sem esperar o carregador | Normal se sessão durou muito; sem impacto (captura sai com valor correto) |
+
+### Alertas de Pagamento (F5 — Cielo)
+
 | Alert | Severidade | O que significa | O que fazer |
 |---|---|---|---|
 | `ocpp_auth_lockout` | ⚠️ Importante | Carregador bloqueado por falhas de senha (tentativas esgotadas) | Conferir carregador/senha; PATCH para resetar `basicAuthSecret` se comprometido |
@@ -473,7 +496,21 @@ Retirada do fim do PROGRESSO.md, compilada para ação do dono. Ordene por prior
    - [ ] Main branch tem F5.7 (rotação, step-up, sandbox, M4)?
    - [ ] Redeploy dos 3 apps: `api`, `ocpp-gateway`, `worker`
 
-### 🟠 **P1 — Antes da tela de testes com motoristas reais**
+### 🟠 **P1 — DECISÕES CRÍTICAS DO DONO — F5.9 (Watchdog)**
+
+- [ ] **D2 — Sessão sem nenhuma leitura de medidor** (carregador silencioso):
+  - **Opção A (padrão):** `SESSION_NO_READING_POLICY=NO_CHARGE` — não cobra nada, alerta para revisão manual, motorista não é culpado
+  - **Opção B:** `SESSION_NO_READING_POLICY=MIN_FEE` — cobra taxa fixa + mínimo da tarifa (comportamento antigo)
+  - **Decisão:** qual? 💬 Confirme com a equipe e setar a env antes do go-live
+  - **Por quê:** afeta sessões onde o carregador some completamente (sem nem uma amostra); D2a = risco zero de cobrança indevida, D2b = recebe algo sempre (pode ser injusto se não houve energia)
+
+- [ ] **D7 — Motorista inicia outra recarga durante a anterior estar em confirmação** (STOP_UNCONFIRMED):
+  - **Opção A (padrão):** `SESSION_ALLOW_START_WHILE_UNCONFIRMED=true` — sim, desconta o "saldo comprometido" (custo provisório) como reserva
+  - **Opção B:** `SESSION_ALLOW_START_WHILE_UNCONFIRMED=false` — bloqueia, motorista tem que esperar confirmação
+  - **Decisão:** qual? 💬 Confirme e setar a env antes do go-live
+  - **Por quê:** afeta experiência do motorista; D7a = mais flexível mas depende de `provisionalCostCents` estar certo (vê M3 em auditoria se errado); D7b = conservador, motor espera
+
+### 🟠 **P2 — Antes da tela de testes com motoristas reais**
 
 5. **Dados da empresa (CNPJ, DPO, etc.)**
    - [ ] Atualizados na política de privacidade do site

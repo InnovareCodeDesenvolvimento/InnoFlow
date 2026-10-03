@@ -281,6 +281,100 @@ ela a API deriva do próprio request, respeitando `TRUST_PROXY_HOPS`). `CIELO_ME
 viram **reserva**: ainda funcionam, e a primeira gravação pela tela parte deles (ambiente e "habilitado
 se há credenciais"), então salvar uma flag não desliga o que já funcionava.
 
+### 1.0 Sessão Travada e Watchdog (F5.9) — KILL-SWITCH E ORDEM DE DEPLOY CRÍTICA
+
+**👉 LEIA O GUIA COMPLETO:** [`docs/F5.9-SESSAO-TRAVADA-DESENHO.md`](F5.9-SESSAO-TRAVADA-DESENHO.md) (desenho técnico) e [`docs/AUDITORIA-F5.9.md`](AUDITORIA-F5.9.md) (achados de segurança).
+
+F5.9 introduz um **watchdog automático** que detecta sessões de recarga que ficaram abertas sem confirmação do carregador (cenários: queda de energia, perda de conexão, silêncio do firmware). A sessão não cobra nada até ter **confirmação real** do carregador. Isto acima tudo está DESLIGADO por padrão no primeiro deploy — uma chave de kill-switch o ativa depois, e a **ordem de deploy é crítica**.
+
+#### O que é `STOP_UNCONFIRMED` (para o dono entender):
+
+O servidor decidiu que a sessão acabou, mas o carregador não respondeu confirmando. Exemplos:
+- Carregador desligou sem avisar ("queda de energia")
+- Perdeu conexão no meio da parada
+- Silencioso: conector voltou a DISPONÍVEL/INDISPONÍVEL de forma estranha
+
+Neste estado:
+- ✅ A sessão **NÃO entra na receita** — nada é debitado, cartão não é capturado, pré-autorização fica congelada
+- ✅ O motorista vê a sessão encerrada (recibo), **NÃO na lista de recarga ativa** (GET `/api/me/sessions/active` exclui STOP_UNCONFIRMED)
+- ✅ Se D7=`true` (padrão), o motorista **pode iniciar outra recarga** enquanto aguarda confirmação (desconta um "saldo comprometido")
+- ⏳ O servidor aguarda (janela G1/G2) pelo Stop enfileirado do carregador — se chegar, fecha com a leitura correta; se não, encerra com a **última amostra conhecida** ou com a **política D2** (sem nenhuma leitura)
+
+#### Variáveis de Ambiente — Watchdog
+
+| Variável | Padrão | O que significa | Notas |
+|---|---|---|---|
+| `SESSION_WATCHDOG_ENABLED` | `false` ⚠️ | Kill-switch — DESLIGADO no 1º deploy | Ativa o agendador no worker — ligar SÓ após migrations + redeploy API/gateway |
+| `SESSION_WATCHDOG_INTERVAL_MS` | 60000 | Ciclo da varredura (milissegundos) | A cada 60 s o watchdog verifica as sessões abertas |
+| `SESSION_WATCHDOG_BATCH_SIZE` | 100 | Quantas sessões por ciclo | Evita lock longo no banco — sessões fora do lote são vistas no próximo ciclo |
+| `SESSION_CHARGER_OFFLINE_MINUTES` | 10 | Limite de offline + inatividade (R1) | Carregador offline há ≥10 min E sem atividade há ≥15 min → STOP_UNCONFIRMED |
+| `SESSION_INACTIVITY_MINUTES` | 15 | Limite de inatividade (R1) | Vê em paralelo com SESSION_CHARGER_OFFLINE_MINUTES |
+| `SESSION_CONNECTOR_IDLE_MINUTES` | 5 | Conector ocioso (R2) | Conector que volta a AVAILABLE/UNAVAILABLE após sessão abrir fica 5 min ocioso → STOP_UNCONFIRMED |
+| `SESSION_STOP_CONFIRM_MINUTES` | 5 | Espera pelo Stop (R3) | Depois do RemoteStop, aguarda 5 min pelo StopTransaction; reenvia até 3x |
+| `SESSION_STOP_MAX_ATTEMPTS` | 3 | Máximo de RemoteStop (R3, D4) | Teto de tentativas — só GUARD/WATCHDOG contam aqui, não toques humanos |
+| `SESSION_METER_TRIGGER_COOLDOWN_MINUTES` | 15 | Mínimo entre TriggerMessage (R4) | Carregador mudo (online, CHARGING, sem MeterValues) → pede amostra 1x a cada 15 min |
+| `SESSION_MAX_OPEN_HOURS` | 24 | Duração máxima (R5, D5) | Sessão aberta há 24 h → RemoteStop e depois STOP_UNCONFIRMED |
+| `SESSION_UNCONFIRMED_GRACE_ONLINE_MINUTES` | 10 | Janela online (U2, G1) | Depois de marcar STOP_UNCONFIRMED com carregador online, aguarda 10 min — se StopTransaction não chegar, encerra com servidor |
+| `SESSION_UNCONFIRMED_GRACE_OFFLINE_MINUTES` | 120 | Janela offline (U2, G2) | Depois de marcar STOP_UNCONFIRMED com carregador offline, aguarda 2 h — se StopTransaction não chegar, encerra com servidor |
+| `CARD_SESSION_MAX_HOLD_HOURS` | 48 | Teto do hold do cartão | Pré-autorização vence em 48 h (prazo da Cielo) — sessão é encerrada antes disso com alerta |
+| **D2 — Sem nenhuma leitura** |
+| `SESSION_NO_READING_POLICY` | `NO_CHARGE` | Política de cobrança | `NO_CHARGE`: não cobra, alerta, revisão manual. `MIN_FEE`: cobra taxa fixa + mínimo (antigo) |
+| **D7 — Outra recarga durante confirmação** |
+| `SESSION_ALLOW_START_WHILE_UNCONFIRMED` | `true` | Motorista inicia outra? | `true`: sim, desconta "saldo comprometido". `false`: bloqueia até confirmar |
+
+⚠️ **Decisões do dono ainda NÃO confirmadas:** D2 (sem leitura) e D7 (outra recarga) — os padrões acima são recomendações da arquitetura. O dono precisa decidir e fazer swap nas envs **ANTES** do go-live.
+
+#### Ordem de Deploy — **CRÍTICA**
+
+**Esta sequência é mandatória; pular etapas ou inverter quebra o sistema no deploy rolante:**
+
+1. **Deploy das migrations** (Postgres): roda automaticamente no boot dos 3 Dockerfiles
+   ```
+   - 20261003120000_f59_watchdog_baseline.sql (colunas novas em ChargingSession, enum StopUnconfirmedReason)
+   - 20261003120100_f59_watchdog_indices.sql (índices para watchdog)
+   - 20261003130000_f59_watchdog_backfill.sql (backfill, não encerra sessões no 1º ciclo)
+   ```
+   - ✅ Seguro rodar 3 Apps ao mesmo tempo (lock consultivo Prisma)
+   - Backfill não causa encerramento em massa — apenas marca coluna para os ciclos futuros
+
+2. **Deploy da API (`inno-elekton-api`):** código com handlers OCPP que entendem `STOP_UNCONFIRMED`
+   - Redeploy: a imagem nova roda migrations, depois sobe a API
+   - Handlers Boot, StopTransaction, MeterValues já conhecem `STOP_UNCONFIRMED` (não lançam erro)
+
+3. **Deploy do gateway OCPP (`ocpp-gateway`):** mesmo código que a API, handlers também atualizados
+   - Redeploy do container
+
+4. **SÓ DEPOIS**: Ligar a chave no worker
+   - [ ] EasyPanel → App `inno-elekton-worker`
+   - [ ] Env `SESSION_WATCHDOG_ENABLED` = `true`
+   - [ ] Redeploy — o worker arranca o agendador (`scheduleVigiarSessoesScan`)
+
+**Por que tão rígido?** Se o worker novo gera `STOP_UNCONFIRMED` antes da API/gateway entenderem o novo enum (status), handlers descrevem erro cacheado (`CALL_ERROR`) e a telemetria fica travada — ver M4 em AUDITORIA-F5.9.md.
+
+#### Rollback
+
+Se precisar voltar atrás:
+1. [ ] EasyPanel → App `inno-elekton-worker`
+2. [ ] Env `SESSION_WATCHDOG_ENABLED` = `false`
+3. [ ] Redeploy — o agendador é removido, watchdog para
+4. Handlers e rotas continuam funcionando — sessões abertas continuam abertas, STOP_UNCONFIRMED já gravadas ficam como estão (não são revertidas)
+
+#### Alertas novos a monitorar (procure por `alert:` nos logs)
+
+| Alerta | Severidade | O que significa | O que fazer |
+|---|---|---|---|
+| `session_stop_unconfirmed` | ⚠️ | Sessão marcada STOP_UNCONFIRMED | Esperado; monitorar frequência excessiva (pode indicar carregador com problema de reconexão) |
+| `session_closed_by_server` | ⚠️ | Servidor encerrou (acabou a janela G1/G2) | Normal; confirmar que a energia foi lida corretamente |
+| `session_max_duration_reached` | ⚠️ | Sessão antiga demais (24 h padrão) | Normal; motorista esqueceu de parar |
+| `session_closed_without_meter_reading` | 🔴 | Sem nenhuma amostra, aplicada política D2 | Se `NO_CHARGE`: revisão manual. Se `MIN_FEE`: cobrado taxa fixa + mínimo. **Raro; investigar se carregador silencioso** |
+| `session_revived_after_unconfirmed` | 🔴 | MeterValues após STOP_UNCONFIRMED reanimou | Carregador continua entregando depois de queda — reanima com nova tentativa de RemoteStop |
+| `session_stop_not_obeyed` | 🔴 | Stop rejeitado, energia subindo | Carregador não obedeceu o stop (firmware? bugs?) — **investigar com fabricante** |
+| `session_metering_after_close` | 🔴 | MeterValues chegaram após STOPPED | Amostra tardia (muito raro); descartada, sem impacto financeiro |
+| `card_session_hold_deadline` | 🔴 | Pré-autorização expirou (48 h) | Normal; servidor encerrou antes que cartão vencesse; sem impacto financeiro |
+| `session_cost_calculation_failed` | 🔴 | Erro ao calcular provisório | Raro; verificar logs para causa — se repetir, escalate para atlas |
+| `ocpp_foreign_transaction` | 🔴 | Transação de carregador diferente | **CRÍTICO — pode ser ataque (ALTO-2 Órion)**; investigar IP, basicAuthSecret |
+| `ocpp_meter_values_without_transaction` | ⚠️ | MeterValues sem ID de transação | Firmware mal configurado; amostra descartada |
+
 ### 1.1 Frontend
 
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
@@ -394,6 +488,8 @@ Detalhes técnicos completos em `docs/PROXY-REVERSO.md`.
 
 ## 5. Smoke test pós-deploy
 
+### 5.1 Básico (todos os deploys)
+
 - [ ] `GET https://<domínio-da-api>/health` responde `ok` e confirma conexão
       com Postgres e Redis.
 - [ ] `POST /api/auth/login` com um usuário do seed devolve um JWT — em produção
@@ -409,3 +505,41 @@ Detalhes técnicos completos em `docs/PROXY-REVERSO.md`.
 **Isto fecha a pendência que vem se arrastando desde F0**: é a primeira vez
 que a migration, o seed e o handshake OCPP rodam contra um Postgres/Redis
 reais, não só validação estática.
+
+### 5.2 F5.9 — Watchdog de Sessão Travada (depois de ligar `SESSION_WATCHDOG_ENABLED`)
+
+Procure por `alert:` nos logs — devem estar limpos (nenhum erro) nos primeiros ciclos. Se o simulador conecta, deixe rodar uma sessão pequena (10–30 s):
+
+- [ ] **Sessionlogical natural:** iniciar → parar normalmente → `session_closed_by_server` com `closureSource=CHARGER` (carregador respondeu) OU `closureSource=SERVER` (servidor encerrou após confirmação)
+- [ ] **Log do ciclo do watchdog:** procure por `[sessao][watchdog]` — message `rodada` com timestamp do início e fim (normal, sem erros)
+- [ ] **Sem `CALL_ERROR` cacheado:** se os handlers lançam erro com enum novo antes do entender, logs trazem `alert:` de cache — não deve acontecer (ordem de deploy foi respeitada?)
+- [ ] **Sem alertas críticos** `session_cost_calculation_failed`, `ocpp_foreign_transaction` — se aparecerem, anotar e investigar
+
+#### Com carregador real ou de teste prolongado:
+
+- [ ] **Simulação de queda**: desconecta carregador mid-sessão
+  - Esperar 10 min (offline) + 15 min (inatividade) = R1 dispara
+  - Sessão vai a STOP_UNCONFIRMED com motivo `CHARGER_UNREACHABLE`
+  - Motorista vê recibo, lista de recarga exclui a sessão
+  - Alerta `session_stop_unconfirmed` + `session_closed_by_server` (no fim, quando janela G2 vence)
+
+- [ ] **Reconexão após queda** (M2 da auditoria):
+  - Carregador volta online, manda Boot
+  - Se Stop enfileirado chega antes da janela G1 vencer, fecha normalmente
+  - Senão, servidor encerra com a última amostra (ou D2 se nenhuma)
+
+- [ ] **Decisão D2** (sem leitura):
+  - Carregador silencioso durante toda sessão (ou amostras perdidas)
+  - `SESSION_NO_READING_POLICY=NO_CHARGE`: custo 0, alerta `session_closed_without_meter_reading`, revisão manual obrigatória
+  - `SESSION_NO_READING_POLICY=MIN_FEE`: custo = taxa fixa + mínimo, comportamento antigo
+
+- [ ] **Decisão D7** (outra recarga):
+  - Iniciar sessão, depois Logout/reconectar
+  - Com D7=`true`: `POST /api/me/sessions/start` **pode** criar nova sessão (desconta `provisionalCostCents` da anterior como saldo comprometido)
+  - Com D7=`false`: devolve 409 `SESSION_ALREADY_UNCONFIRMED`, bloqueia até confirmação
+
+**Checklist de flags pós-validação:**
+- [ ] `SESSION_WATCHDOG_ENABLED=true` está ligado no worker
+- [ ] Logs limpios (0 erros de deserialização do enum novo)
+- [ ] Motorista consegue iniciar/parar recarga normalmente (nada quebrou)
+- [ ] Alertas aparecem no padrão esperado (nenhum susto)
