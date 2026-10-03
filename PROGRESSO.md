@@ -1017,3 +1017,7 @@ log do EasyPanel por `x-innoelektron-webhook-secret` ≠ `[redacted]`); Merchant
 vistos fora do cofre; senhas ADMIN/seed. **Decisão barata agora (ainda sem dados reais):**
 versionar o ciphertext (`v1:<kid>:`) e suportar `PAYMENT_SECRETS_KEY_PREVIOUS` para rotacionar a
 chave sem perder cartões salvos.
+
+## Guia operacional de go-live (02/10/2026)
+
+📖 **`docs/GO-LIVE-PAGAMENTOS.md`** entregue — guia completo para o dono (não-programador) ligar pagamento real com segurança. Contém: roteiro em fases (sandbox → produção), tabela de todas variáveis de ambiente com explicações, pré-condições Órion do portão final, como rodar testes com R$ real, alertas de log a monitorar, plano de rollback, rotações de segredos (webhook, chave de cifragem, credenciais), e lista de decisões operacionais prioritizadas. Nada foi testado contra a Cielo real; lista 5 perguntas abertas para o comercial dela fechar (credenciais sandbox, URLs de SOP/produção, validação de campos). Sandbox liberado com restrições (testadores listados); produção bloqueada até Porto 9000 responder (TLS ou crua?) + credenciais de produção da Cielo chegarem.

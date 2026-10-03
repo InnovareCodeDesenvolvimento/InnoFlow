@@ -160,6 +160,8 @@ senha em claro; o ideal é WSS obrigatório e a porta crua não exposta.
 
 ### Gateway de pagamento (Cielo) — banco manda, env é reserva (F5.5, 02/10/2026)
 
+**👉 LEIA O GUIA COMPLETO:** [`docs/GO-LIVE-PAGAMENTOS.md`](GO-LIVE-PAGAMENTOS.md) — contém roteiro operacional para sandbox/produção, tabela de variáveis de ambiente, alertas a monitorar, plano de rollback, e lista de decisões do dono. **Esta seção é apenas resumo técnico de como as variáveis funcionam.**
+
 A conta Cielo da plataforma agora é configurada pela tela **Admin → Gateway de pagamento**
 (`GET`/`PUT /api/admin/payment-gateway`, só ADMIN), sem editar variáveis no EasyPanel.
 **Precedência:** o que foi salvo na tela (tabela `PaymentGatewayConfig`) **vale mais** que a env;
@@ -264,7 +266,7 @@ ela a API deriva do próprio request, respeitando `TRUST_PROXY_HOPS`). `CIELO_ME
 viram **reserva**: ainda funcionam, e a primeira gravação pela tela parte deles (ambiente e "habilitado
 se há credenciais"), então salvar uma flag não desliga o que já funcionava.
 
-## 1.1 Frontend
+### 1.1 Frontend
 
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
 (mesmo problema do item acima — o Dockerfile é `frontend/Dockerfile`, não a
