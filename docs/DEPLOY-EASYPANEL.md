@@ -184,11 +184,18 @@ sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
   **a confirmar na doc da Cielo antes do go-live** — não foram testados contra a conta real.
 - **Virar produção** na tela exige confirmação digitada e que todo meio habilitado esteja pronto
   (`readiness`); senão 409 `GATEWAY_NOT_READY` com a lista do que falta.
+- **Qualquer mudança de ambiente (sandbox ↔ produção, F5.8, M4c)** é SERIALIZADA com criações de pagamentos — 
+  o lock consultivo no Postgres impede race conditions. Se houver pagamentos em trânsito, a tela responde
+  **409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`**: aguarde os intents finalizarem (capturas re-enfileiradas a cada 5 min).
 - **Cache e consistência:** a API invalida o próprio cache ao salvar; o `worker` é outro processo e
   enxerga a mudança em **até 10 s** (TTL). Para trocar credencial com segurança, desligue o meio na
   tela, troque, religue.
 - **Desligar cartão/Pix só bloqueia COMEÇOS novos** (cadastro de cartão, pré-autorização, novo Pix).
   Captura, cancelamento, webhook, varredores e crédito de Pix já gerado continuam funcionando.
+- **Captura de cartão serializada por intent (F5.8, 984a96b):** lock Redis `card-capture:lock:<intentId>` 
+  com TTL ≥ 60 s (máx(60 s, 6 × CIELO_TIMEOUT_MS)), impede dois executores capturando o mesmo intent.
+  Perdedor lança `CapturaCartaoEmAndamentoError` (job retenta com backoff; log `warn`). Se o Redis cair,
+  falha fechada — prazo 5 s para SET/DEL, melhor atrasar a cobrança que cobrar em dobro.
 - O `FakeAdapter` continua **proibido em produção**: sem credencial (banco **nem** env) o gateway
   responde 503; falha ao ler/decifrar a config também (fail-closed).
 - **Trocar a config exige a SENHA ATUAL do admin (F5.7, step-up).** Todo `PUT` leva `currentPassword`;
@@ -199,29 +206,36 @@ sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
   sendo conferida). **Alertas no log** (procure por `alert`): `payment_config_changed` (toda gravação —
   traz o id do admin e só os NOMES dos campos, nunca valores), `payment_gateway_stepup_failed` (senha
   errada) e `payment_gateway_stepup_locked`. A senha nunca é logada nem auditada.
+- **Redis do throttle indisponível (F5.8, fail-closed):** se o Redis que guarda o rate limit do step-up
+  cair, o `PUT` responde **503 `STEPUP_UNAVAILABLE`** SEM sequer conferir a senha (é a falha segura —
+  melhor bloquear a alteração da config do que deixar um token roubado contornar o rate limit em memória).
+  O admin legítimo também leva 503. Alerta: `payment_gateway_stepup_unavailable`.
 
-#### Sandbox em servidor de produção — só para testadores (F5.7)
+#### Sandbox em servidor de produção — só para testadores (F5.7, F5.8, ALTO-2)
 
 Se o ambiente efetivo do gateway é **sandbox** e o servidor roda com `NODE_ENV=production` (o caso de
-uma instância pública ainda sem a conta real), Pix e cartão **só funcionam para os motoristas cujo
-e-mail está em `PAYMENT_SANDBOX_TESTER_EMAILS`** (lista separada por vírgula, sem distinguir maiúsculas;
-ex.: `dono@empresa.com.br,teste@empresa.com.br`). Qualquer outro motorista recebe 409
-`PAYMENT_METHOD_DISABLED` (`reason: "SANDBOX_RESTRICTED"`) com a **mesma** mensagem de "indisponível no
-momento" — sem revelar que existe uma lista.
+uma instância pública ainda sem a conta real), Pix e cartão **só funcionam para os motoristas cuja
+identidade está VERIFICADA e o e-mail está em `PAYMENT_SANDBOX_TESTER_EMAILS`** (lista separada por vírgula,
+sem distinguir maiúsculas; ex.: `dono@empresa.com.br,teste@empresa.com.br`). Qualquer outro motorista
+recebe 409 `PAYMENT_METHOD_DISABLED` (`reason: "SANDBOX_RESTRICTED"`) com a **mesma** mensagem de
+"indisponível no momento" — sem revelar que existe uma lista.
+
+**Identidade verificada significa:**
+- **DRIVER (motorista):** login/vínculo com Google (entrega `email_verified` do Google) — ou seja, o e-mail na lista SÓ funciona se esse usuário fizer login com a conta Google correspondente. Um DRIVER cadastrado só com e-mail/senha NUNCA é testador, mesmo que o e-mail esteja na lista (evita que qualquer um registre o e-mail de um testador e use sandbox de graça).
+- **STAFF/ADMIN:** role != DRIVER — criado pelo admin/seed, nunca se auto-registra (identidade verificada por construção).
 
 **Por quê:** os cartões de teste da Cielo são **públicos** e o cadastro do app é **aberto**; sem esta
 trava, sandbox numa instância pública seria cobrança grátis (saldo/recarga sem pagar) para qualquer um.
 
 - A env é **opcional**: **vazia ou ausente = NINGUÉM** passa (falha segura). Não há curinga nem domínio inteiro.
-- **Crie as contas dos testadores ANTES de listar o e-mail**: o cadastro por e-mail/senha não confirma o
-  e-mail, então um e-mail listado e ainda sem conta poderia ser registrado por qualquer pessoa.
+- **Crie as contas dos testadores ANTES de listar o e-mail**. Se for DRIVER, a conta precisa estar ligada a um login com Google (googleSub preenchido).
 - Só bloqueia **começos novos** (cadastro de cartão, pré-autorização, novo Pix). Captura, cancelamento,
   webhook, varredores e crédito de Pix já pago seguem; a carteira nunca é bloqueada.
 - Em **production** (dinheiro real) a restrição não existe; em dev/CI (`NODE_ENV` ≠ production) também não.
 - A tela do gateway mostra um aviso permanente enquanto `sandboxRestricted` for verdadeiro.
 - A env não é lida pela tela: mudar a lista exige reiniciar a API.
 
-#### Rotação da `PAYMENT_SECRETS_KEY` e chave perdida (F5.7)
+#### Rotação da `PAYMENT_SECRETS_KEY` e chave perdida (F5.7, F5.8)
 
 Os segredos de pagamento (token do cartão salvo e os 3 segredos do gateway) são cifrados com AES-256-GCM
 no formato `v1:<kid>:<base64>` — o `kid` identifica a chave que cifrou (8 hex do SHA-256 da chave;
@@ -237,12 +251,12 @@ antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e dep
    lendo (a tela mostra `secretsDecryptable: true`) e o que for gravado já usa a chave nova.
 3. No terminal do serviço `api`, rode o **dry-run** (padrão, não grava nada):
    `npm run payments:recifrar-segredos`
-   — ele conta quantos valores ainda estão na chave antiga e quantos são **ilegíveis** (nenhuma chave decifra).
+   — ele conta quantos valores ainda estão na chave antiga e quantos são **ilegíveis** (nenhuma chave decifra). **Importante (F5.8):** o script DECIFRA antes de contar "já na chave atual" — um corpo corrompido com o `kid` certo agora é detectado como ilegível (evita falha silenciosa).
 4. Se estiver como esperado, **aplique**: `npm run payments:recifrar-segredos -- --apply`. É **idempotente**
    (pode rodar de novo), nunca imprime segredo nem ciphertext (só contagens), regrava cada valor só se ele não
    mudou desde a leitura e deixa uma linha na auditoria (ator `system`, ação `PAYMENT_CONFIG_CHANGE`,
-   `actionDetail: secrets_reencrypted`). Código de saída **0** = concluído; **1** = há ilegíveis ou valores
-   alterados durante a execução (rode de novo / investigue); **2** = erro (chave ausente, argumento inválido).
+   `actionDetail: secrets_reencrypted`). Código de saída **0** = concluído; **1** = há ilegíveis (ou valores
+   alterados durante execução — rode de novo, o ilegível nunca é apagado); **2** = erro (chave ausente, argumento inválido).
 5. Com **0 ilegíveis** e tudo na chave atual, **remova** `PAYMENT_SECRETS_KEY_PREVIOUS` e reinicie. Só então a chave antiga pode ser descartada.
 
 Se `PAYMENT_SECRETS_KEY_PREVIOUS` estiver inválida (não decodifica para 32 bytes), ela é ignorada e o log traz
@@ -254,8 +268,9 @@ propriedade da criptografia, não um defeito). Sintomas: a tela do gateway mostr
 recuperar: (1) coloque uma `PAYMENT_SECRETS_KEY` válida e reinicie; (2) **reenvie os 3 segredos** pela tela do
 admin (`merchantKey`, `sopClientSecret`, `webhookHeaderSecret`, todos no mesmo PUT; pede a sua senha) — não é
 preciso decifrar nada, o PUT só grava; (3) **os cartões salvos dos motoristas se perdem**: eles precisam
-cadastrar o cartão de novo (o dry-run lista os ids dos cartões ilegíveis; não há como lê-los). Pix, carteira,
-sessões e dívidas não dependem da chave e seguem intactos. **Faça backup da chave** junto com os demais segredos.
+cadastrar o cartão de novo (o dry-run lista os ids dos cartões ilegíveis; não há como lê-los; valores ilegíveis
+NUNCA são apagados pelo script de rotação, só contados). Pix, carteira, sessões e dívidas não dependem da chave
+e seguem intactos. **Faça backup da chave** junto com os demais segredos.
 
 **Envs que continuam SÓ no servidor** (a tela não edita; contam como "presentes" no `readiness` se
 estiverem setadas): `PAYMENT_SECRETS_KEY`, `CIELO_WEBHOOK_PATH_TOKEN` (compõe a URL do webhook),
@@ -271,7 +286,8 @@ se há credenciais"), então salvar uma flag não desliga o que já funcionava.
 App `inno-elekton-frontend`: mesmo repositório, **Build Path = `frontend`**
 (mesmo problema do item acima — o Dockerfile é `frontend/Dockerfile`, não a
 raiz). Build multi-stage (Vite → Nginx), porta interna **80**, exposta
-publicamente.
+publicamente. **Qualquer mudança no `nginx.conf.template` exige rebuild/redeploy do frontend** — 
+o arquivo é englobado na imagem Docker em tempo de build.
 
 O Nginx dentro do container já resolve `/api/*` **na mesma origem**,
 proxiando pela rede interna do EasyPanel para o serviço da API — sem CORS,
@@ -297,7 +313,7 @@ Nginx pular TODA checagem de regex — mesmo com a rota certa, o bloco SSE
 nunca seria alcançado. Corrigido; não reintroduza `^~` ali sem entender essa
 consequência (comentário detalhado no próprio arquivo).
 
-## 2. Migration (automática desde 17/09/2026 — não precisa mais rodar na mão)
+## 2. Migration e CI (automática desde 17/09/2026; Postgres 16 desde e47e2b8)
 
 **Histórico do problema que isto corrige**: o passo de migration era manual
 (rodar no shell do App depois do deploy) — já esqueceu de rodar mais de uma
@@ -307,6 +323,13 @@ vez neste projeto, e a última vez derrubou rotas novas em produção com 500
 rodam `npx prisma migrate deploy` automaticamente antes de subir o processo
 — seguro mesmo com os 3 serviços subindo ao mesmo tempo (lock consultivo do
 Prisma no Postgres, quem chega depois só espera e não reaplica nada).
+
+**CI (GitHub Actions, e47e2b8):** roda com Postgres 16 + Redis 7 reais
+(não é mock). Postgres sobe por `docker run` com `max_connections=300` 
+(o default de 100 seria apertado com múltiplos workers de teste em paralelo).
+CI confere versões, roda migrations, testes e **guarda contra Unhandled Rejection** 
+mesmo com testes verdes (sintoma clássico de falha silenciosa). Frontend 
+confere que `dist/` não contém `mockServiceWorker.js` (só de dev/E2E).
 
 Ainda assim, o seed **não** roda sozinho (é dado de teste, não faz sentido em
 todo boot) — rodar manualmente só quando quiser popular dados de teste:

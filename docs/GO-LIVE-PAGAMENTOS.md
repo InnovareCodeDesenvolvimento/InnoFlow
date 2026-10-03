@@ -127,7 +127,11 @@ REDIS_URL=redis://host:6379
 
 ### Fase A: SANDBOX — Testar com Cielo (lista de testadores)
 
-**Pré-condição:** contas de testador CRIADAS no painel admin ANTES de listar no `PAYMENT_SANDBOX_TESTER_EMAILS`.
+**Pré-condição:** contas de testador **CRIADAS E COM IDENTIDADE VERIFICADA** no painel admin ANTES de listar no `PAYMENT_SANDBOX_TESTER_EMAILS`. Ver regra abaixo.
+
+**Regra (F5.8, ALTO-2):** Um DRIVER cadastrado só com e-mail/senha (`POST /api/auth/register` NÃO confirma o endereço) **NUNCA** é testador, mesmo com o e-mail na lista — senão qualquer um que soubesse o e-mail de um testador usaria o sandbox de graça. Testador = e-mail na lista E identidade verificada:
+- **Login com Google:** `googleSub != null` (Google entregou email_verified) ✅
+- **Staff/Admin:** role != DRIVER (criado pelo admin/seed, nunca auto-registra) ✅
 
 **Checklist:**
 
@@ -140,18 +144,18 @@ REDIS_URL=redis://host:6379
   - [ ] Confirmar que NÃO aparece o alerta vermelho "Segredos salvos ilegíveis" no topo da tela (chave de cifragem OK) e que o aviso "Ambiente SANDBOX em servidor de produção" aparece
 
 - [ ] **Configurar lista de testadores** — env `PAYMENT_SANDBOX_TESTER_EMAILS`:
-  - [ ] Criar as contas deles no painel (login/carteira vazias)
+  - [ ] Criar as contas deles no painel (login/carteira vazias). Se for motorista (DRIVER), **deve logar com Google** (identidade verificada); staff/admin não precisa.
   - [ ] Listar e-mails: `PAYMENT_SANDBOX_TESTER_EMAILS=dono@empresa.com.br,teste@empresa.com.br`
-  - [ ] Reiniciar a API (env é lida apenas no boot)
+  - [ ] Reiniciar a API (env é lida apenas no boot) — lista vazia ou ausente = NINGUÉM passa (falha segura)
 
 - [ ] **Pix no sandbox — só conferir que o QR é criado** (a Cielo NÃO tem sandbox de Pix: o pagamento nunca confirma). Prova de verdade do crédito só na Fase C, em produção, com R$ 10 reais. Se a criação do QR falhar no sandbox, anote a mensagem do log e siga: não bloqueia o resto.
   - [ ] Login com conta de testador
   - [ ] Na PWA: ir para "Carteira → Adicionar saldo"
   - [ ] Gerar QR Pix (modal com QR ou copia-e-cola)
 
-- [ ] **Testar cadastro de cartão** (cada testador):
+- [ ] **Testar cadastro de cartão** (cada testador — só se identidade verificada, ver regra acima):
   - [ ] PWA → "Meus cartões"
-  - [ ] "Adicionar cartão" — abre página isolada com campo de cartão da Cielo
+  - [ ] "Adicionar cartão" — abre página isolada com campo de cartão da Cielo (SOP)
   - [ ] Usar o cartão de teste que a documentação de sandbox da Cielo indicar (nunca um cartão real)
   - [ ] Confirmar cadastro
   - [ ] **Observar:** cartão aparece na lista "Meus cartões" (últimos 4 dígitos)
@@ -184,6 +188,7 @@ REDIS_URL=redis://host:6379
   - [ ] Confirmar branch `main` está sincronizado com EasyPanel
   - [ ] Redeploy dos 3 apps: `api`, `ocpp-gateway`, `worker`
   - [ ] Confirmar que as migrations rodaram: o container sobe sem erro e, depois do primeiro salvar na tela do gateway, ela mostra "Configuração salva nesta tela" com a data da alteração
+  - [ ] **Verificar o Redis do throttle está saudável** (F5.8): se cair, o step-up do PUT do gateway responde 503 `STEPUP_UNAVAILABLE` (fail-closed — admin legítimo também não consegue alterar). Alerta `payment_gateway_stepup_unavailable`
 
 - [ ] **Hosts da Cielo (produção):** confirmar com Cielo
   - [ ] `https://api.cieloecommerce.cielo.com.br` (não sandbox)
@@ -198,7 +203,8 @@ REDIS_URL=redis://host:6379
 
 - [ ] **Cartões e pagamentos de sandbox** (nada manual a fazer):
   - [ ] Cartões salvos e pagamentos criados em sandbox ficam marcados SANDBOX no banco: ao virar para produção eles somem da lista do motorista e não podem ser usados
-  - [ ] A virada para produção é BLOQUEADA enquanto houver pagamentos em andamento no ambiente atual (409); aguarde liquidarem
+  - [ ] A virada para produção é BLOQUEADA enquanto houver pagamentos em andamento (criações paralelas — F5.8, M4c). **409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`** com a contagem de intents: aguarde liquidarem ou consulte o log de auditorias quem estava criando
+  - [ ] **Cartão escolhido antes da mudança de ambiente:** se o motorista escolheu um cartão salvo em sandbox e a troca para produção ocorreu depois, a pré-autorização recebe **503 `PAYMENT_GATEWAY_UNAVAILABLE`** (o cartão não existe no novo ambiente)
   - [ ] Os motoristas precisarão cadastrar o cartão real de novo (em "Meus cartões")
 
 - [ ] **Segredos de pagamento gerados:**
@@ -309,14 +315,15 @@ REDIS_URL=redis://host:6379
    - Aguarde reiniciar ambos os serviços
    - Confirmar nos logs que não há `alert: payment_secrets_key_previous_invalid` nem `alert: payment_gateway_secrets_undecryptable`
 
-4. **Recifrar** (terminal, no serviço `api`):
+4. **Recifrar** (terminal, no serviço `api`, F5.8):
    ```bash
    npm run payments:recifrar-segredos          # dry-run (não altera nada)
-   npm run payments:recifrar-segredos -- --apply  # aplica (idempotente) — o "--" é obrigatório, senão o npm engole o --apply e roda só a simulação
+   npm run payments:recifrar-segredos -- --apply  # aplica (idempotente) — o "--" é obrigatório, senão o npm engole o --apply
    ```
    - Saída `0` = sucesso
-   - Saída `1` = há segredos ilegíveis (chave anterior inválida — corrigir, depois reexecutar)
+   - Saída `1` = há segredos ilegíveis (chave anterior inválida OU corpo corrompido com o kid certo — o script DECIFRA antes de contar "já na atual", detectando corrupção)
    - Saída `2` = erro (chave ausente, argumento errado)
+   - **ATENÇÃO:** valores ilegíveis **nunca são apagados** — a rotação só pode ser dada como concluída com `ilegíveis = 0`
 
 5. **Remover chave antiga** (após confirmação):
    - Deletar `PAYMENT_SECRETS_KEY_PREVIOUS` do EasyPanel
@@ -363,6 +370,10 @@ REDIS_URL=redis://host:6379
 | `payment_capture_pending_stale` | 🟡 Aviso | Captura travada há > 1 h (ou 🔴 Crítico > 24 h) | Investigar a mesma causa de `retry_exhausted`; varredor tenta recuperar |
 | `payment_webhook_secret_weak` | 🟠 Importante | Segredo do webhook < 32 caracteres (mínimo recomendado) | Gerar novo: `openssl rand -hex 16` (32 hex) e salvar na tela |
 | `payment_webhook_secret_decrypt_failed` | 🔴 Crítico | Segredo do webhook não decifra (chave perdida?) | Reenviar segredo pela tela do gateway (step-up) |
+| `payment_gateway_stepup_unavailable` | 🔴 Crítico | Redis do throttle fora do ar (fail-closed, F5.8) | Verificar Redis; o admin não consegue alterar o gateway enquanto estiver fora |
+| `payment_gateway_stepup_failed` | 🟡 Aviso | Admin digitou a senha errada no step-up | Normal; tente de novo com a senha correta |
+| `payment_gateway_stepup_locked` | ⚠️ Importante | Admin está trancado no step-up (muitas falhas: 5 em 15 min) | Aguardar dobrando de 60 s até 15 min; o limite mora no Redis (se cair, segue sem ele) |
+| `payment_capture_sweep_scan_truncated` | 🟠 Importante | Varredor atingiu teto de 2000 intents scaneados sem juntar um lote (muito com teto atingido) | Investigar capturas esgotadas travadas; pode haver pendentes acionáveis além do teto |
 
 **Alertas esperados (não mexer):**
 - `payment_config_changed` — cada vez que salvar tela do gateway; auditoria normal
@@ -393,7 +404,7 @@ REDIS_URL=redis://host:6379
    - [ ] Ligar o flag de novo na tela (mesmo passo, `enabled = true`)
    - [ ] Motoristas conseguem usar novamente
 
-### Retroceder para Sandbox (BLOQUEADO com pagamentos vivos)
+### Retroceder para Sandbox (BLOQUEADO com pagamentos vivos, F5.8, M4c)
 
 **Cenário:** descobrir problema em produção; quer voltar para sandbox pra debugar.
 
@@ -401,6 +412,8 @@ REDIS_URL=redis://host:6379
 ```
 409 GATEWAY_HAS_INFLIGHT_PAYMENTS: {"count": 3}
 ```
+
+**Por quê:** criações paralelas de intents usam lock consultivo no Postgres — ou o intent entra na contagem (e bloqueia a troca) ou espera a troca commitar. Sem isso, um Pix criado no meio da transição nasceria no ambiente antigo, vivo, depois que o efetivo já virou (pago e não creditado).
 
 **O que fazer:**
 1. Aguardar os 3 intents finalizarem (capturas são re-enfileiradas a cada 5 min)
