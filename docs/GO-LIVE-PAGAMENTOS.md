@@ -38,14 +38,13 @@
 | **Produção da Cielo** | Idem, confirmando dados da empresa (CNPJ, DPO, termos) | 🔴 P0 |
 | **Política de privacidade** | Atualizar com dados da empresa (CNPJ, DPO, telefone suporte) | 🟠 P1 |
 | **Domínio oficial** | Confirmado: `https://innoflow.innovarecode.com.br` | ✅ |
-| **Recibo de testes (Sandbox)** | Transferência do crédito testador para conta real (manual ou automático?) | 🟠 P1 |
 
 ### 5 Perguntas para o comercial da Cielo (NÃO podem ser respondidas pelo código)
-1. **Credencial de sandbox**: qual é o `CIELO_MERCHANT_ID` e `CIELO_MERCHANT_KEY` da conta Cielo de teste? (Formato XXX-XXX-XXX-XXX)
-2. **Silent Order Post**: qual é a URL de script (`CIELO_SOP_SCRIPT_URL`) e de OAuth (`CIELO_SOP_OAUTH_TOKEN_URL`) em sandbox?
-3. **Silent Order Post (OAuth)**: o fluxo é mesmo `client_credentials` (sem end-user), ou precisa autenticar de outro jeito?
-4. **Consulta de cartão**: o endpoint `GET /1/card/{token}` retorna `cardNumber` (final), `cardBrand` e válidade? (Testa antes de usar: pode estar em outro endpoint)
-5. **Webhook**: na transição sandbox→produção, os segredos (`merchantKey`, `webhookSecret`) da Cielo mudam, ou é só o env do lado dele?
+1. **Credenciais de sandbox**: quais são o `MerchantId` e a `MerchantKey` da conta Cielo de teste, e o `client id`/`client secret` do cadastro de cartão (Silent Order Post)?
+2. **Silent Order Post**: qual é a URL oficial do script (`CIELO_SOP_SCRIPT_URL`) e a do login OAuth (`CIELO_SOP_OAUTH_TOKEN_URL`), em sandbox e em produção?
+3. **Cobrança do cartão salvo**: dá para cobrar o `CardToken` salvo SEM pedir o CVV de novo? Qual a validade do token? Existe campo de cartão hospedado pela Cielo (iframe)? O login do SOP é mesmo `client_credentials`?
+4. **Consulta de cartão**: o endpoint `GET /1/card/{token}` devolve bandeira e final do cartão? Em que formato? (o código assume; não foi confirmado)
+5. **Webhook e Pix**: de quais IPs o webhook chega e existe assinatura? Como testar Pix (a documentação indica que a Cielo não tem sandbox de Pix)?
 
 ---
 
@@ -61,7 +60,7 @@
 | `PAYMENT_SECRETS_KEY` | ✅ Sim (cartão/gateway) | api, worker | `openssl rand -base64 32` (AES-256) | Seguro, 32 bytes | Ausente → cartão/gateway falham 503 |
 | `PAYMENT_SECRETS_KEY_PREVIOUS` | ❌ Não (rotação) | api, worker | Chave antiga, durante rotação | Seguro, 32 bytes | OPCIONAL; remova após `npm run payments:recifrar-segredos --apply` |
 | **Cielo — Sandbox** |
-| `CIELO_MERCHANT_ID` | ❌ Não (banco > env) | Todos 3 | Ticket Cielo: formato XXX-XXX-XXX-XXX | Público (ID) | Env é reserva; tela prevalece |
+| `CIELO_MERCHANT_ID` | ❌ Não (banco > env) | Todos 3 | Vem da Cielo (painel/ticket) | Público (ID) | Env é reserva; tela prevalece |
 | `CIELO_MERCHANT_KEY` | ❌ Não (banco > env) | Todos 3 | Ticket Cielo: secreto | 🔴 Inseguro em log (veja redact) | Nunca logar! Banco cifra com `PAYMENT_SECRETS_KEY` |
 | `CIELO_SANDBOX` | ❌ Não | Todos 3 | `true` (sandbox) ou `false` (produção) | Público (flag) | Default `true` (falha segura); produção = `false` |
 | `CIELO_API_BASE_URL` | ❌ Não | Todos 3 | Deixar derivar da env `CIELO_SANDBOX` | Público (URL) | Valor padrão sandbox: `https://apisandbox.cieloecommerce.cielo.com.br` |
@@ -70,10 +69,10 @@
 | `CIELO_WEBHOOK_PATH_TOKEN` | ❌ Não | Todos 3 | `openssl rand -hex 24` (48 hex) | 🟡 Importante | Roteia a requisição; mínimo 8 chars (alerta se < 32) |
 | `CIELO_WEBHOOK_HEADER_SECRET` | ❌ Não | Todos 3 | `openssl rand -hex 16` (32 hex) | 🔴 Inseguro em log | Tempo constante; mínimo 8 (alerta se < 32); banco cifra |
 | **Cielo — Silent Order Post (cartão salvo)** |
-| `CIELO_SOP_SCRIPT_URL` | ❌ Não | api | Ticket Cielo: URL do script de tokenização | Público (CDN) | Ex: `https://ecommerce.cielo.com.br/checkout/token-sop.js` (a confirmar) |
+| `CIELO_SOP_SCRIPT_URL` | ❌ Não | api | A Cielo informa a URL oficial (não adivinhe) | Público (URL) | Sem ela o cadastro de cartão responde 503 |
 | `CIELO_SOP_CLIENT_ID` | ❌ Não | api | Ticket Cielo: OAuth client ID | Público (ID) | Env é reserva; tela prevalece; para `client_credentials` |
 | `CIELO_SOP_CLIENT_SECRET` | ❌ Não | api | Ticket Cielo: OAuth secret | 🔴 Inseguro em log | Banco cifra; a tela o exige junto com `CIELO_SOP_CLIENT_ID` |
-| `CIELO_SOP_OAUTH_TOKEN_URL` | ❌ Não | api | Ticket Cielo: endpoint OAuth | Público (URL) | Ex: `https://sop.sandbox.cielo.com.br/oauth/token` (a confirmar) |
+| `CIELO_SOP_OAUTH_TOKEN_URL` | ❌ Não | api | A Cielo informa o endereço oficial (não adivinhe) | Público (URL) | Sem ele o cadastro de cartão responde 503 |
 | `CIELO_TIMEOUT_MS` | ❌ Não | Todos 3 | Milissegundos | Público (número) | Default 8000 (8s); motorista está esperando (HTTP síncrono) |
 | **Pagamento — Guarda Fake/Produção** |
 | `PAYMENT_ALLOW_FAKE_ADAPTER` | ❌ Não | Todos 3 | `false` (padrão, obrigatório) | Público (flag) | 🔴 **NUNCA `true` em produção real**; aprova qualquer cartão, não cobra |
@@ -136,34 +135,31 @@ REDIS_URL=redis://host:6379
   - [ ] Selecionar ambiente = `Sandbox`
   - [ ] Digitar `merchantId` + `merchantKey` da Cielo
   - [ ] Digitar `sopClientId` + `sopClientSecret` do SOP
-  - [ ] Digitar segredos do webhook: `CIELO_WEBHOOK_PATH_TOKEN` (path) e segredo do header
+  - [ ] Digitar o segredo do header do webhook (mínimo 32 caracteres; a tela tem o botão "Gerar segredo aleatório"). O token do caminho do webhook (`CIELO_WEBHOOK_PATH_TOKEN`) NÃO se digita na tela: é variável do EasyPanel (api); sem ela a tela mostra "a URL ainda não pode ser gerada"
   - [ ] Clicar "Salvar" (exige senha atual do admin — step-up)
-  - [ ] Confirmar que a tela mostra `secretsDecryptable: true` (chave de cifragem OK)
+  - [ ] Confirmar que NÃO aparece o alerta vermelho "Segredos salvos ilegíveis" no topo da tela (chave de cifragem OK) e que o aviso "Ambiente SANDBOX em servidor de produção" aparece
 
 - [ ] **Configurar lista de testadores** — env `PAYMENT_SANDBOX_TESTER_EMAILS`:
   - [ ] Criar as contas deles no painel (login/carteira vazias)
   - [ ] Listar e-mails: `PAYMENT_SANDBOX_TESTER_EMAILS=dono@empresa.com.br,teste@empresa.com.br`
   - [ ] Reiniciar a API (env é lida apenas no boot)
 
-- [ ] **Testar Pix** (cada testador):
+- [ ] **Pix no sandbox — só conferir que o QR é criado** (a Cielo NÃO tem sandbox de Pix: o pagamento nunca confirma). Prova de verdade do crédito só na Fase C, em produção, com R$ 10 reais. Se a criação do QR falhar no sandbox, anote a mensagem do log e siga: não bloqueia o resto.
   - [ ] Login com conta de testador
   - [ ] Na PWA: ir para "Carteira → Adicionar saldo"
   - [ ] Gerar QR Pix (modal com QR ou copia-e-cola)
-  - [ ] Pagar o QR via app Pix real (testador transfere de verdade)
-  - [ ] **Observar:** na tela da PWA, o status muda de "Aguardando" para "Pago" (webhook chegou e crédito foi aplicado)
-  - [ ] **Conferir:** saldo aparece na carteira após o pagamento
 
 - [ ] **Testar cadastro de cartão** (cada testador):
   - [ ] PWA → "Meus cartões"
   - [ ] "Adicionar cartão" — abre página isolada com campo de cartão da Cielo
-  - [ ] Usar cartão de teste da Cielo (números fictícios: `4111111111111111`)
+  - [ ] Usar o cartão de teste que a documentação de sandbox da Cielo indicar (nunca um cartão real)
   - [ ] Confirmar cadastro
   - [ ] **Observar:** cartão aparece na lista "Meus cartões" (últimos 4 dígitos)
 
 - [ ] **Testar recarga com cartão salvo** (cada testador):
   - [ ] Escanear QR de carregador pelo PWA (ou usar URL da landing pós-QR)
-  - [ ] Selecionar "Pagar com cartão salvo"
-  - [ ] Iniciar recarga → status muda de "Pré-autorizado" para "Processando" → "Cobrado"
+  - [ ] Em "Forma de pagamento", escolher o cartão salvo (o padrão já vem marcado)
+  - [ ] Iniciar recarga e parar → no recibo o status vai de "Cobrança em processamento" para "Cobrado"
   - [ ] **Conferir recibo:** valor cobrado bate com energia consumida (pode ter mínimo da tarifa)
   - [ ] **Conferir carteira:** saldo reflete o débito (no admin, ver tabela "Carteiras")
 
@@ -187,7 +183,7 @@ REDIS_URL=redis://host:6379
 - [ ] **Deploy do backend novo:** código pronto (está em `main` do GitHub)
   - [ ] Confirmar branch `main` está sincronizado com EasyPanel
   - [ ] Redeploy dos 3 apps: `api`, `ocpp-gateway`, `worker`
-  - [ ] Confirmar migration rodou: `SELECT COUNT(*) FROM PaymentGatewayConfig;` (deve ter 1 linha após salvar tela)
+  - [ ] Confirmar que as migrations rodaram: o container sobe sem erro e, depois do primeiro salvar na tela do gateway, ela mostra "Configuração salva nesta tela" com a data da alteração
 
 - [ ] **Hosts da Cielo (produção):** confirmar com Cielo
   - [ ] `https://api.cieloecommerce.cielo.com.br` (não sandbox)
@@ -200,10 +196,10 @@ REDIS_URL=redis://host:6379
   - [ ] `sopClientId` + `sopClientSecret` de produção
   - [ ] Segredos de webhook NOVOS de produção (32+ chars cada): `CIELO_WEBHOOK_PATH_TOKEN`, segredo do header
 
-- [ ] **Cartões de sandbox desativados:**
-  - [ ] Antes de mudar para produção, listar todos os cartões salvos em sandbox (dev pode tê-los feito)
-  - [ ] Admin → "Meus cartões" → deletar qualquer um que comece com `4111` (teste)
-  - [ ] Motoristas precisarão recadastrar com cartão real
+- [ ] **Cartões e pagamentos de sandbox** (nada manual a fazer):
+  - [ ] Cartões salvos e pagamentos criados em sandbox ficam marcados SANDBOX no banco: ao virar para produção eles somem da lista do motorista e não podem ser usados
+  - [ ] A virada para produção é BLOQUEADA enquanto houver pagamentos em andamento no ambiente atual (409); aguarde liquidarem
+  - [ ] Os motoristas precisarão cadastrar o cartão real de novo (em "Meus cartões")
 
 - [ ] **Segredos de pagamento gerados:**
   - [ ] `PAYMENT_SECRETS_KEY`: `openssl rand -base64 32` (novo, guarde em 2 lugares)
@@ -212,7 +208,7 @@ REDIS_URL=redis://host:6379
 
 - [ ] **Varredores aguardando:**
   - [ ] Job `varrerPreAutorizacoesCartaoJob` ativo (cancela pré-auth abandonadas)
-  - [ ] Job `reenfileirarCapturasPendentes` ativo (rede de segurança ALTO-1, re-enfileira capturas travadas)
+  - [ ] Rede de segurança das capturas (re-enfileira capturas travadas): roda dentro do mesmo job periódico de pré-autorizações
   - [ ] Job `expirarTopupsPixJob` ativo (expira Pix não pagos)
   - [ ] Todos são `repeatable` (BullMQ) — não precisa liga-desliga, rodam automaticamente
 
@@ -233,15 +229,15 @@ REDIS_URL=redis://host:6379
 
 ### Fase C: Testes reais com valor mínimo — Reconciliação contra Cielo
 
-**Regra:** começar com **valores MÍNIMOS** (PIX R$ 10, cartão R$ 50 = piso de pré-auth).
+**Regra:** começar com **valores MÍNIMOS** (Pix R$ 10 = mínimo da recarga; no cartão a pré-autorização sai do piso de `RESERVA_PISO_CENTS`, hoje R$ 50).
 
 **Como baixar temporariamente os pisos (se necessário, para testes):**
 
 | Limite | Env | Padrão | Observação |
 |---|---|---|---|
 | Saldo mínimo pra iniciar sessão | `WALLET_MIN_START_BALANCE_CENTS` | 2000 (R$ 20) | Motorista precisa ter em carteira antes de iniciar; trocar exige redeploy |
-| Piso de pré-autorização (cartão) | (derivado de tarifa, não há env) | ~R$ 50 (varia) | Não pode ser ajustado; é mínimo da pré-auth calculado |
-| Piso de Pix | (nenhum, é quanto o motorista quiser entre os limites) | — | Pode estar entre R$ 10 e R$ 500 (recomendação Nova); sem env fixa |
+| Piso da pré-autorização (cartão) | `RESERVA_PISO_CENTS` (App api) | 5000 (R$ 50) | Baixe temporariamente (ex.: 1000 = R$ 10) para testar com valor pequeno; o teto é `RESERVA_TETO_CENTS` (40000 = R$ 400). Depois devolva ao padrão |
+| Valor do Pix | (sem variável) | R$ 10 a R$ 500 | Limites fixos no código; o motorista escolhe o valor dentro deles |
 
 **Testes:**
 
@@ -250,7 +246,7 @@ REDIS_URL=redis://host:6379
   - [ ] Motorista paga via Pix real
   - [ ] Webhook Cielo chega (procure por `POST /api/webhooks/cielo/...` nos logs)
   - [ ] Crédito aparece na carteira MENOS o piso mínimo da tarifa (se houver)
-  - [ ] **Reconciliar:** abrir relatório "Movimentação" do admin, conferir que `faturamento = cartCapturePending + walletDebit`
+  - [ ] **Reconciliar:** o Pix credita a carteira (não é faturamento de sessão); confira o extrato da carteira do motorista em Admin → Carteiras
 
 - [ ] **Cartão de R$ 50+** (piso de pré-auth):
   - [ ] Iniciar sessão com cartão salvo
@@ -258,7 +254,7 @@ REDIS_URL=redis://host:6379
   - [ ] Parar recarga → captura parcial é enfileirada
   - [ ] Webhook de captura chega (ou varredor executa em background)
   - [ ] **Conferir recibo:** valor cobrado bate com o calculado (energia + mínimo tarifa)
-  - [ ] **Reconciliar:** admin → "Relatório Financeiro" → `differenceCents` deve estar em 0 (faturamento fecha)
+  - [ ] **Reconciliar:** Admin → Financeiro (conciliação): a diferença entre faturamento e o que foi contabilizado (cartão capturado + captura pendente + carteira + dívida quitada + dívida aberta) deve ser ZERO
 
 - [ ] **Extrato Cielo:**
   - [ ] Logar na conta de produção da Cielo (portal deles)
@@ -275,7 +271,7 @@ REDIS_URL=redis://host:6379
 
 **Como verificar logs do EasyPanel:**
 1. Abrir EasyPanel → App `inno-elekton-api` → aba "Logs"
-2. Procurar por `x-innoelektron-webhook-secret` (o header name é literalmente este)
+2. Procurar por `x-innoelektron-webhook-secret` (o nome do header é exatamente este) em linhas de requisição
 3. Se o valor aparecer como texto (não como `[redacted]`), o segredo vazou
 
 **Se vazou:**
@@ -311,12 +307,12 @@ REDIS_URL=redis://host:6379
 
 3. **Redeploy** (EasyPanel "Deploy" ou push para GitHub):
    - Aguarde reiniciar ambos os serviços
-   - Confirmar nos logs que não há `alert: payment_secrets_key_invalid`
+   - Confirmar nos logs que não há `alert: payment_secrets_key_previous_invalid` nem `alert: payment_gateway_secrets_undecryptable`
 
 4. **Recifrar** (terminal, no serviço `api`):
    ```bash
    npm run payments:recifrar-segredos          # dry-run (não altera nada)
-   npm run payments:recifrar-segredos --apply  # aplica (idempotente)
+   npm run payments:recifrar-segredos -- --apply  # aplica (idempotente) — o "--" é obrigatório, senão o npm engole o --apply e roda só a simulação
    ```
    - Saída `0` = sucesso
    - Saída `1` = há segredos ilegíveis (chave anterior inválida — corrigir, depois reexecutar)
@@ -422,7 +418,7 @@ REDIS_URL=redis://host:6379
 **Quando a Cielo avisa (webhook `ChangeType 7 = Chargeback` ou `25 = Estorno`):**
 
 1. **Webhook chega**, sistema grava em `WebhookEvent` com `changeType` + dados
-2. **Alertar dono:** procurar por `payment_webhook_received` no log para diagnóstico
+2. **Não há alerta automático para isso hoje:** o dono precisa olhar o painel da Cielo nos primeiros dias (conferir chargebacks e estornos) e conferir a tabela de eventos de webhook com o suporte técnico
 3. **Processo manual** (decidir com DPO/compliance):
    - Debitador (estorno): reembolsar para carteira do motorista
    - Chargeback: reverter tudo (carteira, session, auditoria) — operação complexa, requer investigação caso-a-caso
@@ -449,7 +445,7 @@ Retirada do fim do PROGRESSO.md, compilada para ação do dono. Ordene por prior
    - [ ] Testar contra sandbox com as credenciais reais (hoje só FakeAdapter)
 
 3. **Repositório apontado no EasyPanel**
-   - [ ] Todos 3 Apps (api, ocpp, worker, frontend) já apontam para `github.com/InnovareCodeDesenvolvimento/InnoFlow`?
+   - [ ] Os 4 Apps (api, ocpp-gateway, worker, frontend) já apontam para `github.com/InnovareCodeDesenvolvimento/InnoFlow`?
    - [ ] Senão, repointer manualmente (campo "Git" de cada App)
 
 4. **Deploy de código novo**
