@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { montarClosure, montarLateStop, type SessionClosureDto, type SessionLateStopDto } from '../../services/sessao/closureDto'
 import { prisma } from '../../lib/prisma'
 import type { ReportingScope } from '../lib/reportingScope'
 import { zonedStartOfDayToUtc, type PeriodWindow } from '../lib/reportingWindow'
@@ -319,7 +320,8 @@ export interface SessionReportRow {
 
 function sessionsFilterConditions(filters: Pick<SessionsReportQuery, 'status' | 'paymentMethod' | 'minAmountCents'>): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = []
-  if (filters.status) conditions.push(Prisma.sql`cs.status = ${filters.status}`)
+  // Cast para o enum: o Prisma envia o parâmetro como texto e o Postgres recusa `"ChargingSessionStatus" = text` (o filtro por status dava 500 sempre — achado da F5.9b2).
+  if (filters.status) conditions.push(Prisma.sql`cs.status = ${filters.status}::"ChargingSessionStatus"`)
   if (filters.minAmountCents !== undefined) conditions.push(Prisma.sql`cs."totalCostCents" >= ${filters.minAmountCents}`)
   if (filters.paymentMethod === 'CARD') {
     conditions.push(Prisma.sql`EXISTS (SELECT 1 FROM "PaymentIntent" pi WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE' AND pi.status = 'CAPTURED')`)
@@ -427,6 +429,13 @@ export interface SessionDetailResult {
   chargingEndedAt: Date | null
   stoppedAt: Date | null
   stopReason: string | null
+  /** F5.9 — ver `closureDto.ts`. */
+  closure: SessionClosureDto
+  stopRequestedAt: Date | null
+  stopRequestedBy: string | null
+  stopAttempts: number
+  /** Só ADMIN (OPERATOR recebe `null`). */
+  lateStop: SessionLateStopDto | null
   meterStartWh: number
   meterStopWh: number | null
   energyDeliveredWh: number | null
@@ -461,12 +470,12 @@ export async function getSessionDetail(scope: ReportingScope, id: string, isAdmi
     },
     include: {
       site: { select: { id: true, name: true } },
-      chargePoint: { select: { id: true, ocppIdentity: true } },
+      chargePoint: { select: { id: true, ocppIdentity: true, lastSeenAt: true, disconnectedAt: true } },
       connector: { select: { connectorId: true } },
       user: { select: { name: true, email: true } },
       tariff: { select: { name: true } },
       paymentIntents: {
-        select: { id: true, provider: true, status: true, amountRequestedCents: true, amountCapturedCents: true, createdAt: true },
+        select: { id: true, provider: true, purpose: true, status: true, amountRequestedCents: true, amountCapturedCents: true, authorizedAt: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       },
     },
@@ -477,7 +486,7 @@ export async function getSessionDetail(scope: ReportingScope, id: string, isAdmi
     id: session.id,
     ocppTransactionId: session.ocppTransactionId,
     site: session.site,
-    chargePoint: session.chargePoint,
+    chargePoint: { id: session.chargePoint.id, ocppIdentity: session.chargePoint.ocppIdentity },
     connectorId: session.connector.connectorId,
     driver: { name: session.user.name, ...(isAdmin ? { email: session.user.email } : {}) },
     status: session.status,
@@ -485,6 +494,23 @@ export async function getSessionDetail(scope: ReportingScope, id: string, isAdmi
     chargingEndedAt: session.chargingEndedAt,
     stoppedAt: session.stoppedAt,
     stopReason: session.stopReason,
+    // F5.9 (espelha `SessionDetail` de frontend/src/types/api.ts). `closure`, `stopRequested*` e `stopAttempts` valem para ADMIN e OPERATOR (operacional,
+    // sem dado pessoal); `lateStop` SÓ para ADMIN — OPERATOR recebe `null` (decisão da Nova: o desvio financeiro do stop tardio é do dono da rede).
+    closure: montarClosure({
+      status: session.status,
+      paymentMode: session.paymentMode,
+      closureSource: session.closureSource,
+      meterStopSource: session.meterStopSource,
+      unconfirmedAt: session.unconfirmedAt,
+      unconfirmedReason: session.unconfirmedReason,
+      stoppedAt: session.stoppedAt,
+      cardAuthorizedAt: session.paymentIntents.find((p) => p.purpose === 'SESSION_CARD_CAPTURE' && p.status === 'AUTHORIZED')?.authorizedAt ?? null,
+      carregador: session.chargePoint,
+    }),
+    stopRequestedAt: session.stopRequestedAt,
+    stopRequestedBy: session.stopRequestedBy,
+    stopAttempts: session.stopAttempts,
+    lateStop: isAdmin ? montarLateStop(session) : null,
     meterStartWh: session.meterStartWh,
     meterStopWh: session.meterStopWh,
     energyDeliveredWh: session.energyDeliveredWh,
@@ -498,6 +524,6 @@ export async function getSessionDetail(scope: ReportingScope, id: string, isAdmi
       minChargeAdjustmentCents: session.minChargeAdjustmentCents,
       totalCostCents: session.totalCostCents,
     },
-    paymentIntents: session.paymentIntents,
+    paymentIntents: session.paymentIntents.map((p) => ({ id: p.id, provider: p.provider, status: p.status, amountRequestedCents: p.amountRequestedCents, amountCapturedCents: p.amountCapturedCents, createdAt: p.createdAt })),
   }
 }

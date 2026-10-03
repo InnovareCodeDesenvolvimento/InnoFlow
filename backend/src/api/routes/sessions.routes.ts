@@ -2,15 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
+import { isSessaoAberta } from '../../core/sessao/estadosSessao'
 import { pedirParadaSessao } from '../../services/sessao/pedirParadaSessao'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
 import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
-
-/** Estados em que uma `ChargingSession` ainda pode ser parada remotamente — `STOPPED`/`FAULTED` já são terminais. */
-const ACTIVE_SESSION_STATUSES = new Set(['STARTED', 'CHARGING', 'FINISHING'])
 
 const router = Router()
 
@@ -29,7 +27,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const session = await prisma.chargingSession.findFirst({ where: { id: req.params.id, ...operatorScopeWhere(req) } })
     if (!session) throw new AppError('Sessão não encontrada.', 404, 'SESSION_NOT_FOUND')
-    if (!ACTIVE_SESSION_STATUSES.has(session.status)) throw new AppError('Sessão não está ativa.', 409, 'SESSION_NOT_ACTIVE')
+    // Constante única de sessão aberta (inclui FAULTED); STOP_UNCONFIRMED e STOPPED => 409.
+    if (!isSessaoAberta(session.status)) throw new AppError('Sessão não está ativa.', 409, 'SESSION_NOT_ACTIVE')
 
     const correlationId = randomUUID()
     logger.info({ sessionId: session.id, chargePointId: session.chargePointId, correlationId }, '[api] stop de sessão disparado')

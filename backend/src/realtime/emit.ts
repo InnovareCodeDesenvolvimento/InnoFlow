@@ -92,6 +92,16 @@ export async function emitSessionStopped(input: EmitSessionStatusInput): Promise
   await Promise.all([publishToOperator(input.operatorId, event), publishToUser(input.userId, event), publishToAdmin(event)])
 }
 
+/**
+ * F5.9: a sessão virou `STOP_UNCONFIRMED` ou foi reanimada (`marcarSessaoNaoConfirmada` / `reanimarSessao`). Mesmos assinantes de
+ * `session.stopped` (operador dono, o próprio motorista, o canal admin) — nunca o canal público de estações. Sem coalescência de
+ * métricas: não é `session.metrics`.
+ */
+export async function emitSessionUpdated(input: EmitSessionStatusInput): Promise<void> {
+  const event = sessionStatusEvent('session.updated', { sessionId: input.sessionId, chargePointId: input.chargePointId })
+  await Promise.all([publishToOperator(input.operatorId, event), publishToUser(input.userId, event), publishToAdmin(event)])
+}
+
 // ------------------------------------------------------------
 // wallet.updated — SEMPRE chamado depois do commit da transação que gerou o
 // `WalletEntry` (nunca de dentro dela — ver decisão 5 da Nova). Os chamadores

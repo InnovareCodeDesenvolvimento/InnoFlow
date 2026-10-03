@@ -3,6 +3,7 @@ import type { ChargingSessionStatus, Prisma, StopUnconfirmedReason } from '@pris
 import type { IHandlersOption } from 'ocpp-rpc'
 import { prisma } from '../../../src/lib/prisma'
 import { createRedisConnection } from '../../../src/lib/redis'
+import { issueToken } from '../../../src/lib/jwt'
 import { encryptPaymentSecret } from '../../../src/lib/crypto/paymentSecrets'
 import { getPagamentoPort } from '../../../src/services/pagamentos/pagamentoPortInstance'
 import type { OcppHandlerCtx } from '../../../src/ocpp/context'
@@ -85,15 +86,17 @@ export interface OpcoesSessao {
   tariffSnapshot?: Prisma.InputJsonValue
   /** `authorizedAt` do hold (CARD). Default = início da sessão. */
   autorizadoHaMin?: number
+  /** Reaproveita o motorista/carteira/idTag de uma sessão anterior (duas sessões do MESMO motorista — D7). `saldoCents` é ignorado. */
+  motorista?: { driver: { id: string; name: string }; wallet: { id: string }; authToken: { id: string } }
 }
 
 export async function criarSessao(c: Cenario, opts: OpcoesSessao) {
   const rotulo = `${c.label}-${++c.connectorCounter.n}`
   const connector = await prisma.connector.create({ data: { operatorId: c.tenant.operatorId, chargePointId: c.tenant.chargePointId, connectorId: c.connectorCounter.n, type: 'AC_TYPE2' } })
-  const driver = await prisma.user.create({ data: { role: 'DRIVER', name: `Motorista ${rotulo} ${c.suffix}`, email: `driver-${rotulo}-${c.suffix}@example.com` } })
-  const authToken = await prisma.authToken.create({ data: { idTag: makeIdTag(), type: opts.mode === 'CARD' ? 'VIRTUAL' : 'RFID', userId: driver.id } })
-  const wallet = await prisma.wallet.create({ data: { userId: driver.id } })
-  if (opts.mode === 'WALLET' && (opts.saldoCents ?? 0) > 0) {
+  const driver = opts.motorista?.driver ?? (await prisma.user.create({ data: { role: 'DRIVER', name: `Motorista ${rotulo} ${c.suffix}`, email: `driver-${rotulo}-${c.suffix}@example.com` } }))
+  const authToken = opts.motorista?.authToken ?? (await prisma.authToken.create({ data: { idTag: makeIdTag(), type: opts.mode === 'CARD' ? 'VIRTUAL' : 'RFID', userId: driver.id } }))
+  const wallet = opts.motorista?.wallet ?? (await prisma.wallet.create({ data: { userId: driver.id } }))
+  if (!opts.motorista && opts.mode === 'WALLET' && (opts.saldoCents ?? 0) > 0) {
     await prisma.walletEntry.create({ data: { walletId: wallet.id, type: 'ADJUSTMENT_CREDIT', amountCents: opts.saldoCents!, balanceAfterCents: opts.saldoCents!, referenceType: 'MANUAL', description: `saldo de teste ${c.suffix}` } })
   }
 
@@ -161,6 +164,11 @@ export async function criarSessao(c: Cenario, opts: OpcoesSessao) {
   }
 
   return { session, driver, wallet, connector, authToken, intent, inicio }
+}
+
+/** Token JWT de um motorista criado por `criarSessao`. */
+export function tokenDoMotorista(driverId: string): string {
+  return issueToken({ id: driverId, role: 'DRIVER', operatorId: null })
 }
 
 export async function saldo(walletId: string): Promise<number> {

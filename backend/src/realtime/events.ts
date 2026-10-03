@@ -22,7 +22,8 @@ export interface SessionMetricsEvent extends RealtimeEventBase {
 }
 
 export interface SessionStatusEvent extends RealtimeEventBase {
-  type: 'session.started' | 'session.stopped'
+  /** F5.9: `session.updated` = a sessão virou `STOP_UNCONFIRMED` ou foi reanimada (espelha `frontend/src/types/api.ts`); mesmo payload dos outros dois. */
+  type: 'session.started' | 'session.stopped' | 'session.updated'
   sessionId: string
   chargePointId: string
 }
@@ -75,7 +76,7 @@ export function sessionMetricsEvent(input: Omit<SessionMetricsEvent, 'type' | 'o
   return { type: 'session.metrics', occurredAt: nowIso(), ...input }
 }
 
-export function sessionStatusEvent(type: 'session.started' | 'session.stopped', input: Omit<SessionStatusEvent, 'type' | 'occurredAt'>): SessionStatusEvent {
+export function sessionStatusEvent(type: 'session.started' | 'session.stopped' | 'session.updated', input: Omit<SessionStatusEvent, 'type' | 'occurredAt'>): SessionStatusEvent {
   return { type, occurredAt: nowIso(), ...input }
 }
 

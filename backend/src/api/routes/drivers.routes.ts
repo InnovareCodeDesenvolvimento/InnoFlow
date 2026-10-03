@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { sqlEstadosSessaoAberta } from '../lib/sessionStatusSql'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { toNumber } from '../lib/reportingSql'
@@ -75,7 +76,7 @@ router.get(
           SELECT SUM(d."amountCents")::int AS total FROM "Debt" d WHERE d."userId" = u.id AND d.status = 'OPEN'
         ) debt_sum ON true
         LEFT JOIN LATERAL (
-          SELECT cs.id FROM "ChargingSession" cs WHERE cs."userId" = u.id AND cs.status IN ('STARTED', 'CHARGING', 'FINISHING') ORDER BY cs."startedAt" DESC LIMIT 1
+          SELECT cs.id FROM "ChargingSession" cs WHERE cs."userId" = u.id AND cs.status IN (${sqlEstadosSessaoAberta()}) ORDER BY cs."startedAt" DESC LIMIT 1
         ) active_session ON true
         WHERE u.role = 'DRIVER' ${searchCondition}
         ORDER BY u."createdAt" DESC

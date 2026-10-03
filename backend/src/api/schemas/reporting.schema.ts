@@ -43,7 +43,7 @@ export const revenueReportQuerySchema = baseReportQuerySchema.extend({
 export type RevenueReportQuery = z.infer<typeof revenueReportQuerySchema>
 
 export const sessionsReportQuerySchema = baseReportQuerySchema.extend({
-  status: z.enum(['STARTED', 'CHARGING', 'FINISHING', 'STOPPED', 'FAULTED']).optional(),
+  status: z.enum(['STARTED', 'CHARGING', 'FINISHING', 'STOPPED', 'FAULTED', 'STOP_UNCONFIRMED']).optional(),
   // UNPAID continua aceito como filtro (sessão sem CARD nem WALLET) mesmo o
   // frontend só expondo CARD/WALLET na UI — não é um valor que a resposta
   // devolve mais (paymentMethod vira `null`), só um filtro de entrada.

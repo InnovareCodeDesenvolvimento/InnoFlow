@@ -1,5 +1,7 @@
 import type { StopUnconfirmedReason } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
+import { logger } from '../../lib/logger'
+import { emitSessionUpdated } from '../../realtime/emit'
 import { env } from '../../lib/env'
 import { listarEstadosSessaoAberta } from '../../core/sessao/estadosSessao'
 import { deveZerarCusto } from '../../core/sessao/leituraFinal'
@@ -43,7 +45,7 @@ export async function marcarSessaoNaoConfirmada(params: MarcarSessaoNaoConfirmad
     // Custo provisório com a MESMA conta do fechamento real: melhor prova de leitura disponível AGORA e, sem nenhuma, a política D2.
     const sessao = await tx.chargingSession.findUniqueOrThrow({
       where: { id: sessionId },
-      select: { id: true, meterStartWh: true, startedAt: true, chargingEndedAt: true, tariffSnapshot: true, site: { select: { timezone: true } } },
+      select: { id: true, userId: true, meterStartWh: true, startedAt: true, chargingEndedAt: true, tariffSnapshot: true, site: { select: { timezone: true } } },
     })
     const leitura = await resolverLeituraFinal(tx, { id: sessionId, chargePointId: travada.chargePointId, ocppTransactionId: travada.ocppTransactionId, meterStartWh: sessao.meterStartWh, startedAt: sessao.startedAt })
     const { custos } = calcularFechamentoSessao(sessao, {
@@ -61,7 +63,7 @@ export async function marcarSessaoNaoConfirmada(params: MarcarSessaoNaoConfirmad
     })
     if (alteradas.count !== 1) return { tipo: 'NAO_ABERTA' as const }
 
-    return { tipo: 'MARCADA' as const, chargePointId: travada.chargePointId, provisionalCostCents: custos.totalCostCents, prova: leitura.prova, statusAnterior: travada.status }
+    return { tipo: 'MARCADA' as const, chargePointId: travada.chargePointId, operatorId: travada.operatorId, userId: sessao.userId, provisionalCostCents: custos.totalCostCents, prova: leitura.prova, statusAnterior: travada.status }
   })
 
   if (resultado.tipo !== 'MARCADA') return resultado.tipo
@@ -74,5 +76,9 @@ export async function marcarSessaoNaoConfirmada(params: MarcarSessaoNaoConfirmad
       `sessão movida para STOP_UNCONFIRMED (${motivo}) — nenhum dinheiro movido; aguardando o carregador`,
     )
   }
+  // Tempo real: o PWA do motorista e o painel admin invalidam o detalhe/lista (STOP_UNCONFIRMED não é "ativa"). Depois do commit, não bloqueante.
+  void emitSessionUpdated({ operatorId: resultado.operatorId, userId: resultado.userId, sessionId, chargePointId: resultado.chargePointId }).catch((err) =>
+    logger.error({ err, sessionId }, '[realtime] falha ao publicar session.updated (não bloqueante)'),
+  )
   return 'MARCADA'
 }

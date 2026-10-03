@@ -7,6 +7,10 @@ import { logger } from '../../lib/logger'
 import { recordCommandResult, getCommandResult } from '../../ocpp/commandResultCache'
 import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
 import { pedirParadaSessao } from '../../services/sessao/pedirParadaSessao'
+import { listarEstadosSessaoAberta, isSessaoAberta } from '../../core/sessao/estadosSessao'
+import { montarClosure } from '../../services/sessao/closureDto'
+import { withDeadline } from '../../lib/withDeadline'
+import { sqlEstadosSessaoAberta } from '../lib/sessionStatusSql'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { apenasDigitos, isValidCpf } from '../../core/pagamentos/validarCpf'
@@ -41,7 +45,9 @@ import mePaymentMethodsRoutes from './mePaymentMethods.routes'
  */
 
 const START_LOCK_TTL_MS = 30_000
-const ACTIVE_SESSION_STATUSES = ['STARTED', 'CHARGING', 'FINISHING'] as const
+/** TTL do vínculo "1 pedido de parada em curso por sessão" — igual ao cooldown humano de `pedirParadaSessao` (10 s): passado isso, um novo toque é uma NOVA tentativa legítima. */
+const STOP_CORRELATION_TTL_SECONDS = 10
+const REDIS_PRAZO_MS = 2_000
 
 const router = Router()
 
@@ -96,7 +102,7 @@ router.post(
 
     try {
       const activeSession = await prisma.chargingSession.findFirst({
-        where: { userId, status: { in: [...ACTIVE_SESSION_STATUSES] } },
+        where: { userId, status: { in: listarEstadosSessaoAberta() } }, // constante única (inclui FAULTED); STOP_UNCONFIRMED não é "em andamento" para o motorista (D7 decide em iniciarSessaoRemota)
         select: { id: true },
       })
       if (activeSession) {
@@ -222,7 +228,7 @@ router.get(
         WHERE pi."chargingSessionId" = cs.id AND pi.purpose = 'SESSION_CARD_CAPTURE'
         LIMIT 1
       ) card_payment ON true
-      WHERE cs."userId" = ${userId} AND cs.status IN ('STARTED', 'CHARGING', 'FINISHING')
+      WHERE cs."userId" = ${userId} AND cs.status IN (${sqlEstadosSessaoAberta()})
       ORDER BY cs."startedAt" DESC
       LIMIT 1
     `)
@@ -351,7 +357,7 @@ router.get(
       where: { id: req.params.id, userId },
       include: {
         site: { select: { name: true, addressLine: true, city: true } },
-        chargePoint: { select: { ocppIdentity: true } },
+        chargePoint: { select: { ocppIdentity: true, lastSeenAt: true, disconnectedAt: true } },
         connector: { select: { connectorId: true, type: true } },
         tariff: { select: { name: true, currency: true } },
       },
@@ -371,7 +377,7 @@ router.get(
       session.paymentMode === 'CARD'
         ? prisma.paymentIntent.findFirst({
             where: { chargingSessionId: session.id, purpose: 'SESSION_CARD_CAPTURE' },
-            select: { status: true, amountAuthorizedCents: true, amountCapturedCents: true, paymentMethod: { select: { brand: true, last4: true } } },
+            select: { status: true, amountAuthorizedCents: true, amountCapturedCents: true, authorizedAt: true, paymentMethod: { select: { brand: true, last4: true } } },
           })
         : Promise.resolve(null),
     ])
@@ -393,7 +399,7 @@ router.get(
       stoppedAt: session.stoppedAt,
       stopReason: session.stopReason,
       site: session.site,
-      chargePoint: session.chargePoint,
+      chargePoint: { ocppIdentity: session.chargePoint.ocppIdentity },
       connector: session.connector,
       energyDeliveredWh: session.energyDeliveredWh,
       idleSeconds: session.idleSeconds,
@@ -408,6 +414,19 @@ router.get(
       debt: debt ?? null,
       paymentMode: session.paymentMode,
       payment,
+      // F5.9: SÓ o que o motorista pode ver. Nunca `lateStop`/`unbilledCostCents`/`stopRequested*` (são do admin). Custos de sessão em confirmação
+      // saem `null` (a coluna só é gravada no fechamento) — a UI mostra "em confirmação", nunca 0.
+      closure: montarClosure({
+        status: session.status,
+        paymentMode: session.paymentMode,
+        closureSource: session.closureSource,
+        meterStopSource: session.meterStopSource,
+        unconfirmedAt: session.unconfirmedAt,
+        unconfirmedReason: session.unconfirmedReason,
+        stoppedAt: session.stoppedAt,
+        cardAuthorizedAt: cardIntent?.status === 'AUTHORIZED' ? (cardIntent.authorizedAt ?? null) : null,
+        carregador: session.chargePoint,
+      }),
     })
   }),
 )
@@ -416,6 +435,25 @@ router.get(
 // POST /sessions/:id/stop
 // ------------------------------------------------------------
 
+/**
+ * Vincula UM correlationId ao pedido de parada em curso da sessão (SET NX com TTL curto). `novo=false` => já havia um pedido nos últimos
+ * `STOP_CORRELATION_TTL_SECONDS` s: devolve o id dele. Redis fora => segue como pedido novo (parar a recarga vale mais que a deduplicação).
+ */
+async function adquirirCorrelacaoDeParada(sessionId: string, proposto: string): Promise<{ correlationId: string; novo: boolean }> {
+  const chave = `me:stop-corr:${sessionId}`
+  try {
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      if ((await withDeadline(redis.set(chave, proposto, 'EX', STOP_CORRELATION_TTL_SECONDS, 'NX'), REDIS_PRAZO_MS, 'vínculo do pedido de parada')) === 'OK') return { correlationId: proposto, novo: true }
+      const existente = await withDeadline(redis.get(chave), REDIS_PRAZO_MS, 'vínculo do pedido de parada')
+      if (existente) return { correlationId: existente, novo: false }
+      // a chave expirou entre o SET e o GET: tenta de novo uma vez
+    }
+  } catch (err) {
+    logger.warn({ err, sessionId }, '[api][me] vínculo do pedido de parada indisponível (Redis) — seguindo sem deduplicar')
+  }
+  return { correlationId: proposto, novo: true }
+}
+
 router.post(
   '/sessions/:id/stop',
   asyncHandler(async (req, res) => {
@@ -423,11 +461,21 @@ router.post(
 
     const session = await prisma.chargingSession.findFirst({ where: { id: req.params.id, userId } })
     if (!session) throw new AppError('Sessão não encontrada.', 404, 'SESSION_NOT_FOUND')
-    if (!ACTIVE_SESSION_STATUSES.includes(session.status as (typeof ACTIVE_SESSION_STATUSES)[number])) {
+    // Aberta (inclui FAULTED) pode parar; STOP_UNCONFIRMED e STOPPED => 409 (o motorista não "para" o que o servidor já tratou como encerrado).
+    if (!isSessaoAberta(session.status)) {
       throw new AppError('Sessão não está ativa.', 409, 'SESSION_NOT_ACTIVE')
     }
 
-    const correlationId = randomUUID()
+    // Duplo toque: um pedido de parada em curso por sessão. O 2º toque recebe o MESMO correlationId do 1º (o polling do PWA resolve com o
+    // resultado real do comando em curso) em vez de um correlationId novo que ninguém jamais resolveria.
+    const proposto = randomUUID()
+    const vinculo = await adquirirCorrelacaoDeParada(session.id, proposto)
+    if (!vinculo.novo) {
+      logger.info({ sessionId: session.id, userId, correlationId: vinculo.correlationId }, '[api][me] stop duplicado (duplo toque) — devolvendo o correlationId do pedido em curso')
+      res.status(202).json({ correlationId: vinculo.correlationId, status: 'PENDING' })
+      return
+    }
+    const correlationId = proposto
     logger.info({ sessionId: session.id, chargePointId: session.chargePointId, userId, correlationId }, '[api][me] stop de sessão disparado')
 
     // F5.9: ponto ÚNICO de RemoteStop (`pedirParadaSessao`). Um `Rejected`/erro de transporte NÃO fecha mais a sessão com dinheiro (era o
@@ -437,9 +485,10 @@ router.post(
       .then((resultado) => {
         logger.info({ sessionId: session.id, correlationId, resultado }, '[api][me] stop de sessão concluído')
         if (!resultado.registrado) {
-          // EM_COOLDOWN: um pedido idêntico acabou de sair (duplo toque) — o resultado real é o do primeiro. NAO_ABERTA/CONDICAO_MUDOU: a
-          // sessão fechou no meio. Nenhum dos dois grava resultado para ESTE correlationId (segue PENDING no polling do PWA).
-          return undefined
+          // Não houve comando NOVO por este pedido, e deixar o correlationId PENDING para sempre era o defeito: EM_COOLDOWN = outro pedido de parada
+          // (guarda/watchdog/admin) acabou de sair e já cobre este; NAO_ABERTA/CONDICAO_MUDOU = a sessão fechou no meio. Nos dois casos o objetivo
+          // do toque ("parar") está atendido ou em curso — resultado coerente: ACCEPTED. O PWA relê a sessão (estado real) de qualquer forma.
+          return recordCommandResult(correlationId, 'ACCEPTED', userId)
         }
         return recordCommandResult(correlationId, resultado.comando === 'ACCEPTED' ? 'ACCEPTED' : resultado.comando === 'TIMEOUT' ? 'TIMEOUT' : 'REJECTED', userId)
       })

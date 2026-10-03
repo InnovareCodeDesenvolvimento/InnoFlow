@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { sqlEstadosSessaoAberta } from '../lib/sessionStatusSql'
 import { prisma } from '../../lib/prisma'
 import type { ReportingScope } from '../lib/reportingScope'
 import type { PeriodWindow } from '../lib/reportingWindow'
@@ -336,7 +337,7 @@ const LIVE_SESSIONS_LIMIT = 200
  * o schema atual.
  */
 export async function getDashboardLive(scope: ReportingScope): Promise<DashboardLive> {
-  const sessionWhere = whereSql([Prisma.sql`cs.status IN ('STARTED', 'CHARGING', 'FINISHING')`, ...tenantConditions(scope, 'cs')])
+  const sessionWhere = whereSql([Prisma.sql`cs.status IN (${sqlEstadosSessaoAberta()})`, ...tenantConditions(scope, 'cs')])
   const chargePointWhere = whereSql(chargePointTenantConditions(scope, 'cp'))
   const onlineThreshold = new Date(Date.now() - CHARGE_POINT_ONLINE_THRESHOLD_MS)
   // MESMA regra de `isChargePointOnline` (core/estacoes/disponibilidade.ts),
