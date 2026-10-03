@@ -6,13 +6,14 @@ import { Layout } from "@/components/layout/Layout"
 import { ScrollToTop } from "@/components/layout/ScrollToTop"
 import { RequireAuth } from "@/components/layout/RequireAuth"
 import { RealtimeConnection } from "@/components/realtime/RealtimeConnection"
-import { Home } from "@/pages/Public/Home"
 import { registerInstallPromptListeners } from "@/store/installPromptStore"
 
 // Code-splitting por rota: o painel admin (maior parte do bundle — RHF, Zod,
 // Radix Dialog/Dropdown) só carrega para quem de fato entra em /admin. O PWA
 // do motorista (`/c/...`, `/app/*`) segue a mesma regra — nenhuma dessas
 // telas entra no bundle inicial do site público.
+// A landing "/" é pesada (canvas, mockups, animações) e só serve à rota raiz: chunk próprio, fora do bundle inicial.
+const Home = lazy(() => import("@/pages/Public/Home").then((m) => ({ default: m.Home })))
 const Eletropostos = lazy(() => import("@/pages/Public/Eletropostos").then((m) => ({ default: m.Eletropostos })))
 const Login = lazy(() => import("@/pages/Auth/Login").then((m) => ({ default: m.Login })))
 const Register = lazy(() => import("@/pages/Auth/Register").then((m) => ({ default: m.Register })))
@@ -47,6 +48,16 @@ function RouteFallback() {
   return (
     <div className="container-app flex items-center justify-center py-24">
       <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+    </div>
+  )
+}
+
+/** Enquanto o chunk da landing carrega: fundo da cor do hero (sem clarão branco) e aviso para leitores de tela. */
+function LandingFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-primary-950" role="status">
+      <span className="sr-only">Carregando…</span>
+      <Loader2 className="h-8 w-8 animate-spin text-accent-glow" aria-hidden="true" />
     </div>
   )
 }
@@ -127,9 +138,18 @@ export default function App() {
             />
           </Route>
 
-          {/* Público */}
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Home />} />
+          {/* Landing pública: casca própria (cabeçalho escuro com âncoras + rodapé), fora do `Layout` das demais páginas públicas. */}
+          <Route
+            path="/"
+            element={
+              <Suspense fallback={<LandingFallback />}>
+                <Home />
+              </Suspense>
+            }
+          />
+
+          {/* Público (casca clara: Header + Footer) */}
+          <Route element={<Layout />}>
             <Route path="eletropostos" element={<Eletropostos />} />
           </Route>
 

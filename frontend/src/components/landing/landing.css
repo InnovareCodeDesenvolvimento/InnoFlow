@@ -1,0 +1,706 @@
+/*
+ * ============================================================================
+ * LANDING "/" — estilos próprios (importado SÓ por `pages/Public/Home.tsx`, então vai no chunk da landing,
+ * não no CSS global). Usa os tokens de `src/index.css` (`--color-*`); o único valor novo é `--lnd-night`
+ * (azul-noite do fim dos degradês escuros, mais fundo que o primary-950 da logo) — local da landing, sem
+ * token Tailwind: só aparece dentro deste arquivo.
+ *
+ * REGRAS DE MOVIMENTO (não quebrar):
+ *   - O HTML/CSS base mostra TUDO, parado, legível. Todo movimento está dentro de
+ *     `@media (prefers-reduced-motion: no-preference)`; com `reduce` nada anima e o estado final é o padrão.
+ *   - Revelação por rolagem: `Reveal.tsx` só esconde (`data-reveal="hidden"`) o que está ABAIXO da dobra, por
+ *     JS, e só sem `reduce`. Sem JS, tudo visível.
+ *   - `animation-timeline: view()` prende ao ANCESTRAL de rolagem mais próximo: `overflow:hidden` num pai cria
+ *     um e a animação fica travada. Por isso as seções usam `overflow: clip`, nunca `hidden`.
+ *   - Loops contínuos só no hero e em elementos decorativos (aria-hidden); tudo pausa fora da tela
+ *     (`.lnd-paused`, IntersectionObserver) para não gastar bateria.
+ * ============================================================================
+ */
+
+.lnd-root {
+  --lnd-night: 6 22 33; /* #061621 */
+  --lnd-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow-x: clip;
+  background: rgb(var(--lnd-night));
+}
+
+/* ---- Superfícies escuras ------------------------------------------------------------------------ */
+.lnd-dark {
+  color: #fff;
+  background:
+    radial-gradient(62rem 36rem at 88% -8%, rgb(var(--color-brand-teal) / 0.36), transparent 62%),
+    radial-gradient(46rem 30rem at -8% 112%, rgb(var(--color-accent-glow) / 0.11), transparent 62%),
+    linear-gradient(180deg, rgb(var(--color-primary-950)) 0%, rgb(var(--lnd-night)) 100%);
+}
+.lnd-dark-flat {
+  color: #fff;
+  background: linear-gradient(180deg, rgb(var(--color-primary-950)) 0%, rgb(var(--lnd-night)) 100%);
+}
+
+/* Foco visível em fundo escuro: o anel padrão (primary) some no azul-marinho. */
+.lnd-dark :focus-visible,
+.lnd-dark-flat :focus-visible,
+.lnd-header :focus-visible {
+  outline: 2px solid rgb(var(--color-accent-glow));
+  outline-offset: 3px;
+  box-shadow: none;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.lnd-section {
+  scroll-margin-top: 4.5rem;
+}
+
+/* ---- Botões ------------------------------------------------------------------------------------- */
+.lnd-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0 1.5rem;
+  border-radius: 0.875rem;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  isolation: isolate;
+  overflow: hidden;
+  transition-property: transform, box-shadow, background-color, border-color, color;
+  transition-duration: 160ms;
+  transition-timing-function: var(--lnd-ease);
+}
+.lnd-btn:active {
+  transform: scale(0.97);
+}
+/* Visível só de 640px para cima. Existe porque este CSS fica FORA de `@layer`: um `.lnd-btn {display:inline-flex}`
+   ganha de qualquer utilitário `hidden` do Tailwind (utilitários ficam numa camada de menor precedência). */
+.lnd-btn.lnd-sm-up {
+  display: none;
+}
+@media (min-width: 640px) {
+  .lnd-btn.lnd-sm-up {
+    display: inline-flex;
+  }
+}
+.lnd-btn-sm {
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  font-size: 0.875rem;
+  border-radius: 0.75rem;
+}
+/* Lima do mascote: fundo lima, texto azul-noite (11:1) */
+.lnd-btn-lime {
+  background: rgb(var(--color-accent-glow));
+  color: rgb(var(--lnd-night));
+  box-shadow:
+    0 14px 30px -10px rgb(var(--color-accent-glow) / 0.55),
+    0 0 0 1px rgb(255 255 255 / 0.25) inset;
+}
+@media (hover: hover) {
+  .lnd-btn-lime:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 20px 40px -12px rgb(var(--color-accent-glow) / 0.7),
+      0 0 0 1px rgb(255 255 255 / 0.35) inset;
+  }
+}
+.lnd-btn-glass {
+  color: #fff;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.28);
+}
+@media (hover: hover) {
+  .lnd-btn-glass:hover {
+    background: rgb(255 255 255 / 0.16);
+    transform: translateY(-2px);
+  }
+}
+.lnd-btn-ghost {
+  color: rgb(255 255 255 / 0.92);
+}
+@media (hover: hover) {
+  .lnd-btn-ghost:hover {
+    background: rgb(255 255 255 / 0.1);
+  }
+}
+.lnd-btn-solid {
+  color: #fff;
+  background: rgb(var(--color-primary-600));
+  box-shadow: 0 14px 28px -12px rgb(var(--color-primary) / 0.6);
+}
+@media (hover: hover) {
+  .lnd-btn-solid:hover {
+    background: rgb(var(--color-primary-700));
+    transform: translateY(-2px);
+  }
+}
+
+/* ---- Cabeçalho ---------------------------------------------------------------------------------- */
+.lnd-header {
+  /* Sem backdrop-filter: o cabeçalho fixo fica sobre o hero animado e refaria o desfoque a cada quadro (caro em CPU/GPU fraca). */
+  background: rgb(var(--lnd-night) / 0.72);
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  transition: background-color 250ms, border-color 250ms;
+}
+.lnd-header[data-scrolled="true"] {
+  background: rgb(var(--lnd-night) / 0.94);
+  border-bottom-color: rgb(255 255 255 / 0.14);
+}
+
+/* ---- Rótulo de seção ---------------------------------------------------------------------------- */
+.lnd-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.lnd-eyebrow::before {
+  content: "";
+  width: 1.5rem;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+/* ---- Texto em degradê (só sobre fundo escuro: lima -> azul claro, ambos passam AA) -------------- */
+.lnd-gradient-text {
+  background-image: linear-gradient(100deg, rgb(var(--color-accent-glow)) 5%, rgb(var(--color-primary-300)) 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Manchas de cor do fundo: gradiente radial ESTÁTICO (antes eram divs com blur-3xl animadas: o desfoque de 64px e a
+   animação contínua custavam estilo/rasterização sem ganho visível). */
+.lnd-glow-lime {
+  background: radial-gradient(closest-side, rgb(var(--color-accent-glow) / 0.16), transparent);
+}
+.lnd-glow-teal {
+  background: radial-gradient(closest-side, rgb(var(--color-brand-teal) / 0.34), transparent);
+}
+
+.lnd-wash-lime {
+  background: radial-gradient(closest-side, rgb(var(--color-accent-200) / 0.6), transparent);
+}
+.lnd-wash-blue {
+  background: radial-gradient(closest-side, rgb(var(--color-primary-200) / 0.7), transparent);
+}
+
+/* ---- Hero --------------------------------------------------------------------------------------- */
+.lnd-hero-grid {
+  /* sutil malha de pontos que some nas bordas */
+  background-image: radial-gradient(rgb(255 255 255 / 0.1) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(70% 60% at 60% 40%, #000 20%, transparent 75%);
+  mask-image: radial-gradient(70% 60% at 60% 40%, #000 20%, transparent 75%);
+}
+
+.lnd-stage {
+  --m-h: 360px;
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+@media (min-width: 640px) {
+  .lnd-stage { --m-h: 440px; }
+}
+@media (min-width: 1024px) {
+  .lnd-stage { --m-h: 520px; }
+}
+@media (min-width: 1280px) {
+  .lnd-stage { --m-h: 600px; }
+}
+@media (min-width: 1536px) {
+  .lnd-stage { --m-h: 640px; }
+}
+.lnd-mascot-box {
+  position: relative;
+  height: var(--m-h);
+  aspect-ratio: 1006 / 1358;
+}
+.lnd-mascot-box img {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  filter: drop-shadow(0 24px 24px rgb(0 0 0 / 0.45));
+}
+
+.lnd-backlight {
+  position: absolute;
+  inset: 6% -18% 4% -18%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgb(var(--color-accent-glow) / 0.34),
+    rgb(var(--color-brand-teal) / 0.3) 52%,
+    transparent 76%
+  );
+}
+.lnd-ring {
+  position: absolute;
+  inset: 8% -10% 6% -10%;
+  border-radius: 50%;
+  border: 1px dashed rgb(var(--color-primary-300) / 0.3);
+}
+.lnd-ring::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 78%, rgb(var(--color-accent-glow)) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+}
+
+/* Olhos: pálpebra desenhada sobre os olhos da arte (ver Mascot.tsx). Invisível por padrão. */
+.lnd-eye {
+  position: absolute;
+  width: 15%;
+  height: 8.6%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 45%, #04243a 0 66%, rgb(2 26 43 / 0) 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+.lnd-eye::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: 52%;
+  height: 22%;
+  border-bottom: 3px solid rgb(var(--color-accent-glow));
+  border-radius: 0 0 60% 60%;
+  filter: drop-shadow(0 0 4px rgb(var(--color-accent-glow) / 0.7));
+}
+
+.lnd-chip {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 1rem;
+  color: #fff;
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0.06));
+  border: 1px solid rgb(255 255 255 / 0.2);
+  box-shadow: 0 24px 44px -22px rgb(0 0 0 / 0.7);
+}
+
+@media (max-width: 639px) {
+  .lnd-chip { gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 0.8rem; transform-origin: left top; scale: 0.86; }
+}
+
+.lnd-arc {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
+.lnd-arc path {
+  fill: none;
+  stroke-linecap: round;
+}
+.lnd-arc .lnd-arc-base {
+  stroke: rgb(var(--color-primary-300) / 0.35);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 7;
+}
+.lnd-arc .lnd-arc-pulse {
+  stroke: rgb(var(--color-accent-glow));
+  stroke-width: 3;
+  stroke-dasharray: 9 91;
+  stroke-dashoffset: 0;
+  filter: drop-shadow(0 0 6px rgb(var(--color-accent-glow)));
+}
+
+/* ---- Faixa de fatos + cabo horizontal ------------------------------------------------------------- */
+.lnd-cable-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--color-primary-400) / 0.5) 12%,
+    rgb(var(--color-primary-400) / 0.5) 88%,
+    transparent
+  );
+}
+.lnd-cable-h::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 12%;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent-glow)) 70%, #fff);
+  filter: drop-shadow(0 0 6px rgb(var(--color-accent-glow)));
+  transform: translateX(-100%);
+}
+
+/* ---- Passos do motorista --------------------------------------------------------------------------- */
+@property --lnd-fill {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+.lnd-steps-line {
+  position: absolute;
+  left: 1.1875rem; /* centro do círculo de 2.375rem */
+  top: 1.5rem;
+  bottom: 1.5rem;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--color-accent-500)) var(--lnd-fill),
+    rgb(var(--color-primary-200)) var(--lnd-fill)
+  );
+  transition: --lnd-fill 600ms var(--lnd-ease);
+}
+.lnd-progress {
+  display: block;
+  height: 3px;
+  border-radius: 3px;
+  background: rgb(var(--color-primary-200) / 0.7);
+  overflow: hidden;
+}
+.lnd-progress > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(1);
+  background: linear-gradient(90deg, rgb(var(--color-accent-500)), rgb(var(--color-accent-glow)));
+}
+
+/* Celular */
+.lnd-phone {
+  position: relative;
+  width: 296px;
+  height: 604px;
+  padding: 9px;
+  border-radius: 2.9rem;
+  background: linear-gradient(160deg, #1d3b50, #0a1c29 45%, #12303f);
+  box-shadow:
+    0 0 0 1.5px rgb(255 255 255 / 0.1) inset,
+    0 50px 90px -30px rgb(var(--color-primary-950) / 0.9),
+    0 30px 60px -30px rgb(var(--color-brand-teal) / 0.45);
+}
+.lnd-phone::before {
+  /* botão lateral */
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 120px;
+  width: 3px;
+  height: 56px;
+  border-radius: 0 3px 3px 0;
+  background: #0f2a3a;
+}
+.lnd-phone-screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 2.2rem;
+  background: rgb(var(--color-background));
+  isolation: isolate;
+}
+.lnd-screen {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(14px) scale(0.985);
+  transition:
+    opacity 450ms var(--lnd-ease),
+    transform 450ms var(--lnd-ease),
+    visibility 0s linear 450ms;
+}
+.lnd-screen[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+.lnd-scan {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 8%;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent-glow)), transparent);
+  box-shadow: 0 0 14px 2px rgb(var(--color-accent-glow) / 0.7);
+  opacity: 0;
+}
+
+/* ---- Painel (mock admin) 3D ------------------------------------------------------------------------- */
+.lnd-tilt {
+  --pt-x: 9deg;
+  --pt-y: -4deg;
+  position: relative;
+  perspective: 1600px;
+}
+@media (min-width: 1024px) {
+  .lnd-tilt {
+    --pt-x: 14deg;
+    --pt-y: -9deg;
+  }
+}
+.lnd-tilt-body {
+  position: relative;
+  transform-origin: 50% 100%;
+  transform-style: preserve-3d;
+}
+.lnd-tilt-shadow {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: -2.5rem;
+  height: 4rem;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.55), transparent);
+  filter: blur(14px);
+}
+.lnd-tilt-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, rgb(255 255 255 / 0.22), transparent 38%);
+  mix-blend-mode: soft-light;
+}
+
+/* ---- Cards com holofote que segue o ponteiro ----------------------------------------------------------- */
+.lnd-spot {
+  position: relative;
+  isolation: isolate;
+}
+.lnd-spot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(
+    420px circle at var(--mx, 50%) var(--my, 0%),
+    rgb(var(--color-accent-glow) / 0.16),
+    transparent 46%
+  );
+  opacity: 0;
+  transition: opacity 300ms;
+}
+@media (hover: hover) {
+  .lnd-spot:hover::before {
+    opacity: 1;
+  }
+}
+
+/* ---- FAQ --------------------------------------------------------------------------------------------- */
+.lnd-faq summary {
+  list-style: none;
+  cursor: pointer;
+}
+.lnd-faq summary::-webkit-details-marker {
+  display: none;
+}
+.lnd-faq details[open] .lnd-faq-chev {
+  transform: rotate(180deg);
+}
+.lnd-faq-chev {
+  transition: transform 250ms var(--lnd-ease);
+}
+
+/* ==========================================================================================================
+ * MOVIMENTO — só sem `prefers-reduced-motion: reduce`. Estado base (acima) = estado final, tudo visível.
+ * ========================================================================================================== */
+@media (prefers-reduced-motion: no-preference) {
+  /* revelação por rolagem */
+  [data-reveal] {
+    transition:
+      opacity 700ms var(--lnd-ease) var(--reveal-delay, 0ms),
+      transform 700ms var(--lnd-ease) var(--reveal-delay, 0ms);
+  }
+  [data-reveal="hidden"] {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+  [data-reveal="hidden"][data-reveal-from="left"] {
+    transform: translateX(-30px);
+  }
+  [data-reveal="hidden"][data-reveal-from="right"] {
+    transform: translateX(30px);
+  }
+  [data-reveal="hidden"][data-reveal-from="scale"] {
+    transform: scale(0.94);
+  }
+  [data-reveal="hidden"] .lnd-grow {
+    transform: scaleY(0);
+  }
+  [data-reveal] .lnd-grow {
+    transform-origin: bottom;
+    transition: transform 900ms var(--lnd-ease) var(--d, 0ms);
+  }
+  [data-reveal="hidden"] .lnd-grow-x {
+    transform: scaleX(0);
+  }
+  [data-reveal] .lnd-grow-x {
+    transform-origin: left center;
+    transition: transform 1100ms var(--lnd-ease) var(--d, 0ms);
+  }
+
+  .lnd-paused *,
+  .lnd-paused *::before,
+  .lnd-paused *::after {
+    animation-play-state: paused !important;
+  }
+
+  /* hero */
+  @keyframes lnd-float {
+    0%, 100% { transform: translateY(0) rotate(-0.6deg); }
+    50% { transform: translateY(-14px) rotate(0.7deg); }
+  }
+  @keyframes lnd-breathe {
+    0%, 100% { transform: scale(0.94); opacity: 0.72; }
+    50% { transform: scale(1.07); opacity: 1; }
+  }
+  @keyframes lnd-spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes lnd-blink {
+    0%, 92%, 100% { opacity: 0; transform: translate(-50%, -50%) scaleY(0.1); }
+    94%, 96% { opacity: 1; transform: translate(-50%, -50%) scaleY(1); }
+  }
+  @keyframes lnd-dash {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: -100; }
+  }
+  @keyframes lnd-bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-9px); }
+  }
+  @keyframes lnd-rise {
+    from { opacity: 0; transform: translateY(18px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes lnd-pulse-x {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(840%); }
+  }
+  @keyframes lnd-sweep {
+    0%, 70% { transform: translateX(-130%) skewX(-18deg); }
+    100% { transform: translateX(260%) skewX(-18deg); }
+  }
+
+  .lnd-mascot-float { animation: lnd-float 6.5s ease-in-out infinite; }
+  .lnd-mascot-enter { animation: lnd-rise 700ms var(--lnd-ease) both; }
+  .lnd-backlight { animation: lnd-breathe 5.2s ease-in-out infinite; }
+  .lnd-ring { animation: lnd-bob 9s ease-in-out infinite; }
+  .lnd-ring::after { animation: lnd-spin 7s linear infinite; }
+  .lnd-eye { animation: lnd-blink 6.4s ease-in-out infinite; }
+  .lnd-eye[data-eye="r"] { animation-delay: 0.04s; }
+  .lnd-arc .lnd-arc-pulse { animation: lnd-dash 2.4s linear infinite; }
+  .lnd-chip-bob { animation: lnd-bob 6s ease-in-out infinite; }
+  .lnd-chip-bob[data-d="1"] { animation-delay: -2s; }
+  .lnd-chip-bob[data-d="2"] { animation-delay: -4s; }
+  .lnd-cable-h::after { animation: lnd-pulse-x 4.8s linear infinite; }
+  .lnd-btn-lime::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: 40%;
+    background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.55), transparent);
+    animation: lnd-sweep 5.5s ease-in-out infinite;
+  }
+
+
+  /* painel 3D: se endireita ao rolar. Nativo (view timeline) ou, sem suporte, pela variável --pt-p escrita por JS. */
+  .lnd-tilt-body {
+    transform: perspective(1500px) rotateX(calc(var(--pt-x, 14deg) * (1 - var(--pt-p, 1)))) rotateY(calc(var(--pt-y, -9deg) * (1 - var(--pt-p, 1))))
+      scale(calc(0.94 + 0.06 * var(--pt-p, 1)));
+  }
+  @supports (animation-timeline: view()) {
+    @keyframes lnd-tilt {
+      from { transform: perspective(1500px) rotateX(var(--pt-x, 14deg)) rotateY(var(--pt-y, -9deg)) scale(0.94); }
+      to { transform: perspective(1500px) rotateX(0deg) rotateY(0deg) scale(1); }
+    }
+    .lnd-tilt-body {
+      animation: lnd-tilt linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 45%;
+    }
+  }
+
+  /* progresso do passo ativo (o fim da animação avança para o próximo passo — ver DriverTour.tsx) */
+  @keyframes lnd-progress {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
+  .lnd-progress[data-playing="true"] > i {
+    animation: lnd-progress var(--lnd-step-ms, 7000ms) linear both;
+  }
+  .lnd-progress[data-playing="true"][data-hold="true"] > i {
+    animation-play-state: paused;
+  }
+
+  /* celular: cada tela reanima ao ficar ativa */
+  @keyframes lnd-scan {
+    0% { top: 8%; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 88%; opacity: 0; }
+  }
+  @keyframes lnd-slide-up {
+    from { opacity: 0; transform: translateY(26px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes lnd-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes lnd-pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    60% { transform: scale(1.12); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes lnd-tap {
+    0%, 100% { transform: scale(1); }
+    45% { transform: scale(0.95); box-shadow: 0 2px 6px -2px rgb(var(--color-primary) / 0.5); }
+  }
+  @keyframes lnd-fillbar {
+    from { transform: scaleX(0.35); }
+    to { transform: scaleX(1); }
+  }
+  @keyframes lnd-ping {
+    0% { transform: scale(0.85); opacity: 0.5; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+  .lnd-screen[data-active="true"] .lnd-scan { animation: lnd-scan 2.2s ease-in-out 0.3s infinite; }
+  .lnd-screen[data-active="true"] .lnd-a-rise { animation: lnd-slide-up 600ms var(--lnd-ease) var(--a-d, 0ms) both; }
+  .lnd-screen[data-active="true"] .lnd-a-fade { animation: lnd-fade-in 600ms ease-out var(--a-d, 0ms) both; }
+  .lnd-screen[data-active="true"] .lnd-a-pop { animation: lnd-pop 500ms cubic-bezier(0.34, 1.56, 0.64, 1) var(--a-d, 0ms) both; }
+  .lnd-screen[data-active="true"] .lnd-a-tap { animation: lnd-tap 700ms ease-in-out 2.1s both; }
+  .lnd-screen[data-active="true"] .lnd-a-bar { transform-origin: left center; animation: lnd-fillbar 6s linear both; }
+  .lnd-screen[data-active="true"] .lnd-a-ping { animation: lnd-ping 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+}
+
+/* Mobile: nada de hover-only; telas muito baixas não precisam do lado "alto" do hero */
+@media (max-width: 639px) {
+  .lnd-phone { transform-origin: top center; }
+}
