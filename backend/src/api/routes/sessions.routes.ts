@@ -2,14 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
-import { sendCommand } from '../../ocpp/commands'
+import { pedirParadaSessao } from '../../services/sessao/pedirParadaSessao'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
 import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
-
-const COMMAND_TIMEOUT_MS = 35_000
 
 /** Estados em que uma `ChargingSession` ainda pode ser parada remotamente — `STOPPED`/`FAULTED` já são terminais. */
 const ACTIVE_SESSION_STATUSES = new Set(['STARTED', 'CHARGING', 'FINISHING'])
@@ -36,8 +34,9 @@ router.post(
     const correlationId = randomUUID()
     logger.info({ sessionId: session.id, chargePointId: session.chargePointId, correlationId }, '[api] stop de sessão disparado')
 
-    sendCommand(session.chargePointId, 'RemoteStopTransaction', { transactionId: session.ocppTransactionId }, { timeoutMs: COMMAND_TIMEOUT_MS })
-      .then((result) => logger.info({ sessionId: session.id, correlationId, result }, '[api] stop de sessão concluído'))
+    // F5.9: ponto ÚNICO de RemoteStop (`pedirParadaSessao`, `stopRequestedBy=ADMIN`). Rejected/erro => STOP_UNCONFIRMED (nunca fecha com dinheiro).
+    pedirParadaSessao({ sessionId: session.id, solicitante: 'ADMIN' })
+      .then((resultado) => logger.info({ sessionId: session.id, correlationId, resultado }, '[api] stop de sessão concluído'))
       .catch((err) => logger.error({ err, sessionId: session.id, correlationId }, '[api] stop de sessão falhou'))
 
     res.status(202).json({ correlationId, status: 'PENDING' })

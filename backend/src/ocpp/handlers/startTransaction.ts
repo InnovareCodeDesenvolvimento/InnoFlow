@@ -68,6 +68,8 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
         authTokenId: token.id,
         userId,
         status: 'STARTED',
+        // F5.9: âncora de atividade do watchdog = relógio do SERVIDOR (`startedAt` abaixo é o do carregador e não serve para isso).
+        lastActivityAt: new Date(),
         meterStartWh: data.meterStart,
         startedAt: data.timestamp,
         tariffId: tariff.id,

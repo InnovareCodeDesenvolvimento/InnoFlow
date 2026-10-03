@@ -1,15 +1,13 @@
-import type { Prisma, ChargingSessionPaymentMode } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
-import { redis } from '../../lib/redis'
-import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
-import { sendCommand } from '../commands'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
-import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
+import { isSessaoAberta, isSessaoNaoConfirmada } from '../../core/sessao/estadosSessao'
 import { meterValuesReqSchema } from '../schemas/meterValues'
 import { defineOcppHandler } from './defineHandler'
-import type { OcppHandlerCtx } from '../context'
 import { emitSessionMetrics } from '../../realtime/emit'
+import { avaliarGuardaDeSaldo } from '../../services/sessao/guardaDeSaldo'
+import { alertarSessaoLimitado } from '../../services/sessao/alertasSessao'
 
 const ENERGY_MEASURANDS = new Set([
   'Energy.Active.Import.Register',
@@ -29,9 +27,6 @@ function normalizeEnergyToWh(measurand: string, rawValue: number, unit: string |
   return rawValue // 'Wh' ou unidade ausente — assume Wh (mesma convenção de sempre)
 }
 
-const OPEN_SESSION_STATUSES = new Set(['STARTED', 'CHARGING', 'FINISHING'])
-const AUTOSTOP_DEDUPE_TTL_SECONDS = 300
-
 export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReqSchema, async (data, ctx) => {
   const session = data.transactionId
     ? await prisma.chargingSession.findUnique({
@@ -47,6 +42,8 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
           ocppTransactionId: true,
           status: true,
           paymentMode: true,
+          meterStopWh: true,
+          chargePointId: true,
           site: { select: { timezone: true } },
         },
       })
@@ -104,10 +101,17 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
     // Painel "ao vivo" da retaguarda (2026-09-16) — sobrescrito a cada
     // amostra, nunca congelado. Não bloqueante: falha aqui não pode derrubar
     // o ack ao carregador (a leitura já foi persistida em MeterSample acima).
+    //
+    // F5.9: `lastActivityAt`/`lastMeterValuesAt` são RELÓGIO DO SERVIDOR (`new Date()`) — o watchdog decide só por eles; `lastSampleAt`
+    // (abaixo) continua sendo o relógio do carregador (timestamp do payload) e NUNCA entra na decisão. Só mexem em sessão viva
+    // (aberta ou em confirmação): numa sessão STOPPED os campos ficam como estavam, e é a leitura de energia que avisa (abaixo).
+    const sessaoViva = isSessaoAberta(session.status) || isSessaoNaoConfirmada(session.status)
+    const agora = new Date()
     await prisma.chargingSession
       .update({
         where: { id: session.id },
         data: {
+          ...(sessaoViva ? { lastActivityAt: agora, lastMeterValuesAt: agora } : {}),
           lastSampleAt: latestTs ?? undefined,
           ...(latestPowerW !== null ? { lastPowerW: latestPowerW } : {}),
           ...(latestSoc !== null ? { lastSoc: latestSoc } : {}),
@@ -116,12 +120,23 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
       .catch((err) => logger.error({ err, sessionId: session.id }, '[ocpp] falha ao atualizar campos ao vivo da sessão (não bloqueante)'))
   }
 
+  // F5.9: leitura de energia que CHEGA numa sessão já STOPPED e maior que o `meterStopWh` cobrado = o carregador continuou entregando
+  // depois de o servidor fechar (energia não cobrada). Só alerta — não reabre, não cobra.
+  if (session && session.status === 'STOPPED' && latestEnergyWh !== null && session.meterStopWh !== null && latestEnergyWh > session.meterStopWh) {
+    // 1x por hora por sessão: um carregador que segue entregando mandaria um alerta de ERRO a cada MeterValues (medido: 42 em 3 min no simulador).
+    void alertarSessaoLimitado(
+      'session_metering_after_close',
+      { sessionId: session.id, chargePointId: session.chargePointId, billedMeterStopWh: session.meterStopWh, reportedMeterWh: latestEnergyWh },
+      'MeterValues com energia MAIOR que a cobrada chegou depois da sessão encerrada — consumo não cobrado',
+    ).catch((err) => logger.error({ err, sessionId: session.id }, '[ocpp] falha ao emitir o alerta session_metering_after_close (não bloqueante)'))
+  }
+
   // Guarda de saldo — depois de responder {} ao carregador (nunca atrasa o
   // ack): fire-and-forget, sem `await`. Só roda quando há amostra fresca de
   // energia (medida cumulativa, necessária para calcular custo parcial) e a
-  // sessão ainda está tecnicamente aberta.
-  if (session && latestEnergyWh !== null && OPEN_SESSION_STATUSES.has(session.status)) {
-    void runBalanceGuard(ctx, { ...session, tariffSnapshot: session.tariffSnapshot }, latestEnergyWh).catch((err) =>
+  // sessão ainda está tecnicamente aberta (constante única — inclui FAULTED).
+  if (session && latestEnergyWh !== null && isSessaoAberta(session.status)) {
+    void avaliarGuardaDeSaldo({ ...session }, latestEnergyWh).catch((err) =>
       logger.error({ err, sessionId: session.id }, '[ocpp][guard] falha ao avaliar guarda de saldo (não bloqueante)'),
     )
 
@@ -154,101 +169,3 @@ export const handleMeterValues = defineOcppHandler('MeterValues', meterValuesReq
 
   return {}
 })
-
-interface GuardSession {
-  id: string
-  userId: string
-  connectorId: string
-  meterStartWh: number
-  startedAt: Date
-  chargingEndedAt: Date | null
-  tariffSnapshot: Prisma.JsonValue
-  ocppTransactionId: number
-  paymentMode: ChargingSessionPaymentMode
-  site: { timezone: string }
-}
-
-/**
- * Se o custo parcial da sessão (estimado com o que já foi medido + tempo
- * decorrido até AGORA) atingir o limite disponível, dispara
- * `RemoteStopTransaction` pelo barramento Redis que já existe
- * (`ocpp/commands.ts`) — fire-and-forget, marcando a sessão (chave Redis com
- * TTL) para não redisparar a cada nova amostra enquanto o carregador ainda
- * não obedeceu ao comando.
- *
- * F5.4 (2026-09-30): o LIMITE depende do `paymentMode`. WALLET continua
- * exatamente como antes (`min(saldo disponível, teto calculado)` — nunca
- * reservado/debitado antecipadamente). CARD usa
- * `PaymentIntent.amountAuthorizedCents` diretamente — não existe
- * autorização incremental na Cielo (fato documentado desde a F5.1), então o
- * limite É o valor que a Cielo já garantiu na pré-autorização, ponto. Se por
- * algum motivo não achar o intent AUTHORIZED vinculado a esta sessão (não
- * deveria acontecer — `StartTransaction` sempre liga os dois na mesma
- * escrita), falha FECHADO: limite = 0, a próxima amostra já dispara o stop
- * (preferível a deixar a sessão consumir sem limite nenhum).
- */
-async function runBalanceGuard(ctx: OcppHandlerCtx, session: GuardSession, latestEnergyWh: number): Promise<void> {
-  const dedupeKey = `ocpp:autostop:${session.id}`
-  const alreadyDispatched = await redis.get(dedupeKey)
-  if (alreadyDispatched) return
-
-  const tariffSnapshot = session.tariffSnapshot as unknown as TariffSnapshot
-
-  let limiteCents: number
-  if (session.paymentMode === 'CARD') {
-    const intent = await prisma.paymentIntent.findFirst({
-      where: { chargingSessionId: session.id, purpose: 'SESSION_CARD_CAPTURE', status: 'AUTHORIZED' },
-      select: { amountAuthorizedCents: true },
-    })
-    if (!intent) {
-      logger.warn({ sessionId: session.id }, '[ocpp][guard] sessão CARD sem PaymentIntent AUTHORIZED vinculado — limite fail-closed (0)')
-    }
-    limiteCents = intent?.amountAuthorizedCents ?? 0
-  } else {
-    const [connector, wallet] = await Promise.all([
-      prisma.connector.findUnique({ where: { id: session.connectorId }, select: { maxPowerKw: true } }),
-      prisma.wallet.findUnique({ where: { userId: session.userId }, select: { id: true } }),
-    ])
-
-    let saldoDisponivelCents = 0
-    if (wallet) {
-      const lastEntry = await prisma.walletEntry.findFirst({
-        where: { walletId: wallet.id },
-        orderBy: { createdAt: 'desc' },
-        select: { balanceAfterCents: true },
-      })
-      saldoDisponivelCents = lastEntry?.balanceAfterCents ?? 0
-    }
-
-    const tetoEfetivoCents = calcularTetoReserva(
-      { pricePerKwh: tariffSnapshot.pricePerKwh, pricePerMinute: tariffSnapshot.pricePerMinute, sessionFeeCents: tariffSnapshot.sessionFeeCents },
-      { maxPowerKw: connector?.maxPowerKw?.toString() ?? null },
-      { pisoCents: env.RESERVA_PISO_CENTS, tetoCents: env.RESERVA_TETO_CENTS },
-    )
-
-    limiteCents = Math.min(saldoDisponivelCents, tetoEfetivoCents)
-  }
-
-  const energyDeliveredWh = Math.max(0, latestEnergyWh - session.meterStartWh)
-  const { totalCostCents } = calcularCustoSessao(tariffSnapshot, {
-    energyDeliveredWh,
-    startedAt: session.startedAt,
-    chargingEndedAt: session.chargingEndedAt,
-    stoppedAt: new Date(),
-    timezone: session.site.timezone,
-  })
-
-  if (totalCostCents < limiteCents) return
-
-  const dispatched = await redis.set(dedupeKey, '1', 'EX', AUTOSTOP_DEDUPE_TTL_SECONDS, 'NX')
-  if (!dispatched) return // outra amostra concorrente já disparou o stop
-
-  logger.warn(
-    { sessionId: session.id, chargePointId: ctx.chargePointId, paymentMode: session.paymentMode, totalCostCents, limiteCents },
-    '[ocpp][guard] custo parcial atingiu o limite disponível — disparando RemoteStopTransaction',
-  )
-
-  sendCommand(ctx.chargePointId, 'RemoteStopTransaction', { transactionId: session.ocppTransactionId }).catch((err) =>
-    logger.error({ err, sessionId: session.id }, '[ocpp][guard] RemoteStopTransaction falhou'),
-  )
-}

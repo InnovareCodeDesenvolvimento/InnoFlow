@@ -3,6 +3,7 @@ import { logger } from '../../lib/logger'
 import { CONNECTOR_STATUS_MAP, statusNotificationReqSchema } from '../schemas/statusNotification'
 import { defineOcppHandler } from './defineHandler'
 import { emitChargePointStatus } from '../../realtime/emit'
+import { listarEstadosSessaoAberta } from '../../core/sessao/estadosSessao'
 
 /**
  * F4 (2026-09-17): além de atualizar `Connector.status` (como sempre fez),
@@ -54,7 +55,8 @@ export const handleStatusNotification = defineOcppHandler('StatusNotification', 
 
   await prisma.connector.update({
     where: { id: connector.id },
-    data: { status: mappedStatus, statusUpdatedAt: data.timestamp ?? now, errorCode: data.errorCode },
+    // statusUpdatedAt = relógio do CARREGADOR (payload), mantido como sempre; statusReceivedAt = relógio do SERVIDOR (F5.9, regra R2).
+    data: { status: mappedStatus, statusUpdatedAt: data.timestamp ?? now, statusReceivedAt: now, errorCode: data.errorCode },
   })
 
   await syncChargingSessionStatus(connector.id, data.status, data.timestamp ?? now)
@@ -69,24 +71,33 @@ export const handleStatusNotification = defineOcppHandler('StatusNotification', 
 })
 
 async function syncChargingSessionStatus(connectorId: string, ocppStatus: string, eventAt: Date): Promise<void> {
-  if (ocppStatus === 'SuspendedEVSE') return // decisão do dono: não é ociosidade cobrável.
-
-  const openStatuses = ['STARTED', 'CHARGING', 'FINISHING'] as const
+  // Constante ÚNICA de sessão aberta (F5.9) — inclui FAULTED, que antes ficava de fora e nunca voltava a CHARGING.
   const session = await prisma.chargingSession.findFirst({
-    where: { connectorId, status: { in: [...openStatuses] } },
+    where: { connectorId, status: { in: listarEstadosSessaoAberta() } },
     orderBy: { startedAt: 'desc' },
   })
   if (!session) return
 
+  // F5.9: o StatusNotification Charging/SuspendedEV/SuspendedEVSE/Finishing de um conector COM sessão aberta é atividade do carregador
+  // sobre a transação — move `lastActivityAt` (RELÓGIO DO SERVIDOR; `eventAt` abaixo é o do carregador e não entra aqui).
+  const atividade = ATIVIDADE_DO_CONECTOR.has(ocppStatus) ? { lastActivityAt: new Date() } : {}
+
+  if (ocppStatus === 'SuspendedEVSE') {
+    // Decisão do dono: não é ociosidade cobrável (problema da estação) — só registra a atividade, não mexe no status da sessão.
+    await prisma.chargingSession.update({ where: { id: session.id }, data: atividade })
+    return
+  }
+
   if (ocppStatus === 'Charging') {
-    await prisma.chargingSession.update({ where: { id: session.id }, data: { status: 'CHARGING', chargingEndedAt: null } })
+    // Inclusive FAULTED -> CHARGING: o carregador voltou a carregar, a falha passou.
+    await prisma.chargingSession.update({ where: { id: session.id }, data: { status: 'CHARGING', chargingEndedAt: null, ...atividade } })
     return
   }
 
   if (ocppStatus === 'SuspendedEV' || ocppStatus === 'Finishing') {
     await prisma.chargingSession.update({
       where: { id: session.id },
-      data: { status: 'FINISHING', ...(session.chargingEndedAt ? {} : { chargingEndedAt: eventAt }) },
+      data: { status: 'FINISHING', ...(session.chargingEndedAt ? {} : { chargingEndedAt: eventAt }), ...atividade },
     })
     return
   }
@@ -96,5 +107,9 @@ async function syncChargingSessionStatus(connectorId: string, ocppStatus: string
   }
 
   // Outros status (Available, Preparing, Reserved, Unavailable) não afetam a
-  // sessão de recarga — o encerramento real acontece só no StopTransaction.
+  // sessão de recarga — o encerramento real acontece só no StopTransaction
+  // (ou, sem ele, pelo watchdog: R2 usa `Connector.statusReceivedAt`).
 }
+
+/** Status OCPP do conector que contam como atividade da transação em curso (F5.9). */
+const ATIVIDADE_DO_CONECTOR = new Set(['Charging', 'SuspendedEV', 'SuspendedEVSE', 'Finishing'])

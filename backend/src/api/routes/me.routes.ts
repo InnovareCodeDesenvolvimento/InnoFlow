@@ -4,10 +4,9 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { redis } from '../../lib/redis'
 import { logger } from '../../lib/logger'
-import { sendCommand, OcppCommandTimeoutError } from '../../ocpp/commands'
-import { recordCommandResult, getCommandResult, isAcceptedCommandResult } from '../../ocpp/commandResultCache'
+import { recordCommandResult, getCommandResult } from '../../ocpp/commandResultCache'
 import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
-import { reconciliarSessaoOrfa } from '../../services/carteira/reconciliarSessaoOrfa'
+import { pedirParadaSessao } from '../../services/sessao/pedirParadaSessao'
 import { calcularCustoSessao, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { apenasDigitos, isValidCpf } from '../../core/pagamentos/validarCpf'
@@ -41,7 +40,6 @@ import mePaymentMethodsRoutes from './mePaymentMethods.routes'
  * carteira própria nem sessão própria, não fazem sentido nestas rotas.
  */
 
-const COMMAND_TIMEOUT_MS = 35_000
 const START_LOCK_TTL_MS = 30_000
 const ACTIVE_SESSION_STATUSES = ['STARTED', 'CHARGING', 'FINISHING'] as const
 
@@ -432,41 +430,20 @@ router.post(
     const correlationId = randomUUID()
     logger.info({ sessionId: session.id, chargePointId: session.chargePointId, userId, correlationId }, '[api][me] stop de sessão disparado')
 
-    sendCommand(session.chargePointId, 'RemoteStopTransaction', { transactionId: session.ocppTransactionId }, { timeoutMs: COMMAND_TIMEOUT_MS })
-      .then(async (result) => {
-        logger.info({ sessionId: session.id, correlationId, result }, '[api][me] stop de sessão concluído')
-        const accepted = isAcceptedCommandResult(result)
-        if (!accepted) {
-          // Achado real em produção, 17/09/2026: um `RemoteStopTransaction`
-          // rejeitado quase sempre significa "o carregador não reconhece
-          // mais esta transação" (ex.: reconectou entre o start e o stop —
-          // o simulador Solidstudio VCP não preserva transactionId através
-          // de uma reconexão). Sem isto, a sessão ficava presa em STARTED
-          // pra sempre e o motorista via a tela de "parando a recarga..."
-          // girando eternamente, já que o `StopTransaction` real nunca
-          // chegaria de um carregador que já esqueceu a transação. MESMA
-          // reconciliação usada no boot (`reconciliarSessaoOrfa`) — closes
-          // com a última leitura de medidor conhecida.
-          await reconciliarSessaoOrfa(session.id).catch((err) =>
-            logger.error({ err, sessionId: session.id, correlationId }, '[api][me] falha ao reconciliar sessão após stop rejeitado'),
-          )
+    // F5.9: ponto ÚNICO de RemoteStop (`pedirParadaSessao`). Um `Rejected`/erro de transporte NÃO fecha mais a sessão com dinheiro (era o
+    // `reconciliarSessaoOrfa`, defeito M5/M6): ela vira STOP_UNCONFIRMED e o StopTransaction do carregador — ou o watchdog, depois da
+    // janela — decide. Timeout só registra.
+    pedirParadaSessao({ sessionId: session.id, solicitante: 'DRIVER' })
+      .then((resultado) => {
+        logger.info({ sessionId: session.id, correlationId, resultado }, '[api][me] stop de sessão concluído')
+        if (!resultado.registrado) {
+          // EM_COOLDOWN: um pedido idêntico acabou de sair (duplo toque) — o resultado real é o do primeiro. NAO_ABERTA/CONDICAO_MUDOU: a
+          // sessão fechou no meio. Nenhum dos dois grava resultado para ESTE correlationId (segue PENDING no polling do PWA).
+          return undefined
         }
-        return recordCommandResult(correlationId, accepted ? 'ACCEPTED' : 'REJECTED', userId)
+        return recordCommandResult(correlationId, resultado.comando === 'ACCEPTED' ? 'ACCEPTED' : resultado.comando === 'TIMEOUT' ? 'TIMEOUT' : 'REJECTED', userId)
       })
-      .catch(async (err) => {
-        logger.error({ err, sessionId: session.id, correlationId }, '[api][me] stop de sessão falhou')
-        const timedOut = err instanceof OcppCommandTimeoutError
-        // Timeout é ambíguo (pode só estar lento) — não reconcilia à força.
-        // Qualquer outra falha de transporte é tratada como "carregador
-        // inalcançável", mesmo caso de reconciliar.
-        if (!timedOut) {
-          await reconciliarSessaoOrfa(session.id).catch((reconcileErr) =>
-            logger.error({ err: reconcileErr, sessionId: session.id, correlationId }, '[api][me] falha ao reconciliar sessão após stop com erro'),
-          )
-        }
-        return recordCommandResult(correlationId, timedOut ? 'TIMEOUT' : 'REJECTED', userId)
-      })
-      .catch((err) => logger.error({ err, correlationId }, '[api][me] falha ao gravar resultado do comando em Redis (não bloqueante)'))
+      .catch((err) => logger.error({ err, sessionId: session.id, correlationId }, '[api][me] stop de sessão falhou'))
 
     res.status(202).json({ correlationId, status: 'PENDING' })
   }),

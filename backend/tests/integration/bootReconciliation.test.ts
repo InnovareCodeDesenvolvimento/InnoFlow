@@ -3,19 +3,25 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../src/lib/prisma'
 import { redis } from '../../src/lib/redis'
-import { reconciliarSessoesOrfas } from '../../src/ocpp/handlers/bootNotification'
+import { marcarSessoesAbertasAposBoot } from '../../src/ocpp/handlers/bootNotification'
+import { encerrarSessaoPeloServidor } from '../../src/services/sessao/encerrarSessaoPeloServidor'
 import type { OcppHandlerCtx } from '../../src/ocpp/context'
 
 /**
- * Gap encontrado na primeira sessão de recarga real testada de ponta a ponta
- * (2026-09-17, ver PROGRESSO.md): `RemoteStopTransaction` foi aceito pelo
- * carregador, mas ele desconectou/reconectou em vez de completar o
- * `StopTransaction` — a `ChargingSession` ficou travada em STARTED pra
- * sempre, carteira nunca debitada. Este teste cobre a reconciliação que
- * fecha esse gap: ao reconectar (BootNotification), toda sessão aberta
- * daquele charge point é fechada com a última `MeterSample` conhecida.
+ * Gap encontrado na primeira sessão de recarga real testada de ponta a ponta (2026-09-17, ver PROGRESSO.md): `RemoteStopTransaction`
+ * foi aceito pelo carregador, mas ele desconectou/reconectou em vez de completar o `StopTransaction` — a `ChargingSession` ficou
+ * travada em STARTED pra sempre, carteira nunca debitada.
+ *
+ * MUDANÇA DELIBERADA (Vega, F5.9b1, 2026-10-03): este arquivo fixava que o BootNotification FECHAVA a sessão na hora, com a última
+ * `MeterSample` (`reconciliarSessoesOrfas` -> `reconciliarSessaoOrfa`). Esse comportamento era o defeito D-A do desenho da Nova: pelo OCPP
+ * 1.6 o carregador manda o Boot e SÓ DEPOIS o StopTransaction que guardou — fechar no Boot cobrava a menos no incidente mais comum
+ * (queda de energia). Agora o Boot só marca `STOP_UNCONFIRMED(CHARGER_REBOOTED)` (sem dinheiro) e o fechamento pelo servidor
+ * (`encerrarSessaoPeloServidor`) acontece DEPOIS da janela de confirmação. A fixture e TODAS as asserções de DINHEIRO abaixo são as
+ * originais, intactas (custo 500, débito -500, saldo 500, energia 0, `stoppedAt`); o que mudou foi o CAMINHO até elas: agora passam
+ * pela marcação do Boot + o encerramento pelo servidor, e há asserções novas provando que o Boot sozinho não move um centavo. O
+ * D-A em si (Stop enfileirado depois do Boot) está em `sessaoTravadaHandlers.test.ts`.
  */
-describe('Reconciliação de sessão órfã no BootNotification', () => {
+describe('Sessão aberta + BootNotification: marca STOP_UNCONFIRMED e só o encerramento pelo servidor (depois da janela) fecha com dinheiro', () => {
   const suffix = randomUUID().slice(0, 8)
   const startedAt = new Date('2026-09-17T10:00:00Z')
 
@@ -73,7 +79,7 @@ describe('Reconciliação de sessão órfã no BootNotification', () => {
     redis.disconnect()
   })
 
-  it('sessão com MeterSample: fecha com a última leitura, calcula custo real e debita a carteira', async () => {
+  it('sessão com MeterSample: o Boot só MARCA (nenhum dinheiro); o encerramento pelo servidor fecha com a última leitura, calcula custo real e debita a carteira', async () => {
     const driver = await prisma.user.create({ data: { role: 'DRIVER', name: `Motorista Com Amostra ${suffix}`, email: `driver-sample-${suffix}@example.com` } })
     const authToken = await prisma.authToken.create({ data: { idTag: makeIdTag(), type: 'RFID', userId: driver.id } })
     const wallet = await prisma.wallet.create({ data: { userId: driver.id } })
@@ -125,7 +131,17 @@ describe('Reconciliação de sessão órfã no BootNotification', () => {
       },
     })
 
-    await reconciliarSessoesOrfas(ctx)
+    // --- NOVO (F5.9): o Boot só marca. Nenhum centavo se move.
+    await marcarSessoesAbertasAposBoot(ctx)
+    const marcada = await prisma.chargingSession.findUniqueOrThrow({ where: { id: session.id } })
+    expect(marcada.status).toBe('STOP_UNCONFIRMED')
+    expect(marcada.unconfirmedReason).toBe('CHARGER_REBOOTED')
+    expect(marcada.provisionalCostCents).toBe(500)
+    expect(marcada.totalCostCents).toBeNull()
+    expect(await prisma.walletEntry.findFirst({ where: { type: 'CHARGE_DEBIT', referenceType: 'CHARGING_SESSION', referenceId: session.id } })).toBeNull()
+
+    // --- Passada a janela de confirmação sem StopTransaction, o servidor encerra. Daqui para baixo, as asserções ORIGINAIS.
+    await encerrarSessaoPeloServidor({ sessionId: session.id })
 
     const reconciled = await prisma.chargingSession.findUniqueOrThrow({ where: { id: session.id } })
     expect(reconciled.status).toBe('STOPPED')
@@ -134,6 +150,8 @@ describe('Reconciliação de sessão órfã no BootNotification', () => {
     expect(reconciled.stopReason).toBe('OTHER')
     expect(reconciled.totalCostCents).toBe(500)
     expect(reconciled.stoppedAt?.toISOString()).toBe(new Date(startedAt.getTime() + 10 * 60_000).toISOString())
+    expect(reconciled.closureSource).toBe('SERVER')
+    expect(reconciled.meterStopSource).toBe('LAST_METER_SAMPLE')
 
     const walletEntry = await prisma.walletEntry.findFirst({ where: { type: 'CHARGE_DEBIT', referenceType: 'CHARGING_SESSION', referenceId: session.id } })
     expect(walletEntry).not.toBeNull()
@@ -141,7 +159,7 @@ describe('Reconciliação de sessão órfã no BootNotification', () => {
     expect(walletEntry?.balanceAfterCents).toBe(500)
   })
 
-  it('sessão SEM nenhuma MeterSample: fecha com energia zero, sem lançar exceção', async () => {
+  it('sessão SEM nenhuma MeterSample: fecha com energia zero, sem lançar exceção (D2 NO_CHARGE: nada cobrado, ainda que a política seja a padrão)', async () => {
     const driver = await prisma.user.create({ data: { role: 'DRIVER', name: `Motorista Sem Amostra ${suffix}`, email: `driver-no-sample-${suffix}@example.com` } })
     const authToken = await prisma.authToken.create({ data: { idTag: makeIdTag(), type: 'RFID', userId: driver.id } })
     await prisma.wallet.create({ data: { userId: driver.id } })
@@ -163,7 +181,10 @@ describe('Reconciliação de sessão órfã no BootNotification', () => {
     })
     sessionIds.push(session.id)
 
-    await expect(reconciliarSessoesOrfas(ctx)).resolves.not.toThrow()
+    await marcarSessoesAbertasAposBoot(ctx)
+    expect((await prisma.chargingSession.findUniqueOrThrow({ where: { id: session.id } })).status).toBe('STOP_UNCONFIRMED')
+
+    await expect(encerrarSessaoPeloServidor({ sessionId: session.id })).resolves.not.toThrow()
 
     const reconciled = await prisma.chargingSession.findUniqueOrThrow({ where: { id: session.id } })
     expect(reconciled.status).toBe('STOPPED')
@@ -171,20 +192,24 @@ describe('Reconciliação de sessão órfã no BootNotification', () => {
     expect(reconciled.energyDeliveredWh).toBe(0)
     expect(reconciled.totalCostCents).toBe(0)
     expect(reconciled.stoppedAt?.toISOString()).toBe(startedAt.toISOString())
+    expect(reconciled.meterStopSource).toBe('NO_READING')
 
     const walletEntry = await prisma.walletEntry.findFirst({ where: { type: 'CHARGE_DEBIT', referenceType: 'CHARGING_SESSION', referenceId: session.id } })
     expect(walletEntry).toBeNull() // custo zero -> `debitarSessao` não cria entrada nenhuma
   })
 
-  it('sessão já STOPPED não é reconciliada de novo (idempotência)', async () => {
+  it('sessão já STOPPED não é marcada nem encerrada de novo (idempotência)', async () => {
     // Chama de novo depois que as duas sessões acima já foram fechadas —
     // não deve sobrar nenhuma sessão aberta para este charge point, então a
     // segunda chamada não deve alterar nada nem lançar.
-    await expect(reconciliarSessoesOrfas(ctx)).resolves.not.toThrow()
+    await expect(marcarSessoesAbertasAposBoot(ctx)).resolves.not.toThrow()
 
     const stillOpen = await prisma.chargingSession.count({
-      where: { chargePointId: chargePoint.id, status: { in: ['STARTED', 'CHARGING', 'FINISHING'] } },
+      where: { chargePointId: chargePoint.id, status: { in: ['STARTED', 'CHARGING', 'FINISHING', 'FAULTED', 'STOP_UNCONFIRMED'] } },
     })
     expect(stillOpen).toBe(0)
+
+    for (const id of sessionIds) expect(await encerrarSessaoPeloServidor({ sessionId: id })).toEqual({ encerrada: false, motivo: 'JA_ENCERRADA' })
+    expect(await prisma.walletEntry.count({ where: { type: 'CHARGE_DEBIT', referenceType: 'CHARGING_SESSION', referenceId: { in: sessionIds } } })).toBe(1) // continua UM débito só
   })
 })
