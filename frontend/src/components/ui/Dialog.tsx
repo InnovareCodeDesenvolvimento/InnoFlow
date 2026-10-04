@@ -2,6 +2,7 @@ import { type ComponentPropsWithoutRef, type ElementRef, forwardRef, type HTMLAt
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { IconBadge } from "./IconBadge"
 
 const Dialog = DialogPrimitive.Root
 const DialogTrigger = DialogPrimitive.Trigger
@@ -78,14 +79,7 @@ function DialogHeader({
 }: HTMLAttributes<HTMLDivElement> & { icon?: LucideIcon }) {
   return (
     <div className={cn("mb-4 flex items-start gap-3 pr-8", className)} {...props}>
-      {Icon && (
-        <span
-          className="shadow-tinted-primary flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <Icon className="h-4 w-4" />
-        </span>
-      )}
+      {Icon && <IconBadge icon={Icon} size="md" tinted />}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   )

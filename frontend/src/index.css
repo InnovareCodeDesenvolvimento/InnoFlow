@@ -142,11 +142,29 @@
     --color-border-subtle: 241 243 245;    /* #F1F3F5 */
     --color-border-strong: 209 213 219;    /* #D1D5DB */
     --color-muted: 243 244 246;            /* #F3F4F6 */
-    --color-muted-foreground: 107 114 128; /* #6B7280 */
+    --color-muted-foreground: 95 102 115;  /* #5F6673 — era #6B7280 (4,39:1 sobre muted #F3F4F6, reprovava AA); agora 5,25:1 */
     --color-ink: 17 24 39;                 /* #111827 */
     --color-ink-soft: 55 65 81;            /* #374151 */
-    --color-ink-softer: 107 114 128;       /* #6B7280 */
-    --color-ink-subtle: 156 163 175;       /* #9CA3AF */
+    --color-ink-softer: 95 102 115;        /* #5F6673 — era #6B7280: 4,39–4,47:1 sobre #F3F4F6/#F5F6F8 e ~4,05:1 nas tintas (reprovava AA, 148 nós medidos pela Íris). Agora >= 4,83:1 em todas */
+    --color-ink-subtle: 156 163 175;       /* #9CA3AF — 2,5:1: SÓ para ícone decorativo (aria-hidden) e placeholder. NUNCA como cor de texto informativo: use ink-softer */
+
+    /* ====== TOKENS SEMÂNTICOS DO DESIGN SYSTEM UNIFICADO (F-A, 04/10/2026 — docs/DESIGN-SYSTEM-UNIFICACAO.md §3.2) ======
+       Aliases e valores de marca que a landing já usa, promovidos a token compartilhado. A landing segue lendo --lnd-night
+       (localmente, mesmo valor); a troca é da F-F. Tudo em "R G B" para funcionar com rgb(var(--x) / alpha). */
+    --color-night: 6 22 33;                 /* #061621 — fundo mais escuro (era só --lnd-night) */
+    --color-lime: var(--color-accent-glow); /* #61DB24 — AÇÃO (CTA) e "ativo" sobre escuro. NUNCA texto sobre claro (1,6:1) e nunca estado semântico */
+    --color-on-lime: var(--color-night);    /* texto do CTA lima (~10:1) */
+    --color-on-dark: 255 255 255;           /* texto sobre superfície escura: 100% título, 80% corpo, 70% legenda */
+    --color-border-on-dark: 255 255 255;    /* usar com alpha 12–20% */
+    --color-focus: var(--color-primary);    /* anel de foco; vira lima dentro de .surface-dark */
+
+    --radius-control: 0.875rem;             /* botão/input grande (= .lnd-btn) */
+    --radius-card: 1.25rem;                 /* card de conteúdo */
+    --radius-feature: 1.5rem;               /* card de marketing / momento de marca */
+    --ease-brand: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --dur-fast: 160ms;
+    --dur-base: 250ms;
+    --dur-enter: 450ms;
   }
 
   * {
@@ -174,7 +192,7 @@
   ::-webkit-scrollbar-thumb:hover { @apply bg-primary/40; }
 
   :focus-visible {
-    @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background rounded-md;
+    @apply outline-none ring-2 ring-focus ring-offset-2 ring-offset-background rounded-md;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -194,11 +212,130 @@
   .skeleton {
     @apply animate-pulse rounded-md bg-muted;
   }
+
+  /*
+   * ==========================================================================
+   * DESIGN SYSTEM UNIFICADO (F-A, 04/10/2026) — vocabulário NOVO, em @layer components
+   * ==========================================================================
+   * Regra de cascata (INVERTE a do bloco "VOCABULÁRIO PREMIUM" de 17/09, mais abaixo): estas classes ficam em
+   * `@layer components`, então os utilitários do Tailwind (`@layer utilities`) GANHAM delas. É o comportamento esperado de
+   * um componente base que aceita `className` (`<Card className="bg-primary-950">` continua vencendo o fundo do Card), e
+   * por isso os componentes de `components/ui` PODEM carregar o padrão como default. Bônus: classe de layer que nenhum
+   * arquivo usa é removida pelo purge do Tailwind (as fora de layer, nunca).
+   *
+   * `.surface-dark` NÃO é dark mode: é um ESCOPO de tokens. Dentro dele, ink/surface/border/muted viram tons escuros, então
+   * Input, Badge, Skeleton, Card etc. trocam de cor sozinhos, sem variante nova. Os tons são SÓLIDOS (não alpha) de
+   * propósito: os componentes usam `bg-surface`/`border-border` opacos, e alpha só funcionaria onde há `/NN` explícito.
+   * Contraste (calculado, WCAG): ink 21:1, ink-soft ~14:1, ink-softer ~9:1 e ink-subtle ~5,5:1 sobre #112E3F;
+   * lima sobre noite ~10:1 (CTA). Lima sobre claro ~1,6:1 — NUNCA texto lima em fundo claro.
+   */
+  .surface-dark {
+    color: rgb(var(--color-on-dark));
+    background-color: rgb(var(--color-night));
+    background-image: linear-gradient(180deg, rgb(var(--color-primary-950)) 0%, rgb(var(--color-night)) 100%);
+    --color-ink: 255 255 255;
+    --color-ink-soft: 224 232 238;
+    --color-ink-softer: 186 201 211;
+    --color-ink-subtle: 140 165 180;
+    --color-muted-foreground: 186 201 211;
+    --color-surface: 17 46 63;
+    --color-background: 6 22 33;
+    --color-muted: 24 54 72;
+    --color-border: 40 72 90;
+    --color-border-subtle: 29 58 74;
+    --color-border-strong: 58 94 114;
+    --color-focus: var(--color-accent-glow);
+  }
+  /* Foco visível em fundo escuro: o anel primary some no azul-marinho (mesma regra da landing, `.lnd-dark :focus-visible`). */
+  .surface-dark :focus-visible {
+    outline: 2px solid rgb(var(--color-focus));
+    outline-offset: 3px;
+    box-shadow: none;
+    --tw-ring-shadow: 0 0 #0000;
+    --tw-ring-offset-shadow: 0 0 #0000;
+  }
+  /* + as duas manchas radiais ESTÁTICAS da landing (teal no canto superior direito, lima no inferior esquerdo): hero de auth, 404, erro. */
+  .surface-dark-rich {
+    background-image:
+      radial-gradient(62rem 36rem at 88% -8%, rgb(var(--color-brand-teal) / 0.36), transparent 62%),
+      radial-gradient(46rem 30rem at -8% 112%, rgb(var(--color-lime) / 0.11), transparent 62%),
+      linear-gradient(180deg, rgb(var(--color-primary-950)) 0%, rgb(var(--color-night)) 100%);
+  }
+  /* Vidro (só dentro de .surface-dark): card/chip translúcido. `-strong` = o chip flutuante da landing. */
+  .glass {
+    background: rgb(255 255 255 / 0.06);
+    border: 1px solid rgb(255 255 255 / 0.12);
+  }
+  .glass-strong {
+    background: linear-gradient(135deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0.06));
+    border: 1px solid rgb(255 255 255 / 0.2);
+    box-shadow: 0 24px 44px -22px rgb(0 0 0 / 0.7);
+  }
+  /* Rótulo de seção/tela (= .lnd-eyebrow). Em fundo claro use com text-accent-700; em escuro, text-lime. */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 1.5rem;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    opacity: 0.8;
+  }
+  /* Manchas de cor estáticas (sem blur animado: o blur-3xl animado custava rasterização — ver landing.css). */
+  .brand-glow-lime {
+    background: radial-gradient(closest-side, rgb(var(--color-lime) / 0.16), transparent);
+  }
+  .brand-glow-teal {
+    background: radial-gradient(closest-side, rgb(var(--color-brand-teal) / 0.34), transparent);
+  }
+  /* Mascote (`components/brand/Mascot`): a arte é azul-marinho escura — SEMPRE sobre superfície escura com brilho atrás. A altura vem de --m-h. */
+  .brand-mascot-box {
+    position: relative;
+    height: var(--m-h, 280px);
+    aspect-ratio: 1006 / 1358;
+  }
+  .brand-mascot-box img {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 100%;
+    user-select: none;
+    filter: drop-shadow(0 24px 24px rgb(0 0 0 / 0.45));
+  }
+  .brand-backlight {
+    position: absolute;
+    inset: 6% -18% 4% -18%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(var(--color-brand-teal) / 0.5), rgb(var(--color-lime) / 0.12) 60%, transparent);
+  }
 }
 
 /*
  * ============================================================================
- * VOCABULÁRIO "PREMIUM" — referência única (design system de motion/elevação)
+ * VOCABULÁRIO "PREMIUM" DE 17/09 — DEPRECADO desde a F-A do design system unificado (04/10/2026)
+ * ============================================================================
+ * LEIA PRIMEIRO — a regra de cascata abaixo foi INVERTIDA:
+ *   - O vocabulário NOVO (`.surface-dark`, `.glass`, `.eyebrow`, `.brand-*`, mais as variantes de `Button`/`Card`/`Badge`/
+ *     `EmptyState`/`Table`/`StatCard`/`IconBadge` em `components/ui`) nasce em `@layer components` (bloco logo acima, no
+ *     topo deste arquivo). Os utilitários do Tailwind ganham dele, então os componentes base PODEM carregar o padrão como
+ *     default e ainda aceitar `className`. A regra velha "NUNCA mude a classe default do componente base" (mais abaixo)
+ *     existia SÓ porque ESTE bloco está fora de layer e ganha dos utilitários. Para as classes novas ela não vale mais.
+ *   - As classes DESTE bloco (`.card-premium`, `.card-premium-interactive`, `.btn-glow-primary/-accent`, `.pressable`,
+ *     `.text-gradient-brand`, `.shadow-tinted-primary`, `.table-premium` e os `animate-*`) CONTINUAM funcionando, fora de
+ *     layer, como aliases durante a migração — e CONTINUAM com a regra velha (aplicar por `className` em cada tela, não
+ *     como default de componente), porque a causa dela (CSS fora de layer) continua valendo para elas. NÃO CRIE uso novo:
+ *     `src/test/vocabularioDeprecado.test.ts` é uma catraca — a contagem só pode DESCER, e cada fase da migração baixa o
+ *     número até zero (F-F), quando este bloco é apagado.
+ *
+ * (texto original abaixo, mantido enquanto o bloco existir)
  * ============================================================================
  * Nasceu na revisão do PWA do motorista (17/09/2026, pedido explícito do
  * dono: "capriche, deixe o layout realmente premium, mesmo nível do

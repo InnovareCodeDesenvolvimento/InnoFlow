@@ -37,6 +37,10 @@ const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
 
+// Catálogo do design system (`/__ds`): SÓ em dev. `import.meta.env.DEV` é substituído por `false` no build, a expressão colapsa para `null` e o
+// `import()` sai do bundle (e do precache do PWA) — conferido com grep no `dist/`. Ver `src/dev/DesignSystemCatalog.tsx`.
+const DesignSystemCatalog = import.meta.env.DEV ? lazy(() => import("@/dev/DesignSystemCatalog")) : null
+
 const ChargePointLanding = lazy(() => import("@/pages/Public/ChargePointLanding").then((m) => ({ default: m.ChargePointLanding })))
 const AppLayout = lazy(() => import("@/pages/App/Layout").then((m) => ({ default: m.AppLayout })))
 const AppHome = lazy(() => import("@/pages/App/Home").then((m) => ({ default: m.Home })))
@@ -178,6 +182,8 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="eletropostos" element={<Eletropostos />} />
           </Route>
+
+          {DesignSystemCatalog && <Route path="/__ds" element={<DesignSystemCatalog />} />}
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

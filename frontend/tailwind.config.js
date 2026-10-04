@@ -3,7 +3,8 @@ import tailwindcssAnimate from "tailwindcss-animate"
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx,js,jsx}"],
+  // `src/dev/` = catálogo `/__ds` (só em dev, fora do build — ver App.tsx): no build de produção suas classes não entram no CSS global.
+  content: ["./index.html", "./src/**/*.{ts,tsx,js,jsx}", ...(process.env.NODE_ENV === "production" ? ["!./src/dev/**"] : [])],
   theme: {
     extend: {
       // Paleta via CSS variable — ver comentário em src/index.css (:root)
@@ -69,6 +70,11 @@ export default {
         // src/index.css (:root) sobre uso moderado/não-textual.
         "brand-teal": "rgb(var(--color-brand-teal) / <alpha-value>)",
         "accent-glow": "rgb(var(--color-accent-glow) / <alpha-value>)",
+        // Design system unificado (F-A): ver src/index.css (tokens semânticos). `lime` = AÇÃO; `on-lime` = texto sobre ela; `focus` = anel de foco.
+        night: "rgb(var(--color-night) / <alpha-value>)",
+        lime: "rgb(var(--color-lime) / <alpha-value>)",
+        "on-lime": "rgb(var(--color-on-lime) / <alpha-value>)",
+        focus: "rgb(var(--color-focus) / <alpha-value>)",
         background: "rgb(var(--color-background) / <alpha-value>)",
         "background-warm": "rgb(var(--color-background-warm) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",
@@ -101,6 +107,12 @@ export default {
         xl: "1rem",
         "2xl": "1.25rem",
         full: "9999px",
+        control: "var(--radius-control)",
+        card: "var(--radius-card)",
+        feature: "var(--radius-feature)",
+      },
+      transitionTimingFunction: {
+        brand: "var(--ease-brand)",
       },
       boxShadow: {
         xs: "0 1px 2px rgba(15, 20, 25, 0.04)",
@@ -108,6 +120,11 @@ export default {
         card: "0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)",
         "card-hover": "0 12px 24px -8px rgba(29, 78, 216, 0.16), 0 4px 8px -4px rgba(29, 78, 216, 0.08)",
         lg: "0 16px 32px -8px rgba(15, 20, 25, 0.12), 0 4px 12px -4px rgba(15, 20, 25, 0.06)",
+        // Design system unificado: sombras TINGIDAS da marca (não cinza neutro) e o brilho do CTA lima.
+        tinted: "0 1px 2px rgb(15 23 42 / 0.04), 0 10px 20px -12px rgb(var(--color-primary) / 0.35)",
+        "tinted-card": "0 1px 2px rgb(15 23 42 / 0.04), 0 12px 28px -16px rgb(var(--color-primary) / 0.35)",
+        lime: "0 14px 30px -10px rgb(var(--color-lime) / 0.55), 0 0 0 1px rgb(255 255 255 / 0.25) inset",
+        "lime-lg": "0 20px 40px -12px rgb(var(--color-lime) / 0.7), 0 0 0 1px rgb(255 255 255 / 0.35) inset",
       },
       animation: {
         "fade-in": "fadeIn 0.2s ease-out",
