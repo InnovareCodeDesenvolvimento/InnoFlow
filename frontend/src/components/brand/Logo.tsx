@@ -1,4 +1,4 @@
-import logoIcon from "@/assets/landing/logo-icon-96.webp"
+import logoIcon from "@/assets/landing/logo-icon-96.webp?url"
 import { cn } from "@/lib/utils"
 
 /**

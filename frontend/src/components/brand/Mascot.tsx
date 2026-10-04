@@ -1,9 +1,9 @@
-import m320 from "@/assets/landing/mascote-320.webp"
-import m480 from "@/assets/landing/mascote-480.webp"
-import m640 from "@/assets/landing/mascote-640.webp"
-import m900 from "@/assets/landing/mascote-900.webp"
-import face64 from "@/assets/landing/mascote-rosto-64.webp"
-import face128 from "@/assets/landing/mascote-rosto-128.webp"
+import m320 from "@/assets/landing/mascote-320.webp?url"
+import m480 from "@/assets/landing/mascote-480.webp?url"
+import m640 from "@/assets/landing/mascote-640.webp?url"
+import m900 from "@/assets/landing/mascote-900.webp?url"
+import face64 from "@/assets/landing/mascote-rosto-64.webp?url"
+import face128 from "@/assets/landing/mascote-rosto-128.webp?url"
 
 /**
  * Mascote da InnoFlow (arte `Mascote_InnoFlow.png`, tratada por `frontend/scripts/gerar-mascote.py`: halo
@@ -16,7 +16,7 @@ import face128 from "@/assets/landing/mascote-rosto-128.webp"
  * classes: `lnd-mascot-box` (landing.css, o que a landing sempre usou) e `brand-mascot-box` (index.css, `@layer components`, para as telas
  * fora da landing, onde landing.css nem é carregado). A altura vem de `--m-h` (a landing o define em `.lnd-stage`; fora dela, passe
  * `style={{ "--m-h": "280px" }}` ou a classe `[--m-h:280px]`; padrão 280 px). Mascote só sobre superfície ESCURA (`.surface-dark`).
- * Regra de ouro: a landing NÃO importa `components/ui` nem shells — este arquivo só importa assets.
+ * Regra de ouro: a landing NÃO importa `components/ui` nem shells — este arquivo só importa assets. Os imports levam `?url` DE PROPÓSITO: é outro id de módulo que o da landing, então o bundler não funde os módulos de URL dos webp (e o rosto inline) num chunk compartilhado — que foi para o `modulepreload` do `index.html` (6 -> 8) quando as duas cópias importavam o mesmo arquivo.
  */
 export const MASCOT_ALT =
   "Mascote da InnoFlow: robô azul-marinho com detalhes em verde-limão e uma folha no capacete, fazendo joinha com uma mão e segurando um carregador de veículo elétrico na outra."
