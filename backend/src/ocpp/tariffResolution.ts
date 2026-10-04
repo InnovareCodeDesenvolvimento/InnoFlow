@@ -13,7 +13,8 @@ import { prisma } from '../lib/prisma'
  *   2. Especificidade do `scope` (CONNECTOR > CHARGE_POINT > SITE >
  *      OPERATOR) — NÃO confiar na ordem alfabética do enum do Postgres.
  *   3. `createdAt` mais recente — desempate final, determinístico.
- * Resolvido em MEMÓRIA (não no SQL) porque especificidade de escopo não é
+ * Só considera tarifas ATIVAS (`Tariff.active`): um vínculo cuja tarifa foi desativada é ignorado, e o próximo vínculo ativo de maior prioridade vale; sem nenhum, o erro
+ * "Nenhuma tarifa ativa" existente. Resolvido em MEMÓRIA (não no SQL) porque especificidade de escopo não é
  * uma coluna, é uma regra de negócio sobre o enum `TariffScope`.
  */
 
@@ -33,6 +34,9 @@ export async function resolveActiveTariff(
   const assignments = await prisma.tariffAssignment.findMany({
     where: {
       operatorId: chargePoint.operatorId,
+      // Tarifa DESATIVADA no admin (`Tariff.active = false`, soft delete) não pode mais ser resolvida: antes o filtro não existia e desativar não tirava a tarifa de uso.
+      // Sessão JÁ em andamento não é afetada — ela cobra pelo `tariffSnapshot` gravado no StartTransaction, não por esta resolução.
+      tariff: { active: true },
       validFrom: { lte: now },
       OR: [{ validTo: null }, { validTo: { gte: now } }],
       AND: [
