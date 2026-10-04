@@ -1,5 +1,8 @@
 import { Link } from "react-router-dom"
-import logoIcon from "@/assets/logo-icon-sm.png"
+import logoIcon from "@/assets/landing/logo-icon-96.webp"
+// Versão de 72 px de altura (2x do que aparece, 36 px) em webp: o PNG original (616x405, 100 KB) era baixado inteiro porque o
+// rodapé fica dentro da distância do `loading="lazy"` numa página curta.
+import innovareLogo from "@/assets/landing/innovarecode-h72.webp"
 import { DESENVOLVEDORA, DESENVOLVEDORA_URL, VERSAO_EXIBIDA } from "@/lib/appInfo"
 import { CTA_LINKS, NAV_ANCHORS, SLOGAN } from "./landing-data"
 
@@ -63,7 +66,7 @@ export function LandingFooter() {
           className="flex items-center gap-3 rounded-xl bg-white px-3.5 py-2 shadow-lg transition-transform hover:-translate-y-0.5"
         >
           <span className="text-[10px] font-bold uppercase tracking-widest text-ink-softer">Desenvolvido por</span>
-          <img src="/brand/innovarecode.png" alt="" width={616} height={405} loading="lazy" decoding="async" className="h-9 w-auto" />
+          <img src={innovareLogo} alt="" width={110} height={72} loading="lazy" decoding="async" className="h-9 w-auto" />
         </a>
       </div>
     </footer>

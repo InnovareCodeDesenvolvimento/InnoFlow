@@ -14,7 +14,7 @@ import {
   Wallet,
   Zap,
 } from "lucide-react"
-import logoIcon from "@/assets/logo-icon-sm.png"
+import logoIcon from "@/assets/landing/logo-icon-96.webp"
 import { mulberry32 } from "./flow-network"
 import { useElapsed } from "./motion-hooks"
 import type { TourScreen } from "./landing-data"

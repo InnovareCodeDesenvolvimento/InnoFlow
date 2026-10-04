@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom"
 import { ArrowRight, BarChart3, Gauge, LayoutDashboard, Receipt, DollarSign, Zap, CheckCircle2, BatteryCharging } from "lucide-react"
-import logoIcon from "@/assets/logo-icon-sm.png"
+import logoIcon from "@/assets/landing/logo-icon-96.webp"
 import { ADMIN_MOCK_NAV, CTA_LINKS, EXAMPLE_NOTICE, OPERATOR_AREAS } from "./landing-data"
 import { PanelTilt } from "./PanelTilt"
 import { Reveal } from "./Reveal"

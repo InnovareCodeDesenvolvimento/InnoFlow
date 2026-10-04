@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowRight, LayoutDashboard, Menu, Smartphone, X } from "lucide-react"
-import logoIcon from "@/assets/logo-icon-sm.png"
+import logoIcon from "@/assets/landing/logo-icon-96.webp"
 import { useAuthStore } from "@/store/authStore"
 import { CTA_LINKS, NAV_ANCHORS } from "./landing-data"
 
