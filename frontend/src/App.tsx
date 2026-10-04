@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import { Loader2 } from "lucide-react"
 import { ScrollToTop } from "@/components/layout/ScrollToTop"
 import { RequireAuth } from "@/components/layout/RequireAuth"
+import { RouteError } from "@/components/feedback/RouteError"
 import { registerInstallPromptListeners } from "@/store/installPromptStore"
 import { useAuthStore } from "@/store/authStore"
 
@@ -41,6 +42,10 @@ const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"
 // `import()` sai do bundle (e do precache do PWA) — conferido com grep no `dist/`. Ver `src/dev/DesignSystemCatalog.tsx`.
 const DesignSystemCatalog = import.meta.env.DEV ? lazy(() => import("@/dev/DesignSystemCatalog")) : null
 
+// 404 de verdade (decisão D5 do dono, F-B): antes a rota `*` redirecionava em silêncio para "/" e escondia link quebrado (inclusive QR impresso
+// com identidade errada). Chunk lazy: não pesa no caminho crítico da landing.
+const NotFound = lazy(() => import("@/components/feedback/NotFound").then((m) => ({ default: m.NotFound })))
+
 const ChargePointLanding = lazy(() => import("@/pages/Public/ChargePointLanding").then((m) => ({ default: m.ChargePointLanding })))
 const AppLayout = lazy(() => import("@/pages/App/Layout").then((m) => ({ default: m.AppLayout })))
 const AppHome = lazy(() => import("@/pages/App/Home").then((m) => ({ default: m.Home })))
@@ -51,6 +56,16 @@ const AppCarteira = lazy(() => import("@/pages/App/Carteira").then((m) => ({ def
 const AppCarteiraAdicionar = lazy(() => import("@/pages/App/CarteiraAdicionar").then((m) => ({ default: m.CarteiraAdicionar })))
 const AppCartoes = lazy(() => import("@/pages/App/Cartoes").then((m) => ({ default: m.Cartoes })))
 const AppMapa = lazy(() => import("@/pages/App/Mapa").then((m) => ({ default: m.Mapa })))
+
+/**
+ * Error boundary das rotas (render que lança, chunk lazy que não baixou). O `RouteError` do bundle inicial é mínimo e só carrega a tela de marca se
+ * um erro acontecer. `resetKey` = pathname: navegar para outra rota limpa o erro. Erros de requisição (axios) NÃO passam por aqui — cada tela os trata
+ * com `ErrorState`; o boundary só pega o que derrubaria a árvore.
+ */
+function RoutesBoundary({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation()
+  return <RouteError resetKey={pathname}>{children}</RouteError>
+}
 
 function RouteFallback() {
   return (
@@ -103,91 +118,93 @@ export default function App() {
     <BrowserRouter>
       <AppRealtime />
       <ScrollToTop />
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          {/* Auth (sem layout público) */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/cadastro" element={<Register />} />
+      <RoutesBoundary>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            {/* Auth (sem layout público) */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/cadastro" element={<Register />} />
 
-          {/* PWA do motorista — landing pública pós-QR + área autenticada DRIVER-only */}
-          <Route path="/c/:ocppIdentity" element={<ChargePointLanding />} />
-          <Route path="/c/:ocppIdentity/:connectorId" element={<ChargePointLanding />} />
-          <Route path="/app" element={<AppLayout />}>
-            <Route index element={<AppHome />} />
-            <Route path="sessao" element={<AppSessao />} />
-            <Route path="sessoes" element={<AppSessoes />} />
-            <Route path="sessoes/:id" element={<AppSessaoDetalhe />} />
-            <Route path="mapa" element={<AppMapa />} />
-            <Route path="carteira" element={<AppCarteira />} />
-            <Route path="carteira/adicionar" element={<AppCarteiraAdicionar />} />
-            {/* Cartão salvo (F5.3) — formulário de cartão em si NÃO mora aqui, vive isolado em pagamento-cartao.html (ver useAddCardFlow). */}
-            <Route path="carteira/cartoes" element={<AppCartoes />} />
-          </Route>
+            {/* PWA do motorista — landing pública pós-QR + área autenticada DRIVER-only */}
+            <Route path="/c/:ocppIdentity" element={<ChargePointLanding />} />
+            <Route path="/c/:ocppIdentity/:connectorId" element={<ChargePointLanding />} />
+            <Route path="/app" element={<AppLayout />}>
+              <Route index element={<AppHome />} />
+              <Route path="sessao" element={<AppSessao />} />
+              <Route path="sessoes" element={<AppSessoes />} />
+              <Route path="sessoes/:id" element={<AppSessaoDetalhe />} />
+              <Route path="mapa" element={<AppMapa />} />
+              <Route path="carteira" element={<AppCarteira />} />
+              <Route path="carteira/adicionar" element={<AppCarteiraAdicionar />} />
+              {/* Cartão salvo (F5.3) — formulário de cartão em si NÃO mora aqui, vive isolado em pagamento-cartao.html (ver useAddCardFlow). */}
+              <Route path="carteira/cartoes" element={<AppCartoes />} />
+            </Route>
 
-          {/* Painel admin (ADMIN/OPERATOR) */}
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<Navigate to="/admin/dashboard" replace />} />
-            <Route path="dashboard" element={<AdminDashboard />} />
-            <Route path="financeiro" element={<AdminFinanceiro />} />
-            <Route path="movimento-diario" element={<AdminMovimentoDiario />} />
-            <Route path="faturamento" element={<AdminFaturamento />} />
-            <Route path="sessoes" element={<AdminSessoes />} />
-            <Route path="pagamentos" element={<AdminPagamentos />} />
-            {/* Motorista é conta de rede: OPERATOR e ADMIN consultam (OPERATOR só buscando); o ajuste de saldo é ADMIN-only no servidor e na UI. */}
-            <Route path="carteiras" element={<AdminCarteiras />} />
-            <Route path="sites" element={<AdminSites />} />
-            <Route path="charge-points" element={<AdminChargePoints />} />
-            <Route path="connectors" element={<AdminConnectors />} />
-            <Route path="tariffs" element={<AdminTariffs />} />
-            {/* AuthToken não tem operatorId — a API restringe a rota inteira a ADMIN (ver authTokens.routes.ts). */}
+            {/* Painel admin (ADMIN/OPERATOR) */}
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="financeiro" element={<AdminFinanceiro />} />
+              <Route path="movimento-diario" element={<AdminMovimentoDiario />} />
+              <Route path="faturamento" element={<AdminFaturamento />} />
+              <Route path="sessoes" element={<AdminSessoes />} />
+              <Route path="pagamentos" element={<AdminPagamentos />} />
+              {/* Motorista é conta de rede: OPERATOR e ADMIN consultam (OPERATOR só buscando); o ajuste de saldo é ADMIN-only no servidor e na UI. */}
+              <Route path="carteiras" element={<AdminCarteiras />} />
+              <Route path="sites" element={<AdminSites />} />
+              <Route path="charge-points" element={<AdminChargePoints />} />
+              <Route path="connectors" element={<AdminConnectors />} />
+              <Route path="tariffs" element={<AdminTariffs />} />
+              {/* AuthToken não tem operatorId — a API restringe a rota inteira a ADMIN (ver authTokens.routes.ts). */}
+              <Route
+                path="auth-tokens"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminAuthTokens />
+                  </RequireAuth>
+                }
+              />
+              {/* Conta Cielo é ÚNICA da plataforma (a carteira é da rede): só ADMIN configura (F5.5); o servidor confere de novo (403). */}
+              <Route
+                path="gateway-pagamento"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminGatewayPagamento />
+                  </RequireAuth>
+                }
+              />
+              {/* AuditLog é ADMIN-only por decisão de produto (rastreabilidade da rede inteira, ver decisoes-audit-log.md). */}
+              <Route
+                path="auditoria"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminAuditoria />
+                  </RequireAuth>
+                }
+              />
+            </Route>
+
+            {/* Landing pública: casca própria (cabeçalho escuro com âncoras + rodapé), fora do `Layout` das demais páginas públicas. */}
             <Route
-              path="auth-tokens"
+              path="/"
               element={
-                <RequireAuth roles={["ADMIN"]}>
-                  <AdminAuthTokens />
-                </RequireAuth>
+                <Suspense fallback={<LandingFallback />}>
+                  <Home />
+                </Suspense>
               }
             />
-            {/* Conta Cielo é ÚNICA da plataforma (a carteira é da rede): só ADMIN configura (F5.5); o servidor confere de novo (403). */}
-            <Route
-              path="gateway-pagamento"
-              element={
-                <RequireAuth roles={["ADMIN"]}>
-                  <AdminGatewayPagamento />
-                </RequireAuth>
-              }
-            />
-            {/* AuditLog é ADMIN-only por decisão de produto (rastreabilidade da rede inteira, ver decisoes-audit-log.md). */}
-            <Route
-              path="auditoria"
-              element={
-                <RequireAuth roles={["ADMIN"]}>
-                  <AdminAuditoria />
-                </RequireAuth>
-              }
-            />
-          </Route>
 
-          {/* Landing pública: casca própria (cabeçalho escuro com âncoras + rodapé), fora do `Layout` das demais páginas públicas. */}
-          <Route
-            path="/"
-            element={
-              <Suspense fallback={<LandingFallback />}>
-                <Home />
-              </Suspense>
-            }
-          />
+            {/* Público (casca clara: Header + Footer) */}
+            <Route element={<Layout />}>
+              <Route path="eletropostos" element={<Eletropostos />} />
+            </Route>
 
-          {/* Público (casca clara: Header + Footer) */}
-          <Route element={<Layout />}>
-            <Route path="eletropostos" element={<Eletropostos />} />
-          </Route>
+            {DesignSystemCatalog && <Route path="/__ds" element={<DesignSystemCatalog />} />}
 
-          {DesignSystemCatalog && <Route path="/__ds" element={<DesignSystemCatalog />} />}
-
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </RoutesBoundary>
       <AppToaster />
     </BrowserRouter>
   )

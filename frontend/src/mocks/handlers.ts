@@ -389,6 +389,10 @@ export const handlers = [
   // limites juntos, ou nenhum — igual ao backend). Default de 50 por página.
   http.get("/api/sites", ({ request }) => {
     const url = new URL(request.url)
+    // Só para o E2E do error boundary (`RouteError`): resposta com FORMATO quebrado (sem `connectorSummary`), que faz o card lançar na renderização.
+    if (localStorage.getItem("mock:sites-malformed") === "1") {
+      return HttpResponse.json({ items: [{ id: "quebrado", name: "Quebrado" }], meta: { page: 1, pageSize: 12, total: 1, totalPages: 1 } })
+    }
     const num = (key: string) => (url.searchParams.has(key) ? Number(url.searchParams.get(key)) : undefined)
     const [minLat, maxLat, minLng, maxLng] = [num("minLat"), num("maxLat"), num("minLng"), num("maxLng")]
     const box = [minLat, maxLat, minLng, maxLng]

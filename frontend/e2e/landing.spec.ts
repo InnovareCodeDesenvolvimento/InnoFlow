@@ -311,11 +311,23 @@ test.describe("navegação", () => {
     await expect(page.locator("main")).not.toContainText(/painel|quem opera/i)
   })
 
-  test("rota inexistente continua caindo na landing e /eletropostos segue no layout público claro", async ({ page }) => {
+  // MUDANÇA DELIBERADA (F-B do design system unificado, decisão D5 do dono, 04/10/2026): este teste fixava que rota inexistente "continua caindo na
+  // landing" (redirecionamento silencioso). Agora é uma página 404 de verdade: a URL NÃO muda, o mascote e dois caminhos de volta aparecem. O
+  // redirecionamento escondia link quebrado, inclusive QR impresso com identidade errada.
+  test("rota inexistente mostra a página 404 (sem redirecionar) com caminhos de volta; /eletropostos segue no layout público", async ({ page }) => {
     await page.goto("/nao-existe")
+    await expect(page).toHaveURL(/\/nao-existe$/)
+    await expect(page.getByRole("heading", { level: 1, name: "Página não encontrada" })).toBeVisible()
+    await expect(page.getByRole("img", { name: /Mascote da InnoFlow/ })).toBeVisible()
+
+    await page.getByRole("link", { name: "Voltar ao início" }).click()
     await expect(page).toHaveURL(/\/$/)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Recarregue seu elétrico")
-    await page.goto("/eletropostos")
+
+    await page.goto("/rota/que/nao-existe")
+    await expect(page).toHaveURL(/\/rota\/que\/nao-existe$/)
+    await page.getByRole("link", { name: "Ver eletropostos" }).click()
+    await expect(page).toHaveURL(/\/eletropostos$/)
     await expect(page.getByRole("navigation", { name: "Navegação principal" })).toBeVisible()
   })
 })
