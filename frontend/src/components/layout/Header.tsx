@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Building2, ChevronDown, LayoutDashboard, LogOut, Menu, Smartphone, User, X } from "lucide-react"
+import { Building2, ChevronDown, LayoutDashboard, LogOut, Menu, Smartphone, X } from "lucide-react"
+import { Logo } from "@/components/brand/Logo"
+import { buttonVariants } from "@/components/ui/buttonVariants"
 import { cn, operatorContextLabel } from "@/lib/utils"
 import { useAuthStore } from "@/store/authStore"
-import logoIcon from "@/assets/logo-icon.png"
 
 /**
- * Cabeçalho do site público (mapa/lista de eletropostos). Lê autenticação
- * direto do store — não recebe nada por prop. Só uma instância na árvore
+ * Cabeçalho do site público (`/eletropostos`). Lê autenticação direto do store — não recebe nada por prop. Só uma instância na árvore
  * (ver `Layout.tsx`).
+ *
+ * Design system unificado (F-B): MOLDURA ESCURA (`surface-dark`, mesmo tom `night/90` do cabeçalho da landing, sem `backdrop-filter` pelo mesmo motivo
+ * de custo), CTA "Criar conta" em lima, e o menu da conta vira dropdown escuro (os tokens do escopo trocam sozinhos). Nomes acessíveis, textos e
+ * a ordem dos elementos NÃO mudam (os E2E procuram por eles).
  */
+const NAV_LINK = "rounded-lg px-3 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -35,31 +41,28 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border-subtle bg-surface/90 backdrop-blur-md">
+    <header className="surface-dark sticky top-0 z-40 border-b border-white/10 bg-none bg-night/90">
       <div className="container-app flex h-16 items-center gap-4">
         <button
           type="button"
           onClick={() => setMobileOpen((v) => !v)}
-          className="-ml-1 flex h-10 w-10 items-center justify-center rounded-lg text-ink-soft hover:bg-muted md:hidden"
+          className="-ml-1 flex h-10 w-10 items-center justify-center rounded-lg text-white hover:bg-white/10 md:hidden"
           aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"}
           aria-expanded={mobileOpen}
         >
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
 
-        <Link to="/" className="flex items-center gap-2 font-black tracking-tight text-ink">
-          <img src={logoIcon} alt="" className="h-9 w-9 shrink-0" />
-          <span className="hidden sm:inline">InnoFlow</span>
+        <Link to="/" className="flex items-center gap-2">
+          <Logo tone="dark" size={36} showName={false} />
+          <span className="hidden text-lg font-extrabold tracking-tight text-white sm:inline">InnoFlow</span>
         </Link>
 
         <nav className="ml-2 hidden items-center gap-1 md:flex" aria-label="Navegação principal">
-          <Link to="/" className="rounded-lg px-3 py-2 text-sm font-semibold text-ink-soft hover:bg-muted hover:text-ink">
+          <Link to="/" className={NAV_LINK}>
             Início
           </Link>
-          <Link
-            to="/eletropostos"
-            className="rounded-lg px-3 py-2 text-sm font-semibold text-ink-soft hover:bg-muted hover:text-ink"
-          >
+          <Link to="/eletropostos" className={NAV_LINK}>
             Eletropostos
           </Link>
         </nav>
@@ -67,10 +70,10 @@ export function Header() {
         <div className="ml-auto flex items-center gap-2">
           {isAuthenticated && user && contextLabel && (
             <span
-              className="hidden items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-ink-soft md:inline-flex"
+              className="hidden items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 md:inline-flex"
               title={contextLabel}
             >
-              <Building2 className="h-3.5 w-3.5 text-ink-softer" aria-hidden="true" />
+              <Building2 className="h-3.5 w-3.5 text-white/70" aria-hidden="true" />
               {contextLabel}
             </span>
           )}
@@ -79,23 +82,23 @@ export function Header() {
               <button
                 type="button"
                 onClick={() => setUserMenuOpen((v) => !v)}
-                className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-muted"
+                className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/10"
                 aria-label={`Conta de ${user.name}`}
                 aria-expanded={userMenuOpen}
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-white" aria-hidden="true">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-lime text-sm font-extrabold text-on-lime" aria-hidden="true">
                   {user.name.trim().charAt(0).toUpperCase()}
                 </span>
-                <span className="hidden text-sm font-semibold text-ink sm:inline">{user.name.split(" ")[0]}</span>
-                <ChevronDown className={cn("hidden h-3.5 w-3.5 text-ink-softer transition-transform sm:block", userMenuOpen && "rotate-180")} aria-hidden="true" />
+                <span className="hidden text-sm font-semibold text-white sm:inline">{user.name.split(" ")[0]}</span>
+                <ChevronDown className={cn("hidden h-3.5 w-3.5 text-white/70 transition-transform sm:block", userMenuOpen && "rotate-180")} aria-hidden="true" />
               </button>
               {userMenuOpen && (
-                <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-border-subtle bg-surface py-2 shadow-lg">
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-border bg-surface py-2 shadow-lg">
                   <div className="border-b border-border-subtle px-4 py-2.5">
                     <p className="truncate text-sm font-bold text-ink">{user.name}</p>
                     <p className="truncate text-xs text-ink-softer">{user.email}</p>
                     {contextLabel && (
-                      <p className="mt-1.5 flex items-center gap-1.5 truncate text-xs font-semibold text-primary-700 md:hidden">
+                      <p className="mt-1.5 flex items-center gap-1.5 truncate text-xs font-semibold text-primary-300 md:hidden">
                         <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         {contextLabel}
                       </p>
@@ -124,7 +127,7 @@ export function Header() {
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-danger-600 hover:bg-danger-50"
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-danger-100 hover:bg-danger/20"
                   >
                     <LogOut className="h-4 w-4" aria-hidden="true" />
                     Sair
@@ -134,17 +137,10 @@ export function Header() {
             </div>
           ) : (
             <>
-              <Link
-                to="/login"
-                className="rounded-lg px-3 py-2 text-sm font-semibold text-ink-soft hover:bg-muted hover:text-ink"
-              >
+              <Link to="/login" className={NAV_LINK}>
                 Entrar
               </Link>
-              <Link
-                to="/cadastro"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-700"
-              >
-                <User className="h-4 w-4" aria-hidden="true" />
+              <Link to="/cadastro" className={buttonVariants({ variant: "lime", size: "sm" })}>
                 Criar conta
               </Link>
             </>
@@ -153,11 +149,11 @@ export function Header() {
       </div>
 
       {mobileOpen && (
-        <nav className="border-t border-border-subtle bg-surface px-4 py-3 md:hidden" aria-label="Navegação principal (mobile)">
-          <Link to="/" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-ink hover:bg-muted">
+        <nav className="border-t border-white/10 bg-night px-4 py-3 md:hidden" aria-label="Navegação principal (mobile)">
+          <Link to="/" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/10">
             Início
           </Link>
-          <Link to="/eletropostos" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-ink hover:bg-muted">
+          <Link to="/eletropostos" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/10">
             Eletropostos
           </Link>
         </nav>

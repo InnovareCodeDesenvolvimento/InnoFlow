@@ -8,6 +8,8 @@ import { buttonVariants } from "@/components/ui/buttonVariants"
 import { Card, CardContent } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
+import { BrandBackdrop } from "@/components/brand/BrandBackdrop"
+import { MascotFace } from "@/components/brand/Mascot"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { ConnectorPickerCard } from "@/components/chargePoint/ConnectorPickerCard"
 import { PaymentMethodSelector, type PaymentSelection } from "@/components/chargePoint/PaymentMethodSelector"
@@ -20,10 +22,6 @@ import { CARD_GATEWAY_DISABLED_START_MESSAGE, isGatewayDisabledError } from "@/l
 import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
 import { issueErrorMessage, issueFromEligibility, issueFromError, type CardEligibilityIssue } from "@/lib/cardEligibility"
 import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
-// Variante pequena (128×128, ~16kB) do ícone — a original (512×512, ~140kB)
-// é overkill para um `h-7 w-7` no hero e pesava sozinha mais que todo o JS
-// desta página no Lighthouse mobile (achado medindo a landing).
-import logoIcon from "@/assets/logo-icon-sm.png"
 
 /**
  * `/c/:ocppIdentity` (+ `:connectorId` opcional) — a tela MAIS importante do
@@ -178,35 +176,18 @@ export function ChargePointLanding() {
           vê ao escanear o QR. Altura contida de propósito (a regra "acima da
           dobra, sem scroll" continua valendo) — o impacto vem da COR/
           conteúdo, não de ocupar mais tela. */}
-      <div className="relative shrink-0 overflow-hidden bg-gradient-to-br from-primary-950 via-primary-900 to-primary-800 px-4 pb-14 pt-6 text-center">
-        <div
-          className="pointer-events-none absolute -right-8 -top-12 h-52 w-52 rounded-full bg-accent-glow/60 blur-2xl animate-float-soft"
-          aria-hidden="true"
-        />
-        <div
-          className="pointer-events-none absolute -bottom-10 -left-10 h-48 w-48 rounded-full bg-brand-teal/60 blur-2xl animate-float-soft"
-          style={{ animationDelay: "1.2s" }}
-          aria-hidden="true"
-        />
-        <div className="relative mx-auto flex max-w-md flex-col items-center gap-2">
-          <div className="flex items-center gap-2">
-            <img src={logoIcon} alt="" className="h-7 w-7 shrink-0" />
-            <span className="text-base font-black tracking-tight text-white">InnoFlow</span>
+      <div className="surface-dark surface-dark-rich relative shrink-0 overflow-hidden px-4 pb-14 pt-6 text-center">
+        <BrandBackdrop />
+        <div className="relative z-10 mx-auto flex max-w-md flex-col items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            <MascotFace size={40} className="rounded-full bg-white/10 ring-1 ring-white/15" />
+            <span className="text-base font-extrabold tracking-tight text-white">InnoFlow</span>
           </div>
-          <p className="text-xl font-black leading-snug tracking-tight text-white sm:text-2xl">
-            Carregue um{" "}
-            <span className="bg-gradient-to-r from-accent-300 to-accent-glow bg-clip-text text-transparent">futuro melhor</span>.
+          <p className="text-xl font-extrabold leading-snug tracking-tight text-white sm:text-2xl">
+            Carregue um <span className="bg-gradient-to-r from-lime to-primary-300 bg-clip-text text-transparent">futuro melhor</span>.
           </p>
         </div>
       </div>
-
-      {/* Blob de continuidade na área clara, atrás do card — bem mais sutil
-          que os do herói (fundo claro pede menos opacidade pra não brigar
-          com o texto), só pra a metade de baixo não voltar a ficar "morta". */}
-      <div
-        className="pointer-events-none absolute -bottom-20 -right-16 h-72 w-72 rounded-full bg-primary-200/40 blur-3xl"
-        aria-hidden="true"
-      />
 
       {/* SEM `justify-center`: o conteúdo fica logo abaixo do herói (fluxo do
           topo pra baixo), não centralizado numa coluna vazia — era exatamente
@@ -228,11 +209,12 @@ export function ChargePointLanding() {
           <ErrorState
             message={getApiErrorMessage(error, "Não foi possível encontrar este carregador. Confira o QR code e tente de novo.")}
             onRetry={() => refetch()}
+            art={<MascotFace size={64} />}
           />
         )}
 
         {!isLoading && !isError && cp && cp.connectors.length === 0 && (
-          <EmptyState icon={Zap} title="Sem conectores cadastrados" description="Este ponto de recarga ainda não tem conectores configurados." />
+          <EmptyState tone="brand" icon={Zap} title="Sem conectores cadastrados" description="Este ponto de recarga ainda não tem conectores configurados." art={<MascotFace size={64} />} />
         )}
 
         {!isLoading && !isError && cp && cp.connectors.length > 0 && !connectorId && cp.connectors.length > 1 && (
@@ -259,7 +241,7 @@ export function ChargePointLanding() {
                 : undefined
             if (!selected) {
               if (connectorId) {
-                return <ErrorState message="Conector não encontrado neste carregador." />
+                return <ErrorState message="Conector não encontrado neste carregador." art={<MascotFace size={64} />} />
               }
               return null
             }
@@ -273,7 +255,7 @@ export function ChargePointLanding() {
               // sobreposição com o herói (ver comentário do `<main>` acima)
               // — "flutua" por cima da fronteira em vez de nascer colado
               // nela, evitando o vazio entre o herói e o card.
-              <Card className="card-premium animate-fade-in-up -mt-8">
+              <Card className="animate-fade-in-up -mt-8 shadow-tinted-card">
                 <CardContent className="p-5">
                   <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">{cp.site.name}</p>
                   {(cp.site.addressLine || cp.site.city) && (
@@ -323,7 +305,7 @@ export function ChargePointLanding() {
                     {!isAuthenticated && (
                       <Link
                         to={`/login?redirect=${encodeURIComponent(redirectTarget)}`}
-                        className={buttonVariants({ size: "lg", className: "w-full" })}
+                        className={buttonVariants({ variant: "lime", size: "lg", className: "w-full" })}
                       >
                         <LogIn className="h-4 w-4" aria-hidden="true" />
                         Entrar para carregar
@@ -390,7 +372,8 @@ export function ChargePointLanding() {
                         <Button
                           type="button"
                           size="lg"
-                          className="w-full btn-glow-primary"
+                          variant="lime"
+                          className="w-full"
                           disabled={isOffline || !selected.tariff || hasOpenDebt}
                           loading={startSession.isPending}
                           onClick={() => handleStart(selected.connectorId)}
