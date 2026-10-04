@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { usePublicConfig } from "@/hooks/usePublicConfig"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorCode, getApiErrorStatus } from "@/services/api"
-import { clampGoogleButtonWidth, googleErrorMessageForCode, shouldShowGoogleButton } from "@/lib/googleAuth"
+import { clampGoogleButtonWidth, googleErrorMessageForCode, readGoogleEnabledHint, shouldShowGoogleButton, writeGoogleEnabledHint } from "@/lib/googleAuth"
 import { initGoogleIdentity, loadGoogleScript, releaseGoogleHandler, renderGoogleButton } from "@/lib/googleIdentity"
 import { cn } from "@/lib/utils"
 import type { User } from "@/types/api"
@@ -37,7 +37,10 @@ function GoogleGlyph() {
  * (ou a chamada falhar), não renderiza nada — nem botão, nem divisor. Se o
  * script do Google não carregar (bloqueador de anúncio, rede), também some em
  * silêncio, sem toast. Enquanto a config/script carregam, reserva a altura do
- * botão com skeleton (sem salto de layout).
+ * botão com skeleton SE a última resposta da config foi "ligado" (dica local,
+ * ver `readGoogleEnabledHint`); sem dica (primeira visita) ou com "desligado",
+ * não reserva nada — a config é buscada antes da tela montar
+ * (`lib/prefetchPublicConfig.ts`), então quase sempre já está no cache.
  */
 export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => void }) {
   const { data: config, isLoading: configLoading } = usePublicConfig()
@@ -45,6 +48,12 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
 
   const enabled = shouldShowGoogleButton(config)
   const clientId = config?.googleClientId ?? null
+
+  // Dica da última resposta da config: decide, SÓ enquanto ela carrega, se o primeiro quadro já reserva o espaço do botão.
+  const [hintEnabled] = useState(readGoogleEnabledHint)
+  useEffect(() => {
+    if (config) writeGoogleEnabledHint(enabled)
+  }, [config, enabled])
 
   const [scriptReady, setScriptReady] = useState(false)
   const [rendered, setRendered] = useState(false)
@@ -143,8 +152,9 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
     }
   }, [scriptReady, clientId, width])
 
-  // Config já carregou e não tem Client ID (ou o script falhou): feature desligada.
-  if ((!configLoading && !enabled) || failed) return null
+  // Config já carregou e não tem Client ID (ou o script falhou): feature desligada. Config ainda a caminho: só reserva o espaço
+  // (esqueleto) se a última resposta foi "ligado" — nunca nasce uma seção que vai sumir (CLS).
+  if (failed || (configLoading ? !hintEnabled : !enabled)) return null
 
   const ready = USE_MOCK_GOOGLE ? enabled : rendered
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { GoogleAuthSection } from "./GoogleAuthSection"
+import { GOOGLE_ENABLED_HINT_KEY } from "@/lib/googleAuth"
 
 const usePublicConfigMock = vi.fn()
 vi.mock("@/hooks/usePublicConfig", () => ({ usePublicConfig: () => usePublicConfigMock() }))
@@ -23,7 +24,10 @@ vi.mock("@/lib/googleIdentity", () => ({
 }))
 
 describe("GoogleAuthSection — feature nasce desligada", () => {
-  beforeEach(() => usePublicConfigMock.mockReset())
+  beforeEach(() => {
+    usePublicConfigMock.mockReset()
+    localStorage.clear()
+  })
 
   it("sem Client ID (googleClientId: null): não renderiza botão NEM o divisor", () => {
     usePublicConfigMock.mockReturnValue({ data: { googleClientId: null }, isLoading: false })
@@ -39,11 +43,43 @@ describe("GoogleAuthSection — feature nasce desligada", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("enquanto a config carrega: reserva o espaço (skeleton + divisor), marcado aria-busy", () => {
+  it("config a caminho SEM dica de ligado (primeira visita ou desligado): não reserva nada - a seção não nasce para sumir (CLS)", () => {
+    usePublicConfigMock.mockReturnValue({ data: undefined, isLoading: true })
+    const { container } = render(<GoogleAuthSection onSuccess={vi.fn()} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("config a caminho COM dica de ligado: reserva o espaço (skeleton + divisor), marcado aria-busy", () => {
+    localStorage.setItem(GOOGLE_ENABLED_HINT_KEY, "1")
     usePublicConfigMock.mockReturnValue({ data: undefined, isLoading: true })
     const { container } = render(<GoogleAuthSection onSuccess={vi.fn()} />)
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull()
     expect(screen.getByText(/ou continue com e-mail/i)).toBeInTheDocument()
+  })
+
+  it("grava a dica quando a config responde: ligado grava 1; desligado apaga", () => {
+    class InertResizeObserver {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", InertResizeObserver)
+    usePublicConfigMock.mockReturnValue({ data: { googleClientId: "id.apps.googleusercontent.com" }, isLoading: false })
+    const first = render(<GoogleAuthSection onSuccess={vi.fn()} />)
+    expect(localStorage.getItem(GOOGLE_ENABLED_HINT_KEY)).toBe("1")
+    first.unmount()
+
+    usePublicConfigMock.mockReturnValue({ data: { googleClientId: null }, isLoading: false })
+    render(<GoogleAuthSection onSuccess={vi.fn()} />)
+    expect(localStorage.getItem(GOOGLE_ENABLED_HINT_KEY)).toBeNull()
+    vi.unstubAllGlobals()
+  })
+
+  it("config que FALHOU não apaga a dica (erro de rede não significa desligado)", () => {
+    localStorage.setItem(GOOGLE_ENABLED_HINT_KEY, "1")
+    usePublicConfigMock.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+    render(<GoogleAuthSection onSuccess={vi.fn()} />)
+    expect(localStorage.getItem(GOOGLE_ENABLED_HINT_KEY)).toBe("1")
   })
 
   it("Google real monta o botão SÍNCRONO: sai do skeleton e fica visível (regressão de produção)", async () => {

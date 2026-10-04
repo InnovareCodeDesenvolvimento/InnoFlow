@@ -50,3 +50,28 @@ export function googleErrorMessageForCode(code: string | undefined, status?: num
       return "Não foi possível entrar com o Google. Tente novamente ou use e-mail e senha."
   }
 }
+
+/**
+ * Dica local de que o servidor TEM o login com Google ligado (gravada quando a config responde). Existe só para o primeiro
+ * quadro da tela de Login/Cadastro: reservar o espaço do botão ANTES da config chegar quando a última resposta foi "ligado", e
+ * NÃO reservar quando foi "desligado" ou desconhecido — assim a seção nunca nasce e some (o salto que o Lighthouse media como
+ * CLS 0,041 em `/login`). A verdade continua sendo a config; a dica errada custa, no máximo, um ajuste de layout.
+ */
+export const GOOGLE_ENABLED_HINT_KEY = "innoflow:google-enabled"
+
+export function readGoogleEnabledHint(): boolean {
+  try {
+    return localStorage.getItem(GOOGLE_ENABLED_HINT_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+export function writeGoogleEnabledHint(enabled: boolean): void {
+  try {
+    if (enabled) localStorage.setItem(GOOGLE_ENABLED_HINT_KEY, "1")
+    else localStorage.removeItem(GOOGLE_ENABLED_HINT_KEY)
+  } catch {
+    // modo privado/armazenamento bloqueado: sem dica, comportamento padrão (não reserva)
+  }
+}

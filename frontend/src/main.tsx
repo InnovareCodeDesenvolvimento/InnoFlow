@@ -46,4 +46,10 @@ if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === "true") {
   await worker.start({ onUnhandledRequest: "bypass", quiet: true })
 }
 
+// Login/Cadastro: busca a config pública (botão do Google) em paralelo com o chunk da tela - ver `lib/prefetchPublicConfig.ts`.
+// Import dinâmico e só nessas rotas: a landing e o PWA não pagam axios/serviços no caminho crítico.
+if (/^\/(login|cadastro)\/?$/.test(window.location.pathname)) {
+  void import("./lib/prefetchPublicConfig").then(({ prefetchPublicConfig }) => prefetchPublicConfig(queryClient))
+}
+
 renderApp()
