@@ -44,10 +44,19 @@ function GoogleGlyph() {
  */
 export function GoogleAuthSection({
   onSuccess,
+  onCredential,
+  mapError,
   showDivider = true,
   className,
 }: {
-  onSuccess: (user: User) => void
+  /** Login/cadastro: recebe o usuário que o `POST /api/auth/google` devolveu. */
+  onSuccess?: (user: User) => void
+  /**
+   * Quando informado, SUBSTITUI o login: a credencial do Google vai para esta função (ex.: vincular o Google a quem já está logado, via
+   * `POST /api/auth/google/link`) e a sessão atual não é tocada. Se lançar, o erro vira o texto de `mapError`.
+   */
+  onCredential?: (credential: string) => Promise<void>
+  mapError?: (err: unknown) => string
   /** `false` fora de Login/Cadastro (ex.: vincular o Google a uma conta já logada): sem o "ou continue com e-mail". */
   showDivider?: boolean
   className?: string
@@ -79,15 +88,19 @@ export function GoogleAuthSection({
       setError(null)
       setSubmitting(true)
       try {
-        const user = await googleLogin(credential)
-        onSuccess(user)
+        if (onCredential) {
+          await onCredential(credential)
+        } else {
+          const user = await googleLogin(credential)
+          onSuccess?.(user)
+        }
       } catch (err) {
-        setError(googleErrorMessageForCode(getApiErrorCode(err), getApiErrorStatus(err)))
+        setError(mapError ? mapError(err) : googleErrorMessageForCode(getApiErrorCode(err), getApiErrorStatus(err)))
       } finally {
         setSubmitting(false)
       }
     },
-    [googleLogin, onSuccess],
+    [googleLogin, onSuccess, onCredential, mapError],
   )
 
   // O GIS guarda o callback da PRIMEIRA `initialize` — o handler vivo passa

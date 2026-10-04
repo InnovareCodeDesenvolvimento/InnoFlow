@@ -52,6 +52,33 @@ export function googleErrorMessageForCode(code: string | undefined, status?: num
 }
 
 /**
+ * Texto de cada erro de `POST /api/auth/google/link` (vincular o Google a quem já está logado). `email` = e-mail da conta logada, para dizer qual Google usar.
+ * 401 aqui pode ser o Google (`INVALID_GOOGLE_TOKEN`) ou a própria sessão (`UNAUTHORIZED`): o código decide.
+ */
+export function linkGoogleErrorMessage(code: string | undefined, status: number | undefined, email?: string | null): string {
+  const rateLimited = authRateLimitMessage(status, code)
+  if (rateLimited) return rateLimited
+  switch (code) {
+    case "GOOGLE_EMAIL_MISMATCH":
+      return `Use a conta Google com o mesmo e-mail desta conta${email ? ` (${email})` : ""}.`
+    case "GOOGLE_ALREADY_LINKED":
+      return "Esta conta Google já está vinculada a outra conta, ou a sua conta já tem um Google vinculado."
+    case "GOOGLE_EMAIL_NOT_VERIFIED":
+      return "O Google informou que o e-mail dessa conta ainda não foi verificado. Verifique-o na sua conta Google e tente de novo."
+    case "GOOGLE_LOGIN_NOT_ALLOWED":
+      return "Esta conta não pode ser vinculada ao Google (contas de operação e administração entram só com e-mail e senha)."
+    case "GOOGLE_NOT_CONFIGURED":
+      return "O login com o Google está indisponível no momento. Use o Pix ou a carteira por enquanto."
+    case "INVALID_GOOGLE_TOKEN":
+      return "Não foi possível validar a conta Google. Tente novamente."
+    case "UNAUTHORIZED":
+      return "Sua sessão expirou. Entre de novo para vincular o Google."
+    default:
+      return "Não foi possível vincular o Google agora. Tente novamente em instantes."
+  }
+}
+
+/**
  * Dica local de que o servidor TEM o login com Google ligado (gravada quando a config responde). Existe só para o primeiro
  * quadro da tela de Login/Cadastro: reservar o espaço do botão ANTES da config chegar quando a última resposta foi "ligado", e
  * NÃO reservar quando foi "desligado" ou desconhecido — assim a seção nunca nasce e some (o salto que o Lighthouse media como

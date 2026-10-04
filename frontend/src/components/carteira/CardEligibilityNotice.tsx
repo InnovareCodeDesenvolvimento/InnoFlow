@@ -1,24 +1,23 @@
 import { Clock, ShieldCheck } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { authService } from "@/services/auth"
+import { getApiErrorCode, getApiErrorStatus } from "@/services/api"
 import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { usePublicConfig } from "@/hooks/usePublicConfig"
 import { BLOCKED_TEXT, GOOGLE_REQUIRED_TEXT, GOOGLE_REQUIRED_TITLE, blockedMessage, type CardEligibilityIssue } from "@/lib/cardEligibility"
-import { shouldShowGoogleButton } from "@/lib/googleAuth"
+import { linkGoogleErrorMessage, shouldShowGoogleButton } from "@/lib/googleAuth"
 import { useAuthStore } from "@/store/authStore"
-import type { User } from "@/types/api"
 
 /**
  * Explica por que o CARTÃO não está disponível e o que fazer (I-7). Pix e carteira seguem normais - o texto sempre diz isso.
  *
- *  - `GOOGLE_LOGIN_REQUIRED`: CTA "Continuar com o Google". O app não tem um "vincular" separado: o botão chama `POST /api/auth/google`, que para conta de
- *    motorista com o MESMO e-mail verificado VINCULA o Google à conta existente (o servidor zera a senha e devolve token novo - o login normal continua sendo
- *    esta mesma rota). Duas consequências que o motorista precisa saber ANTES de clicar, e por isso estão no texto: (1) tem que ser o Google do mesmo e-mail
- *    desta conta; (2) depois disso a conta entra pelo Google. Se o Google for de OUTRO e-mail, o servidor cria/entra em OUTRA conta de motorista: detectado
- *    pela troca de `user.id` e avisado em toast (a tela passa a mostrar a outra conta, sem a carteira desta).
+ *  - `GOOGLE_LOGIN_REQUIRED`: CTA "Continuar com o Google" que chama `POST /api/auth/google/link` (autenticado) - vincula o Google a ESTA conta sem trocar de
+ *    conta, sem zerar a senha e sem token novo. O e-mail do Google tem que ser o da conta (senão 403 `GOOGLE_EMAIL_MISMATCH`, explicado com o e-mail certo).
+ *    NÃO usa o `POST /api/auth/google` público (ignora quem está logado, zera a senha e pode cair em outra conta).
  *  - `TEMPORARILY_BLOCKED`: "indisponível até HH:MM", sem CTA (não há o que fazer além de esperar).
  */
-export function CardEligibilityNotice({ issue, className, onLinked }: { issue: CardEligibilityIssue; className?: string; /** Chamado depois do Google responder com sucesso (a tela solta o aviso que guardava do servidor). */ onLinked?: () => void }) {
+export function CardEligibilityNotice({ issue, className, onLinked }: { issue: CardEligibilityIssue; className?: string; /** Chamado depois de o servidor confirmar o vínculo (a tela solta o aviso que guardava do servidor). */ onLinked?: () => void }) {
   const user = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
   const { data: config } = usePublicConfig()
@@ -37,17 +36,13 @@ export function CardEligibilityNotice({ issue, className, onLinked }: { issue: C
     )
   }
 
-  const handleLinked = (next: User) => {
-    // O servidor pode ter vinculado (mesma conta) OU entrado/criado outra conta (Google de outro e-mail): só o `user.id` diz qual.
-    if (user && next.id !== user.id) {
-      toast.warning("Você entrou em outra conta.", {
-        description: "O Google usado tem um e-mail diferente do desta conta. Para pagar com cartão nesta conta, vincule o Google do mesmo e-mail dela.",
-      })
-    } else {
-      toast.success("Conta Google vinculada.", { description: "Agora você pode pagar com cartão." })
-    }
+  // `POST /api/auth/google/link` (autenticado): vincula o Google a ESTA conta, sem trocar de conta e sem mexer na senha nem na sessão. Só resta recarregar a
+  // elegibilidade (`cardEligibility` vem do GET de cartões) - nada de token novo.
+  const handleCredential = async (credential: string) => {
+    await authService.linkGoogle({ credential })
+    toast.success("Pronto! Agora você pode pagar com cartão.")
     onLinked?.()
-    void queryClient.invalidateQueries({ queryKey: ["me"] })
+    await queryClient.invalidateQueries({ queryKey: ["me"] })
   }
 
   const googleAvailable = shouldShowGoogleButton(config)
@@ -66,10 +61,14 @@ export function CardEligibilityNotice({ issue, className, onLinked }: { issue: C
 
       {googleAvailable ? (
         <>
-          <GoogleAuthSection onSuccess={handleLinked} showDivider={false} className="mt-3" />
+          <GoogleAuthSection
+            onCredential={handleCredential}
+            mapError={(err) => linkGoogleErrorMessage(getApiErrorCode(err), getApiErrorStatus(err), user?.email)}
+            showDivider={false}
+            className="mt-3"
+          />
           <p className="mt-3 text-xs leading-relaxed text-ink-softer" data-testid="card-eligibility-link-note">
-            Use a conta Google do <strong className="font-semibold text-ink-soft">mesmo e-mail</strong> desta conta{user?.email ? ` (${user.email})` : ""}. Depois de vincular, você passa a entrar
-            pelo Google e a senha atual deixa de valer.
+            Use a conta Google do <strong className="font-semibold text-ink-soft">mesmo e-mail</strong> desta conta{user?.email ? ` (${user.email})` : ""}. Sua senha continua valendo.
           </p>
         </>
       ) : (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clampGoogleButtonWidth, googleErrorMessageForCode, shouldShowGoogleButton } from "./googleAuth"
+import { clampGoogleButtonWidth, googleErrorMessageForCode, linkGoogleErrorMessage, shouldShowGoogleButton } from "./googleAuth"
 
 describe("shouldShowGoogleButton", () => {
   it("mostra só quando há Client ID de verdade", () => {
@@ -40,5 +40,24 @@ describe("googleErrorMessageForCode", () => {
     const generic = googleErrorMessageForCode(undefined)
     expect(generic).toMatch(/Tente novamente/)
     expect(googleErrorMessageForCode("ALGO_NOVO")).toBe(generic)
+  })
+})
+
+describe("linkGoogleErrorMessage (POST /api/auth/google/link)", () => {
+  it("e-mail diferente: diz qual e-mail usar", () => {
+    expect(linkGoogleErrorMessage("GOOGLE_EMAIL_MISMATCH", 403, "ana@x.com")).toBe("Use a conta Google com o mesmo e-mail desta conta (ana@x.com).")
+    expect(linkGoogleErrorMessage("GOOGLE_EMAIL_MISMATCH", 403)).toBe("Use a conta Google com o mesmo e-mail desta conta.")
+  })
+  it("já vinculado, não verificado, não permitido, não configurado, token inválido, sessão expirada", () => {
+    expect(linkGoogleErrorMessage("GOOGLE_ALREADY_LINKED", 409)).toMatch(/já está vinculada a outra conta, ou a sua conta já tem um Google vinculado/)
+    expect(linkGoogleErrorMessage("GOOGLE_EMAIL_NOT_VERIFIED", 403)).toMatch(/não foi verificado/)
+    expect(linkGoogleErrorMessage("GOOGLE_LOGIN_NOT_ALLOWED", 403)).toMatch(/não pode ser vinculada/)
+    expect(linkGoogleErrorMessage("GOOGLE_NOT_CONFIGURED", 503)).toMatch(/indisponível/)
+    expect(linkGoogleErrorMessage("INVALID_GOOGLE_TOKEN", 401)).toMatch(/validar a conta Google/)
+    expect(linkGoogleErrorMessage("UNAUTHORIZED", 401)).toMatch(/sessão expirou/)
+  })
+  it("429 usa o texto de limite de tentativas; código desconhecido cai no genérico", () => {
+    expect(linkGoogleErrorMessage("RATE_LIMITED_AUTH", 429)).toBe(googleErrorMessageForCode("RATE_LIMITED_AUTH", 429))
+    expect(linkGoogleErrorMessage("ALGO_NOVO", 500)).toMatch(/Tente novamente em instantes/)
   })
 })

@@ -931,6 +931,10 @@ export function isMockDriverGoogleLinkable(driverId: string): boolean {
   return driverId === SO_SENHA_DRIVER_ID
 }
 
+export function isMockDriverGoogleLinked(driverId: string): boolean {
+  return googleLinkedDrivers.has(driverId)
+}
+
 export function linkGoogleToMockDriver(driverId: string): void {
   googleLinkedDrivers.add(driverId)
 }

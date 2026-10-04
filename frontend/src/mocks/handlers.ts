@@ -35,6 +35,7 @@ import {
   getPublicChargePointCard,
   isGatewayDisabledFor,
   isMockDriverGoogleLinkable,
+  isMockDriverGoogleLinked,
   linkGoogleToMockDriver,
   listMockPaymentMethods,
   listMockSessions,
@@ -315,6 +316,42 @@ export const handlers = [
     return HttpResponse.json({ googleClientId: disabled ? null : "mock-client-id.apps.googleusercontent.com" })
   }),
 
+  // I-7 - `POST /api/auth/google/link` (AUTENTICADO, só DRIVER): vincula o Google à conta LOGADA, sem trocar de conta, sem zerar a senha e sem token novo.
+  // Espelha `backend/src/api/routes/auth.routes.ts`. Desfechos: 200 `{linked:true}`; 400 sem credential; 401 sem sessão / `INVALID_GOOGLE_TOKEN`; 403
+  // `GOOGLE_EMAIL_NOT_VERIFIED` | `GOOGLE_EMAIL_MISMATCH` | `GOOGLE_LOGIN_NOT_ALLOWED`; 409 `GOOGLE_ALREADY_LINKED`; 503 `GOOGLE_NOT_CONFIGURED`; 429 `RATE_LIMITED_AUTH`.
+  // Cenários: a conta `so-senha@` vincula de verdade (o GET de cartões passa a dizer elegível); `localStorage["mock:google-link-error"]` = o código a devolver;
+  // `["mock:google-other-email"]="1"` (ou credential `outro-email`) = Google de outro e-mail; `["mock:google-rate-limited"]="1"` = 429.
+  http.post("/api/auth/google/link", async ({ request }) => {
+    const current = currentUser(request)
+    if (!current) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const body = (await request.json().catch(() => ({}))) as { credential?: string }
+    const credential = body.credential?.trim() ?? ""
+    if (!credential) return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "credential", message: "Required" }] }, { status: 400 })
+    if (localStorage.getItem("mock:google-rate-limited") === "1") {
+      return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429 })
+    }
+    if (current.role !== "DRIVER") return HttpResponse.json(errorBody("Esta conta não pode entrar com Google.", "GOOGLE_LOGIN_NOT_ALLOWED"), { status: 403 })
+    const forced = localStorage.getItem("mock:google-link-error")
+    const FORCED: Record<string, { status: number; message: string }> = {
+      INVALID_GOOGLE_TOKEN: { status: 401, message: "Token do Google inválido." },
+      GOOGLE_EMAIL_NOT_VERIFIED: { status: 403, message: "O e-mail da conta Google não está verificado." },
+      GOOGLE_EMAIL_MISMATCH: { status: 403, message: "O e-mail do Google é diferente do e-mail desta conta." },
+      GOOGLE_ALREADY_LINKED: { status: 409, message: "Esta conta ou este Google já está vinculado." },
+      GOOGLE_NOT_CONFIGURED: { status: 503, message: "Login com Google não está configurado." },
+      GOOGLE_LOGIN_NOT_ALLOWED: { status: 403, message: "Esta conta não pode entrar com Google." },
+    }
+    if (forced && FORCED[forced]) return HttpResponse.json(errorBody(FORCED[forced].message, forced), { status: FORCED[forced].status })
+    if (credential === "nao-verificado") return HttpResponse.json(errorBody(FORCED.GOOGLE_EMAIL_NOT_VERIFIED.message, "GOOGLE_EMAIL_NOT_VERIFIED"), { status: 403 })
+    if (credential === "outro-email" || localStorage.getItem("mock:google-other-email") === "1") {
+      return HttpResponse.json(errorBody(FORCED.GOOGLE_EMAIL_MISMATCH.message, "GOOGLE_EMAIL_MISMATCH"), { status: 403 })
+    }
+    if (!isMockDriverGoogleLinkable(current.userId) || isMockDriverGoogleLinked(current.userId)) {
+      return HttpResponse.json(errorBody(FORCED.GOOGLE_ALREADY_LINKED.message, "GOOGLE_ALREADY_LINKED"), { status: 409 })
+    }
+    linkGoogleToMockDriver(current.userId)
+    return HttpResponse.json({ linked: true })
+  }),
+
   http.post("/api/auth/google", async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { credential?: string }
     const credential = body.credential?.trim() ?? ""
@@ -340,22 +377,6 @@ export const handlers = [
       }
       mockUsers.push(created)
       return HttpResponse.json({ token: fakeToken(created), user: toUserDTO(created) }, { status: 201 })
-    }
-    // I-7: o servidor real não olha o token (rota pública) - vincula pelo E-MAIL do Google, que tem de ser o da conta. O mock simula "Google do mesmo e-mail" pela conta
-    // logada que está na tela; `credential = "outro-email"` simula o Google de OUTRO e-mail (o servidor cria/entra em OUTRA conta).
-    const current = currentUser(request)
-    if (credential === "outro-email" || (credential === "mock-google-credential" && localStorage.getItem("mock:google-other-email") === "1")) {
-      const other: MockUser = { id: `user_google_${Date.now()}`, name: "Outra Conta Google", email: `outra.${Date.now()}@example.com`, role: "DRIVER", operatorId: null, operatorName: null, password: "" }
-      mockUsers.push(other)
-      return HttpResponse.json({ token: fakeToken(other), user: toUserDTO(other) }, { status: 201 })
-    }
-    if (current && isMockDriverGoogleLinkable(current.userId)) {
-      const linkable = mockUsers.find((u) => u.id === current.userId)
-      if (linkable) {
-        linkGoogleToMockDriver(linkable.id)
-        // Vincular zera a senha no servidor real (conta passa a ser só-Google) e devolve token novo.
-        return HttpResponse.json({ token: fakeToken(linkable), user: { ...toUserDTO(linkable), hasPassword: false } })
-      }
     }
     const driver = mockUsers.find((u) => u.role === "DRIVER" && u.id === "user_driver")
     if (!driver) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })

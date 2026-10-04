@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { AuthResponse, GoogleAuthRequest } from "@/types/api"
+import type { AuthResponse, GoogleAuthRequest, LinkGoogleResponse } from "@/types/api"
 
 export interface LoginPayload {
   email: string
@@ -36,6 +36,15 @@ export const authService = {
    */
   async google(payload: GoogleAuthRequest): Promise<AuthResponse> {
     const { data } = await api.post<AuthResponse>("/api/auth/google", payload)
+    return data
+  },
+
+  /**
+   * `POST /api/auth/google/link` (AUTENTICADO) - vincula o Google à conta JÁ LOGADA. Não troca de conta, não zera a senha e não devolve token novo:
+   * a sessão atual segue valendo. Só vincula se o e-mail verificado do Google for igual ao da conta. Erros: ver `LinkGoogleErrorCode`.
+   */
+  async linkGoogle(payload: GoogleAuthRequest): Promise<LinkGoogleResponse> {
+    const { data } = await api.post<LinkGoogleResponse>("/api/auth/google/link", payload)
     return data
   },
 }
