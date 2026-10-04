@@ -51,6 +51,22 @@ Limites conhecidos (leia `BASELINE.md` para os números):
 - Mapa: os tiles são sólidos de propósito; o que se compara é layout, controles e marcadores, não o mapa do OSM.
 - SSE do mock (`realtimeStream.ts`) vira conectores a cada 15 s com timer real; as capturas duram poucos segundos e não esperam isso.
 
+## Classificar uma mudança de fase (sonda de geometria)
+
+`test:visual` diz "mudou"; não diz "mudou só a cor". Para classificar com prova:
+
+```
+VISUAL_PORT=5299 VISUAL_GEO_DIR=/tmp/geo_antes npx playwright test --config playwright.visual.config.ts rotas estados   # no commit ANTERIOR (fresh checkout + node_modules COPIADO)
+VISUAL_PORT=5299 VISUAL_GEO_DIR=/tmp/geo_depois npx playwright test --config playwright.visual.config.ts rotas estados  # no commit NOVO
+node scripts/comparar-geometria.mjs --a /tmp/geo_antes --b /tmp/geo_depois --json classe.json --md classe.md   [--ruido-a /tmp/geo_antes2 --ruido-b /tmp/geo_depois2]   # 2ª execução de cada lado: pixels que variam sozinhos não reprovam
+```
+
+Em modo sonda o teste NÃO compara com a baseline (só coleta). Vereditos por página: IDENTICA, ACEITA (só cor de texto/ícone) ou REPORTAR (qualquer retângulo, estilo de layout, fundo/borda, estrutura, texto ou
+atributo diferente, ou pixel alterado fora dos elementos recoloridos). Opções de decisão humana: `--opacity-ok`, `--aceitar-estilo`, `--orfaos-max` (documentadas no cabeçalho do script).
+
+**Porta e servidor.** O harness NÃO reaproveita servidor (`VISUAL_REUSE_SERVER=1` reativa de propósito): o Vite dev não recompila `tailwind.config.js` depois de subir (medido: classe nova no config
+=> 0 ocorrências no CSS servido até reiniciar; 1 depois), então um servidor velho na porta fotografava o CSS ANTIGO. Com a porta ocupada o Playwright erra em voz alta; use `VISUAL_PORT=<outra>`.
+
 ## Política de atualização da baseline
 
 A baseline é a **referência de "nada regrediu"**. Regravar para "fazer passar" destrói o propósito.

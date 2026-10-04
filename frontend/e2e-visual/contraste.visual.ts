@@ -31,7 +31,7 @@ interface NoRuim {
   fonte: string
 }
 
-async function medirContraste(page: Page): Promise<{ ruins: NoRuim[]; incompletos: number; passaram: number }> {
+async function medirContraste(page: Page): Promise<{ ruins: NoRuim[]; incompletos: number; motivosIncompletos: Record<string, number>; passaram: number }> {
   const r = await new AxeBuilder({ page }).withRules(["color-contrast"]).analyze()
   const violacao = r.violations.find((v) => v.id === "color-contrast")
   const ruins: NoRuim[] = (violacao?.nodes ?? []).map((n) => {
@@ -46,16 +46,23 @@ async function medirContraste(page: Page): Promise<{ ruins: NoRuim[]; incompleto
       fonte: `${d.fontSize ?? "?"} / peso ${d.fontWeight ?? "?"}`,
     }
   })
-  const incompletos = r.incomplete.find((v) => v.id === "color-contrast")?.nodes.length ?? 0
+  const nosIncompletos = r.incomplete.find((v) => v.id === "color-contrast")?.nodes ?? []
+  const incompletos = nosIncompletos.length
+  // POR QUE o axe não conseguiu avaliar (messageKey: bgImage = fundo com imagem/degradê, bgOverlap = sobreposto por outro elemento, pseudoContent, shortTextContent...).
+  const motivosIncompletos: Record<string, number> = {}
+  for (const n of nosIncompletos) {
+    const chave = String((n.any.find((a) => a.id === "color-contrast")?.data as { messageKey?: string } | undefined)?.messageKey ?? "sem-motivo")
+    motivosIncompletos[chave] = (motivosIncompletos[chave] ?? 0) + 1
+  }
   const passaram = r.passes.find((v) => v.id === "color-contrast")?.nodes.length ?? 0
-  return { ruins, incompletos, passaram }
+  return { ruins, incompletos, motivosIncompletos, passaram }
 }
 
 function registrar(projeto: string, id: string, rota: string, res: Awaited<ReturnType<typeof medirContraste>>) {
   mkdirSync(PASTA_SAIDA, { recursive: true })
   writeFileSync(
     path.join(PASTA_SAIDA, `${projeto}__${id}.json`),
-    JSON.stringify({ viewport: projeto, id, rota, reprovados: res.ruins.length, incompletos: res.incompletos, aprovados: res.passaram, nos: res.ruins }, null, 1),
+    JSON.stringify({ viewport: projeto, id, rota, reprovados: res.ruins.length, incompletos: res.incompletos, motivosIncompletos: res.motivosIncompletos, aprovados: res.passaram, nos: res.ruins }, null, 1),
   )
   const chave = `${projeto}/${id}`
   if (chave in baseline) {

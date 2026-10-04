@@ -145,8 +145,28 @@ dependência: `admin-gateway-pagamento` (170), `admin-vinculo-tarifa` (116), `ad
 2. Cada diferença visual é classificada pela Íris: **esperada** (escopo da fase) ou **regressão**. Registre abaixo; só então a Lyra/Atlas regravam a baseline (política no `README.md`).
 3. Mudanças **deliberadas já conhecidas**: `pub-rota-inexistente` muda se a D5 virar página 404; `landing.spec.ts:314` idem.
 
-### Registro por fase
+### 7. Classificação da F-A (04/10/2026) — com prova, não com olho
+
+Ferramenta: `VISUAL_GEO_DIR=<pasta> npx playwright test --config playwright.visual.config.ts rotas estados` grava, de cada rota×viewport, o DOM inteiro com o retângulo e o estilo
+computado de CADA elemento (`e2e-visual/geometria.ts`) e a imagem da mesma captura; `node scripts/comparar-geometria.mjs --a <baseline> --b <novo> ...` classifica. Entradas: A0 = `src` do
+commit `3bc8116`, novo = `bdbf8fc`, cada um rodado **2 vezes** (ruído medido). Árvore, texto, atributos e retângulos idênticos nos 123 pares (exceto o `pwa-mapa` a 1440 numa das execuções, ver abaixo).
+
+| Resultado | Páginas |
+|---|---:|
+| IDENTICA (nada mudou) | 6 (as 2 imagens do documento isolado do cartão ×3) |
+| ACEITA (só recolor de texto/ícone; todo pixel alterado dentro de um elemento recolorido) | **107** |
+| REPORTAR (recolor de fundo de elemento de estado) | **10** |
+
+- `opacity 0.7→1` do selo "Desenvolvido por" (aceito pelo Atlas): atinge também o **logo da Innovare** (a `<img>` fica 100% opaca), 1 elemento por página admin.
+- Ruído de rasterização que NÃO é diferença: blocos de 37 a 66 px em bordas/sombras (3 páginas) com DOM idêntico; mesmo tamanho de ruído aparece entre duas execuções do MESMO estado.
+- **Instabilidade conhecida do `pwa-mapa` a 1440**: 1 de 4 execuções saiu com a métrica da fonte de reserva (169 retângulos 0,67 px mais estreitos). Não é do app; é o flake de fonte já descrito em §1.1.
+- **Fundação não é 100% neutra**: o commit `9c9851d` já traz dois recolores (tokens `ink-softer`/`muted-foreground` e a legenda do `StatCard`). Revertendo TUDO que é contraste (tokens + 21 arquivos de `bdbf8fc` + legenda do `StatCard`) o `test:visual` dá 114/114 idêntico à A0; revertendo só `bdbf8fc` dava 111/114 (as 3 do `adm-dashboard`).
+- Contraste (axe): 0 reprovados, 3.753 aprovados, 898 incompletos (landing/vidro: `bgGradient` 449, `pseudoContent` 312, `bgOverlap` 98...) — lista por motivo em `CONTRASTE-ESTADO-ATUAL.md`.
+- Autoteste da ferramenta: um "fix de contraste" que também muda `px-3.5→px-4` na sidebar → `comparar-geometria` REPORTAR em 9/9 páginas testadas (retângulos e `padding-left/right` listados) e o `test:visual` falha nos 3 de 1440 (a 375/768 a sidebar está oculta).
+
+### Registro por fase (continuação)
 
 | Fase | Data | Diferenças esperadas (rota · o que mudou) | Regressões achadas | Baseline regravada por |
 |---|---|---|---|---|
 | A0 | 04/10/2026 | — (linha de base original) | — | Íris (única gravação inicial) |
+| F-A | 04/10/2026 | **107 imagens regravadas** (ver §7): só recolor de TEXTO/ÍCONE (tokens `ink-softer`/`muted-foreground` #6B7280→#5F6673, 26 usos de `ink-subtle` como texto→`ink-softer`, sidebar `white/35→60` e `white/50→70`, selo "Desenvolvido por" sem `opacity-70`, ícone de busca/"R$" do Input, legenda do `StatCard`). Geometria idêntica nos 123 pares. | **10 imagens NÃO regravadas** (REPORTAR): recolor de FUNDO de elemento de estado por efeito colateral do token (`bg-ink-softer`): trilho do Switch desligado (`/admin/gateway-pagamento` ×3), pino cinza do mockup da landing (`/` e `/nao-existe-xyz` ×3 cada, 6 imagens) e marcador/legenda "Fora do ar" do mapa (`/app/mapa` a 1440). 1 mudança latente aceita com nota: `flex-shrink 1→0` no `IconBadge` do EmptyState. | Lyra/Atlas (aprovação do Atlas dada no briefing de 04/10/2026), classificado e gravado pela Íris |

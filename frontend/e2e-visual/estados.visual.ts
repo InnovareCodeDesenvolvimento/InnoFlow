@@ -16,7 +16,8 @@ const SALTO_FIM_MS = 10_000 // depois do Stop, > 4 s para o mock fechar a sessã
 
 async function foto(page: Page, nome: string, opts: { crescerAteODocumento?: boolean; spinnerEhConteudo?: boolean } = {}) {
   await aguardarEstavel(page, { spinnerEhConteudo: opts.spinnerEhConteudo })
-  expect(await fotografar(page, opts)).toMatchSnapshot(`${nome}.jpg`)
+  const imagem = await fotografar(page, { ...opts, nome })
+  if (!process.env.VISUAL_GEO_DIR) expect(imagem).toMatchSnapshot(`${nome}.jpg`) // modo SONDA: ver rotas.visual.ts
 }
 
 test.describe("fluxo de recarga (uma página só) — conectando, ao vivo, parar, recibo", () => {

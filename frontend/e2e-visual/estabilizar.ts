@@ -1,5 +1,8 @@
 import { deflateSync, crc32 } from "node:zlib"
-import type { Page } from "@playwright/test"
+import { test, type Page } from "@playwright/test"
+import { writeFileSync } from "node:fs"
+import path from "node:path"
+import { gravarGeometria } from "./geometria"
 import { T0 } from "./constantes"
 
 function chunk(tipo: string, dados: Buffer): Buffer {
@@ -132,11 +135,17 @@ async function carregarImagensPreguicosas(page: Page) {
     }
     window.scrollTo(0, 0)
     await Promise.all(
+      // Só espera imagem que está EM LAYOUT: `<img loading="lazy">` dentro de `display:none` (ex.: painel `lg:hidden` / `hidden lg:flex`) nunca
+      // carrega — por desenho do navegador — e a espera pendurava a rota até o timeout (achado da F-B, nas telas de login/cadastro).
       Array.from(document.images).map((img) =>
-        img.complete ? Promise.resolve() : new Promise((r) => (img.addEventListener("load", r, { once: true }), img.addEventListener("error", r, { once: true }))),
+        img.complete || img.getClientRects().length === 0 ? Promise.resolve() : new Promise((r) => (img.addEventListener("load", r, { once: true }), img.addEventListener("error", r, { once: true }))),
       ),
     )
-    await Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => undefined)))
+    await Promise.all(
+      Array.from(document.images)
+        .filter((img) => img.getClientRects().length > 0) // decode() de imagem preguiçosa fora de layout também nunca resolve
+        .map((img) => img.decode().catch(() => undefined)),
+    )
   })
 }
 
@@ -155,7 +164,7 @@ const ALTURA_MAXIMA = 14_000
  * `crescerAteODocumento`: telas do PWA têm bottom nav `fixed`; sem crescer, o `fullPage` a desenha no meio da imagem, por cima do conteúdo
  * (a posição "na dobra" da viewport original). NÃO use onde a altura depende de `vh` (landing, login): a viewport gigante esticaria o hero.
  */
-export async function fotografar(page: Page, opts: { crescerAteODocumento?: boolean } = {}): Promise<Buffer> {
+export async function fotografar(page: Page, opts: { crescerAteODocumento?: boolean; nome?: string } = {}): Promise<Buffer> {
   const original = page.viewportSize()!
   const extra = await page.evaluate((doc) => {
     let melhor = doc ? Math.max(0, document.documentElement.scrollHeight - window.innerHeight) : 0
@@ -181,6 +190,14 @@ export async function fotografar(page: Page, opts: { crescerAteODocumento?: bool
     // mesmo instante, era sempre igual à baseline. DOM e `document.fonts` eram idênticos antes das duas (as faces "Inter Fallback" só ficam
     // `loaded` DEPOIS da 1ª captura). Causa raiz não identificada no Chromium; o contorno é fotografar duas vezes e guardar a segunda.
     await page.screenshot({ ...OPCOES_FOTO, quality: 20 })
+    // Sonda de geometria (F-A): só com VISUAL_GEO_DIR. Grava o DOM+retângulos+estilos e a imagem da MESMA captura (ver geometria.ts / scripts/comparar-geometria.mjs).
+    if (process.env.VISUAL_GEO_DIR && opts.nome) {
+      const vp = test.info().project.name
+      await gravarGeometria(page, opts.nome, vp)
+      const foto = await page.screenshot(OPCOES_FOTO)
+      writeFileSync(path.join(process.env.VISUAL_GEO_DIR, `${vp}__${opts.nome}.jpg`), foto)
+      return foto
+    }
     return await page.screenshot(OPCOES_FOTO)
   } finally {
     if (extra > 0) await page.setViewportSize(original)

@@ -53,6 +53,16 @@ for (const i of itens)
     porClasse.set(cls, c)
   }
 
+// Por que o axe não avaliou (messageKey) e em quais páginas — a LISTA do que precisa de cálculo manual.
+const motivosInc = new Map()
+for (const i of itens)
+  for (const [m, q] of Object.entries(i.motivosIncompletos ?? {})) {
+    const c = motivosInc.get(m) ?? { nos: 0, rotas: new Map() }
+    c.nos += q
+    c.rotas.set(i.id, (c.rotas.get(i.id) ?? 0) + q)
+    motivosInc.set(m, c)
+  }
+
 const total = itens.reduce((a, i) => a + i.reprovados, 0)
 const incompletos = itens.reduce((a, i) => a + i.incompletos, 0)
 const aprovados = itens.reduce((a, i) => a + i.aprovados, 0)
@@ -69,6 +79,9 @@ for (const [k, c] of [...combos.entries()].sort((a, b) => b[1].nos - a[1].nos))
 linhas.push("", "## Por classe de cor de texto (extraída do HTML do nó)", "", "| Classe | Nós | Razão (mín–máx) | Rotas |", "|---|---:|---|---|")
 for (const [k, c] of [...porClasse.entries()].sort((a, b) => b[1].nos - a[1].nos))
   linhas.push(`| \`${k}\` | ${c.nos} | ${c.min}–${c.max} | ${[...c.rotas].slice(0, 5).join(", ")}${c.rotas.size > 5 ? ` +${c.rotas.size - 5}` : ""} |`)
+linhas.push("", "## Nós que o axe NÃO conseguiu avaliar (`incomplete`) — por motivo", "", "| Motivo (messageKey do axe) | Nós | Onde (rota: nós, as 6 maiores) |", "|---|---:|---|")
+for (const [m, c] of [...motivosInc.entries()].sort((a, b) => b[1].nos - a[1].nos))
+  linhas.push(`| ${m} | ${c.nos} | ${[...c.rotas.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([r, q]) => `${r}: ${q}`).join(", ")} |`)
 linhas.push("", "## Por rota × viewport (reprovados / incompletos)", "", "| Rota | 375 | 768 | 1440 |", "|---|---:|---:|---:|")
 for (const id of [...new Set(itens.map((i) => i.id))]) {
   const cel = (v) => {

@@ -21,7 +21,9 @@ for (const persona of personas) {
         await prepararPagina(page)
         await page.goto(rota.path, { waitUntil: "load" })
         await aguardarEstavel(page, rota.pronto)
-        expect(await fotografar(page, { crescerAteODocumento: rota.crescerAteODocumento })).toMatchSnapshot(`${rota.id}.jpg`)
+        const foto = await fotografar(page, { crescerAteODocumento: rota.crescerAteODocumento, nome: rota.id })
+        // Modo SONDA (VISUAL_GEO_DIR): só coleta DOM+imagem para `scripts/comparar-geometria.mjs`; não compara com a baseline (senão o 1º diff aborta o fluxo de várias telas).
+        if (!process.env.VISUAL_GEO_DIR) expect(foto).toMatchSnapshot(`${rota.id}.jpg`)
       })
     }
   })

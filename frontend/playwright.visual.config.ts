@@ -16,7 +16,7 @@ import { VIEWPORTS, TIMEZONE, LOCALE } from "./e2e-visual/constantes"
  *  - tiles do mapa interceptados e trocados por um PNG sólido (rede externa = instabilidade);
  *  - JPEG nos baselines (`toMatchSnapshot` aceita .jpg) para o repositório não inchar com PNG de página inteira.
  */
-const PORT = 5199
+const PORT = Number(process.env.VISUAL_PORT || 5199)
 const baseURL = process.env.VISUAL_BASE_URL || `http://localhost:${PORT}`
 
 export default defineConfig({
@@ -61,9 +61,12 @@ export default defineConfig({
   webServer: process.env.VISUAL_BASE_URL
     ? undefined
     : {
-        command: "npm run dev:mock -- --port 5199 --strictPort",
+        command: `npm run dev:mock -- --port ${PORT} --strictPort`,
         url: `http://localhost:${PORT}`,
-        reuseExistingServer: !process.env.CI,
+        // NUNCA reaproveitar servidor por padrão. O Vite dev NÃO recompila `tailwind.config.js`/tokens editados depois que subiu (skill medir-antes-de-afirmar): um servidor velho
+        // na porta serve o CSS ANTIGO e a comparação "falha" (ou "passa") por motivo nenhum — foi a 1ª rodada instável da F-A (45 falhas sem 768). Com porta ocupada o Playwright
+        // ERRA em voz alta em vez de fotografar o servidor errado. `VISUAL_REUSE_SERVER=1` reativa o reaproveitamento de propósito.
+        reuseExistingServer: process.env.VISUAL_REUSE_SERVER === "1",
         timeout: 120_000,
       },
 })
