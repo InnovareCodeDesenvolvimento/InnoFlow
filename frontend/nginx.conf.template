@@ -105,17 +105,8 @@ server {
     # tiles OSM) se aplica aqui, porque esta página não deveria precisar de
     # NENHUMA delas.
     #
-    # `script-src`/`connect-src`/`frame-src` ainda são só 'self' porque a URL
-    # real do script de tokenização (Silent Order Post) da Cielo NÃO foi
-    # confirmada ainda (3 perguntas em aberto pro comercial, ver
-    # PROGRESSO.md §F5) — o app usa um mock local enquanto isso
-    # (`pagamento-cartao/sopClient.ts`), que nunca bate em rede nenhuma.
-    # QUANDO a Cielo confirmar: adicionar SÓ esse host exato em `script-src`
-    # (o script em si) E em `connect-src`/`frame-src` se o SDK abrir XHR ou
-    # iframe próprio para o POST de tokenização — NUNCA um wildcard amplo tipo
-    # `*.cielo.com.br`. Sem isso o SDK real não carrega nem consegue enviar o
-    # cartão — e é exatamente esse bloqueio que garante que, até lá, nenhum
-    # dado de cartão pode vazar para fora desta origem por engano.
+    # `script-src`/`connect-src`/`frame-src`/`form-action` liberam os domínios da Cielo (ver o bloco "CSP DESTA PÁGINA" logo abaixo):
+    # sem isso o script do Silent Order Post não carrega nem consegue enviar o cartão. Fora desses domínios, nada sai desta página.
     #
     # `frame-ancestors 'none'` + `X-Frame-Options: DENY`: esta página NUNCA
     # deve ser embutida em iframe, nem pelo nosso próprio site — é aba/janela
@@ -126,6 +117,15 @@ server {
     # disco/proxy. `Referrer-Policy: no-referrer`: nem a própria URL desta
     # página (que não leva segredo nenhum, mas por princípio) vaza para
     # quem quer que seja referenciado a partir daqui.
+    # CSP DESTA PÁGINA (C1.2, 04/10/2026) - única que fala com a Cielo, e a única que libera domínios dela:
+    #   script-src   o script do SOP (sandbox: transactionsandbox.pagador.com.br; produção: transaction.cieloecommerce.cielo.com.br);
+    #   connect-src  EM PRODUÇÃO o script POSTA o cartão em https://www.pagador.com.br/post/api/public/v1/card (host DIFERENTE do script) -
+    #                foi exatamente isso que derrubou o cartão do Parque das Feiras em 19/09/2026 ("violates connect-src");
+    #   frame-src / form-action  o script pode usar iframe/form para o mesmo destino (liberado por precaução, como pede a doc da fase).
+    # Domínios INTEIROS (*.pagador.com.br e *.cieloecommerce.cielo.com.br), não hosts soltos: sandbox e produção usam hosts diferentes e a
+    # Cielo muda subdomínio. Todo o resto continua estrito (default-src 'none', img/font/style só 'self', frame-ancestors 'none').
+    # NÃO foi testado contra a Cielo real: depois do deploy, fazer um cadastro de cartão de teste com a HORA ANOTADA e conferir o log/console
+    # daquele minuto (a ausência de relato só prova algo se o relato tinha como acontecer na janela lida).
     location = /pagamento-cartao.html {
         add_header Cache-Control "no-store" always;
         add_header X-Frame-Options "DENY" always;
@@ -133,7 +133,7 @@ server {
         add_header Referrer-Policy "no-referrer" always;
         add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'none'" always;
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; frame-src https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br" always;
         try_files $uri =404;
     }
 
