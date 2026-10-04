@@ -67,6 +67,12 @@ atributo diferente, ou pixel alterado fora dos elementos recoloridos). Opções 
 **Porta e servidor.** O harness NÃO reaproveita servidor (`VISUAL_REUSE_SERVER=1` reativa de propósito): o Vite dev não recompila `tailwind.config.js` depois de subir (medido: classe nova no config
 => 0 ocorrências no CSS servido até reiniciar; 1 depois), então um servidor velho na porta fotografava o CSS ANTIGO. Com a porta ocupada o Playwright erra em voz alta; use `VISUAL_PORT=<outra>`.
 
+## Critérios de aceite de um REDESENHO (`criterios-fb.visual.ts`)
+
+Quando a fase muda a tela de propósito, "só cor" deixa de ser o critério. `npx playwright test --config playwright.visual.config.ts criterios-fb` mede, por tela e viewport: moldura escura + miolo claro
+(pixels), CTA lima, mascote, ausência de texto de operador, rolagem horizontal, foco por teclado (cada focável muda de aparência com contraste >= 3:1, o foco cicla, a ordem não volta), CLS de `/eletropostos`
+e os fluxos (error boundary, `?redirect=`, redirect aberto recusado, Google mock). A lista de telas está no topo do arquivo: copie e ajuste para a fase seguinte.
+
 ## Política de atualização da baseline
 
 A baseline é a **referência de "nada regrediu"**. Regravar para "fazer passar" destrói o propósito.

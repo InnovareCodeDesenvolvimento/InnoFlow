@@ -167,9 +167,38 @@ commit `3bc8116`, novo = `bdbf8fc`, cada um rodado **2 vezes** (ruído medido). 
 - **DÍVIDA registrada (para a Lyra, F-B/F-D):** `ink-softer` é usado como cor de TEXTO e como cor de FUNDO de elemento de estado (Switch desligado, pino/marcador cinza). Escurecer o token para passar no contraste de texto escureceu os fundos também. Criar um token separado para fundos de estado (ex.: `--color-state-off`) e migrar `bg-ink-softer`, para que mudar um não arraste o outro.
 - A aprovação do Atlas das 10 REPORTADAS e das notas (logo da Innovare 100% opaco, `flex-shrink` do IconBadge) está na mensagem de 04/10/2026; aqui só registro a decisão.
 
+### 8. Classificação da F-B — Auth + Público (04/10/2026) — redesenho DELIBERADO, critério ≠ "só cor"
+
+Estados comparados pela sonda: F-A = `9912d3d`/`add4e7d` (src idêntico) x F-B = `5d073cd`, 2 execuções de cada lado (`--ruido-a/--ruido-b`), 123 pares.
+
+| Resultado | Páginas |
+|---|---:|
+| **Fora das 6 telas da F-B**: IDENTICA | 103 |
+| **Fora das 6 telas da F-B**: ACEITA só por ruído de raster medido (70 px no documento isolado do cartão a 1440; 325 px em bordas/sombras de `adm-tariffs` a 1440; DOM idêntico) | 2 |
+| **Dentro das 6 telas** (`auth-login`, `auth-cadastro`, `pub-eletropostos`, `pub-qr-carregador`, `pub-qr-conector`, `pub-rota-inexistente` × 3 larguras) | 18, todas REDESENHO (mudam retângulos, estrutura e pintura) |
+
+- **(a) Nada fora das 6 mudou**: a landing (`/`) saiu **IDENTICA** nas 3 larguras (0 pixel, 0 retângulo) mesmo com `landing/Mascot.tsx` editado; admin (14 rotas), PWA (13), diálogos e documento do cartão idênticos. `test:visual` no estado F-B: **96 passed / 18 failed**, as 18 são exatamente as listadas.
+- **D5**: `pub-rota-inexistente` deixou de ser a landing (`/nao-existe-xyz` agora é a 404 de marca, `h1` "Página não encontrada", CTA lima "Voltar ao início"). Mudança deliberada de comportamento, junto com `landing.spec.ts`.
+- **(b) Critérios medidos no navegador** (`criterios-fb.visual.ts`, 54 testes verdes, 3 viewports):
+  - D1 moldura escura + miolo claro: fração de pixels escuros/claros por tela (login 375: 18%/76%; 1440: 48%/49%; QR 14–19%/78–84%; eletropostos 13–24%/75–85%; 404: 93–98% escuro, de propósito).
+  - D2 CTA lima: 1 por tela (login "Entrar", cadastro "Criar conta", QR "Entrar para carregar", 404 "Voltar ao início", eletropostos "Criar conta" no cabeçalho). `/c/<id>` sem conector é o SELETOR de conector: sem CTA (correto). O "Pular para o conteúdo" também é lima mas só aparece com foco.
+  - D3 mascote: auth, QR e 404 têm; `/eletropostos` não tem (não está na tabela do D3).
+  - D4: nenhum "painel administrativo/operadores" no login/cadastro. **`/eletropostos` ainda diz "Disponibilidade de conectores em tempo real, por operador."** (texto pré-existente, que um E2E exige): fora do D4, mas é linguagem de operador numa tela de motorista.
+  - Rolagem horizontal: 0 em todas; nenhum elemento além da borda direita.
+  - Teclado: 7 a 20 focáveis por tela; **todos** mudam de aparência ao receber foco, com contraste do anel ≥ **4,83:1** (login/cadastro; o pior caso), 5,7 a 9,6 nas demais; o foco cicla e não prende; a ordem de Tab não volta mais de 300 px para cima.
+  - Contraste (axe): **0 reprovados**; incompletos 618 no total (a landing já não pesa nas 404: 898→618), nas 6 telas só `bgGradient`/`elmPartiallyObscuring` (3 a 10 nós por rota), que são texto sobre degradê escuro: **não** auditado pelo axe.
+- **(c) CLS de `/eletropostos` = 0** (3 cargas × 3 viewports, dev + mock) e **0** no Lighthouse de produção (era 0,125).
+- **(d) E2E 206/206 em 2 rodadas** (1,9 min cada, servidor próprio; a auditoria dizia 185, a A0 194). `modulepreload` 6→6; CSS global gzip 11.944→**13.183** (+1.239 B; orçamento +2.500); precache 1.537.209→1.557.086 B (+19.877; orçamento +40.960).
+  Lighthouse mobile, mediana de 5 (bench 1420–1561 contra 1566–1598 da A0, CPU um pouco mais lenta hoje): `/` 93→92, `/login` 86→86, `/cadastro` 86→86, `/eletropostos` 84→**89**, `/app`(=login) 88→88; a11y/boas práticas iguais.
+  **SEO 69→66 em `/login`, `/cadastro` e `/app`**: causa isolada, não é defeito — a auditoria `image-alt` (aprovada, peso 1) deixou de ser aplicável porque o mobile não renderiza mais uma `<img>` no login (o mascote do painel está em `lg:flex`); sobra a única falha antiga (`is-crawlable`, `robots.txt` intencional).
+  `/login` pesa 363 KiB contra 481 (−118 KiB) na carga mobile.
+- **(e) Fluxos**: `RouteError` (`localStorage["mock:sites-malformed"]="1"` + `/eletropostos`) mostra a tela de marca com "Tentar de novo"/"Voltar ao início", sem pilha nem caminho de arquivo (a mensagem técnica aparece só em DEV, `import.meta.env.DEV`); QR → "Entrar para carregar" → login → "Cadastre-se" preserva `?redirect=` nas duas telas e, criada a conta, volta ao carregador; login com `?redirect` volta ao carregador; `//host`, `https://host` e `javascript:` são ignorados e caem em `/app`; Google (mock) entra e respeita o `?redirect` em `/login` e `/cadastro`.
+- **ACHADO baixo (anterior à F-B)**: `lib/authRedirect.ts` só recusa `//`. `?redirect=/\evil.example` é aceito: o navegador lê `\` como `/` e o app navega para `/evil.example` na MESMA origem (cai na 404). Não sai do site (não é redirecionamento aberto), mas deveria ser ignorado e cair em `/app`. `test.fail` em `criterios-fb.visual.ts` acusa quando for corrigido.
+
 ### Registro por fase (continuação)
 
 | Fase | Data | Diferenças esperadas (rota · o que mudou) | Regressões achadas | Baseline regravada por |
 |---|---|---|---|---|
 | A0 | 04/10/2026 | — (linha de base original) | — | Íris (única gravação inicial) |
 | F-A | 04/10/2026 | **107 imagens regravadas** (ver §7): só recolor de TEXTO/ÍCONE (tokens `ink-softer`/`muted-foreground` #6B7280→#5F6673, 26 usos de `ink-subtle` como texto→`ink-softer`, sidebar `white/35→60` e `white/50→70`, selo "Desenvolvido por" sem `opacity-70`, ícone de busca/"R$" do Input, legenda do `StatCard`). Geometria idêntica nos 123 pares. | **10 imagens reportadas e DEPOIS aceitas pelo Atlas** (recolor de FUNDO de elemento de estado por efeito colateral do token, `bg-ink-softer`): trilho do Switch desligado (`/admin/gateway-pagamento` ×3), pino cinza do mockup da landing (`/` e `/nao-existe-xyz` ×3 cada, 6 imagens) e marcador/legenda "Fora do ar" do mapa (`/app/mapa` a 1440). Regravadas num worktree limpo do HEAD (`9912d3d`): `test:visual` **114/114 em 2 rodadas**. Mudança latente aceita com nota: `flex-shrink 1→0` no `IconBadge` do EmptyState (já nas 107). | Lyra/Atlas (aprovação do Atlas, 04/10/2026), classificado e gravado pela Íris (107 em `6ada5dc`, +10 no commit seguinte) |
+| F-B | 04/10/2026 | **18 imagens regravadas** (REDESENHO deliberado, §8): `auth-login`, `auth-cadastro`, `pub-eletropostos`, `pub-qr-carregador`, `pub-qr-conector`, `pub-rota-inexistente` × 375/768/1440. `pub-rota-inexistente` mudou de comportamento (D5: landing → 404). | nenhuma na F-B. Achado baixo anterior: `?redirect=/\host` (§8). `/eletropostos` ainda fala "por operador". | Lyra/Atlas (pedido do Atlas), classificado e gravado pela Íris |
