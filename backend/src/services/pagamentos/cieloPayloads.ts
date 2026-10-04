@@ -115,11 +115,21 @@ export function lerDataCielo(bruto: unknown): number | null {
   return Number.isFinite(ms) ? ms : null
 }
 
+/**
+ * `Status` da Cielo como inteiro: aceita número inteiro OU texto numérico ("1", " 2 ") como o Parque (`statusComoNumero`); qualquer outra coisa (ausente, decimal, texto, NaN) é -1 = "sem Status"
+ * (não conclusivo, nunca aprovação). Antes só `number` valia e `"1"` virava CREATED.
+ */
+export function lerStatusCielo(bruto: unknown): number {
+  if (typeof bruto === 'number') return Number.isInteger(bruto) && bruto >= 0 ? bruto : -1
+  if (typeof bruto === 'string' && /^[0-9]{1,3}$/.test(bruto.trim())) return Number(bruto.trim())
+  return -1
+}
+
 export function extrairCamposPagamento(body: unknown): CamposPagamentoCielo {
   const raw = body as Record<string, unknown> | null | undefined
   const payment = (raw?.Payment as Record<string, unknown> | undefined) ?? raw ?? {}
 
-  const status = typeof payment.Status === 'number' ? payment.Status : -1
+  const status = lerStatusCielo(payment.Status)
   const returnCode = typeof payment.ReturnCode === 'string' ? payment.ReturnCode : payment.ReturnCode != null ? String(payment.ReturnCode) : null
   const paymentId = typeof payment.PaymentId === 'string' ? payment.PaymentId : null
   const merchantOrderId = typeof raw?.MerchantOrderId === 'string' ? (raw!.MerchantOrderId as string) : null
@@ -165,7 +175,7 @@ export function lerListaDaConsultaPorPedido(body: unknown): { merchantOrderIdTop
     if (p === null || typeof p !== 'object') return []
     const e = p as Record<string, unknown>
     const paymentId = typeof e.PaymentId === 'string' && e.PaymentId.trim() !== '' ? e.PaymentId.trim() : null
-    const traz = typeof e.Status === 'number'
+    const traz = lerStatusCielo(e.Status) !== -1
     const inline = traz ? extrairCamposPagamento({ MerchantOrderId: topo ?? undefined, Payment: e }) : null
     if (!paymentId && !inline) return []
     return [{ paymentId, receivedDateMs: lerDataCielo(e.ReceivedDate ?? e.ReceveidDate), inline }]

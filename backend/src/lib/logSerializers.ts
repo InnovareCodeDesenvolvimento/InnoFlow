@@ -95,11 +95,32 @@ export function mascararUrlComSegredo(url: string): string {
   return i === -1 ? url : `${url.slice(0, i + PREFIXO_WEBHOOK_CIELO.length)}***`
 }
 
+/**
+ * Headers cujo NOME denuncia segredo: `secret`, `token`, `key`, `auth`, `cookie`, `password`/`senha`, `signature`, `credential`. O `redact` do pino só casa NOMES EXATOS (e o `pino-http` loga `req.headers` de toda
+ * requisição): o segredo do webhook da Cielo vazava em claro se chegasse sob um nome fora da lista (ex.: o nome antigo, ou um que o dono cadastre no Site Cielo). Este padrão faz a redação NÃO depender do
+ * nome exato — qualquer header novo com cara de segredo sai mascarado por padrão. Falso positivo (mascarar algo inocente) custa só uma linha de log menos útil; o contrário custa um segredo no log.
+ */
+const PADRAO_NOME_DE_HEADER_SENSIVEL = /secret|token|key|auth|cookie|passw|senha|signature|credential/i
+
+export function nomeDeHeaderEhSensivel(nome: string): boolean {
+  return PADRAO_NOME_DE_HEADER_SENSIVEL.test(nome) || CAMPOS_SENSIVEIS.has(nome.toLowerCase())
+}
+
+export function mascararHeadersSensiveis(headers: unknown): unknown {
+  if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) return headers
+  const saida: Record<string, unknown> = {}
+  for (const [nome, valor] of Object.entries(headers)) saida[nome] = nomeDeHeaderEhSensivel(nome) ? CENSOR : valor
+  return saida
+}
+
 /** Recebe o `req` JÁ serializado (o `pino-http` embrulha o serializer customizado com `wrapRequestSerializer`). */
 export function serializarReq(req: unknown): unknown {
   if (req === null || typeof req !== 'object') return req
-  const { url } = req as { url?: unknown }
-  return typeof url === 'string' ? { ...req, url: mascararUrlComSegredo(url) } : req
+  const { url, headers } = req as { url?: unknown; headers?: unknown }
+  const saida: Record<string, unknown> = { ...(req as Record<string, unknown>) }
+  if (typeof url === 'string') saida.url = mascararUrlComSegredo(url)
+  if (headers !== undefined) saida.headers = mascararHeadersSensiveis(headers)
+  return saida
 }
 
 export const LOG_SERIALIZERS = { err: serializarErro, req: serializarReq }
