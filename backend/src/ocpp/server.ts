@@ -20,6 +20,12 @@ import { resolveHandshakeIp } from '../core/ocpp/clientIp'
 import { env } from '../lib/env'
 import { registrarConexao, registrarDesconexao } from '../services/estacoes/presencaCarregador'
 import type { OcppHandlerCtx } from './context'
+import {
+  ALERTA_TRUST_PROXY_ZERO_EM_PRODUCAO,
+  MENSAGEM_TRUST_PROXY_ZERO_EM_PRODUCAO,
+  OCPP_MAX_PAYLOAD_BYTES,
+  deveAvisarTrustProxyZeroEmProducao,
+} from '../core/ocpp/configGateway'
 
 type AuthResult = { ok: true; ctx: OcppHandlerCtx } | { ok: false; reason: 'rate_limited' | 'invalid' }
 
@@ -32,20 +38,23 @@ type AuthResult = { ok: true; ctx: OcppHandlerCtx } | { ok: false; reason: 'rate
  * `ChargePoint.basicAuthSecretHash` — NUNCA comparação direta de string.
  */
 export async function startOcppServer(port: number) {
+  // Só avisa, nunca derruba o boot: 0 saltos também é o valor certo quando a porta é exposta direto.
+  if (deveAvisarTrustProxyZeroEmProducao(env.NODE_ENV, env.OCPP_TRUST_PROXY_HOPS)) {
+    logger.warn({ alert: ALERTA_TRUST_PROXY_ZERO_EM_PRODUCAO, ocppTrustProxyHops: env.OCPP_TRUST_PROXY_HOPS }, MENSAGEM_TRUST_PROXY_ZERO_EM_PRODUCAO)
+  }
+
   const server = new RPCServer({
     protocols: ['ocpp1.6'],
     callTimeoutMs: 30_000,
     pingIntervalMs: 30_000,
+    // Teto por mensagem (256 KiB): acima disso o `ws` fecha a conexão com 1009 — ver `core/ocpp/configGateway.ts`.
+    wssOptions: { maxPayload: OCPP_MAX_PAYLOAD_BYTES },
   })
 
   server.auth((accept, reject, handshake) => {
-    // IP do cliente com a mesma semântica de "hops" do `trust proxy` (env própria do gateway,
-    // default 0 = só o socket — ver `core/ocpp/clientIp.ts`). IPv6 vira a chave de sub-rede (/56)
-    // da própria lib de rate limit: um cliente IPv6 não foge do limite trocando o sufixo.
-    const rawIp = resolveHandshakeIp(handshake.remoteAddress, handshake.headers['x-forwarded-for'], env.OCPP_TRUST_PROXY_HOPS)
-    const clientIp = rawIp === 'unknown' ? rawIp : ipKeyGenerator(rawIp)
+    const { clientIp, forwardedFor } = origemDoHandshake(handshake)
 
-    void authenticateChargePoint(handshake.identity, handshake.password, { clientIp, forwardedFor: String(handshake.headers['x-forwarded-for'] ?? '').slice(0, 200) })
+    void authenticateChargePoint(handshake.identity, handshake.password, { clientIp, forwardedFor })
       .then((result) => {
         if (!result.ok) {
           if (result.reason === 'rate_limited') {
@@ -81,6 +90,17 @@ export async function startOcppServer(port: number) {
   startCommandListener()
 
   return server
+}
+
+/**
+ * IP do cliente com a mesma semântica de "hops" do `trust proxy` (env própria do gateway, default 0 = só o socket — ver
+ * `core/ocpp/clientIp.ts`). IPv6 vira a chave de sub-rede (/56) da própria lib de rate limit: um cliente IPv6 não foge do
+ * limite trocando o sufixo. Lê SÓ `remoteAddress` e `x-forwarded-for` — nunca `authorization`/`password`, que não podem ir a log.
+ */
+function origemDoHandshake(handshake: { remoteAddress?: string; headers: Record<string, string | string[] | undefined> }): HandshakeInfo {
+  const rawIp = resolveHandshakeIp(handshake.remoteAddress, handshake.headers['x-forwarded-for'], env.OCPP_TRUST_PROXY_HOPS)
+  const clientIp = rawIp === 'unknown' ? rawIp : ipKeyGenerator(rawIp)
+  return { clientIp, forwardedFor: String(handshake.headers['x-forwarded-for'] ?? '').slice(0, 200) }
 }
 
 interface HandshakeInfo {
@@ -189,7 +209,10 @@ async function registrarFalha(attempt: { identity: string; ip: string }, reserva
 
 async function onClientConnected(client: RpcServerClient): Promise<void> {
   const ctx = client.session as OcppHandlerCtx
-  logger.info({ chargePointId: ctx.chargePointId, ocppIdentity: ctx.ocppIdentity }, '[ocpp] charge point conectado')
+  // `clientIp` (já resolvido pelos saltos configurados) e `xForwardedFor` (header cru) TAMBÉM no sucesso: medir
+  // `OCPP_TRUST_PROXY_HOPS` exige ver o IP real de uma conexão boa (a falha já logava). Nunca a senha/Authorization.
+  const origem = origemDoHandshake(client.handshake)
+  logger.info({ chargePointId: ctx.chargePointId, ocppIdentity: ctx.ocppIdentity, clientIp: origem.clientIp, xForwardedFor: origem.forwardedFor }, '[ocpp] charge point conectado')
 
   try {
     await acquireChargePointLock(ctx.chargePointId)
