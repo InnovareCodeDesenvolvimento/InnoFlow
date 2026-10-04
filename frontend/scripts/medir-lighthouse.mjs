@@ -34,9 +34,15 @@ const opt = (name, fallback) => {
 }
 
 if (flag("help") || flag("h")) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("*/")[0].replace(/^#!.*
-/, "").replace(/^\/\*\*?
-?/, ""))
+  // imprime o comentário de cabeçalho (uso e opções) e sai
+  const header = readFileSync(fileURLToPath(import.meta.url), "utf8").split("*/")[0]
+  console.log(
+    header
+      .split(/\r?\n/)
+      .slice(2)
+      .map((l) => l.replace(/^ \* ?/, ""))
+      .join("\n"),
+  )
   process.exit(0)
 }
 
