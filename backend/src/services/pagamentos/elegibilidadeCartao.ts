@@ -70,7 +70,12 @@ async function melhorEsforco<T>(operacao: Promise<T>, padrao: T, o: string): Pro
   }
 }
 
-/** Até quando o bloqueio vale (o MAIOR prazo entre os contadores que estouraram), ou `null`. */
+/**
+ * Até quando o bloqueio vale (o MAIOR prazo entre os contadores que estouraram), ou `null`.
+ *
+ * UM prazo TOTAL (`PRAZO_REDIS_MS`) para a leitura inteira: os contadores são lidos em PARALELO e os TTLs dos que estouraram também. Antes eram até 3 leituras sequenciais de 2 s cada, e com o
+ * Redis fora/travado cada tela de cartão esperava ~6 s antes do fail-open (achado da Íris, rodada 3). Estourou o prazo (ou o Redis falhou): fail-open ruidoso, UM aviso por chamada.
+ */
 async function bloqueadoAte(userId: string, ip: string | null | undefined): Promise<Date | null> {
   const contadores: Array<[string, EscopoContador]> = [
     [chaveUsuarioRecusas(userId), 'user_refusals'],
@@ -78,15 +83,20 @@ async function bloqueadoAte(userId: string, ip: string | null | undefined): Prom
   ]
   if (ip) contadores.push([chaveIpRecusas(ip), 'ip_refusals'])
 
-  let ate: Date | null = null
-  for (const [chave, escopo] of contadores) {
-    const valor = await melhorEsforco(redis.get(chave), null as string | null, 'ler contador de risco do cartão')
-    if (valor === null || Number(valor) < limiteDe(escopo)) continue
-    const ttlMs = await melhorEsforco(redis.pttl(chave), -1, 'ler TTL do contador de risco do cartão')
-    const fim = new Date(Date.now() + (ttlMs > 0 ? ttlMs : (escopo === 'ip_refusals' ? JANELA_HORA_SEG : JANELA_DIA_SEG) * 1000))
-    if (ate === null || fim > ate) ate = fim
+  const ler = async (): Promise<Date | null> => {
+    const valores = await Promise.all(contadores.map(([chave]) => redis.get(chave)))
+    const estourados = contadores.filter(([, escopo], i) => valores[i] !== null && Number(valores[i]) >= limiteDe(escopo))
+    if (estourados.length === 0) return null
+    const ttls = await Promise.all(estourados.map(([chave]) => redis.pttl(chave)))
+    let ate: Date | null = null
+    estourados.forEach(([, escopo], i) => {
+      const ttlMs = ttls[i]
+      const fim = new Date(Date.now() + (ttlMs > 0 ? ttlMs : (escopo === 'ip_refusals' ? JANELA_HORA_SEG : JANELA_DIA_SEG) * 1000))
+      if (ate === null || fim > ate) ate = fim
+    })
+    return ate
   }
-  return ate
+  return melhorEsforco(ler(), null as Date | null, 'ler contadores de risco do cartão')
 }
 
 /** Elegibilidade completa (para `GET /api/me/payment-methods` e para os portões). */

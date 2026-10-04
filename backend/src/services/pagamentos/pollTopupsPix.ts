@@ -38,6 +38,38 @@ export function backoffPollSegundos(idadeSegundos: number): number {
 export const chaveProximaConsultaPix = (intentId: string) => `pix-poll:next:${intentId}`
 export const chaveConsultaPorLeituraPix = (intentId: string) => `pix-poll:read:${intentId}`
 
+/**
+ * CURSOR PERSISTENTE do varredor (id do último Pix examinado). Cada rodada lê no máximo `MAX_PAGINAS x PAGINA` (300) e consulta no máximo `LOTE_POLL_PIX` (50); sem cursor, os 300 primeiros por id
+ * ficavam sempre na frente e com mais de 300 Pix pendentes ao mesmo tempo a cauda nunca era consultada (achado da Íris, rodada 3). Agora a rodada seguinte RETOMA depois do último examinado e, ao
+ * chegar ao fim da lista, volta ao começo — todo Pix pendente é alcançado, mantidos o teto por rodada e o backoff por intent. Fica no Redis (sobrevive a reinício); Redis fora => sem cursor (começa do
+ * início, comportamento anterior). A chave leva o nome do banco: dois bancos no mesmo Redis (testes) não compartilham cursor.
+ */
+function nomeDoBanco(): string {
+  try {
+    return new URL(env.DATABASE_URL).pathname.replace(/^\//, '') || 'db'
+  } catch {
+    return 'db'
+  }
+}
+export const chaveCursorVarredorPix = () => `pix-poll:cursor:${nomeDoBanco()}`
+const TTL_CURSOR_SEG = 3600
+
+async function lerCursor(): Promise<string | undefined> {
+  try {
+    return (await withDeadline(redis.get(chaveCursorVarredorPix()), PRAZO_REDIS_MS, 'ler cursor do varredor de Pix')) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+async function gravarCursor(cursor: string | undefined): Promise<void> {
+  try {
+    if (cursor) await withDeadline(redis.set(chaveCursorVarredorPix(), cursor, 'EX', TTL_CURSOR_SEG), PRAZO_REDIS_MS, 'gravar cursor do varredor de Pix')
+    else await withDeadline(redis.del(chaveCursorVarredorPix()), PRAZO_REDIS_MS, 'limpar cursor do varredor de Pix')
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, '[pollTopupsPix] sem Redis para guardar o cursor do varredor — a próxima rodada recomeça do início')
+  }
+}
+
 /** Credita (idempotente) e publica os eventos de tempo real. `true` = creditou AGORA. Erros de publicação não derrubam o crédito. */
 export async function creditarEPublicar(intentId: string, port: PagamentoPort): Promise<boolean> {
   const resultado = await creditarTopupPix(intentId, port)
@@ -82,7 +114,11 @@ export async function varrerTopupsPixPendentes(pagamentoPortInjetado?: Pagamento
 
   let consultados = 0
   let creditados = 0
-  let cursor: string | undefined
+  const cursorInicial = await lerCursor()
+  let cursor: string | undefined = cursorInicial
+  let ultimoExaminado: string | undefined = cursorInicial
+  let chegouAoFim = false
+  let voltouAoInicio = false
 
   for (let pagina = 0; pagina < MAX_PAGINAS && consultados < LOTE_POLL_PIX; pagina++) {
     const pendentes = await prisma.paymentIntent.findMany({
@@ -98,11 +134,26 @@ export async function varrerTopupsPixPendentes(pagamentoPortInjetado?: Pagamento
       orderBy: { id: 'asc' },
       take: PAGINA,
     })
-    if (pendentes.length === 0) break
+    if (pendentes.length === 0) {
+      // Fim da lista. Se retomamos de um cursor, ainda dá para voltar ao começo (uma vez) na mesma rodada; senão a rodada acabou e a próxima recomeça do início.
+      if (cursor && !voltouAoInicio) {
+        voltouAoInicio = true
+        cursor = undefined
+        ultimoExaminado = undefined
+        continue
+      }
+      chegouAoFim = true
+      break
+    }
     cursor = pendentes[pendentes.length - 1].id
 
+    let parouPeloTeto = false
     for (const intent of pendentes) {
-      if (consultados >= LOTE_POLL_PIX) break
+      if (consultados >= LOTE_POLL_PIX) {
+        parouPeloTeto = true
+        break
+      }
+      ultimoExaminado = intent.id
       try {
         if (!(await ambienteDoIntentConfere(intent, 'varrerTopupsPixPendentes'))) continue // outro ambiente: nem consulta
         const idadeSeg = Math.floor((agora - intent.createdAt.getTime()) / 1000)
@@ -114,8 +165,15 @@ export async function varrerTopupsPixPendentes(pagamentoPortInjetado?: Pagamento
         logger.error({ err, intentId: intent.id }, '[pollTopupsPix] falha ao reconsultar/creditar — tentando de novo depois do backoff')
       }
     }
-    if (pendentes.length < PAGINA) break
+    // Página curta SÓ significa "fim da lista" se ela foi examinada por inteiro; parar pelo teto no meio dela deixa itens sem examinar (a próxima rodada retoma depois do último examinado).
+    if (pendentes.length < PAGINA && !parouPeloTeto) {
+      chegouAoFim = true
+      break
+    }
+    if (parouPeloTeto) break
   }
+  // Próxima rodada: retoma depois do último examinado; se esta rodada viu o fim da lista, recomeça do início.
+  await gravarCursor(chegouAoFim ? undefined : ultimoExaminado)
 
   if (creditados > 0) logger.info({ consultados, creditados }, '[pollTopupsPix] Pix creditados por polling (sem webhook)')
   return { consultados, creditados }

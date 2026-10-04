@@ -115,7 +115,7 @@ describe('I-7 com o Redis fora/travado (proxy TCP)', () => {
 
   // ACHADO (rodada 3, severidade baixa-média): `bloqueadoAte` faz até 3 leituras SEQUENCIAIS (usuário, cadastros, IP), cada uma com prazo próprio de 2 s. Com o Redis fora ou travado cada
   // tela de cartão espera ~6 s (medido: 6.045–6.121 ms) antes do fail-open. Deveria ser UM prazo total (leituras em paralelo ou disjuntor). `it.fails`: ao corrigir, vira `it` com a asserção intacta.
-  it.fails('ACHADO — com o Redis fora, a lista de cartões deveria responder em < 3 s (hoje ~6 s: 3 leituras sequenciais de 2 s cada)', async () => {
+  it('ACHADO — com o Redis fora, a lista de cartões deveria responder em < 3 s (hoje ~6 s: 3 leituras sequenciais de 2 s cada)', async () => {
     await proxy.down()
     const lista = await medir(() => request(app).get('/api/me/payment-methods').set(h(google.token)))
     expect(lista.r.status).toBe(200)

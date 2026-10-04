@@ -8,7 +8,7 @@ import { issueToken } from '../../src/lib/jwt'
 import { FakeAdapter } from '../../src/services/pagamentos/fakeAdapter'
 import { getPagamentoPort, resetPagamentoPortCacheParaTeste } from '../../src/services/pagamentos/pagamentoPortInstance'
 import { creditarTopupPix } from '../../src/services/pagamentos/creditarTopupPix'
-import { backoffPollSegundos, chaveProximaConsultaPix, LOTE_POLL_PIX, tentarCreditarPixPendente, varrerTopupsPixPendentes } from '../../src/services/pagamentos/pollTopupsPix'
+import { backoffPollSegundos, chaveCursorVarredorPix, chaveProximaConsultaPix, LOTE_POLL_PIX, tentarCreditarPixPendente, varrerTopupsPixPendentes } from '../../src/services/pagamentos/pollTopupsPix'
 import { uniqueSuffix } from './helpers/fixtures'
 
 /**
@@ -85,18 +85,34 @@ describe('Pix creditado por POLLING (sem webhook)', () => {
 
     it('Pix NÃO pago: consulta e NADA muda; a rodada seguinte, dentro do backoff, NÃO consulta de novo (não martela a Cielo)', async () => {
       const m = await motorista('nao-pago')
-      const intent = await pixCriado(m, 2_000, 20)
+      // O `beforeEach` de `pixPollingRevalidacaoIndependente` apaga `pix-poll:*` no Redis COMPARTILHADO (suítes paralelas). Se a reserva sumir entre duas rodadas do cenário, a 2ª consulta é legítima
+      // (backoff perdido por interferência alheia, não bug do varredor): o cenário é refeito com outro Pix. Só se REPETE quando a interferência foi detectada; as asserções não mudam.
+      let intent = await pixCriado(m, 2_000, 20)
       const consultar = vi.spyOn(fake, 'consultarPix')
-
-      await varrerTopupsPixPendentes(fake)
-      await varrerTopupsPixPendentes(fake)
-      await varrerTopupsPixPendentes(fake)
+      for (let tentativa = 1; ; tentativa++) {
+        consultar.mockClear()
+        const sentinela = `pix-poll:sentinela:${randomUUID()}` // some junto com `pix-poll:*` se uma suíte alheia limpar o Redis no meio do cenário
+        await redis.set(sentinela, '1', 'EX', 120)
+        await varrerTopupsPixPendentes(fake)
+        const ttl = await redis.ttl(chaveProximaConsultaPix(intent.id))
+        await varrerTopupsPixPendentes(fake)
+        await varrerTopupsPixPendentes(fake)
+        const ttlFinal = await redis.ttl(chaveProximaConsultaPix(intent.id))
+        const interferencia = ttl <= 0 || ttlFinal <= 0 || (await redis.get(sentinela)) === null
+        await redis.del(sentinela)
+        if (interferencia && tentativa < 5) {
+          await prisma.paymentIntent.update({ where: { id: intent.id }, data: { status: 'FAILED' } })
+          intent = await pixCriado(m, 2_000, 20)
+          continue
+        }
+        expect(ttl).toBeGreaterThan(0)
+        expect(ttl).toBeLessThanOrEqual(15) // idade ~20 s => backoff de 15 s
+        break
+      }
 
       expect(consultar.mock.calls.filter((c) => c[0] === intent.cieloPaymentId)).toHaveLength(1)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('PENDING')
       expect(await saldo(m.id)).toBe(0)
-      expect(await redis.ttl(chaveProximaConsultaPix(intent.id))).toBeGreaterThan(0)
-      expect(await redis.ttl(chaveProximaConsultaPix(intent.id))).toBeLessThanOrEqual(15) // idade ~20 s => backoff de 15 s
 
       // passado o backoff, consulta de novo — e se já foi pago, credita
       fake.marcarPixComoPago(intent.cieloPaymentId!)
@@ -179,6 +195,75 @@ describe('Pix creditado por POLLING (sem webhook)', () => {
       expect(await saldo(m.id)).toBe(4_000)
       expect(await entradas(m.id)).toBe(1)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('PAID')
+    })
+  })
+
+  describe('varredor — cursor persistente (todo Pix pendente é alcançado, mesmo com mais de uma rodada de fila)', () => {
+    /** Zera o estado do varredor neste banco próprio: nada pendente de testes anteriores e nenhum cursor/backoff sobrando. */
+    async function zerarVarredor() {
+      await prisma.paymentIntent.updateMany({ where: { purpose: 'WALLET_TOPUP_PIX', status: 'PENDING' }, data: { status: 'FAILED' } })
+      await redis.del(chaveCursorVarredorPix())
+    }
+    async function pendentes(n: number) {
+      const m = await motorista(`cursor-${n}`)
+      const base = await pixCriado(m, 1_000, 40)
+      const todos = [base]
+      for (let i = 1; i < n; i++) {
+        todos.push(
+          await prisma.paymentIntent.create({
+            data: { purpose: 'WALLET_TOPUP_PIX', provider: 'CIELO_PIX', userId: m.id, walletId: base.walletId, amountRequestedCents: 500, status: 'PENDING', environment: 'SANDBOX', cieloPaymentId: `cur-${randomUUID()}`, pixQrCode: 'x', pixExpiresAt: new Date(Date.now() + 30 * 60_000), createdAt: new Date(Date.now() - 40_000) },
+          }),
+        )
+      }
+      return todos.sort((a, b) => (a.id < b.id ? -1 : 1))
+    }
+
+    it('a chave do cursor leva o NOME DO BANCO (dois bancos no mesmo Redis não compartilham cursor)', () => {
+      expect(chaveCursorVarredorPix()).toContain(banco.nome)
+    })
+
+    it('rodada que para NO MEIO de uma página (teto de 50): a próxima retoma exatamente depois do último examinado — ninguém é pulado', async () => {
+      await zerarVarredor()
+      const todos = await pendentes(100)
+      // os 20 primeiros já estão em backoff (reservados): a rodada 1 os examina sem consultar, consulta os 50 seguintes (itens 21..70) e para no meio da 2ª página
+      for (const i of todos.slice(0, 20)) await redis.set(chaveProximaConsultaPix(i.id), '1', 'EX', 60)
+      const consultar = vi.spyOn(fake, 'consultarPix').mockRejectedValue(new Error('Cielo fora (simulado)'))
+      const r1 = await varrerTopupsPixPendentes(fake)
+      expect(r1.consultados).toBe(LOTE_POLL_PIX)
+      expect(await redis.get(chaveCursorVarredorPix())).toBe(todos[69].id) // retoma DEPOIS do 70º
+      const consultadosR1 = new Set(consultar.mock.calls.map((c) => c[0]))
+      const r2 = await varrerTopupsPixPendentes(fake)
+      expect(r2.consultados).toBe(30) // os itens 71..100 — não 0 (cursor no fim da página) e não repete os já consultados
+      const todosConsultados = new Set(consultar.mock.calls.map((c) => c[0]))
+      for (const i of todos.slice(20)) expect(todosConsultados.has(i.cieloPaymentId), `intent ${i.id}`).toBe(true)
+      for (const i of todos.slice(0, 20)) expect(todosConsultados.has(i.cieloPaymentId)).toBe(false) // seguem em backoff
+      expect(consultadosR1.size).toBe(50)
+      expect(await redis.get(chaveCursorVarredorPix())).toBeNull() // viu o fim da lista: a próxima rodada recomeça do início
+    })
+
+    it('cursor ficou ALÉM de tudo que restou (os de trás foram pagos/saíram): a MESMA rodada volta ao início e alcança os que ficaram para trás', async () => {
+      await zerarVarredor()
+      const todos = await pendentes(80)
+      for (const i of todos.slice(0, 20)) await redis.set(chaveProximaConsultaPix(i.id), '1', 'EX', 1) // ficam fora da 1ª rodada
+      const consultar = vi.spyOn(fake, 'consultarPix').mockRejectedValue(new Error('Cielo fora (simulado)'))
+      await varrerTopupsPixPendentes(fake) // examina 1..80: consulta 21..70 e para no 70º (teto de 50)
+      expect(await redis.get(chaveCursorVarredorPix())).toBe(todos[69].id)
+      // os itens 71..80 saem da fila (pagos por outro caminho) e o backoff dos 20 primeiros vence
+      await prisma.paymentIntent.updateMany({ where: { id: { in: todos.slice(70).map((i) => i.id) } }, data: { status: 'PAID' } })
+      await redis.del(...todos.slice(0, 20).map((i) => chaveProximaConsultaPix(i.id)))
+      consultar.mockClear()
+      const r = await varrerTopupsPixPendentes(fake)
+      expect(r.consultados).toBe(20) // nada além do cursor => volta ao começo nesta mesma rodada
+      for (const i of todos.slice(0, 20)) expect(consultar.mock.calls.some((c) => c[0] === i.cieloPaymentId), `intent ${i.id}`).toBe(true)
+    })
+
+    it('Redis sem cursor (apagado/expirado): começa do início, sem erro', async () => {
+      await zerarVarredor()
+      const todos = await pendentes(3)
+      const consultar = vi.spyOn(fake, 'consultarPix').mockRejectedValue(new Error('Cielo fora (simulado)'))
+      await redis.del(chaveCursorVarredorPix())
+      expect((await varrerTopupsPixPendentes(fake)).consultados).toBe(3)
+      expect(consultar).toHaveBeenCalledTimes(todos.length)
     })
   })
 

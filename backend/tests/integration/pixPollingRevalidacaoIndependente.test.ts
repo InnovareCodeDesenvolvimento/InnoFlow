@@ -208,7 +208,7 @@ describe('Pix por polling (varredor + gatilho na leitura) — Cielo falsa por TC
     // ACHADO (rodada 3, severidade baixa; só aparece com > 300 Pix pendentes AO MESMO TEMPO): o varredor lê no máximo 6 páginas x 50 (= 300) por rodada, ordenadas por id. Os 300 primeiros
     // ficam sempre "devidos" quando o backoff deles vence, e a cauda nunca é lida. Hoje só o gatilho de LEITURA e o expirador (que reconsulta) alcançam a cauda. `it.fails`: ao corrigir
     // (ordenar por "consultado há mais tempo" / cursor persistente), vira `it`.
-    it.fails('ACHADO — com 320 Pix pendentes, todos deveriam ser consultados ao menos uma vez em 8 rodadas (hoje a cauda além da posição 300 nunca é lida)', async () => {
+    it('ACHADO — com 320 Pix pendentes, todos deveriam ser consultados ao menos uma vez em 8 rodadas (hoje a cauda além da posição 300 nunca é lida)', async () => {
       const m = await motoristaComCarteira()
       const ids = await pixEmMassa(m, 320, 30)
       for (let i = 0; i < 8; i++) await varrerTopupsPixPendentes()

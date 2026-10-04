@@ -68,6 +68,25 @@ describe('cartão: identidade verificada + bloqueio por recusas (I-7)', () => {
     request(app).post('/api/me/sessions/start').set(m.auth).send({ ocppIdentity: fixture.tenant.ocppIdentity, connectorId, payment: { mode: 'CARD', paymentMethodId: m.pmId } })
 
   // ------------------------------------------------------------------------------------------------------------------
+  describe('blockedUntil vem do TTL REAL do contador (não da janela cheia)', () => {
+    it('contador no limite com 120 s de vida restante: blockedUntil ~ agora + 120 s, e os três escopos usam o maior', async () => {
+      const m = await motorista('ttl-real', { google: true })
+      await redis.set(`card-risk:refusals:user:${m.id}`, '3', 'EX', 120)
+      const e = await avaliarElegibilidadeCartao(m.id)
+      expect(e.reason).toBe('TEMPORARILY_BLOCKED')
+      const falta = new Date(e.blockedUntil!).getTime() - Date.now()
+      expect(falta).toBeGreaterThan(100_000)
+      expect(falta).toBeLessThan(125_000) // e não 24 h
+      // dois contadores estourados: vale o de MAIOR prazo
+      await redis.set(`card-risk:registrations:user:${m.id}`, '10', 'EX', 600)
+      const e2 = await avaliarElegibilidadeCartao(m.id)
+      const falta2 = new Date(e2.blockedUntil!).getTime() - Date.now()
+      expect(falta2).toBeGreaterThan(580_000)
+      expect(falta2).toBeLessThan(605_000)
+      await limparRiscoDeCartaoParaTeste(m.id)
+    })
+  })
+
   describe('regra pura única', () => {
     it('identidadeVerificada = googleSub OU role diferente de DRIVER; cartaoLiberadoParaUsuario usa a MESMA regra; identidadeEhTestador também', () => {
       for (const [usuario, esperado] of [
