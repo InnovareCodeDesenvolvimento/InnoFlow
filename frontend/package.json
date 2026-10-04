@@ -12,7 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:visual": "playwright test --config playwright.visual.config.ts rotas estados",
+    "test:visual:update": "playwright test --config playwright.visual.config.ts rotas estados --update-snapshots",
+    "test:contraste": "playwright test --config playwright.visual.config.ts contraste && node scripts/relatorio-contraste.mjs",
+    "medir:tamanhos": "node scripts/medir-tamanhos.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -42,6 +46,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",

@@ -17,3 +17,8 @@ test-results/
 # Memoria de trabalho dos agentes — interna, nao e codigo do projeto
 .claude/agent-memory/
 **/.claude/agent-memory/
+
+# Harness visual (frontend/e2e-visual/): sessao, relatorio e diffs sao locais — a baseline (e2e-visual/baseline/) e versionada
+frontend/e2e-visual/.auth/
+frontend/e2e-visual/.relatorio/
+frontend/e2e-visual/.resultados/

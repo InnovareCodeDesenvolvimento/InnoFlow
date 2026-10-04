@@ -1,0 +1,347 @@
+{
+  "geradoEm": "2026-10-04T18:33:12.751Z",
+  "rodadas": 5,
+  "maquina": {
+    "cpus": 24,
+    "cpu": "Intel(R) Xeon(R) CPU E5-2650 v4 @ 2.20GHz",
+    "platform": "win32"
+  },
+  "rotas": {
+    "/": {
+      "medianas": {
+        "perf": {
+          "mediana": 93,
+          "min": 92,
+          "max": 93
+        },
+        "FCP": {
+          "mediana": 1952,
+          "min": 1887,
+          "max": 1960
+        },
+        "LCP": {
+          "mediana": 3019,
+          "min": 3015,
+          "max": 3089
+        },
+        "TBT": {
+          "mediana": 50,
+          "min": 27,
+          "max": 89
+        },
+        "SI": {
+          "mediana": 2150,
+          "min": 2109,
+          "max": 2261
+        },
+        "CLS": {
+          "mediana": 0,
+          "min": 0,
+          "max": 0
+        },
+        "bytes": {
+          "mediana": 286,
+          "min": 277,
+          "max": 286
+        },
+        "dom": {
+          "mediana": 173,
+          "min": 173,
+          "max": 173
+        },
+        "bench": {
+          "mediana": 1570,
+          "min": 1489,
+          "max": 1589
+        },
+        "a11y": {
+          "mediana": 100,
+          "min": 100,
+          "max": 100
+        },
+        "seo": {
+          "mediana": 100,
+          "min": 100,
+          "max": 100
+        },
+        "bp": {
+          "mediana": 100,
+          "min": 100,
+          "max": 100
+        }
+      },
+      "elementoLcp": [
+        "section#inicio > div.mx-auto > div.lnd-hero-in > p.mx-auto"
+      ]
+    },
+    "/login": {
+      "medianas": {
+        "perf": {
+          "mediana": 86,
+          "min": 85,
+          "max": 87
+        },
+        "FCP": {
+          "mediana": 2351,
+          "min": 2332,
+          "max": 2370
+        },
+        "LCP": {
+          "mediana": 3805,
+          "min": 3609,
+          "max": 3856
+        },
+        "TBT": {
+          "mediana": 38,
+          "min": 24,
+          "max": 83
+        },
+        "SI": {
+          "mediana": 2351,
+          "min": 2332,
+          "max": 2370
+        },
+        "CLS": {
+          "mediana": 0,
+          "min": 0,
+          "max": 0
+        },
+        "bytes": {
+          "mediana": 481,
+          "min": 481,
+          "max": 481
+        },
+        "dom": {
+          "mediana": 65,
+          "min": 65,
+          "max": 65
+        },
+        "bench": {
+          "mediana": 1583,
+          "min": 1343,
+          "max": 1640
+        },
+        "a11y": {
+          "mediana": 98,
+          "min": 98,
+          "max": 98
+        },
+        "seo": {
+          "mediana": 69,
+          "min": 69,
+          "max": 69
+        },
+        "bp": {
+          "mediana": 96,
+          "min": 96,
+          "max": 96
+        }
+      },
+      "elementoLcp": [
+        "div.grid > div.flex > div.w-full > p.mt-6"
+      ]
+    },
+    "/cadastro": {
+      "medianas": {
+        "perf": {
+          "mediana": 86,
+          "min": 86,
+          "max": 87
+        },
+        "FCP": {
+          "mediana": 2347,
+          "min": 2291,
+          "max": 2363
+        },
+        "LCP": {
+          "mediana": 3824,
+          "min": 3600,
+          "max": 3828
+        },
+        "TBT": {
+          "mediana": 31,
+          "min": 22,
+          "max": 46
+        },
+        "SI": {
+          "mediana": 2347,
+          "min": 2291,
+          "max": 2363
+        },
+        "CLS": {
+          "mediana": 0,
+          "min": 0,
+          "max": 0
+        },
+        "bytes": {
+          "mediana": 481,
+          "min": 481,
+          "max": 481
+        },
+        "dom": {
+          "mediana": 42,
+          "min": 42,
+          "max": 42
+        },
+        "bench": {
+          "mediana": 1565,
+          "min": 1514,
+          "max": 1667
+        },
+        "a11y": {
+          "mediana": 98,
+          "min": 98,
+          "max": 98
+        },
+        "seo": {
+          "mediana": 69,
+          "min": 69,
+          "max": 69
+        },
+        "bp": {
+          "mediana": 96,
+          "min": 96,
+          "max": 96
+        }
+      },
+      "elementoLcp": [
+        "div.relative > div.relative > div.relative > p.text-xl"
+      ]
+    },
+    "/eletropostos": {
+      "medianas": {
+        "perf": {
+          "mediana": 84,
+          "min": 84,
+          "max": 85
+        },
+        "FCP": {
+          "mediana": 2196,
+          "min": 1981,
+          "max": 2221
+        },
+        "LCP": {
+          "mediana": 3481,
+          "min": 3466,
+          "max": 3531
+        },
+        "TBT": {
+          "mediana": 14,
+          "min": 13,
+          "max": 43
+        },
+        "SI": {
+          "mediana": 2213,
+          "min": 2098,
+          "max": 2249
+        },
+        "CLS": {
+          "mediana": 0.125,
+          "min": 0.125,
+          "max": 0.125
+        },
+        "bytes": {
+          "mediana": 444,
+          "min": 444,
+          "max": 444
+        },
+        "dom": {
+          "mediana": 51,
+          "min": 51,
+          "max": 51
+        },
+        "bench": {
+          "mediana": 1598,
+          "min": 1552,
+          "max": 1629
+        },
+        "a11y": {
+          "mediana": 96,
+          "min": 96,
+          "max": 96
+        },
+        "seo": {
+          "mediana": 100,
+          "min": 100,
+          "max": 100
+        },
+        "bp": {
+          "mediana": 96,
+          "min": 96,
+          "max": 96
+        }
+      },
+      "elementoLcp": [
+        "main#conteudo > div.container-app > header.mb-6 > p.mt-1"
+      ]
+    },
+    "/app": {
+      "nota": "redireciona-para-login (sem backend/MSW no build de produção): NÃO é a tela do motorista logado",
+      "medianas": {
+        "perf": {
+          "mediana": 88,
+          "min": 87,
+          "max": 88
+        },
+        "FCP": {
+          "mediana": 2235,
+          "min": 2139,
+          "max": 2288
+        },
+        "LCP": {
+          "mediana": 3564,
+          "min": 3553,
+          "max": 3611
+        },
+        "TBT": {
+          "mediana": 54,
+          "min": 36,
+          "max": 67
+        },
+        "SI": {
+          "mediana": 2235,
+          "min": 2139,
+          "max": 2288
+        },
+        "CLS": {
+          "mediana": 0,
+          "min": 0,
+          "max": 0
+        },
+        "bytes": {
+          "mediana": 448,
+          "min": 448,
+          "max": 448
+        },
+        "dom": {
+          "mediana": 65,
+          "min": 65,
+          "max": 65
+        },
+        "bench": {
+          "mediana": 1566,
+          "min": 1547,
+          "max": 1658
+        },
+        "a11y": {
+          "mediana": 98,
+          "min": 98,
+          "max": 98
+        },
+        "seo": {
+          "mediana": 69,
+          "min": 69,
+          "max": 69
+        },
+        "bp": {
+          "mediana": 96,
+          "min": 96,
+          "max": 96
+        }
+      },
+      "elementoLcp": [
+        "div.grid > div.flex > div.w-full > p.mt-6"
+      ]
+    }
+  }
+}
