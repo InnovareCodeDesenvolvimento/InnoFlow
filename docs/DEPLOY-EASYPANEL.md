@@ -322,7 +322,7 @@ Neste estado:
 | **D7 — Outra recarga durante confirmação** |
 | `SESSION_ALLOW_START_WHILE_UNCONFIRMED` | `true` | Motorista inicia outra? | `true`: sim, desconta "saldo comprometido". `false`: bloqueia até confirmar |
 
-⚠️ **Decisões do dono ainda NÃO confirmadas:** D2 (sem leitura) e D7 (outra recarga) — os padrões acima são recomendações da arquitetura. O dono precisa decidir e fazer swap nas envs **ANTES** do go-live.
+✅ **Decisões do dono confirmadas em 04/10/2026:** D2 = não cobrar sem leitura (`SESSION_NO_READING_POLICY=NO_CHARGE`), D3 = registrar o Stop tardio, alertar e absorver (sem cobrar a diferença), D7 = pode iniciar outra recarga durante a confirmação (`SESSION_ALLOW_START_WHILE_UNCONFIRMED=true`); D1 (espera de 2 h), D4 (3 tentativas de parada), D5 (24 h) e D6 (textos) nos padrões. Os padrões das tabelas acima são, portanto, os valores definitivos; nada precisa ser trocado no EasyPanel. Perdas aceitas explicitamente: M2 (queda longa seguida de volta) e M5 (carregador que recusa a parada e fica mudo, sem cobrança por D2).
 
 #### Ordem de Deploy — **CRÍTICA**
 

@@ -498,16 +498,16 @@ Retirada do fim do PROGRESSO.md, compilada para ação do dono. Ordene por prior
 
 ### 🟠 **P1 — DECISÕES CRÍTICAS DO DONO — F5.9 (Watchdog)**
 
-- [ ] **D2 — Sessão sem nenhuma leitura de medidor** (carregador silencioso):
+- [x] **D2 — Sessão sem nenhuma leitura de medidor** (carregador silencioso) — **DECIDIDO pelo dono em 04/10/2026: NÃO cobrar (`NO_CHARGE`, que é o padrão; nada a alterar no EasyPanel)**:
   - **Opção A (padrão):** `SESSION_NO_READING_POLICY=NO_CHARGE` — não cobra nada, alerta para revisão manual, motorista não é culpado
   - **Opção B:** `SESSION_NO_READING_POLICY=MIN_FEE` — cobra taxa fixa + mínimo da tarifa (comportamento antigo)
-  - **Decisão:** qual? 💬 Confirme com a equipe e setar a env antes do go-live
+  - **Decisão (04/10/2026):** Opção A, `NO_CHARGE`
   - **Por quê:** afeta sessões onde o carregador some completamente (sem nem uma amostra); D2a = risco zero de cobrança indevida, D2b = recebe algo sempre (pode ser injusto se não houve energia)
 
-- [ ] **D7 — Motorista inicia outra recarga durante a anterior estar em confirmação** (STOP_UNCONFIRMED):
+- [x] **D7 — Motorista inicia outra recarga durante a anterior estar em confirmação** (STOP_UNCONFIRMED) — **DECIDIDO pelo dono em 04/10/2026: aceita o padrão (`true`, pode iniciar descontando o saldo comprometido; nada a alterar no EasyPanel)**:
   - **Opção A (padrão):** `SESSION_ALLOW_START_WHILE_UNCONFIRMED=true` — sim, desconta o "saldo comprometido" (custo provisório) como reserva
   - **Opção B:** `SESSION_ALLOW_START_WHILE_UNCONFIRMED=false` — bloqueia, motorista tem que esperar confirmação
-  - **Decisão:** qual? 💬 Confirme e setar a env antes do go-live
+  - **Decisão (04/10/2026):** Opção A, `true`
   - **Por quê:** afeta experiência do motorista; D7a = mais flexível mas depende de `provisionalCostCents` estar certo (vê M3 em auditoria se errado); D7b = conservador, motor espera
 
 ### 🟠 **P2 — Antes da tela de testes com motoristas reais**

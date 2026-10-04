@@ -1066,3 +1066,12 @@ Entregue e validado: schema (5 migrations: enums, colunas+CHECKs+índice do watc
 **Infra de teste:** a suíte precisa de Postgres com `max_connections` ≥ 300 ou `--maxWorkers=8` (duas suítes ao mesmo tempo esgotam conexões); flake residual `P1001` em `/reports/payments` no PG nativo do Windows com banco reutilizado, não visto em CI Linux. Dívida: suítes antigas deixam `CAPTURE_PENDING` em banco reutilizado (resolver no `afterAll`).
 
 **Landing premium** entregue em `/` (Lyra): Lighthouse mobile caiu de 80–83 para 65–74 (mediana 72); decisão do dono: aceitar ou pedir mais otimização. Telas de exemplo trazem valores em R$ rotulados como "exemplo".
+
+## Decisões do dono sobre a F5.9 (04/10/2026) — CONFIRMADAS
+
+- **D2:** sessão sem nenhuma leitura de medidor → **não cobrar** (`SESSION_NO_READING_POLICY=NO_CHARGE`, alerta + revisão manual). Nunca estimar energia.
+- **D3:** StopTransaction tardio com mais consumo após o encerramento → **registrar, alertar e absorver** (sem cobrar a diferença; `lateStop*`/`unbilledCostCents` informativos). Interpretação do Atlas para a resposta "Sim" do dono: aceita a opção recomendada; se ele quis outra, é decisão a reabrir.
+- **D7:** pode iniciar outra recarga durante a confirmação (`SESSION_ALLOW_START_WHILE_UNCONFIRMED=true`), descontando o saldo comprometido.
+- **D1, D4, D5, D6:** padrões da Nova aceitos (espera de 2 h pelo carregador offline; 3 tentativas de parada e Reset manual pelo admin; duração máxima 24 h; textos ao motorista em `frontend/src/lib/sessionClosureCopy.ts`).
+- **M2 e M5 (perdas aceitas):** reconexão após queda longa (o servidor pode encerrar pela última amostra antes de o Stop verdadeiro chegar; a diferença cai em D3) e carregador que recusa a parada e fica mudo (sem cobrança por D2, só alerta de erro). Aceitas explicitamente.
+Nenhuma mudança de código ou de variável de ambiente é necessária: os padrões implementados já são estes.
