@@ -953,7 +953,19 @@ function decodeMockCardToken(cardToken: string): { last4: string; expiryMonth: n
   return { last4, expiryMonth: Number(month), expiryYear: Number(year), holderName }
 }
 
-export function createMockTokenizationSession(): MeCardTokenizationSessionResponse {
+/** URL de sandbox do script do SOP (a mesma que o backend devolve por default - `URLS_SOP` em `configGateway.ts`). */
+export const REAL_SOP_SANDBOX_SCRIPT_URL = "https://transactionsandbox.pagador.com.br/post/scripts/silentorderpost-1.0.min.js"
+
+export function createMockTokenizationSession(driverId?: string): MeCardTokenizationSessionResponse {
+  if (driverId === "user_driver_sop_real") {
+    return {
+      accessToken: `mock_sop_access_${Date.now()}`,
+      merchantId: "mock_merchant",
+      environment: "sandbox",
+      scriptUrl: REAL_SOP_SANDBOX_SCRIPT_URL,
+      expiresAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+    }
+  }
   return {
     accessToken: `mock_access_${Date.now()}`,
     merchantId: "mock_merchant",
@@ -988,6 +1000,8 @@ export function createMockPaymentMethod(
   cardToken: unknown,
   brand: unknown,
   makeDefault: boolean,
+  /** `last4`/validade que a página isolada manda no corpo (C1.3). Usados quando o token não é um `mocktok.*` decodificável (token REAL do cofre da Cielo). */
+  extra?: { last4?: unknown; expiryMonth?: unknown; expiryYear?: unknown },
 ): { ok: true; method: MePaymentMethodDTO } | { ok: false; code: "INVALID_CARD_TOKEN" | "TOO_MANY_PAYMENT_METHODS"; message: string } {
   const methods = getPaymentMethods(driverId)
   if (methods.length >= MAX_PAYMENT_METHODS_PER_USER) {
@@ -996,7 +1010,11 @@ export function createMockPaymentMethod(
   if (typeof cardToken !== "string" || typeof brand !== "string") {
     return { ok: false, code: "INVALID_CARD_TOKEN", message: "Cartão inválido ou não reconhecido." }
   }
-  const decoded = decodeMockCardToken(cardToken)
+  const decoded =
+    decodeMockCardToken(cardToken) ??
+    (typeof extra?.last4 === "string" && /^\d{4}$/.test(extra.last4) && typeof extra.expiryMonth === "number" && typeof extra.expiryYear === "number"
+      ? { last4: extra.last4, expiryMonth: extra.expiryMonth, expiryYear: extra.expiryYear, holderName: null }
+      : null)
   if (!decoded) {
     return { ok: false, code: "INVALID_CARD_TOKEN", message: "Cartão inválido ou não reconhecido." }
   }

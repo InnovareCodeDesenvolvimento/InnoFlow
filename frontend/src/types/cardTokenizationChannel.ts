@@ -41,13 +41,24 @@ export type CardTokenizationInitMessage = {
 }
 
 /**
- * `token`: SÓ `cardToken`+`brand` — número/validade/CVV/nome do titular
- * NUNCA saem do documento isolado, nem para o app principal via postMessage,
+ * `token`: `cardToken`+`brand` e o PAN TRUNCADO (`last4`) com a validade -
+ * número inteiro/CVV/nome do titular NUNCA saem do documento isolado, nem para o app principal via postMessage,
  * nem para o nosso backend (ver `MeCreatePaymentMethodRequest`). Isso é o
  * que mantém o limite SAQ A-EP correto: o app principal (e nosso servidor)
  * jamais veem dado de cartão em texto puro, só o token que a Cielo emitiu.
  */
+export interface CardTokenizationTokenPayload {
+  cardToken: string
+  brand: CardBrand
+  /** Últimos 4 dígitos - PAN TRUNCADO (permitido guardar/transmitir pelo PCI DSS). O servidor não depende mais de `GET /1/card/{token}` para saber o final. */
+  last4: string
+  /** 1..12 */
+  expiryMonth: number
+  /** 4 dígitos */
+  expiryYear: number
+}
+
 export type CardTokenizationChildMessage =
   | { source: typeof CARD_TOKENIZATION_CHANNEL_SOURCE; type: "ready" }
-  | { source: typeof CARD_TOKENIZATION_CHANNEL_SOURCE; type: "token"; payload: { cardToken: string; brand: CardBrand } }
+  | { source: typeof CARD_TOKENIZATION_CHANNEL_SOURCE; type: "token"; payload: CardTokenizationTokenPayload }
   | { source: typeof CARD_TOKENIZATION_CHANNEL_SOURCE; type: "cancelled" }

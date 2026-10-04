@@ -39,3 +39,28 @@ describe("detectCardBrand", () => {
     expect(detectCardBrand("411")).toBeNull()
   })
 })
+
+// Achado em PRODUÇÃO no Parque das Feiras (19/09/2026): regras genéricas engoliam as específicas. Bandeira errada = recusa na certa.
+describe("detectCardBrand — ordem das regras (Elo antes de Visa/Discover, Hipercard antes de Diners)", () => {
+  it("Elo com prefixo 4 NÃO vira Visa", () => {
+    for (const bin of ["4011780000000000", "4389350000000000", "4514160000000000", "4573930000000000"]) expect(detectCardBrand(bin)).toBe("Elo")
+  })
+
+  it("Elo com prefixo 65 NÃO vira Discover", () => {
+    for (const bin of ["6500310000000000", "6504050000000000", "6516520000000000", "6550000000000000"]) expect(detectCardBrand(bin)).toBe("Elo")
+  })
+
+  it("Hipercard 3841 NÃO vira Diners (começa com 38)", () => {
+    expect(detectCardBrand("3841000000000000000")).toBe("Hipercard")
+    expect(detectCardBrand("3841001111111111111")).toBe("Hipercard")
+  })
+
+  it("Visa comum continua Visa (4111 não está nas faixas do Elo)", () => {
+    expect(detectCardBrand("4111111111111111")).toBe("Visa")
+  })
+
+  it("Discover e JCB existem na Cielo mas não no nosso contrato: null (o formulário bloqueia, não adivinha)", () => {
+    expect(detectCardBrand("6011000000000004")).toBeNull()
+    expect(detectCardBrand("3530111333300000")).toBeNull()
+  })
+})

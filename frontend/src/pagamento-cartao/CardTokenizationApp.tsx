@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { CardForm } from "./CardForm"
-import { tokenizeCard, type CardFormInput } from "./sopClient"
+import { SopInvalidFieldsError, SopTokenizationError, tokenizeCard, type CardFormInput } from "./sopClient"
 import type { MeCardTokenizationSessionResponse } from "@/types/api"
 import { CARD_TOKENIZATION_CHANNEL_SOURCE, type CardTokenizationChildMessage, type CardTokenizationInitMessage } from "@/types/cardTokenizationChannel"
 import logoIcon from "@/assets/logo-icon-sm.png"
@@ -77,11 +77,18 @@ export function CardTokenizationApp() {
     setStatus("submitting")
     try {
       const result = await tokenizeCard(session, values)
-      // SÓ cardToken+brand saem daqui — número/validade/CVV/nome nunca chegam ao app principal (ver types/cardTokenizationChannel.ts).
-      postToParent({ source: CARD_TOKENIZATION_CHANNEL_SOURCE, type: "token", payload: { cardToken: result.cardToken, brand: values.brand } })
+      // Saem daqui: cardToken + brand + last4 + validade (PAN TRUNCADO). Número inteiro/CVV/nome nunca chegam ao app principal (ver types/cardTokenizationChannel.ts).
+      postToParent({
+        source: CARD_TOKENIZATION_CHANNEL_SOURCE,
+        type: "token",
+        payload: { cardToken: result.cardToken, brand: values.brand, last4: result.last4, expiryMonth: result.expiryMonth, expiryYear: result.expiryYear },
+      })
       setStatus("done")
-    } catch {
-      setFormError("Não foi possível validar o cartão. Confira os dados e tente novamente.")
+    } catch (err) {
+      // A Cielo valida os campos e devolve a mensagem pronta, em português (`onInvalid`): mostrar como veio. Qualquer outra falha: texto genérico + código curto (sem dado de cartão) para o suporte.
+      if (err instanceof SopInvalidFieldsError) setFormError(err.message)
+      else if (err instanceof SopTokenizationError) setFormError(`Não foi possível validar o cartão agora. Tente novamente em instantes. (código ${err.message})`)
+      else setFormError("Não foi possível validar o cartão. Confira os dados e tente novamente.")
       setStatus("ready")
     }
   }

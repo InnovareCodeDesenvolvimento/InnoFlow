@@ -3,8 +3,28 @@ import { toast } from "sonner"
 import { useCreateTokenizationSession, useAddPaymentMethod } from "./useMePaymentMethods"
 import { getApiErrorMessage } from "@/services/api"
 import { isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
-import type { MeCardTokenizationSessionResponse } from "@/types/api"
-import { CARD_TOKENIZATION_CHANNEL_SOURCE, type CardTokenizationChildMessage, type CardTokenizationInitMessage } from "@/types/cardTokenizationChannel"
+import type { MeCardTokenizationSessionResponse, MeCreatePaymentMethodRequest } from "@/types/api"
+import {
+  CARD_TOKENIZATION_CHANNEL_SOURCE,
+  type CardTokenizationChildMessage,
+  type CardTokenizationInitMessage,
+  type CardTokenizationTokenPayload,
+} from "@/types/cardTokenizationChannel"
+
+/**
+ * Mensagem da aba isolada -> corpo do `POST /api/me/payment-methods`. A aba é outro documento: confere o formato antes de mandar (o servidor
+ * recusa `last4` que não tenha EXATAMENTE 4 dígitos e validade pela metade, então o que não bater aqui simplesmente não vai - o cartão ainda salva).
+ */
+export function toCreateRequest(payload: CardTokenizationTokenPayload): MeCreatePaymentMethodRequest {
+  const request: MeCreatePaymentMethodRequest = { cardToken: payload.cardToken, brand: payload.brand }
+  if (typeof payload.last4 === "string" && /^\d{4}$/.test(payload.last4)) request.last4 = payload.last4
+  const { expiryMonth, expiryYear } = payload
+  if (Number.isInteger(expiryMonth) && expiryMonth >= 1 && expiryMonth <= 12 && Number.isInteger(expiryYear) && expiryYear >= 2000 && expiryYear <= 2200) {
+    request.expiryMonth = expiryMonth
+    request.expiryYear = expiryYear
+  }
+  return request
+}
 
 export type AddCardFlowStatus = "idle" | "opening" | "awaiting" | "saving"
 
@@ -89,7 +109,7 @@ export function useAddCardFlow() {
       if (data.type === "token") {
         setStatus("saving")
         addPaymentMethod
-          .mutateAsync({ cardToken: data.payload.cardToken, brand: data.payload.brand })
+          .mutateAsync(toCreateRequest(data.payload))
           .then(() => {
             toast.success("Cartão cadastrado.")
           })

@@ -1255,6 +1255,12 @@ export interface MeCreatePaymentMethodRequest {
   /** Detectado no documento isolado a partir do BIN do cartão (a sessão de tokenização não devolve bandeira) — ver `pagamento-cartao/cardBrand.ts`. */
   brand: CardBrand
   makeDefault?: boolean
+  /** C1.3 (aditivo): últimos 4 dígitos, EXATAMENTE 4 dígitos - PAN TRUNCADO vindo da página isolada; nunca o número inteiro. O servidor deixou de depender de `GET /1/card/{token}`; os dados da Cielo, quando existem, prevalecem. */
+  last4?: string
+  /** 1..12. Vem junto com `expiryYear` (o servidor recusa um sem o outro). */
+  expiryMonth?: number
+  /** 4 dígitos. */
+  expiryYear?: number
 }
 
 export type MePaymentMethodErrorCode =

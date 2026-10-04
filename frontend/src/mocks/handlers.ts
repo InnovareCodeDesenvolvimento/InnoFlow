@@ -1131,15 +1131,22 @@ export const handlers = [
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
     if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
-    return HttpResponse.json(createMockTokenizationSession())
+    return HttpResponse.json(createMockTokenizationSession(scope.user.userId))
   }),
 
   http.post("/api/me/payment-methods", async ({ request }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
-    const body = (await request.json().catch(() => ({}))) as { cardToken?: unknown; brand?: unknown; makeDefault?: unknown }
+    const body = (await request.json().catch(() => ({}))) as {
+      cardToken?: unknown
+      brand?: unknown
+      makeDefault?: unknown
+      last4?: unknown
+      expiryMonth?: unknown
+      expiryYear?: unknown
+    }
     if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
-    const result = createMockPaymentMethod(scope.user.userId, body.cardToken, body.brand, body.makeDefault === true)
+    const result = createMockPaymentMethod(scope.user.userId, body.cardToken, body.brand, body.makeDefault === true, body)
     if (!result.ok) {
       const status = result.code === "TOO_MANY_PAYMENT_METHODS" ? 409 : 400
       return HttpResponse.json(errorBody(result.message, result.code), { status })

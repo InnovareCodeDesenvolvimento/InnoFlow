@@ -22,8 +22,9 @@ const MOCK_ADMIN_PASSWORD = "senha1234"
  *  - `source: "env"` até o primeiro PUT; depois `"database"` com `updatedAt`.
  *
  * SUPOSIÇÕES DO MOCK (o contrato não fecha; alinhar com o Vega):
- *  - "pronto" do cartão = MERCHANT_ID, MERCHANT_KEY, SOP_CLIENT_ID, SOP_CLIENT_SECRET, SOP_SCRIPT_URL,
- *    SOP_OAUTH_TOKEN_URL, PAYMENT_SECRETS_KEY; do Pix = MERCHANT_ID, MERCHANT_KEY, WEBHOOK_PATH_TOKEN,
+ *  - "pronto" do cartão = MERCHANT_ID, MERCHANT_KEY, SOP_CLIENT_ID, SOP_CLIENT_SECRET, PAYMENT_SECRETS_KEY (C1.1: o backend
+ *    real NÃO exige mais SOP_SCRIPT_URL/SOP_OAUTH_TOKEN_URL - as URLs do SOP têm default por ambiente e as envs são só override);
+ *    do Pix = MERCHANT_ID, MERCHANT_KEY, WEBHOOK_PATH_TOKEN,
  *    WEBHOOK_HEADER_SECRET, PAYMENT_SECRETS_KEY;
  *  - ir para produção exige que todo meio HABILITADO (no estado resultante) esteja pronto;
  *  - `details` do 409 é um array de strings (`["MERCHANT_KEY", ...]`) em ordem estável.
@@ -59,8 +60,6 @@ const MOCK_ADMIN_PASSWORD = "senha1234"
  */
 
 interface ServerEnv {
-  sopScriptUrl: boolean
-  sopOauthTokenUrl: boolean
   webhookPathToken: boolean
   secretsKey: boolean
   /** `NODE_ENV=production` no servidor: sandbox aqui é "cobrança grátis" (cartões de teste públicos) => `sandboxRestricted`. */
@@ -89,7 +88,7 @@ interface Scenario {
   state: GatewayState
 }
 
-const FULL_SERVER: ServerEnv = { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: true, secretsKey: true, productionNode: false }
+const FULL_SERVER: ServerEnv = { webhookPathToken: true, secretsKey: true, productionNode: false }
 
 const EMPTY_STATE: GatewayState = {
   source: "env",
@@ -138,7 +137,7 @@ function seed(userId: string): Scenario {
       return { server: { ...FULL_SERVER }, state: { ...READY_STATE, inflightPayments: 3 } }
     case "user_admin_gateway_sem_chave":
       // Pix já HABILITADO (herdado do ambiente do servidor) mas sem pré-requisito: prova que DESLIGAR é sempre permitido e dá o caminho ao 409 GATEWAY_NOT_READY (ir para produção).
-      return { server: { sopScriptUrl: true, sopOauthTokenUrl: true, webhookPathToken: false, secretsKey: false, productionNode: false }, state: { ...EMPTY_STATE, pixEnabled: true } }
+      return { server: { webhookPathToken: false, secretsKey: false, productionNode: false }, state: { ...EMPTY_STATE, pixEnabled: true } }
     default:
       return { server: { ...FULL_SERVER }, state: { ...EMPTY_STATE } }
   }
@@ -175,8 +174,6 @@ function missingFor(method: "card" | "pix", state: GatewayState, server: ServerE
   if (method === "card") {
     if (!state.sopClientId) missing.add("SOP_CLIENT_ID")
     if (!state.sopClientSecretSet) missing.add("SOP_CLIENT_SECRET")
-    if (!server.sopScriptUrl) missing.add("SOP_SCRIPT_URL")
-    if (!server.sopOauthTokenUrl) missing.add("SOP_OAUTH_TOKEN_URL")
   } else {
     if (!server.webhookPathToken) missing.add("WEBHOOK_PATH_TOKEN")
     if (!state.webhookHeaderSecretSet) missing.add("WEBHOOK_HEADER_SECRET")
@@ -199,7 +196,7 @@ function toDto({ state, server }: Scenario): PaymentGatewayConfigDTO {
     sopClientSecretSet: state.sopClientSecretSet,
     webhookHeaderSecretSet: state.webhookHeaderSecretSet,
     webhookUrl: server.webhookPathToken ? "https://api.innoflow.example/api/webhooks/cielo/k3x9-demo-token" : null,
-    webhookHeaderName: "x-innoelektron-webhook-secret",
+    webhookHeaderName: "InnoFlowWebhookSecret", // só letras: o campo Key do Site Cielo recusa hífen/número (C1.4); mesmo valor de WEBHOOK_SECRET_HEADER_NAME do backend
     cardEnabled: state.cardEnabled,
     pixEnabled: state.pixEnabled,
     readiness: { card: readiness("card", state, server), pix: readiness("pix", state, server) },

@@ -76,6 +76,9 @@ export const mockUsers: MockUser[] = [
   // F5.9 (sessão travada): histórico PRÉ-SEMEADO com 3 recibos (em confirmação WALLET, em confirmação CARD, encerrado pelo
   // servidor) + 1 sessão ATIVA em `FAULTED`. Conta separada pelo mesmo motivo das outras: o estado do mock vive na página,
   // então semear nos motoristas existentes quebraria os E2E de sessão/recarga (`seedStuckDemoSessions` em `mocks/meData.ts`).
+  // C1.2: sessão de tokenização com `scriptUrl` do SOP REAL (host da Cielo) em vez do marcador `mock` - exercita no E2E o caminho
+  // `bpSop_silentOrderPost` (o script em si é interceptado/substituído pelo teste; nada vai à Cielo). Conta separada de propósito, como as outras.
+  { id: "user_driver_sop_real", name: "Sônia SOP", email: "sop-real@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 

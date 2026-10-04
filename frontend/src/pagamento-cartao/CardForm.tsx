@@ -1,6 +1,6 @@
 import { useId, useState } from "react"
 import { detectCardBrand } from "./cardBrand"
-import type { CardFormInput } from "./sopClient"
+import { SOP_FIELD_CLASSES, type CardFormInput } from "./sopClient"
 
 export interface CardFormValues {
   cardNumber: string // dígitos puros
@@ -94,6 +94,7 @@ export function CardForm({
         <label htmlFor={`${idPrefix}-number`}>Número do cartão</label>
         <input
           id={`${idPrefix}-number`}
+          className={SOP_FIELD_CLASSES.number}
           inputMode="numeric"
           autoComplete="cc-number"
           maxLength={23} // 19 dígitos + 4 espaços de agrupamento
@@ -115,6 +116,7 @@ export function CardForm({
         <label htmlFor={`${idPrefix}-holder`}>Nome impresso no cartão</label>
         <input
           id={`${idPrefix}-holder`}
+          className={SOP_FIELD_CLASSES.holder}
           autoComplete="cc-name"
           value={values.holderName}
           onChange={(e) => setValues((v) => ({ ...v, holderName: e.target.value.toUpperCase().slice(0, 60) }))}
@@ -175,6 +177,8 @@ export function CardForm({
           <label htmlFor={`${idPrefix}-cvv`}>CVV</label>
           <input
             id={`${idPrefix}-cvv`}
+            // O manual da Cielo se contradiz (cardcvv x cardcvvc): marcar as duas é inofensivo e evita gastar um ciclo de sandbox descobrindo qual o script lê.
+            className={`${SOP_FIELD_CLASSES.cvv} bp-sop-cardcvvc`}
             inputMode="numeric"
             autoComplete="cc-csc"
             maxLength={4}
@@ -192,6 +196,14 @@ export function CardForm({
           )}
         </div>
       </div>
+
+      {/* Campo que o script da Cielo LÊ para a validade: um só, em MM/AAAA (a tela tem Mês e Ano separados). Escrito de novo por `sopClient` no último instante. */}
+      <input
+        type="hidden"
+        className={SOP_FIELD_CLASSES.expiration}
+        readOnly
+        value={values.expiryMonth && values.expiryYear ? `${values.expiryMonth.padStart(2, "0")}/${values.expiryYear}` : ""}
+      />
 
       <button type="submit" className="pc-button" disabled={submitting}>
         {submitting && <span className="pc-spinner" aria-hidden="true" />}
