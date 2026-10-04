@@ -3,26 +3,6 @@ import { spotlightMove } from "./motion-hooks"
 import { FEATURES } from "./landing-data"
 import { SectionHeading } from "./SectionHeading"
 
-/** Mini diagrama decorativo: carregador -> plataforma -> painel, com pulso de energia correndo pela linha. */
-function OcppFlow() {
-  const nodes = ["Carregador", "InnoFlow", "Painel"]
-  return (
-    <div className="relative mt-6 flex items-center justify-between gap-2" aria-hidden="true">
-      <div className="lnd-cable-h !top-1/2" />
-      {nodes.map((n, i) => (
-        <span
-          key={n}
-          className={`relative z-10 rounded-xl px-3 py-2 text-xs font-bold ring-1 ${
-            i === 1 ? "bg-accent-glow text-[rgb(var(--lnd-night))] ring-accent-glow" : "bg-primary-950 text-white ring-white/25"
-          }`}
-        >
-          {n}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 /** Recursos em grade "bento": cards grandes (2 colunas) e médios, com holofote que segue o ponteiro. */
 export function Features() {
   return (
@@ -30,9 +10,9 @@ export function Features() {
       <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8">
         <SectionHeading
           id="recursos-titulo"
-          eyebrow="Recursos"
-          title="Feito para a rede de recarga funcionar junta"
-          description="Motoristas, operadores e carregadores conversando na mesma plataforma."
+          eyebrow="Recursos do app"
+          title="Tudo o que você usa antes, durante e depois de carregar"
+          description="Mapa, tarifa, acompanhamento ao vivo, carteira e histórico, no celular e sem complicação."
         />
 
         <ul className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
@@ -73,7 +53,15 @@ export function Features() {
                     ))}
                   </ul>
                 )}
-                {f.id === "ocpp" && <OcppFlow />}
+                {f.id === "tempo-real" && (
+                  <ul className="relative mt-6 flex flex-wrap gap-2" aria-label="O que você acompanha">
+                    {["Energia (kWh)", "Valor estimado", "Tempo", "Potência", "Bateria"].map((c) => (
+                      <li key={c} className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white ring-1 ring-white/20">
+                        {c}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {f.note && (
                   <p className="relative mt-3 inline-flex rounded-xl bg-warning-100 px-3 py-1.5 text-xs font-bold leading-snug text-warning-700">{f.note}</p>
                 )}

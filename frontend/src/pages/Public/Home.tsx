@@ -4,7 +4,6 @@ import { LandingFooter } from "@/components/landing/LandingFooter"
 import { LandingHeader } from "@/components/landing/LandingHeader"
 import { BelowFoldReserve } from "@/components/landing/BelowFoldReserve"
 import { StatsStrip } from "@/components/landing/StatsStrip"
-import { SLOGAN } from "@/components/landing/landing-data"
 import "@/components/landing/landing.css"
 import "@/components/landing/landing-reserve.css"
 
@@ -12,7 +11,7 @@ import "@/components/landing/landing-reserve.css"
 const loadBelowFold = () => import("@/components/landing/BelowFold")
 const BelowFold = lazy(loadBelowFold)
 
-const PAGE_TITLE = `InnoFlow — ${SLOGAN}: recarga de veículos elétricos`
+const PAGE_TITLE = "InnoFlow — Recarregue seu elétrico sem complicação"
 
 /** Eventos que indicam que a pessoa vai rolar/navegar: montam o conteúdo de baixo sem esperar a margem de proximidade. */
 const INTENT_EVENTS = ["scroll", "wheel", "touchstart", "pointerdown", "keydown", "hashchange"] as const
@@ -68,6 +67,7 @@ function useBelowFoldGate(): [boolean, React.RefObject<HTMLDivElement | null>] {
  * público, porque o hero é escuro e precisa do menu de seções; `/eletropostos` continua no `Layout` de sempre.
  * O `<title>` é restaurado ao sair da página (as outras rotas não definem o próprio).
  *
+ * Público: o MOTORISTA (quem usa o carro elétrico); nada aqui fala com a empresa que opera os eletropostos.
  * Conteúdo: tudo o que a página afirma está em `components/landing/landing-data.ts`, com a prova (arquivo/rota)
  * de cada afirmação. O pagamento real (Pix/cartão) ainda NÃO está no ar: só aparece como "em breve".
  */

@@ -410,6 +410,25 @@
     0 50px 90px -30px rgb(var(--color-primary-950) / 0.9),
     0 30px 60px -30px rgb(var(--color-brand-teal) / 0.45);
 }
+/* O celular é o protagonista do "Como funciona": maior a partir do tablet (zoom escala o conteúdo todo, telas inclusive) */
+@media (min-width: 640px) {
+  .lnd-phone { zoom: 1.1; }
+}
+@media (min-width: 1024px) {
+  .lnd-phone { zoom: 1.22; }
+}
+.lnd-phone-halo {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 150%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgb(var(--color-accent-glow) / 0.2), rgb(var(--color-brand-teal) / 0.1) 55%, transparent 100%);
+}
 .lnd-phone::before {
   /* botão lateral */
   content: "";
@@ -456,43 +475,6 @@
   background: linear-gradient(90deg, transparent, rgb(var(--color-accent-glow)), transparent);
   box-shadow: 0 0 14px 2px rgb(var(--color-accent-glow) / 0.7);
   opacity: 0;
-}
-
-/* ---- Painel (mock admin) 3D ------------------------------------------------------------------------- */
-.lnd-tilt {
-  --pt-x: 9deg;
-  --pt-y: -4deg;
-  position: relative;
-  perspective: 1600px;
-}
-@media (min-width: 1024px) {
-  .lnd-tilt {
-    --pt-x: 14deg;
-    --pt-y: -9deg;
-  }
-}
-.lnd-tilt-body {
-  position: relative;
-  transform-origin: 50% 100%;
-  transform-style: preserve-3d;
-}
-.lnd-tilt-shadow {
-  position: absolute;
-  left: 6%;
-  right: 6%;
-  bottom: -2.5rem;
-  height: 4rem;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, rgb(0 0 0 / 0.55), transparent);
-  filter: blur(14px);
-}
-.lnd-tilt-sheen {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(115deg, rgb(255 255 255 / 0.22), transparent 38%);
-  mix-blend-mode: soft-light;
 }
 
 /* ---- Cards com holofote que segue o ponteiro ----------------------------------------------------------- */
@@ -557,20 +539,6 @@
   }
   [data-reveal="hidden"][data-reveal-from="scale"] {
     transform: scale(0.94);
-  }
-  [data-reveal="hidden"] .lnd-grow {
-    transform: scaleY(0);
-  }
-  [data-reveal] .lnd-grow {
-    transform-origin: bottom;
-    transition: transform 900ms var(--lnd-ease) var(--d, 0ms);
-  }
-  [data-reveal="hidden"] .lnd-grow-x {
-    transform: scaleX(0);
-  }
-  [data-reveal] .lnd-grow-x {
-    transform-origin: left center;
-    transition: transform 1100ms var(--lnd-ease) var(--d, 0ms);
   }
 
   .lnd-paused *,
@@ -638,23 +606,6 @@
     animation: lnd-sweep 5.5s ease-in-out infinite;
   }
 
-
-  /* painel 3D: se endireita ao rolar. Nativo (view timeline) ou, sem suporte, pela variável --pt-p escrita por JS. */
-  .lnd-tilt-body {
-    transform: perspective(1500px) rotateX(calc(var(--pt-x, 14deg) * (1 - var(--pt-p, 1)))) rotateY(calc(var(--pt-y, -9deg) * (1 - var(--pt-p, 1))))
-      scale(calc(0.94 + 0.06 * var(--pt-p, 1)));
-  }
-  @supports (animation-timeline: view()) {
-    @keyframes lnd-tilt {
-      from { transform: perspective(1500px) rotateX(var(--pt-x, 14deg)) rotateY(var(--pt-y, -9deg)) scale(0.94); }
-      to { transform: perspective(1500px) rotateX(0deg) rotateY(0deg) scale(1); }
-    }
-    .lnd-tilt-body {
-      animation: lnd-tilt linear both;
-      animation-timeline: view();
-      animation-range: entry 10% cover 45%;
-    }
-  }
 
   /* progresso do passo ativo (o fim da animação avança para o próximo passo — ver DriverTour.tsx) */
   @keyframes lnd-progress {

@@ -8,6 +8,10 @@ import { expect, test, type Page } from "@playwright/test"
  * no celular (nenhum texto/botão passa da largura da tela) e as regras de conteúdo (Pix/cartão só "em breve").
  * O que NÃO se prova: desempenho percebido em aparelho real (ver Lighthouse no handoff) e a aparência (screenshots
  * olhados à parte).
+ *
+ * FOCO NO MOTORISTA (04/10/2026): a landing fala com quem USA o carro elétrico. A seção "Para quem opera", o painel 3D
+ * e tudo voltado à empresa operadora saíram; os testes abaixo que mudaram estão marcados com "MUDOU"/"NOVO" e há um
+ * teste ("público: o motorista") que barra a volta de conteúdo de operador.
  */
 
 /**
@@ -135,7 +139,14 @@ test.describe("estrutura e conteúdo", () => {
     await openLanding(page)
     await expect(page).toHaveTitle(/InnoFlow/)
     const meta = (sel: string) => page.locator(sel).first().getAttribute("content")
-    expect(await meta('meta[name="description"]')).toContain("recarga de veículos elétricos")
+    // MUDOU: description/OG/Twitter falam com o motorista (antes: "recarga de veículos elétricos ... Painel para quem opera").
+    const description = (await meta('meta[name="description"]')) ?? ""
+    expect(description).toContain("veículo elétrico")
+    expect(description).toMatch(/eletropostos/)
+    for (const sel of ['meta[name="description"]', 'meta[property="og:description"]', 'meta[name="twitter:description"]', 'meta[property="og:title"]', 'meta[name="twitter:title"]']) {
+      expect((await meta(sel)) ?? "", sel).not.toMatch(/painel|oper(a|ador)|relat[oó]rio/i)
+    }
+    await expect(page).toHaveTitle(/Recarregue seu elétrico/)
     expect(await meta('meta[property="og:title"]')).toContain("InnoFlow")
     expect(await meta('meta[property="og:image"]')).toMatch(/^https:\/\/.+\/brand\/og-innoflow\.jpg$/)
     expect(await meta('meta[property="og:image:width"]')).toBe("1200")
@@ -145,8 +156,9 @@ test.describe("estrutura e conteúdo", () => {
     const ld = await page.locator('script[type="application/ld+json"]').first().textContent()
     const graph = JSON.parse(ld ?? "{}")["@graph"] as Array<Record<string, unknown>>
     expect(graph.map((n) => n["@type"])).toEqual(["Organization", "WebSite"])
-    // nada de nota, avaliação, preço ou endereço inventado
+    // nada de nota, avaliação, preço ou endereço inventado - nem de operador/painel (MUDOU: antes a descrição citava operadores)
     expect(ld).not.toMatch(/aggregateRating|ratingValue|price|address|telephone|review/i)
+    expect(ld).not.toMatch(/operador|painel/i)
 
     const og = await page.request.get("/brand/og-innoflow.jpg")
     expect(og.ok()).toBe(true)
@@ -163,9 +175,62 @@ test.describe("estrutura e conteúdo", () => {
 
     const text = (await page.locator("main").innerText()) + (await page.locator("footer").innerText())
     expect(text).not.toMatch(/depoiment|★|⭐|certifica|prêmio|whatsapp|\(\d{2}\)\s?\d{4,5}-?\d{4}|@[\w-]+\.\w{2,}/i)
-    // as telas de exemplo se declaram exemplo
+    // as telas de exemplo se declaram exemplo (MUDOU: o selo "Dados de exemplo" era do mock do painel, que saiu; o celular
+    // se declara pela legenda e cada dado dele diz "exemplo")
     await expect(page.getByText("Telas ilustrativas, com dados de exemplo.").first()).toBeVisible()
-    await expect(page.getByText("Dados de exemplo").first()).toBeVisible()
+    const phone = await page.locator('[data-testid="tour-phone"]').evaluate((el) => el.textContent ?? "")
+    expect(phone).toMatch(/exemplo/i)
+  })
+
+  // NOVO: público = motorista. Barra a volta de qualquer conteúdo voltado à empresa que opera eletropostos.
+  test("público: o motorista - nada de 'Para quem opera', painel, relatórios, auditoria, OCPP ou comandos de operador na página", async ({ page }) => {
+    await openLanding(page)
+    await scrollThrough(page)
+    const text = (await page.locator("header").innerText()) + "\n" + (await page.locator("main").innerText()) + "\n" + (await page.locator("footer").innerText())
+    expect(text).not.toMatch(/para quem opera|painel|relat[oó]rio|dashboard|auditoria|ocpp|\bcsv\b|reiniciar|destravar|perfis de acesso|operar com|seu eletroposto|faturamento/i)
+    // "operador" só aparece na frase do motorista ("qualquer operador"), nunca como público-alvo
+    expect(text).not.toMatch(/quem opera|para operadores|painel do operador/i)
+    await expect(page.locator("#para-quem-opera")).toHaveCount(0)
+    await expect(page.getByTestId("admin-mock")).toHaveCount(0)
+    await expect(page.getByTestId("operator-tilt")).toHaveCount(0)
+    await expect(page.getByRole("link", { name: /Entrar no painel/ })).toHaveCount(0)
+    // as seções que sobraram, na ordem da narrativa do motorista
+    const ids = await page.locator("main section[id]").evaluateAll((els) => els.map((e) => e.id))
+    expect(ids).toEqual(["inicio", "como-funciona", "vantagens", "recursos", "seguranca", "perguntas"])
+  })
+
+  test("hero: promessa do motorista e os três benefícios (livre agora com tipo/potência, tarifa antes, acompanhar e parar)", async ({ page }) => {
+    await openLanding(page)
+    const hero = page.locator("#inicio")
+    await expect(hero.getByText(/Encontre um eletroposto livre, escaneie o QR code/)).toBeVisible()
+    await expect(hero.getByText("Veja o que está livre agora, com tipo e potência de cada conector")).toBeVisible()
+    await expect(hero.getByText("Confira a tarifa antes de iniciar a recarga")).toBeVisible()
+    await expect(hero.getByText("Acompanhe e pare a recarga pelo celular")).toBeVisible()
+  })
+
+  test("vantagens: seis benefícios do motorista, cada um com onde aparece no app, e CTAs que levam a /cadastro e /eletropostos", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await openLanding(page)
+    const adv = page.locator("#vantagens")
+    await adv.scrollIntoViewIfNeeded()
+    await expect(adv.getByRole("heading", { level: 3 })).toHaveCount(6)
+    for (const title of ["Chegue sabendo o que esperar", "Custo sem susto", "Controle na palma da mão", "Uma conta, qualquer operador", "Seus gastos à mão", "Sem passar pela loja"]) {
+      await expect(adv.getByRole("heading", { level: 3, name: title })).toBeVisible()
+    }
+    await expect(adv.getByText(/^No app: /)).toHaveCount(6)
+    await adv.getByRole("link", { name: "Ver eletropostos" }).click()
+    await expect(page).toHaveURL(/\/eletropostos$/)
+    await openLanding(page)
+    await page.locator("#vantagens").getByRole("link", { name: "Criar conta" }).click()
+    await expect(page).toHaveURL(/\/cadastro$/)
+  })
+
+  test("não promete o que não existe: sem filtro AC/DC, sem reserva, sem push; e diz que não há reserva", async ({ page }) => {
+    await openLanding(page)
+    await scrollThrough(page)
+    const text = await page.locator("main").innerText()
+    expect(text).not.toMatch(/filtr(e|ar|o) (por )?(ac|dc|conector|pot[eê]ncia)|reserve|reservar|agende|notifica[cç][aã]o|push/i)
+    expect(text).toMatch(/N[aã]o (h[aá]|existe) reserva/)
   })
 })
 
@@ -191,6 +256,12 @@ test.describe("navegação", () => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await openLanding(page)
     const nav = page.getByRole("navigation", { name: "Seções da página" })
+    // MUDOU: a âncora "Para quem opera" saiu do menu; entrou "Vantagens" e "Segurança" virou "Privacidade".
+    await expect(nav.getByRole("link")).toHaveText(["Como funciona", "Vantagens", "Recursos", "Privacidade", "Perguntas", "Eletropostos"])
+    await expect(nav.getByRole("link", { name: /opera/i })).toHaveCount(0)
+    await nav.getByRole("link", { name: "Vantagens" }).click()
+    await expect(page).toHaveURL(/#vantagens$/)
+    await expect(page.locator("#vantagens")).toBeInViewport()
     await nav.getByRole("link", { name: "Recursos" }).click()
     await expect(page).toHaveURL(/#recursos$/)
     await expect(page.locator("#recursos")).toBeInViewport()
@@ -226,6 +297,18 @@ test.describe("navegação", () => {
     const header = page.getByRole("banner")
     await expect(header.getByRole("link", { name: "Meu app" })).toHaveAttribute("href", "/app")
     await expect(header.getByRole("link", { name: "Criar conta" })).toHaveCount(0)
+  })
+
+  // NOVO: o atalho funcional do cabeçalho para quem opera continua (é navegação, não marketing).
+  test("logado como administrador, o cabeçalho mostra o atalho 'Painel' (navegação), sem nenhum conteúdo de operador na página", async ({ page }) => {
+    await page.goto("/login")
+    await page.getByLabel("E-mail").fill("admin@innoelektron.com")
+    await page.getByLabel("Senha").fill("senha1234")
+    await page.getByRole("button", { name: "Entrar" }).click()
+    await expect(page).toHaveURL(/\/admin/)
+    await openLanding(page)
+    await expect(page.getByRole("banner").getByRole("link", { name: "Painel" })).toHaveAttribute("href", "/admin")
+    await expect(page.locator("main")).not.toContainText(/painel|quem opera/i)
   })
 
   test("rota inexistente continua caindo na landing e /eletropostos segue no layout público claro", async ({ page }) => {
@@ -312,7 +395,7 @@ test.describe("prefers-reduced-motion: reduce", () => {
     expect(info.hidden).toBe(0)
 
     // texto essencial visível e com opacidade cheia
-    for (const sel of ["#hero-title", "#como-funciona-titulo", "#operadores-titulo", "#recursos-titulo", "#seguranca-titulo", "#perguntas-titulo", "#cta-final-titulo"]) {
+    for (const sel of ["#hero-title", "#como-funciona-titulo", "#vantagens-titulo", "#recursos-titulo", "#seguranca-titulo", "#perguntas-titulo", "#cta-final-titulo"]) {
       const o = await page.locator(sel).evaluate((el) => Number(getComputedStyle(el.parentElement?.closest("[data-reveal-from], div") ?? el).opacity))
       expect(o, sel).toBe(1)
       await expect(page.locator(sel)).toBeVisible()

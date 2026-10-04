@@ -102,8 +102,8 @@ export function Hero() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-white/80 lg:mx-0">
-            Encontre um eletroposto, escaneie o QR code do carregador e acompanhe a recarga em tempo real. Para quem opera
-            eletropostos, um painel completo com sessões, financeiro e relatórios.
+            Encontre um eletroposto livre, escaneie o QR code do carregador, veja a tarifa antes de começar e acompanhe a
+            recarga do seu elétrico em tempo real, do primeiro kWh ao recibo, tudo pelo celular.
           </p>
 
           <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center lg:justify-start">
@@ -127,8 +127,8 @@ export function Hero() {
 
           <ul className="mx-auto mt-8 flex w-fit flex-col items-start gap-2.5 lg:mx-0">
             {HERO_POINTS.map((point) => (
-              <li key={point.text} className="flex items-center gap-2.5 text-sm text-white/90">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-glow text-[rgb(var(--lnd-night))]">
+              <li key={point.text} className="flex items-start gap-2.5 text-left text-sm text-white/90">
+                <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-glow text-[rgb(var(--lnd-night))]">
                   <Check className="h-3 w-3" strokeWidth={3.5} aria-hidden="true" />
                 </span>
                 {point.text}

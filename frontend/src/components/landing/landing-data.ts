@@ -1,14 +1,12 @@
 import {
-  Activity,
-  BatteryCharging,
-  Cpu,
-  Landmark,
-  LayoutDashboard,
+  Download,
+  Gauge,
+  History,
   Map as MapIcon,
-  Plug,
+  MapPinned,
+  Network,
   Radio,
-  ScrollText,
-  Wallet,
+  Receipt,
   WalletCards,
   Zap,
   type LucideIcon,
@@ -18,10 +16,15 @@ import {
  * Conteúdo da landing "/" — TODO texto de produto mora aqui, num lugar só, para a auditoria de conteúdo
  * (e o teste `landing-data.test.ts`) olharem uma fonte única.
  *
+ * PÚBLICO: o MOTORISTA / usuário do carro elétrico. Nada aqui fala com a empresa que opera eletropostos (painel,
+ * relatórios, tarifas do ponto de vista de quem cobra, comandos remotos...): decisão do dono em 04/10/2026.
+ *
  * REGRA DE OURO: só se afirma o que o produto FAZ hoje. Cada item leva `proof` = o arquivo/rota do repositório
  * que comprova a afirmação (não aparece na tela; é a trilha para quem for conferir). O pagamento real
  * (Pix/cartão pela Cielo) AINDA NÃO está no ar: toda menção a eles precisa dizer "em breve" (o teste exige).
  * Sem depoimentos, avaliações, números de clientes, preços, prêmios, certificações ou logos de terceiros.
+ * NÃO existe filtro "AC/DC" no mapa: o que existe é o tipo e a potência de CADA conector, visíveis em toda parte
+ * (e a busca por cidade/endereço + ordenação). Não prometer filtro. Também não há reserva de conector.
  */
 
 export const SITE_URL = "https://innoflow.innovarecode.com.br"
@@ -34,17 +37,27 @@ export interface NavAnchor {
 
 export const NAV_ANCHORS: NavAnchor[] = [
   { href: "#como-funciona", label: "Como funciona" },
-  { href: "#para-quem-opera", label: "Para quem opera" },
+  { href: "#vantagens", label: "Vantagens" },
   { href: "#recursos", label: "Recursos" },
-  { href: "#seguranca", label: "Segurança" },
+  { href: "#seguranca", label: "Privacidade" },
   { href: "#perguntas", label: "Perguntas" },
 ]
 
-/** Pontos curtos do hero. */
+/** Os três benefícios do hero (a promessa principal está no título e no parágrafo). */
 export const HERO_POINTS: Array<{ text: string; proof: string }> = [
-  { text: "AC e DC na mesma busca, com a potência de cada conector", proof: "frontend/src/lib/utils.ts (CONNECTOR_TYPE_LABELS), components/sites/PublicSiteCard.tsx" },
-  { text: "Uma conta só para qualquer operador da rede", proof: "PROGRESSO.md decisão 9 (conta única de rede); pages/Public/Home.tsx (antiga)" },
-  { text: "Recarga acompanhada em tempo real", proof: "frontend/src/pages/App/Sessao.tsx" },
+  {
+    text: "Veja o que está livre agora, com tipo e potência de cada conector",
+    proof:
+      "frontend/src/lib/stations.ts (STATION_STATE_LABELS 'Livre agora', freeSummaryLabel); components/sites/PublicSiteCard.tsx; lib/utils.ts (CONNECTOR_TYPE_LABELS, formatPowerKw)",
+  },
+  {
+    text: "Confira a tarifa antes de iniciar a recarga",
+    proof: "frontend/src/pages/Public/ChargePointLanding.tsx (card do conector: formatTariffHeadlinePrice acima do botão 'Iniciar recarga')",
+  },
+  {
+    text: "Acompanhe e pare a recarga pelo celular",
+    proof: "frontend/src/pages/App/Sessao.tsx (kWh, valor estimado, tempo, potência, bateria; 'Parar recarga' com confirmação)",
+  },
 ]
 
 /** Faixa de fatos verificáveis (NÃO são métricas de uso: o produto não publica números de clientes). */
@@ -76,18 +89,18 @@ export const STAT_FACTS: StatFact[] = [
     proof: "PROGRESSO.md decisão 9; types/api.ts (User/Wallet sem operatorId)",
   },
   {
-    id: "ocpp",
-    value: "OCPP 1.6-J",
-    label: "protocolo dos carregadores",
-    detail: "Comunicação padrão de mercado com o carregador",
-    proof: "frontend/src/pages/Admin/ChargePoints/index.tsx (descrição da página)",
+    id: "ao-vivo",
+    value: "Ao vivo",
+    label: "a sua recarga",
+    detail: "kWh, valor estimado, potência e bateria enquanto você carrega",
+    proof: "frontend/src/pages/App/Sessao.tsx; components/realtime/RealtimeConnection.tsx (DRIVER assina /api/me/events)",
   },
   {
-    id: "tempo-real",
-    value: "Ao vivo",
-    label: "status e sessões",
-    detail: "Eventos em tempo real para motorista e painel",
-    proof: "frontend/src/components/realtime/RealtimeConnection.tsx",
+    id: "sem-loja",
+    value: "Sem loja",
+    label: "app instalável (PWA)",
+    detail: "Abra no navegador do celular e instale na tela inicial se quiser",
+    proof: "frontend/vite.config.ts (manifest PWA, display standalone); components/pwa/InstallPromptCard.tsx",
   },
 ]
 
@@ -104,21 +117,21 @@ export interface TourStep {
 export const TOUR_STEPS: TourStep[] = [
   {
     id: "mapa",
-    title: "Ache um eletroposto",
-    text: "Veja os eletropostos da rede com conectores livres agora, tipo e potência. No app, o mapa mostra os mais próximos e o botão Como chegar abre a rota.",
-    proof: "frontend/src/pages/Public/Eletropostos.tsx; pages/App/Mapa.tsx; components/sites/PublicSiteCard.tsx",
+    title: "Ache um eletroposto livre",
+    text: "Veja os eletropostos da rede com os conectores livres agora, o tipo e a potência de cada um. Busque por cidade ou endereço, veja os mais próximos de você e toque em Como chegar para abrir a rota.",
+    proof: "frontend/src/pages/Public/Eletropostos.tsx; pages/App/Mapa.tsx (busca, ordenação, 'Mais próximos'); lib/stations.ts (directionsLinks)",
   },
   {
     id: "qr",
     title: "Escaneie o QR code do carregador",
-    text: "Aponte a câmera do celular para o QR code do carregador. A página dele abre direto no navegador, sem instalar nada antes.",
+    text: "Aponte a câmera do celular para o QR code do carregador. A página dele abre direto no navegador, sem instalar nada antes, já com o conector, a potência e a tarifa.",
     proof: "frontend/src/pages/Public/ChargePointLanding.tsx (rota /c/:ocppIdentity); App.tsx",
   },
   {
     id: "iniciar",
-    title: "Inicie a recarga",
-    text: "Confira o conector, a tarifa e toque em Iniciar recarga. O app conversa com o carregador e avisa quando a recarga começar.",
-    proof: "frontend/src/pages/Public/ChargePointLanding.tsx; pages/App/Sessao.tsx (estado Conectando)",
+    title: "Veja a tarifa e inicie",
+    text: "Confira a tarifa e o seu saldo e toque em Iniciar recarga. Se ainda não estiver com a sessão aberta, o app leva ao login e volta para o mesmo carregador. Depois, avisa quando a recarga começar.",
+    proof: "frontend/src/pages/Public/ChargePointLanding.tsx (tarifa, 'Seu saldo', redirectTarget); pages/App/Sessao.tsx (estado Conectando)",
   },
   {
     id: "carregando",
@@ -134,75 +147,69 @@ export const TOUR_STEPS: TourStep[] = [
   },
 ]
 
-/** Áreas do painel de quem opera. */
-export interface OperatorArea {
+/** Vantagens: o que muda para o motorista (linguagem de benefício; o "como" está nos recursos logo abaixo). */
+export interface Benefit {
   id: string
   icon: LucideIcon
   title: string
   text: string
+  /** Onde isso aparece no app (chip curto). */
+  where: string
   proof: string
 }
 
-export const OPERATOR_AREAS: OperatorArea[] = [
+export const BENEFITS: Benefit[] = [
   {
-    id: "dashboard",
-    icon: LayoutDashboard,
-    title: "Dashboard",
-    text: "Faturamento, sessões, energia, ticket médio, taxa de sucesso e utilização do período.",
-    proof: "frontend/src/pages/Admin/Dashboard/index.tsx (MetricCard x6)",
+    id: "chegar-sabendo",
+    icon: MapPinned,
+    title: "Chegue sabendo o que esperar",
+    text: "Veja se o eletroposto tem conector livre agora, de que tipo e com quanta potência, com o horário da última atualização. Não há reserva: o que aparece é a situação de agora.",
+    where: "Mapa e lista",
+    proof: "frontend/src/pages/App/Mapa.tsx (comentário 'não existe reserva'); components/estacoes/UpdatedAgo.tsx; lib/stations.ts (stationState)",
   },
   {
-    id: "sessoes",
-    icon: Activity,
-    title: "Sessões",
-    text: "Acompanhe as recargas em andamento e consulte o histórico detalhado de cada sessão.",
-    proof: "frontend/src/components/admin/adminNav.ts (Sessões); pages/Admin/Sessoes/index.tsx",
+    id: "custo-previsivel",
+    icon: Receipt,
+    title: "Custo sem susto",
+    text: "A tarifa aparece antes de você iniciar e, se houver cobrança mínima, o app avisa. Durante a recarga, o valor estimado acompanha o que você consome.",
+    where: "Página do carregador",
+    proof: "frontend/src/pages/Public/ChargePointLanding.tsx (formatTariffHeadlinePrice, minChargeCents); pages/App/Sessao.tsx (estimatedCostCents, belowMinimum)",
   },
   {
-    id: "financeiro",
-    icon: Landmark,
-    title: "Financeiro e relatórios",
-    text: "Faturamento, movimento diário por eletroposto e pagamentos, com exportação em CSV.",
-    proof: "frontend/src/components/admin/adminNav.ts; components/relatorios/ExportCsvButton.tsx",
+    id: "controle",
+    icon: Gauge,
+    title: "Controle na palma da mão",
+    text: "Inicie, acompanhe energia, tempo, potência e bateria e pare a recarga quando quiser, tudo pelo celular.",
+    where: "Tela da recarga",
+    proof: "frontend/src/pages/App/Sessao.tsx (Parar recarga + ConfirmDialog)",
   },
   {
-    id: "tarifas",
-    icon: Wallet,
-    title: "Tarifas",
-    text: "Preço por kWh e por minuto, taxa fixa por sessão, cobrança mínima e taxa de ociosidade.",
-    proof: "frontend/src/pages/Admin/Tariffs/TariffFormDialog.tsx",
+    id: "uma-conta",
+    icon: Network,
+    title: "Uma conta, qualquer operador",
+    text: "Um cadastro e uma carteira valem em todos os eletropostos da rede, mesmo que sejam de empresas diferentes. Nada de criar conta nova a cada lugar.",
+    where: "Conta e carteira",
+    proof: "PROGRESSO.md decisão 9 (conta única de rede); frontend/src/pages/Auth/Register.tsx; types/api.ts",
   },
   {
-    id: "carregadores",
-    icon: Plug,
-    title: "Carregadores e conectores",
-    text: "Cadastre pontos de recarga OCPP 1.6-J e seus conectores; reinicie e destrave conectores à distância.",
-    proof: "frontend/src/pages/Admin/ChargePoints/index.tsx; components/chargePoints/ChargePointCommandsMenu.tsx",
+    id: "historico",
+    icon: History,
+    title: "Seus gastos à mão",
+    text: "Cada recarga vira um recibo com energia, tarifa e detalhamento do custo, guardado no histórico. Dá para conferir depois quanto e onde você carregou.",
+    where: "Histórico e recibos",
+    proof: "frontend/src/pages/App/Sessoes.tsx ('Histórico de recargas'); pages/App/SessaoDetalhe.tsx ('Detalhamento do custo')",
   },
   {
-    id: "carteiras",
-    icon: WalletCards,
-    title: "Carteiras dos motoristas",
-    text: "Consulte o saldo e o extrato dos motoristas. Ajustes de saldo ficam com o administrador da rede.",
-    proof: "frontend/src/pages/Admin/Carteiras; components/admin/adminNav.ts",
-  },
-  {
-    id: "auditoria",
-    icon: ScrollText,
-    title: "Auditoria",
-    text: "Registro de quem fez o quê, onde e como, para o administrador da rede.",
-    proof: "frontend/src/components/admin/adminNav.ts (Auditoria, ADMIN-only); App.tsx",
-  },
-  {
-    id: "tempo-real",
-    icon: Radio,
-    title: "Tempo real",
-    text: "O painel recebe eventos do servidor e se atualiza sozinho, sem precisar recarregar a página.",
-    proof: "frontend/src/components/realtime/RealtimeConnection.tsx (/api/admin/events)",
+    id: "sem-loja",
+    icon: Download,
+    title: "Sem passar pela loja",
+    text: "Funciona direto no navegador do celular e pode ser instalado na tela inicial como um app. O QR code abre a página do carregador sem instalar nada.",
+    where: "Navegador e tela inicial",
+    proof: "frontend/vite.config.ts (manifest PWA); components/pwa/InstallPromptCard.tsx; pages/Public/ChargePointLanding.tsx",
   },
 ]
 
-/** Recursos (bento). `size` define o peso visual na grade. */
+/** Recursos do app (bento). `size` define o peso visual na grade (2 "lg" + 4 "md" = duas linhas cheias de 4 colunas). */
 export interface Feature {
   id: string
   icon: LucideIcon
@@ -217,10 +224,10 @@ export const FEATURES: Feature[] = [
   {
     id: "mapa",
     icon: MapIcon,
-    title: "Mapa multi-operador",
-    text: "Eletropostos de várias empresas numa única rede consultável, com a situação de agora de cada conector. Não há reserva: o que você vê é o estado atual.",
+    title: "Mapa e lista de eletropostos",
+    text: "Veja os mais próximos de você ou busque por cidade ou endereço, ordene por distância, quantidade de conectores ou nome, e toque em Como chegar para abrir a rota no Google Maps ou no Waze.",
     size: "lg",
-    proof: "frontend/src/pages/App/Mapa.tsx (comentário: 'não existe reserva'); pages/Public/Eletropostos.tsx",
+    proof: "frontend/src/pages/App/Mapa.tsx (SORT_OPTIONS, busca); components/estacoes/StationDetailSheet.tsx (Como chegar, Waze); lib/stations.ts (directionsLinks)",
   },
   {
     id: "ac-dc",
@@ -228,44 +235,44 @@ export const FEATURES: Feature[] = [
     title: "AC e DC com potência",
     text: "AC Tipo 2, DC CCS2 e DC CHAdeMO, sempre com a potência máxima em kW de cada conector.",
     size: "md",
-    proof: "frontend/src/lib/utils.ts (CONNECTOR_TYPE_LABELS, formatPowerKw)",
+    proof: "frontend/src/lib/utils.ts (CONNECTOR_TYPE_LABELS, formatPowerKw); components/sites/PublicSiteCard.tsx",
   },
   {
-    id: "conta-unica",
-    icon: BatteryCharging,
-    title: "Conta única de rede",
-    text: "Um cadastro e uma carteira valem para qualquer operador da plataforma.",
+    id: "tarifa",
+    icon: Receipt,
+    title: "Tarifa antes de iniciar",
+    text: "O preço por kWh, por minuto ou por sessão, conforme o eletroposto, e o aviso de cobrança mínima aparecem antes de você tocar em Iniciar recarga.",
     size: "md",
-    proof: "PROGRESSO.md decisão 9; frontend/src/pages/Auth/Register.tsx",
+    proof: "frontend/src/pages/Public/ChargePointLanding.tsx; lib/utils.ts (formatTariffHeadlinePrice)",
+  },
+  {
+    id: "tempo-real",
+    icon: Radio,
+    title: "Recarga acompanhada ao vivo",
+    text: "Energia em kWh, valor estimado, tempo, potência e bateria atualizados enquanto a recarga acontece, com o botão Parar recarga sempre à mão.",
+    size: "lg",
+    proof: "frontend/src/pages/App/Sessao.tsx; hooks/useMeSessions.ts (useActiveSession); components/realtime/RealtimeConnection.tsx",
   },
   {
     id: "carteira",
     icon: WalletCards,
     title: "Carteira pré-paga",
-    text: "Saldo, extrato e acompanhamento de pendências num lugar só. A recarga é debitada do saldo da carteira.",
+    text: "Saldo e extrato num lugar só. A recarga é debitada do saldo da sua carteira.",
     note: "Adicionar saldo por Pix e pagar com cartão: em breve.",
     size: "md",
-    proof: "frontend/src/pages/App/Carteira.tsx; lib/utils.ts (WALLET_ENTRY_TYPE_LABELS: CHARGE_DEBIT)",
+    proof: "frontend/src/pages/App/Carteira.tsx (Extrato); lib/utils.ts (WALLET_ENTRY_TYPE_LABELS: CHARGE_DEBIT)",
   },
   {
-    id: "tempo-real",
-    icon: Radio,
-    title: "Acompanhamento em tempo real",
-    text: "Energia, valor estimado, tempo, potência e bateria da sua recarga atualizados enquanto ela acontece.",
+    id: "historico",
+    icon: History,
+    title: "Histórico e recibos",
+    text: "Todas as suas recargas, com energia, tarifa e o detalhamento do custo de cada uma.",
     size: "md",
-    proof: "frontend/src/pages/App/Sessao.tsx",
-  },
-  {
-    id: "ocpp",
-    icon: Cpu,
-    title: "Protocolo OCPP 1.6-J",
-    text: "Os carregadores se conectam à plataforma pelo padrão OCPP 1.6-J, com comandos remotos de reinício e destravamento no painel.",
-    size: "lg",
-    proof: "frontend/src/pages/Admin/ChargePoints/index.tsx; components/chargePoints/ChargePointCommandsMenu.tsx",
+    proof: "frontend/src/pages/App/Sessoes.tsx; pages/App/SessaoDetalhe.tsx",
   },
 ]
 
-/** Segurança e confiança — só o que está implementado e é verificável no código. */
+/** Privacidade e segurança — só o que está implementado e é verificável no código, na ótica de quem usa o app. */
 export interface TrustItem {
   id: string
   title: string
@@ -275,50 +282,32 @@ export interface TrustItem {
 
 export const TRUST_ITEMS: TrustItem[] = [
   {
-    id: "isolamento",
-    title: "Dados separados por operador",
-    text: "Cada operador enxerga somente os próprios eletropostos e relatórios. Só o administrador da plataforma vê a rede toda.",
-    proof: "PROGRESSO.md decisão 1 (multi-tenant com operatorId); frontend/src/lib/utils.ts (operatorContextLabel)",
+    id: "localizacao",
+    title: "Sua localização exata não sai do aparelho",
+    text: "A busca por eletropostos próximos usa só uma área aproximada. A posição exata não é enviada nem guardada.",
+    proof: "frontend/src/components/estacoes/LocationPrompt.tsx; e2e/mapa-eletropostos.spec.ts; .claude/agent-memory/lyra/padrao-mapa-eletropostos-pwa.md",
   },
   {
-    id: "perfis",
-    title: "Perfis de acesso",
-    text: "Motorista, operador e administrador têm telas e permissões diferentes. As áreas restritas também são conferidas no servidor.",
-    proof: "frontend/src/App.tsx (RequireAuth roles); components/admin/adminNav.ts (getAdminNav por papel)",
-  },
-  {
-    id: "auditoria",
-    title: "Trilha de auditoria",
-    text: "As alterações feitas no painel ficam registradas: quem fez, o quê, onde e como.",
-    proof: "frontend/src/pages/Admin/Auditoria/index.tsx",
+    id: "offline",
+    title: "Saldo e recarga sempre atualizados",
+    text: "Dados de saldo e de sessão vêm sempre do servidor: o app não guarda uma cópia antiga no aparelho, então você nunca vê um saldo ou uma recarga desatualizados.",
+    proof: "frontend/vite.config.ts (runtimeCaching /api NetworkOnly)",
   },
   {
     id: "extrato",
-    title: "Extrato que só cresce",
-    text: "Lançamentos da carteira não são editados nem apagados: correções entram como novos lançamentos, como Crédito manual ou Estorno.",
+    title: "Extrato que não se reescreve",
+    text: "Lançamentos da carteira não são editados nem apagados: correções entram como novos lançamentos identificados, como Estorno.",
     proof: "PROGRESSO.md (WalletEntry append-only por trigger); frontend/src/lib/utils.ts (WALLET_ENTRY_TYPE_LABELS)",
   },
   {
     id: "login",
-    title: "Proteção do login",
+    title: "Proteção da sua conta",
     text: "Excesso de tentativas de acesso é bloqueado por um tempo, por conta e por IP.",
-    proof: "frontend/src/lib/authErrors.ts (RATE_LIMITED_ACCOUNT_MESSAGE e mensagem por IP)",
-  },
-  {
-    id: "localizacao",
-    title: "Sua localização exata não sai do aparelho",
-    text: "A busca por eletropostos próximos usa só uma área aproximada. A posição exata não é enviada nem guardada.",
-    proof: ".claude/agent-memory/lyra/padrao-mapa-eletropostos-pwa.md; frontend/e2e/mapa-eletropostos.spec.ts",
-  },
-  {
-    id: "offline",
-    title: "Saldo e sessões nunca ficam em cache",
-    text: "Dados financeiros e de sessão sempre vêm do servidor: o app não guarda uma cópia antiga no aparelho.",
-    proof: "frontend/vite.config.ts (runtimeCaching /api NetworkOnly)",
+    proof: "frontend/src/lib/authErrors.ts (RATE_LIMITED_ACCOUNT_MESSAGE e RATE_LIMITED_AUTH_MESSAGE)",
   },
 ]
 
-/** Perguntas frequentes. As respostas seguem a regra de ouro (Pix/cartão = em breve). */
+/** Perguntas frequentes do motorista. As respostas seguem a regra de ouro (Pix/cartão = em breve). */
 export interface FaqItem {
   q: string
   a: string
@@ -337,9 +326,19 @@ export const FAQ_ITEMS: FaqItem[] = [
     proof: "frontend/src/pages/Public/ChargePointLanding.tsx (redirectTarget, handleStart)",
   },
   {
+    q: "Vejo quanto vai custar antes de começar?",
+    a: "Vê a tarifa do conector antes de iniciar (por kWh, por minuto ou por sessão, conforme o eletroposto) e o aviso de cobrança mínima, quando houver. Durante a recarga, o app mostra o valor estimado.",
+    proof: "frontend/src/pages/Public/ChargePointLanding.tsx (formatTariffHeadlinePrice, minChargeCents); pages/App/Sessao.tsx (estimatedCostCents)",
+  },
+  {
     q: "Como pago a recarga?",
     a: "A recarga é debitada do saldo da sua carteira pré-paga no app. O pagamento online por Pix e por cartão de crédito ainda não está disponível e chega em breve.",
     proof: "frontend/src/pages/App/SessaoDetalhe.tsx (walletEntry); pages/App/Sessao.tsx (ConfirmDialog: cobrado da carteira)",
+  },
+  {
+    q: "Posso parar a recarga quando quiser?",
+    a: "Pode. Na tela da recarga, toque em Parar recarga e confirme. O recibo mostra a energia entregue e o custo.",
+    proof: "frontend/src/pages/App/Sessao.tsx (Parar recarga + ConfirmDialog); pages/App/SessaoDetalhe.tsx",
   },
   {
     q: "Posso carregar em eletropostos de empresas diferentes?",
@@ -352,19 +351,14 @@ export const FAQ_ITEMS: FaqItem[] = [
     proof: "frontend/src/pages/App/Mapa.tsx (comentário), components/estacoes/UpdatedAgo.tsx",
   },
   {
-    q: "Quais conectores são atendidos?",
-    a: "AC Tipo 2, DC CCS2 e DC CHAdeMO. Cada eletroposto informa quais conectores e qual potência oferece.",
-    proof: "frontend/src/lib/utils.ts (CONNECTOR_TYPE_LABELS)",
-  },
-  {
-    q: "Meus carregadores são compatíveis?",
-    a: "A plataforma conversa com carregadores que usam o protocolo OCPP 1.6-J. Confirme com o fabricante se o seu modelo oferece esse protocolo.",
-    proof: "frontend/src/pages/Admin/ChargePoints/ChargePointFormDialog.tsx",
+    q: "Quais conectores aparecem?",
+    a: "AC Tipo 2, DC CCS2 e DC CHAdeMO. Cada eletroposto informa quais conectores e qual potência oferece, para você escolher o que serve ao seu carro.",
+    proof: "frontend/src/lib/utils.ts (CONNECTOR_TYPE_LABELS, formatPowerKw)",
   },
   {
     q: "A InnoFlow guarda a minha localização?",
     a: "Não a posição exata. Para achar eletropostos perto de você, o app usa só uma área aproximada.",
-    proof: "frontend/e2e/mapa-eletropostos.spec.ts",
+    proof: "frontend/e2e/mapa-eletropostos.spec.ts; components/estacoes/LocationPrompt.tsx",
   },
 ]
 
@@ -377,6 +371,3 @@ export const CTA_LINKS = {
 
 /** Rótulos das telas ilustrativas — repetidos em aria/legenda para ninguém tomar o exemplo por dado real. */
 export const EXAMPLE_NOTICE = "Telas ilustrativas, com dados de exemplo."
-
-/** Itens do menu lateral do painel desenhado no mockup (mesmos rótulos de `adminNav.ts`). */
-export const ADMIN_MOCK_NAV = ["Dashboard", "Sessões", "Pontos de recarga", "Conectores", "Financeiro", "Carteiras", "Tarifas"] as const

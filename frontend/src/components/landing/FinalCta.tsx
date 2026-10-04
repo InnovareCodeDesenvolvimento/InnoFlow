@@ -12,10 +12,10 @@ export function FinalCta() {
         <Reveal className="text-center lg:text-left">
           <p className="lnd-eyebrow text-accent-glow">{SLOGAN}</p>
           <h2 id="cta-final-titulo" className="mt-4 text-balance text-3xl font-extrabold leading-tight tracking-tight !text-white sm:text-4xl lg:text-5xl">
-            Pronto para <span className="lnd-gradient-text">recarregar</span> ou para operar com mais controle?
+            Pronto para <span className="lnd-gradient-text">recarregar</span> sem complicação?
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-lg leading-relaxed text-white/80 lg:mx-0">
-            Veja os eletropostos da rede, crie a sua conta de motorista ou entre para acessar o seu painel.
+            Veja os eletropostos da rede e crie a sua conta de motorista: com ela, uma recarga começa no QR code do carregador e termina no seu recibo.
           </p>
           <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center lg:justify-start">
             <Link to={CTA_LINKS.eletropostos} className="lnd-btn lnd-btn-lime">
@@ -27,10 +27,13 @@ export function FinalCta() {
               <UserPlus className="h-5 w-5" aria-hidden="true" />
               Criar conta
             </Link>
-            <Link to={CTA_LINKS.login} className="lnd-btn lnd-btn-ghost">
+          </div>
+          <p className="mt-4 text-sm font-medium text-white/75">
+            Já tem conta?{" "}
+            <Link to={CTA_LINKS.login} className="font-bold text-white underline decoration-accent-glow decoration-2 underline-offset-4 hover:text-accent-glow">
               Entrar
             </Link>
-          </div>
+          </p>
         </Reveal>
 
         <Reveal from="scale" className="flex justify-center">

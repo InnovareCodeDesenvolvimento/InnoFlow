@@ -16,7 +16,7 @@ export function Faq() {
           id="perguntas-titulo"
           eyebrow="Perguntas frequentes"
           title="Tire suas dúvidas"
-          description="Respostas diretas sobre como a plataforma funciona hoje."
+          description="Respostas diretas sobre como o InnoFlow funciona hoje para quem dirige um elétrico."
         />
         <div className="lnd-faq mt-12 space-y-3">
           {FAQ_ITEMS.map((item, i) => (

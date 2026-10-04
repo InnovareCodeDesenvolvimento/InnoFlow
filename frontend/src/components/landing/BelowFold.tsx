@@ -3,14 +3,14 @@ import { DriverTour } from "./DriverTour"
 import { Faq } from "./Faq"
 import { FinalCta } from "./FinalCta"
 import { Features } from "./Features"
-import { OperatorSection } from "./OperatorSection"
+import { Benefits } from "./Benefits"
 import { TrustSection } from "./TrustSection"
 import { SLOT_KEYS, slotClass, type SlotKey } from "./landing-slots"
 
 /** Seções abaixo da dobra (mesma ordem de `SLOT_KEYS`). Cada uma é montada numa tarefa própria (ver `useStagedMount`). */
 const SECTIONS: Record<SlotKey, () => ReactNode> = {
   tour: () => <DriverTour />,
-  op: () => <OperatorSection />,
+  adv: () => <Benefits />,
   feat: () => <Features />,
   trust: () => <TrustSection />,
   faq: () => <Faq />,

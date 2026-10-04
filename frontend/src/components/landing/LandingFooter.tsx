@@ -20,7 +20,7 @@ export function LandingFooter() {
             <img src={logoIcon} alt="" width={36} height={36} className="h-9 w-9" />
             <span className="text-lg font-extrabold tracking-tight text-white">InnoFlow</span>
           </Link>
-          <p className="mt-3 max-w-xs text-sm leading-relaxed text-white/75">{SLOGAN}. Plataforma de recarga de veículos elétricos para motoristas e operadores de eletropostos.</p>
+          <p className="mt-3 max-w-xs text-sm leading-relaxed text-white/75">{SLOGAN}. Encontre um eletroposto, inicie a recarga pelo QR code, acompanhe pelo celular e guarde o recibo.</p>
         </div>
 
         <nav aria-label="Atalhos do rodapé">

@@ -4,7 +4,7 @@ import { Reveal } from "./Reveal"
 import { SectionHeading } from "./SectionHeading"
 
 /**
- * Segurança e confiança. Só entra o que está implementado e é verificável no código (ver `proof` em
+ * Privacidade e segurança, na ótica de quem usa o app. Só entra o que está implementado e é verificável no código (ver `proof` em
  * `TRUST_ITEMS`); nada de selo, certificação ou promessa genérica de "máxima segurança".
  */
 export function TrustSection() {
@@ -22,9 +22,9 @@ export function TrustSection() {
             <SectionHeading
               id="seguranca-titulo"
               align="left"
-              eyebrow="Segurança e confiança"
-              title="Cada dado no seu lugar, cada ação registrada"
-              description="Controle de acesso por perfil, separação entre operadores e um extrato que ninguém reescreve."
+              eyebrow="Privacidade e segurança"
+              title="Seus dados no lugar certo"
+              description="A localização exata fica com você, o saldo é sempre o de agora e a sua conta tem proteção contra tentativas em excesso."
             />
           </div>
         </div>

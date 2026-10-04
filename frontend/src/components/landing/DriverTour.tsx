@@ -60,9 +60,9 @@ export function DriverTour() {
       <div ref={sectionRef} className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8">
         <SectionHeading
           id="como-funciona-titulo"
-          eyebrow="Para o motorista"
+          eyebrow="Como funciona"
           title="Da busca ao recibo, em cinco passos"
-          description="Você acha o eletroposto, escaneia o QR code do carregador, inicia a recarga e acompanha tudo pelo celular."
+          description="Você acha um eletroposto livre, escaneia o QR code do carregador, vê a tarifa, inicia a recarga e acompanha tudo pelo celular até receber o recibo."
         />
 
         <div
@@ -160,7 +160,9 @@ export function DriverTour() {
             </div>
           </div>
 
-          <Reveal from="scale" className="order-first flex flex-col items-center lg:order-none">
+          <Reveal from="scale" className="relative order-first flex flex-col items-center lg:order-none">
+            {/* halo de luz atrás do celular (gradiente simples, sem filter/blur: barato) - o celular é o protagonista da seção */}
+            <div className="lnd-phone-halo" aria-hidden="true" />
             <PhoneFrame step={current.id} />
             <p className="mt-4 max-w-[18rem] text-center text-xs font-medium text-ink-softer">{EXAMPLE_NOTICE}</p>
           </Reveal>

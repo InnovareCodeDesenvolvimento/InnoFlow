@@ -24,7 +24,7 @@ export function StatsStrip() {
   return (
     <section aria-labelledby="fatos-titulo" className="lnd-dark-flat relative isolate overflow-clip pb-16 sm:pb-20">
       <h2 id="fatos-titulo" className="sr-only">
-        A plataforma em poucos fatos
+        O InnoFlow em poucos fatos
       </h2>
       <div ref={ref} className="relative mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8">
         <div className="lnd-cable-h hidden lg:block" aria-hidden="true" />

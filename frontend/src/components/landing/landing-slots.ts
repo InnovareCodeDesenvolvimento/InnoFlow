@@ -4,7 +4,7 @@
  * SEM imports de componentes para a casca da landing (que carrega no primeiro paint) saber quantos espaços reservar
  * sem puxar o chunk das seções.
  */
-export const SLOT_KEYS = ["tour", "op", "feat", "trust", "faq", "cta"] as const
+export const SLOT_KEYS = ["tour", "adv", "feat", "trust", "faq", "cta"] as const
 export type SlotKey = (typeof SLOT_KEYS)[number]
 
 /** Os espaços vazios: reservam a altura final do conteúdo que ainda não foi montado (a página já nasce do tamanho certo). */
