@@ -126,3 +126,11 @@ export const webhookCieloRateLimit = buildLimiter(60 * 1000, 60, 'RATE_LIMITED_W
  * puniria outros admins). Roda DEPOIS de `authenticate`/`requireRole('ADMIN')`.
  */
 export const paymentGatewayWriteRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_PAYMENT_GATEWAY', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/admin/payment-gateway/test-connection` (C2.1) — cada chamada fala com a Cielo/Braspag de verdade (até 3 requisições), então tem balde PRÓPRIO
+ * (não divide a cota do PUT) e é mais apertado: 6/min por ADMIN. Mesmo código de erro do PUT (`RATE_LIMITED_PAYMENT_GATEWAY`, já no contrato do frontend).
+ * Sem step-up de senha: não grava nada, não revela segredo e só LÊ (uma consulta de venda inexistente); pedir a senha a cada clique tornaria o diagnóstico
+ * inutilizável, e o que ele consome de Cielo fica limitado por este balde e registrado na auditoria.
+ */
+export const paymentGatewayTestRateLimit = buildLimiter(60 * 1000, 6, 'RATE_LIMITED_PAYMENT_GATEWAY', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))

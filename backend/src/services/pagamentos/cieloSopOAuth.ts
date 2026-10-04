@@ -65,7 +65,7 @@ const MINIMO_SEGUNDOS = 30
 /** Passos 1 e 2. Devolve o `AccessToken` do navegador. */
 export async function emitirAccessTokenSop(config: CieloSopConfig): Promise<CieloSopAccessToken> {
   const tokenOAuth = await obterTokenOAuthSop(config)
-  return emitirAccessTokenDoNavegador(config, tokenOAuth)
+  return emitirAccessTokenDoNavegadorSop(config, tokenOAuth)
 }
 
 /** Passo 1 — OAuth2 `client_credentials` na Braspag. */
@@ -102,7 +102,7 @@ export async function obterTokenOAuthSop(config: CieloSopConfig): Promise<string
 }
 
 /** Passo 2 — troca o token OAuth pelo `AccessToken` que o navegador usa. */
-async function emitirAccessTokenDoNavegador(config: CieloSopConfig, tokenOAuth: string): Promise<CieloSopAccessToken> {
+export async function emitirAccessTokenDoNavegadorSop(config: CieloSopConfig, tokenOAuth: string): Promise<CieloSopAccessToken> {
   const res = await chamar(config, 'accesstoken', config.accessTokenUrl, {
     method: 'POST',
     headers: { Authorization: `Bearer ${tokenOAuth}`, 'Content-Type': 'application/json', Accept: 'application/json', MerchantId: config.merchantId },

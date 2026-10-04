@@ -9,10 +9,11 @@ import { asyncHandler } from '../middleware/asyncHandler'
 import { auditCtx } from '../middleware/auditTrail'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AppError } from '../middleware/errorHandler'
-import { paymentGatewayWriteRateLimit } from '../middleware/rateLimit'
+import { paymentGatewayTestRateLimit, paymentGatewayWriteRateLimit } from '../middleware/rateLimit'
 import { validateBody } from '../middleware/validate'
 import { updatePaymentGatewayConfigSchema, type UpdatePaymentGatewayConfigInput } from '../schemas/paymentGateway.schema'
 import { exigirSenhaAtual, StepUpRateLimitedError } from '../../services/auth/stepUpSenha'
+import { testarConexaoGateway } from '../../services/pagamentos/testarConexaoGateway'
 
 /**
  * Configuração do gateway de pagamento (F5.5) — `GET`/`PUT /api/admin/payment-gateway`. ADMIN-ONLY: a conta
@@ -99,6 +100,32 @@ router.put(
     auditCtx(res).describe({ skip: true })
 
     res.json(await dtoDaConfigAtual(req))
+  }),
+)
+
+/**
+ * `POST /api/admin/payment-gateway/test-connection` (C2.1) — testa as credenciais EFETIVAS de verdade, passo a passo, sem cobrar nem gravar nada e sem devolver
+ * segredo/token. Sempre 200 com o resultado POR PASSO (uma credencial errada é o RESULTADO do teste, não um erro da rota); 503 só se a config está ilegível,
+ * como o GET. Auditoria: uma linha `OTHER` com o resumo (sem segredo). Ver `services/pagamentos/testarConexaoGateway.ts`.
+ */
+router.post(
+  '/test-connection',
+  paymentGatewayTestRateLimit,
+  asyncHandler(async (_req, res) => {
+    let resultado
+    try {
+      resultado = await testarConexaoGateway()
+    } catch (err) {
+      if (err instanceof ConfiguracaoGatewayIndisponivelError) throw new AppError('Não foi possível ler a configuração do gateway agora.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+      throw err
+    }
+    const falhas = resultado.steps.filter((s) => s.status !== 'OK' && s.status !== 'NOT_CONFIGURED' && s.status !== 'SKIPPED').map((s) => `${s.step}=${s.status}`)
+    auditCtx(res).describe({
+      action: 'OTHER',
+      actionDetail: resultado.ok ? 'test_connection:ok' : `test_connection:${falhas.length > 0 ? falhas.join(',') : 'nada_configurado'}`,
+      changes: null,
+    })
+    res.json(resultado)
   }),
 )
 
