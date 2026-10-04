@@ -1,3 +1,4 @@
+import { pularNoWebhook, webhookJsonParser } from './middleware/webhookJson'
 import express, { type Express } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -70,7 +71,7 @@ export function createApp(): Express {
     }),
   )
   app.use(compression())
-  app.use(express.json())
+  app.use(pularNoWebhook(express.json())) // o webhook da Cielo tem parser próprio (4 KB, tolerante a JSON inválido) — ver `middleware/webhookJson.ts`
   // `serializers.err`: o pino-http SOBRESCREVE o `err` do logger pelo serializer padrão do pino (sem a varredura profunda) — repete o nosso aqui.
   app.use(pinoHttp({ logger, serializers: LOG_SERIALIZERS }))
 
@@ -102,7 +103,7 @@ export function createApp(): Express {
   app.use('/api/sites', publicRateLimit, publicSitesRoutes) // público — app do motorista
   app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
   app.use('/api/public/config', publicRateLimit, publicConfigRoutes) // público — configuração da tela de login (Google client ID)
-  app.use('/api/webhooks/cielo', webhookCieloRateLimit, webhooksCieloRoutes) // público, SEM JWT (a Cielo não manda Bearer) — segredo próprio (pathToken + header estático), ver F5.2
+  app.use('/api/webhooks/cielo', webhookCieloRateLimit, webhookJsonParser(), webhooksCieloRoutes) // público, SEM JWT (a Cielo não manda Bearer) — segredo próprio (pathToken + header estático), ver F5.2
   app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start e /wallet/topups é mais apertado, aplicado na própria rota
 
   // Log de auditoria (Nova, 2026-09-17) — montado ANTES de todo router

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
@@ -28,10 +29,17 @@ import { webhookCieloBodySchema, type WebhookCieloBody } from '../schemas/webhoo
  */
 const router = Router()
 
+/** S-4: tempo constante (o token do caminho é a 1ª barreira da rota pública). Tamanhos diferentes => falso sem comparar. */
+function tokenDoCaminhoConfere(recebido: string, esperado: string): boolean {
+  const a = Buffer.from(recebido, 'utf8')
+  const b = Buffer.from(esperado, 'utf8')
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
 router.post(
   '/:pathToken',
   asyncHandler(async (req, res) => {
-    if (req.params.pathToken !== getCieloWebhookPathToken()) {
+    if (!tokenDoCaminhoConfere(req.params.pathToken, getCieloWebhookPathToken())) {
       // 404 (não 401): não confirma nem nega que "existe uma rota de webhook
       // aqui" para quem não sabe o token — mesma filosofia anti-enumeração
       // do resto da API.

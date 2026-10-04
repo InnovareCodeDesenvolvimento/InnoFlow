@@ -53,6 +53,18 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     return
   }
 
+  // Erros do body-parser (`type` string, `statusCode` 4xx): corpo malformado/grande/codificação — erro do CLIENTE, não nosso. Sem log de erro e sem `err` (o corpo pode ter segredo), só um aviso curto.
+  const tipoBodyParser = typeof err === 'object' && err !== null ? (err as { type?: unknown }).type : undefined
+  if (typeof tipoBodyParser === 'string' && /^(entity|encoding|charset|request|stream)[.]/.test(tipoBodyParser)) {
+    const status = tipoBodyParser === 'entity.too.large' ? 413 : tipoBodyParser === 'entity.parse.failed' ? 400 : tipoBodyParser.startsWith('encoding') || tipoBodyParser.startsWith('charset') ? 415 : 400
+    logger.debug({ tipo: tipoBodyParser, method: req.method, path: req.originalUrl.split('?')[0] }, '[api] corpo da requisição recusado pelo parser')
+    res.status(status).json({
+      error: status === 413 ? 'Corpo da requisição grande demais.' : status === 415 ? 'Codificação do corpo não suportada.' : 'Corpo da requisição inválido (JSON malformado).',
+      code: status === 413 ? 'PAYLOAD_TOO_LARGE' : status === 415 ? 'UNSUPPORTED_BODY' : 'INVALID_JSON',
+    })
+    return
+  }
+
   // Erros conhecidos do Prisma. `err?.constructor?.name` (não
   // `err.constructor.name`) porque um throwable sem protótipo explodiria
   // dentro do próprio error handler — a request morreria sem resposta.
