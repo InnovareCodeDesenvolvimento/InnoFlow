@@ -931,6 +931,30 @@ model PaymentIntent {
   // Authorized não é pago). Ver checagem obrigatória no handoff.
   returnCode String?
 
+  // Identificadores da transação na Cielo (C2.5, achado F22 de
+  // docs/GATEWAY-CIELO-PARQUE-VS-INNOFLOW.md). A Cielo só responde sobre uma
+  // venda por 3 meses e o chargeback chega depois disso, então o que a
+  // contestação pede (Tid, código de autorização, NSU) precisa ser gravado NA
+  // HORA da autorização/captura — não dá para redescobrir. Fonte do que
+  // guardar: Parque das Feiras, adaptadores/cielo/index.ts (~347-364). Todos
+  // anuláveis: Pix e intent que nunca chegou à Cielo não têm nenhum deles.
+  // São identificadores de transação, NÃO dado de cartão (nem PAN nem CVV).
+  //
+  // Tamanho: o repositório do Parque não fixa comprimento (lê como texto
+  // livre). A API 3.0 da Cielo documenta Tid e ProofOfSale (NSU) com 20
+  // caracteres e AuthorizationCode com 6 — NÃO reconferido contra a doc ao
+  // vivo nesta tarefa. VarChar(64) em todos, ~3x o maior valor documentado: um
+  // limite apertado faria o INSERT/UPDATE falhar DEPOIS de a Cielo já ter
+  // autorizado (dinheiro movido, registro perdido), e alargar VarChar depois
+  // é fácil, mas esse estrago não se desfaz. A aplicação deve tratar valor
+  // maior que 64 como alerta, nunca como motivo para descartar a transação.
+  // Sem índice: nenhuma consulta do sistema filtra por eles (o webhook casa
+  // por cieloPaymentId, que já é @unique). Ver migration
+  // 20261004120000_payment_intent_cielo_transaction_ids.
+  cieloTid               String? @db.VarChar(64)
+  cieloAuthorizationCode String? @db.VarChar(64)
+  cieloProofOfSale       String? @db.VarChar(64)
+
   amountRequestedCents  Int
   amountAuthorizedCents Int?
   // Valor-ALVO da captura, calculado e gravado pelo finalizarSessao ao
