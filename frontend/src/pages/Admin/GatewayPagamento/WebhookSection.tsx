@@ -25,6 +25,9 @@ export function WebhookSection({
   errors: DraftErrors
   onChange: (patch: Partial<GatewayDraft>) => void
 }) {
+  // Webhook não usado (conta Cielo compartilhada): nada configurado e nada a cadastrar - situação normal, não pendência. Se ALGO já está configurado
+  // (URL ou segredo), a seção completa continua aparecendo para o admin terminar ou limpar.
+  const notInUse = dto.webhookInUse === false && !dto.webhookUrl && !dto.webhookHeaderSecretSet && draft.webhookHeaderSecret === undefined
   const revealed = !!draft.webhookSecretRevealed && !!draft.webhookHeaderSecret
   const secretValue = draft.webhookHeaderSecret
 
@@ -32,6 +35,25 @@ export function WebhookSection({
   const handleSecretChange = (value: string | undefined) => {
     if (value === undefined) onChange({ webhookHeaderSecret: undefined, webhookSecretRevealed: undefined })
     else onChange({ webhookHeaderSecret: value, webhookSecretRevealed: draft.webhookSecretRevealed && value !== "" ? true : undefined })
+  }
+
+  if (notInUse) {
+    return (
+      <Card className="card-premium" data-testid="section-webhook">
+        <CardHeader>
+          <CardTitle>Webhook</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p role="status" className="flex items-start gap-2 text-sm text-ink-soft" data-testid="webhook-not-in-use">
+            <Webhook className="mt-0.5 h-4 w-4 shrink-0 text-ink-softer" aria-hidden="true" />
+            <span className="min-w-0">
+              <span className="font-semibold text-ink">Webhook não usado (conta compartilhada).</span> O Pix é creditado por consulta periódica à Cielo, então não há URL nem header para cadastrar no Site da
+              Cielo.
+            </span>
+          </p>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (

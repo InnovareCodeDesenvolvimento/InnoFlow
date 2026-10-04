@@ -179,8 +179,7 @@ function missingFor(method: "card" | "pix", state: GatewayState, server: ServerE
     if (!state.sopClientId) missing.add("SOP_CLIENT_ID")
     if (!state.sopClientSecretSet) missing.add("SOP_CLIENT_SECRET")
   } else {
-    if (!server.webhookPathToken) missing.add("WEBHOOK_PATH_TOKEN")
-    if (!state.webhookHeaderSecretSet) missing.add("WEBHOOK_HEADER_SECRET")
+    // Conta Cielo compartilhada com o Parque: o Pix é creditado por polling, então o webhook NÃO é pré-requisito (backend: `calcularReadiness`).
   }
   return REQUIREMENT_ORDER.filter((r) => missing.has(r))
 }
@@ -200,6 +199,7 @@ function toDto({ state, server }: Scenario): PaymentGatewayConfigDTO {
     sopClientSecretSet: state.sopClientSecretSet,
     webhookHeaderSecretSet: state.webhookHeaderSecretSet,
     webhookUrl: server.webhookPathToken ? "https://api.innoflow.example/api/webhooks/cielo/k3x9-demo-token" : null,
+    webhookInUse: server.webhookPathToken && state.webhookHeaderSecretSet,
     webhookHeaderName: "InnoFlowWebhookSecret", // só letras: o campo Key do Site Cielo recusa hífen/número (C1.4); mesmo valor de WEBHOOK_SECRET_HEADER_NAME do backend
     cardEnabled: state.cardEnabled,
     pixEnabled: state.pixEnabled,

@@ -96,10 +96,10 @@ test.describe("ADMIN — origem env, nada configurado: ver → configurar → ha
     await expect(page.getByTestId("source-banner-env")).toContainText("Usando as variáveis do servidor")
     await expect(page.getByTestId("source-banner-env")).toContainText("Na primeira gravação, a configuração nasce com o ambiente atual")
     await expect(page.getByTestId("source-banner-env")).toContainText("salvar não desliga o que já funcionava")
-    await expect(page.getByTestId("method-pix-readiness")).toHaveText("Faltam 3 itens")
+    await expect(page.getByTestId("method-pix-readiness")).toHaveText("Faltam 2 itens")
     await expect(page.getByTestId("method-card-readiness")).toHaveText("Faltam 4 itens")
     await expect(page.getByTestId("method-pix-missing")).toContainText("MerchantId da Cielo")
-    await expect(page.getByTestId("method-pix-missing")).toContainText("Segredo do header do webhook")
+    await expect(page.getByTestId("method-pix-missing")).not.toContainText("webhook") // conta Cielo compartilhada: o Pix não depende de webhook
     // interruptores bloqueados enquanto não está pronto, com a razão dita
     await expect(page.getByRole("switch", { name: "Habilitar Pix" })).toBeDisabled()
     await expect(page.getByRole("switch", { name: "Habilitar Cartão" })).toBeDisabled()
@@ -346,13 +346,14 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     await login(page, "gateway-sem-chave@innoelektron.com")
     await openGateway(page)
 
-    // URL do webhook ausente: explica a variável que falta
-    await expect(page.getByTestId("webhook-url-missing")).toContainText("CIELO_WEBHOOK_PATH_TOKEN")
+    // Webhook sem token e sem segredo = "não usado" (conta compartilhada): situação normal, sem aviso de pendência
+    await expect(page.getByTestId("webhook-not-in-use")).toContainText("Webhook não usado (conta compartilhada)")
+    await expect(page.getByTestId("webhook-url-missing")).toHaveCount(0)
     // prontidão com itens SÓ DO SERVIDOR separados dos da tela
     const missing = page.getByTestId("method-pix-missing")
     await expect(missing).toContainText("Preencha nesta tela")
     await expect(missing).toContainText("Só no servidor (EasyPanel)")
-    await expect(missing).toContainText("CIELO_WEBHOOK_PATH_TOKEN")
+    await expect(missing).not.toContainText("CIELO_WEBHOOK_PATH_TOKEN") // o backend não pede mais webhook para o Pix
     await expect(missing).toContainText("PAYMENT_SECRETS_KEY")
     await expect(missing).toContainText("openssl rand -base64 32")
     // Pix está habilitado mesmo sem estar pronto: DESLIGAR é permitido (não fica preso)
@@ -398,8 +399,7 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     await expect(error).toHaveAttribute("data-code", "GATEWAY_NOT_READY")
     const notReady = page.getByTestId("save-error-missing")
     await expect(notReady).toContainText("MerchantKey da Cielo")
-    await expect(notReady).toContainText("Segredo do header do webhook")
-    await expect(notReady).toContainText("CIELO_WEBHOOK_PATH_TOKEN")
+    await expect(notReady).not.toContainText("webhook")
     expect(puts.at(-1)).toEqual({ environment: "production", confirmProduction: true })
     // continua em sandbox no servidor: o banner de produção é só rascunho
     await expect(page.getByTestId("environment-production-banner")).toContainText("ainda não salva")
@@ -605,16 +605,27 @@ test.describe("mobile (390px)", () => {
       .toEqual([true, true])
   }
 
+  test("segredo do webhook gerado (longo) cabe em 390px", async ({ page }) => {
+    await login(page, "admin@innoelektron.com")
+    await page.goto("/admin/gateway-pagamento")
+    await expect(page.getByRole("heading", { name: "Gateway de pagamento", level: 1 })).toBeVisible()
+    await page.getByRole("button", { name: "Informar Segredo do header" }).click()
+    await page.getByRole("button", { name: "Gerar segredo aleatório" }).click()
+    await expect(page.getByTestId("webhook-secret-generated-note")).toBeVisible()
+    expect(await horizontalOverflow(page)).toEqual({ document: 0, main: 0, stray: [] })
+  })
+
   test("sem overflow horizontal em nenhum estado (env, segredo gerado, erro 503/409, diálogos)", async ({ page }) => {
     await login(page, "gateway-sem-chave@innoelektron.com")
     await page.goto("/admin/gateway-pagamento")
     await expect(page.getByRole("heading", { name: "Gateway de pagamento", level: 1 })).toBeVisible()
     expect(await horizontalOverflow(page)).toEqual({ document: 0, main: 0, stray: [] })
 
-    // segredo gerado (longo, monoespaçado) + copiar
-    await page.getByRole("button", { name: "Informar Segredo do header" }).click()
-    await page.getByRole("button", { name: "Gerar segredo aleatório" }).click()
-    await expect(page.getByTestId("webhook-secret-generated-note")).toBeVisible()
+    // webhook "não usado" (conta compartilhada) cabe; segredo longo digitado (monoespaçado) cabe
+    await expect(page.getByTestId("webhook-not-in-use")).toBeVisible()
+    await page.getByLabel("MerchantId", { exact: true }).fill("mid-mobile")
+    await page.getByRole("button", { name: "Informar MerchantKey" }).click()
+    await secretInput(page, "merchantKey").fill(`SEGREDO-LONGO-${"x".repeat(80)}`)
     expect(await horizontalOverflow(page)).toEqual({ document: 0, main: 0, stray: [] })
 
     // diálogo de resumo cabe

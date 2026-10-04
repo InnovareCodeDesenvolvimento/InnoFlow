@@ -1624,6 +1624,12 @@ export interface PaymentGatewayConfigDTO {
   webhookUrl: string | null
   /** Nome do header que a Cielo deve enviar com o segredo (constante do servidor, somente leitura). */
   webhookHeaderName: string
+  /**
+   * `true` só se o webhook está configurado por inteiro (token do caminho no servidor + segredo do header). `false` = "webhook não usado": o Pix é creditado por consulta periódica
+   * (polling). NÃO é erro nem pendência - conta Cielo COMPARTILHADA com o Parque não tem URL de notificação do InnoFlow, e `readiness.pix.missing` não lista mais os códigos de webhook.
+   * Opcional no tipo só para tolerar servidor antigo (ausente = comportamento antigo).
+   */
+  webhookInUse?: boolean
   cardEnabled: boolean
   pixEnabled: boolean
   readiness: { card: PaymentMethodReadiness; pix: PaymentMethodReadiness }
