@@ -7,7 +7,7 @@ import { issueToken } from '../../lib/jwt'
 import { logger } from '../../lib/logger'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
-import { changePasswordRateLimit, googleAuthRateLimit, loginRateLimit, registerRateLimit } from '../middleware/rateLimit'
+import { changePasswordRateLimit, googleAuthRateLimit, googleLinkRateLimit, loginRateLimit, registerRateLimit } from '../middleware/rateLimit'
 import { authenticate } from '../middleware/auth'
 import { sessionValidator } from '../lib/sessionValidatorInstance'
 import { loginThrottle } from '../lib/loginThrottleInstance'
@@ -17,6 +17,10 @@ import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
 import { autenticarComGoogle } from '../../services/auth/autenticarComGoogle'
 import { createGoogleTokenVerifier } from '../../services/auth/googleTokenVerifier'
 import { prismaGoogleUserRepository } from '../../services/auth/prismaGoogleUserRepository'
+import { prismaVinculoGoogleRepository, vincularGoogleAContaLogada } from '../../services/auth/vincularGoogleAContaLogada'
+import { incrWithTtl } from '../../lib/redisCounter'
+import { redis } from '../../lib/redis'
+import { withDeadline } from '../../lib/withDeadline'
 
 /**
  * Log de auditoria de LOGIN — fora do middleware genérico (`auditTrail()`,
@@ -242,6 +246,83 @@ router.post(
         if (resultado.linked) sessionValidator.invalidate(resultado.user.id)
         res.status(resultado.created ? 201 : 200).json({ token: issueToken(resultado.user), user: toUserDTO({ ...resultado.user, operatorName: null }) })
         return
+    }
+  }),
+)
+
+/** Falhas de vínculo por usuário numa hora; ao cruzar o limite UMA vez, o alerta `google_link_repeated_failures` (sinal de alguém tentando atalhar a regra de sandbox/cartão). Fail-open. */
+const LIMITE_ALERTA_FALHAS_VINCULO = 5
+const JANELA_FALHAS_VINCULO_SEG = 60 * 60
+
+async function registrarFalhaDeVinculo(userId: string, motivo: string): Promise<void> {
+  try {
+    const total = await withDeadline(incrWithTtl(redis, `google-link:failures:${userId}`, JANELA_FALHAS_VINCULO_SEG), 500, 'contar falha de vínculo do Google')
+    if (total === LIMITE_ALERTA_FALHAS_VINCULO) {
+      logger.warn({ alert: 'google_link_repeated_failures', userId, motivo, falhas: total }, '[auth] falhas repetidas ao vincular o Google à conta logada')
+    }
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, '[auth] falha ao contar tentativas de vínculo do Google (ignorada)')
+  }
+}
+
+/**
+ * `POST /api/auth/google/link` — AUTENTICADO. Vincula o Google à conta LOGADA (motorista que entrou por senha) para liberar o cartão (I-7), SEM trocar de conta, SEM zerar a senha
+ * e SEM revogar a sessão atual (diferente de `POST /api/auth/google`). Regras e ordem das recusas: `core/auth/decidirVinculoGoogle.ts`. NÃO loga nem audita o `credential` (JWT):
+ * a auditoria leva só o motivo. Nenhum código de erro novo — todos já estão em `LinkGoogleErrorCode` (`frontend/src/types/api.ts`).
+ */
+router.post(
+  '/google/link',
+  authenticate,
+  googleLinkRateLimit,
+  validateBody(googleAuthSchema),
+  asyncHandler(async (req, res) => {
+    const clientId = env.GOOGLE_CLIENT_ID
+    if (!clientId) throw new AppError('Login com Google não está configurado.', 503, 'GOOGLE_NOT_CONFIGURED')
+
+    const userId = req.user!.userId
+    const { credential } = req.body as GoogleAuthInput
+    const resultado = await vincularGoogleAContaLogada(userId, credential, { verifyIdToken: createGoogleTokenVerifier(clientId), repo: prismaVinculoGoogleRepository })
+
+    const conta = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true, email: true, name: true, operatorId: true } })
+    if (conta) {
+      void writeAuditLog({
+        actorUserId: conta.id,
+        actorRole: conta.role,
+        actorEmail: conta.email,
+        actorName: conta.name,
+        actorOperatorId: conta.operatorId,
+        action: 'OTHER',
+        actionDetail: resultado.status === 'OK' ? 'google_linked' : `google_link_denied:${resultado.status}`,
+        outcome: resultado.status === 'OK' ? 'SUCCESS' : 'DENIED',
+        httpStatus: resultado.status === 'OK' ? 200 : resultado.status === 'ALREADY_LINKED' ? 409 : resultado.status === 'INVALID_TOKEN' || resultado.status === 'INACTIVE' ? 401 : 403,
+        entityType: 'User',
+        entityId: conta.id,
+        targetOperatorId: conta.operatorId,
+        method: 'POST',
+        path: '/api/auth/google/link',
+        ...requestMeta(req),
+      }).catch((err) => logger.error({ err, userId }, '[audit] falha ao gravar o vínculo do Google (fire-and-forget)'))
+    }
+
+    if (resultado.status === 'OK') {
+      res.json({ linked: true })
+      return
+    }
+
+    await registrarFalhaDeVinculo(userId, resultado.status)
+    switch (resultado.status) {
+      case 'INVALID_TOKEN':
+        throw new AppError('Token do Google inválido.', 401, 'INVALID_GOOGLE_TOKEN')
+      case 'EMAIL_NOT_VERIFIED':
+        throw new AppError('O e-mail da conta Google não está verificado.', 403, 'GOOGLE_EMAIL_NOT_VERIFIED')
+      case 'EMAIL_MISMATCH':
+        throw new AppError('O e-mail da conta Google escolhida é diferente do e-mail desta conta.', 403, 'GOOGLE_EMAIL_MISMATCH')
+      case 'ALREADY_LINKED':
+        throw new AppError('Esta conta já tem um Google vinculado, ou este Google já está em outra conta.', 409, 'GOOGLE_ALREADY_LINKED')
+      case 'NOT_ALLOWED':
+        throw new AppError('Esta conta não pode entrar com Google.', 403, 'GOOGLE_LOGIN_NOT_ALLOWED')
+      case 'INACTIVE':
+        throw new AppError('Token inválido ou expirado.', 401, 'UNAUTHORIZED')
     }
   }),
 )

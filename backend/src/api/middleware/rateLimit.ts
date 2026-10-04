@@ -42,6 +42,12 @@ export const loginRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUT
 export const registerRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH')
 export const googleAuthRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH', undefined, { skipSuccessfulRequests: true })
 
+/**
+ * `POST /api/auth/google/link` (autenticado): 10 FALHAS / 15 min por USUÁRIO (não por IP — atrás de NAT o limite por IP puniria inocentes, e quem tem o token roubado não ganha
+ * tentativas trocando de IP). Sucesso não gasta o balde. Roda DEPOIS de `authenticate`.
+ */
+export const googleLinkRateLimit = buildLimiter(15 * 60 * 1000, 10, 'RATE_LIMITED_AUTH', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'), { skipSuccessfulRequests: true })
+
 /** Rotas administrativas em geral: limite mais folgado, só contra abuso/loop de cliente quebrado. */
 export const adminRateLimit = buildLimiter(60 * 1000, 300, 'RATE_LIMITED')
 
