@@ -57,7 +57,8 @@ describe('contratos de fio da Cielo/Braspag', () => {
       expect(c.headers['merchantkey']).toBe('merchant-key-iris-0002')
       expect(String(c.headers['content-type'])).toContain('application/json')
       expect(c.corpo).toEqual({
-        MerchantOrderId: 'ord-contrato-1',
+        // MUDANÇA DELIBERADA (rodada 3): conta Cielo compartilhada com o Parque => o pedido vai como `IF-<id>` (I-7, 89f36dd).
+        MerchantOrderId: 'IF-ord-contrato-1',
         Customer: { Name: 'Fulano', Identity: '52998224725', IdentityType: 'CPF' },
         Payment: { Type: 'CreditCard', Amount: 2500, Installments: 1, Capture: false, SoftDescriptor: 'INNOFLOWCARGA', CreditCard: { CardToken: 'card-token-iris-aaaa', SaveCard: false, Brand: 'Visa' } },
       })
@@ -117,7 +118,7 @@ describe('contratos de fio da Cielo/Braspag', () => {
       expect(c.metodo).toBe('POST')
       expect(c.url).toBe('/1/sales/')
       expect(c.corpo).toEqual({
-        MerchantOrderId: pedido.merchantOrderId,
+        MerchantOrderId: `IF-${pedido.merchantOrderId}`, // MUDANÇA DELIBERADA (rodada 3): prefixo `IF-` na conta compartilhada
         Customer: { Name: 'Fulano', Identity: '52998224725', IdentityType: 'CPF' },
         Payment: { Type: 'Pix', Amount: 1000, Provider: 'Cielo2', QrCode: { Expiration: 1800 } },
       })

@@ -30,6 +30,11 @@ const banco = await vi.hoisted(async () => {
 })
 
 
+// MUDANÇA DELIBERADA (rodada 3, 500a550): o log do pino-http passou a mascarar os headers por ALLOWLIST (só host/user-agent/content-type/.../`x-request-id` saem em claro; TODO o resto vira
+// `[redacted]`, qualquer que seja o nome). Os headers de SENTINELA e de CONTROLE POSITIVO que este arquivo usava (`x-sentinela`, `x-controle-positivo`) agora saem mascarados e fariam o log
+// "assentado" nunca aparecer — por isso passam a usar `x-request-id`, o header de diagnóstico que a allowlist deixa visível. A prova de que um nome fora da lista é mascarado está no teste
+// "(aberto) ... nome de header SEM palavra sensível" e na varredura final.
+
 const SEGREDOS = {
   merchantKey: 'merchant-key-iris-real-0001',
   sopSecret: 'SOP-SECRET-LOG-REAL-qq11',
@@ -107,7 +112,7 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
   /** Requisição SENTINELA: valor único num header fora do redact; o log é ordenado, então quando aparece tudo o que veio antes já está em `saidaApi`. */
   async function logApiAssentado(): Promise<string> {
     const sentinela = `SENTINELA-${Math.random().toString(36).slice(2, 12)}`
-    await fetch(`${base}/health`, { headers: { 'x-sentinela': sentinela } })
+    await fetch(`${base}/health`, { headers: { 'x-request-id': sentinela } })
     await esperarSentinela(() => saidaApi, sentinela)
     return saidaApi
   }
@@ -132,7 +137,9 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
     apontarAdaptadorParaCieloFalsa(cielo.url, { timeoutMs: 1500, sandbox: false })
 
     const admin = await prisma.user.create({ data: { role: 'ADMIN', name: 'Admin Log Real', email: `admin-logreal-${suffix}@example.com` } })
-    const driver = await prisma.user.create({ data: { role: 'DRIVER', name: 'Motorista Log Real', email: `driver-logreal-${suffix}@example.com` } })
+    // MUDANÇA DELIBERADA (rodada 3, I-7): com `NODE_ENV=production` o cartão EXIGE identidade verificada (`CARD_REQUIRE_VERIFIED_IDENTITY` liga sozinho). O motorista deste log real é um
+    // motorista COM Google (`googleSub`), como será em produção; sem isso o servidor responderia 403 `CARD_REQUIRES_VERIFIED_IDENTITY` antes de qualquer fluxo Cielo.
+    const driver = await prisma.user.create({ data: { role: 'DRIVER', name: 'Motorista Log Real', email: `driver-logreal-${suffix}@example.com`, googleSub: `google-sub-logreal-${suffix}` } })
     driverId = driver.id
     adminToken = jwt.sign({ userId: admin.id, role: 'ADMIN', operatorId: null }, process.env.JWT_SECRET!, { algorithm: 'HS256', expiresIn: '1h' })
     driverToken = jwt.sign({ userId: driver.id, role: 'DRIVER', operatorId: null }, process.env.JWT_SECRET!, { algorithm: 'HS256', expiresIn: '1h' })
@@ -177,7 +184,7 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
   }, 60_000)
 
   const post = (path: string, token: string, corpo?: unknown) =>
-    fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-controle-positivo': CONTROLE_POSITIVO }, body: corpo === undefined ? undefined : JSON.stringify(corpo) })
+    fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-request-id': CONTROLE_POSITIVO }, body: corpo === undefined ? undefined : JSON.stringify(corpo) })
 
   function procurarSegredos(texto: string, segredos: Record<string, string>): string[] {
     return Object.entries(segredos).filter(([, v]) => texto.includes(v)).map(([k]) => k)
@@ -237,14 +244,18 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
       { timeoutMs: 15_000, what: 'linhas de auditoria do teste de conexão' },
     )
     expect(linhas).toHaveLength(6)
-    expect(linhas.map((l) => l.actionDetail)).toEqual([
-      'test_connection:ok',
-      'test_connection:MERCHANT_CREDENTIALS=CREDENTIAL_REJECTED',
-      'test_connection:MERCHANT_CREDENTIALS=IP_NOT_ALLOWED',
-      'test_connection:SOP_OAUTH=CREDENTIAL_REJECTED',
-      'test_connection:ok',
-      'test_connection:ok',
-    ])
+    // Compara SEM ordem: a linha de auditoria é gravada depois da resposta (fire-and-forget) e `occurredAt` é o instante da GRAVAÇÃO — duas chamadas seguidas podem trocar de lugar
+    // (flake de ~1 em 3 rodadas completas na rodada 3). O que se prova é QUAIS linhas existem, não a ordem de gravação.
+    expect(linhas.map((l) => l.actionDetail).sort()).toEqual(
+      [
+        'test_connection:ok',
+        'test_connection:MERCHANT_CREDENTIALS=CREDENTIAL_REJECTED',
+        'test_connection:MERCHANT_CREDENTIALS=IP_NOT_ALLOWED',
+        'test_connection:SOP_OAUTH=CREDENTIAL_REJECTED',
+        'test_connection:ok',
+        'test_connection:ok',
+      ].sort(),
+    )
     expect(procurarSegredos(JSON.stringify(linhas), SEGREDOS)).toEqual([])
     expect(linhas.every((l) => l.changes === null && l.outcome === 'SUCCESS' && l.method === 'POST')).toBe(true)
   }, 60_000)
@@ -316,7 +327,7 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
 
   it('WEBHOOK no servidor real: ping 200, notificação válida 200, segredo errado 401 e nome antigo do header 401 — o segredo e o token do caminho não aparecem', async () => {
     const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
-    const h = (extra: Record<string, string>) => ({ 'content-type': 'application/json', 'x-controle-positivo': CONTROLE_POSITIVO, ...extra })
+    const h = (extra: Record<string, string>) => ({ 'content-type': 'application/json', 'x-request-id': CONTROLE_POSITIVO, ...extra })
     expect((await fetch(url, { method: 'POST', headers: h({}), body: '{}' })).status).toBe(200) // ping
     expect((await fetch(url, { method: 'POST', headers: h({ InnoFlowWebhookSecret: SEGREDOS.webhookHeader }), body: JSON.stringify({ PaymentId: 'pay-desconhecido-log', ChangeType: 1 }) })).status).toBe(200)
     expect((await fetch(url, { method: 'POST', headers: h({ InnoFlowWebhookSecret: 'segredo-errado-xyz' }), body: JSON.stringify({ PaymentId: 'p', ChangeType: 1 }) })).status).toBe(401)
@@ -368,7 +379,7 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
     const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
     const nomes = ['x-innoelektron-webhook-secret', 'WebhookSecret', 'CieloWebhookSecret', 'X-Api-Key', 'X-Auth-Token', 'X-Signature', 'X-Webhook-Password', 'X-Senha', 'X-Credential', 'Proxy-Authorization']
     const iscas = nomes.map((n, i) => [n, `ISCA-MASCARADA-${i}-${Math.random().toString(36).slice(2, 10)}`] as const)
-    const headers: Record<string, string> = { 'content-type': 'application/json', 'x-controle-positivo': CONTROLE_POSITIVO }
+    const headers: Record<string, string> = { 'content-type': 'application/json', 'x-request-id': CONTROLE_POSITIVO }
     for (const [n, v] of iscas) headers[n] = v
     expect((await fetch(url, { method: 'POST', headers, body: '{}' })).status).toBe(200)
     const log = await logApiAssentado()
@@ -377,11 +388,11 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
   })
 
   /**
-   * RESIDUAL ABERTO (Íris, rodada 2): a máscara é HEURÍSTICA por palavras em inglês (+ "senha"). Um header cujo nome NÃO tem nenhuma delas e que carrega o segredo continua saindo em
+   * HISTÓRICO — RESIDUAL da rodada 2, FECHADO na rodada 3 (500a550: allowlist de headers). Texto original:: a máscara é HEURÍSTICA por palavras em inglês (+ "senha"). Um header cujo nome NÃO tem nenhuma delas e que carrega o segredo continua saindo em
    * claro — p.ex. nomes em português que o dono pode digitar no campo "Key" do Site Cielo (só letras): `Segredo`, `Chave`, `Codigo`. O ideal é lista PERMITIDA para a rota do webhook (logar só
    * host/user-agent/content-type) em vez de lista de proibidos. Vira `it` quando o `req` do webhook deixar de logar headers desconhecidos.
    */
-  it('(aberto) segredo do webhook sob um nome de header SEM palavra sensível (`Segredo`, `Chave`, `Codigo`, `Notificacao`) NÃO pode sair em claro no log', async () => {
+  it('segredo do webhook sob um nome de header SEM palavra sensível (`Segredo`, `Chave`, `Codigo`, `Notificacao`) NÃO sai em claro no log (CORRIGIDO na rodada 3 pela allowlist; era o RESIDUAL ABERTO da rodada 2)', async () => {
     const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
     const nomes = ['Segredo', 'Chave', 'Codigo', 'Notificacao', 'Webhook']
     const iscas = nomes.map((n, i) => [n, `ISCA-ABERTA-${i}-${Math.random().toString(36).slice(2, 10)}`] as const)
@@ -390,6 +401,21 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
     await fetch(url, { method: 'POST', headers, body: '{}' })
     const log = await logApiAssentado()
     for (const [n, v] of iscas) expect(log, `o valor do header ${n} saiu em claro`).not.toContain(v)
+  })
+
+  it('ALLOWLIST de verdade (rodada 3): 16 nomes de header FORA da lista — em português, neutros, em inglês, cookie/authorization — saem [redacted] no log do servidor real; os da lista (x-request-id, user-agent, referer, accept-language) saem em claro', async () => {
+    const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
+    const foraDaLista = ['Segredo', 'Chave', 'Codigo', 'Notificacao', 'Webhook', 'Palavra', 'X-Foo', 'X-Notificacao-Cielo', 'Cookie', 'Authorization', 'Proxy-Authorization', 'X-Custom-Id', 'Senha', 'Token', 'X-Api-Key', 'If-None-Match']
+    const iscas = foraDaLista.map((n, i) => [n, `ISCA-ALLOWLIST-${i}-${Math.random().toString(36).slice(2, 10)}`] as const)
+    const controles: Record<string, string> = { 'x-request-id': 'CTRL-REQID-visivel-r3', 'user-agent': 'CTRL-UA-visivel-r3', referer: 'https://ctrl-referer-visivel-r3.example/', 'accept-language': 'xx-CTRL-visivel-r3' }
+    const headers: Record<string, string> = { 'content-type': 'application/json', ...controles }
+    for (const [n, v] of iscas) headers[n] = v
+    expect((await fetch(url, { method: 'POST', headers, body: '{}' })).status).toBe(200)
+    const log = await logApiAssentado()
+    for (const [n, v] of iscas) expect(log, `o valor do header ${n} saiu em claro`).not.toContain(v)
+    for (const v of Object.values(controles)) expect(log, `o controle ${v} deveria estar visível (o log de headers existe)`).toContain(v)
+    // o NOME do header permanece (sabe-se que existiu) e o valor vira [redacted]
+    expect(log).toMatch(/"?segredo"?:?\s*"?\[redacted\]/i)
   })
 
   it('I-5 no servidor real: JSON malformado, corpo grande e codificação inválida (rota normal e webhook) NÃO geram nenhuma linha de log ERROR nem vazam o corpo', async () => {

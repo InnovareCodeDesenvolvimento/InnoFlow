@@ -30,6 +30,10 @@ const banco = await vi.hoisted(async () => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// MUDANÇA DELIBERADA (rodada 3): a conta Cielo é COMPARTILHADA com o Parque das Feiras e o pedido vai à Cielo como `IF-<id do intent>` (I-7, 89f36dd). A Cielo falsa guarda e casa o
+// `MerchantOrderId` EXATAMENTE como recebeu (como a real), então toda leitura do "mundo da Cielo" por pedido passa por `mo()`.
+const mo = (intentId: string) => `IF-${intentId}`
+
 describe('captura/cancelamento de cartão — nunca um 2º PUT sem consulta antes, nunca duas cobranças (adaptador real + Cielo falsa por TCP)', () => {
   const app = createApp()
   const suffix = uniqueSuffix()
@@ -429,11 +433,11 @@ describe('captura/cancelamento de cartão — nunca um 2º PUT sem consulta ante
       // cada intent é CONTADO uma única vez (a gravação condicional CREATED -> AUTHORIZED tem um só vencedor); sem ela os dois varredores 'ganham' e ressuscitam o intent
       expect(r1.resolvidasCreated + r2.resolvidasCreated).toBe(ids.length)
       for (const id of ids) {
-        const venda = cielo.vendaPorPedido(id)!
+        const venda = cielo.vendaPorPedido(mo(id))!
         expect(venda.status).toBe(10)
         expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
-        expect(cielo.efeitos.vendasCriadas.get(id)).toBe(1)
-        expect(cielo.contar('POST_SALE', { merchantOrderId: id })).toBe(1)
+        expect(cielo.efeitos.vendasCriadas.get(mo(id))).toBe(1)
+        expect(cielo.contar('POST_SALE', { merchantOrderId: mo(id) })).toBe(1)
       }
     })
 

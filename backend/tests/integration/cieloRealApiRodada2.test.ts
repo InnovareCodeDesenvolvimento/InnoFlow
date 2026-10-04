@@ -30,6 +30,10 @@ const banco = await vi.hoisted(async () => {
   return criarBancoProprio('cielo_real_r2')
 })
 
+// MUDANÇA DELIBERADA (rodada 3): a conta Cielo é COMPARTILHADA com o Parque das Feiras e o pedido vai à Cielo como `IF-<id do intent>` (I-7, 89f36dd). A Cielo falsa guarda e casa o
+// `MerchantOrderId` EXATAMENTE como recebeu (como a real), então toda leitura do "mundo da Cielo" por pedido passa por `mo()`.
+const mo = (intentId: string) => `IF-${intentId}`
+
 describe('rodada 2 — API de pagamentos com adaptador real + Cielo falsa por TCP', () => {
   const app = createApp()
   const suffix = uniqueSuffix()
@@ -108,7 +112,7 @@ describe('rodada 2 — API de pagamentos com adaptador real + Cielo falsa por TC
       expect(res.body.code).toBe('PAYMENT_GATEWAY_UNAVAILABLE')
       expect(res.text).not.toContain(ECO)
       expect(intent.status).toBe('CREATED')
-      expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1)
+      expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent.id) })).toBe(1)
     })
 
     it('4xx definitivo: cada tentativa cria 1 intent e 1 POST (nunca repete), e a 2ª tentativa do mesmo motorista com cartão ruim também é 402 (não "indisponível para sempre")', async () => {
@@ -441,7 +445,9 @@ describe('rodada 2 — API de pagamentos com adaptador real + Cielo falsa por TC
       }
     })
 
-    it('MEDIÇÃO — RemoteStart aceito, tarifa desativada ANTES do StartTransaction: o handler falha com "Nenhuma tarifa ativa" (o carregador recebe erro, a sessão NÃO abre) e a pré-autorização é cancelada pelo varredor depois do abandono — nunca fica retida', async () => {
+    // MUDANÇA DELIBERADA (rodada 3, 500a550): o StartTransaction sem tarifa ativa deixou de LANÇAR (InternalError para o carregador) e passou a RESPONDER `Blocked` com transactionId 0
+    // + alerta `ocpp_start_transaction_no_active_tariff`. O que importa para o dinheiro continua igual e é o que se prova aqui: sessão NÃO abre e a pré-autorização não fica retida.
+    it('RemoteStart aceito, tarifa desativada ANTES do StartTransaction: o handler RESPONDE Blocked + transactionId 0 (não lança), alerta `ocpp_start_transaction_no_active_tariff` SEM dado pessoal, a sessão NÃO abre e a pré-autorização é cancelada pelo varredor depois do abandono — nunca fica retida', async () => {
       const m = await cen.novoMotorista('start-sem-tarifa')
       const c = await cen.novoConector()
       expect((await cen.iniciar(m, c)).status).toBe(202)
@@ -449,15 +455,34 @@ describe('rodada 2 — API de pagamentos com adaptador real + Cielo falsa por TC
       const intent = await prisma.paymentIntent.findFirstOrThrow({ where: { authTokenId: authToken.id } })
       await ativarCpEDesativar(false)
       try {
-        await expect(callHandler(handleStartTransaction, cen.ctx, { connectorId: c, idTag: authToken.idTag, meterStart: 10, timestamp: new Date().toISOString() })).rejects.toThrow(/Nenhuma tarifa ativa/)
+        const erroLog = vi.spyOn(logger, 'error')
+        const resposta = await callHandler(handleStartTransaction, cen.ctx, { connectorId: c, idTag: authToken.idTag, meterStart: 10, timestamp: new Date().toISOString() })
+        const alertasEmitidos = alertas(erroLog).filter((a) => a.alert === 'ocpp_start_transaction_no_active_tariff')
+        erroLog.mockRestore()
+        expect(resposta).toEqual({ transactionId: 0, idTagInfo: { status: 'Blocked' } })
+        expect(alertasEmitidos).toHaveLength(1)
+        expect(alertasEmitidos[0]).toMatchObject({ connectorId: c, operatorId: cen.tenant.operatorId })
+        expect(JSON.stringify(alertasEmitidos[0])).not.toContain(authToken.idTag) // o idTag identifica o motorista: fora do alerta
+        expect(JSON.stringify(alertasEmitidos[0])).not.toContain((m.user as { id: string; email: string }).email)
         expect(await prisma.chargingSession.count({ where: { userId: m.user.id } })).toBe(0)
         await cen.envelhecer(intent.id, 30)
         await varrerPreAutorizacoesCartao()
         expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
-        expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+        expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(10)
       } finally {
         await ativarCpEDesativar(true)
       }
+    })
+
+    it('StartTransaction: SÓ a falta de tarifa vira Blocked — qualquer OUTRO erro (ex.: banco fora ao resolver a tarifa) continua PROPAGANDO, para o carregador não receber "recusado" por uma falha nossa', async () => {
+      const m = await cen.novoMotorista('start-erro-outro')
+      const c = await cen.novoConector()
+      expect((await cen.iniciar(m, c)).status).toBe(202)
+      const authToken = await prisma.authToken.findFirstOrThrow({ where: { userId: m.user.id, type: 'VIRTUAL' }, orderBy: { createdAt: 'desc' } })
+      const falha = vi.spyOn(prisma.tariffAssignment, 'findMany').mockRejectedValueOnce(new Error('banco indisponível (simulado)'))
+      await expect(callHandler(handleStartTransaction, cen.ctx, { connectorId: c, idTag: authToken.idTag, meterStart: 10, timestamp: new Date().toISOString() })).rejects.toThrow(/banco indisponível/)
+      falha.mockRestore()
+      expect(await prisma.chargingSession.count({ where: { userId: m.user.id } })).toBe(0)
     })
 
     it('com a tarifa de MAIOR prioridade desativada, vale a próxima tarifa ATIVA (2,00 do operador desativada -> volta a 1,00); reativada, a de maior prioridade volta', async () => {

@@ -20,6 +20,10 @@ const banco = await vi.hoisted(async () => {
   return criarBancoProprio('cielo_real_pix')
 })
 
+// MUDANÇA DELIBERADA (rodada 3): a conta Cielo é COMPARTILHADA com o Parque das Feiras e o pedido vai à Cielo como `IF-<id do intent>` (I-7, 89f36dd). A Cielo falsa guarda e casa o
+// `MerchantOrderId` EXATAMENTE como recebeu (como a real), então toda leitura do "mundo da Cielo" por pedido passa por `mo()`.
+const mo = (intentId: string) => `IF-${intentId}`
+
 describe('Pix Cielo2 via API (adaptador real + Cielo falsa por TCP)', () => {
   const app = createApp()
   const suffix = uniqueSuffix()
@@ -65,9 +69,9 @@ describe('Pix Cielo2 via API (adaptador real + Cielo falsa por TCP)', () => {
     expect(cielo.chamadas).toHaveLength(1)
     const c = cielo.chamadas[0]
     expect(c).toMatchObject({ metodo: 'POST', url: '/1/sales/' })
-    expect(c.corpo).toMatchObject({ MerchantOrderId: intent!.id, Payment: { Type: 'Pix', Amount: 1500, Provider: 'Cielo2', QrCode: { Expiration: 1800 } } })
+    expect(c.corpo).toMatchObject({ MerchantOrderId: mo(intent!.id), Payment: { Type: 'Pix', Amount: 1500, Provider: 'Cielo2', QrCode: { Expiration: 1800 } } })
     expect(c.corpoBruto).not.toContain('QrCodeExpiration')
-    const venda = cielo.vendaPorPedido(intent!.id)!
+    const venda = cielo.vendaPorPedido(mo(intent!.id))!
     expect(venda.tid).toBeTruthy() // a Cielo falsa DEVOLVEU Tid/AuthorizationCode/ProofOfSale
     expect(intent).toMatchObject({ status: 'PENDING', cieloPaymentId: venda.paymentId, pixQrCode: '00020101021226830014br.gov.bcb.pix2561exemplo', cieloTid: null, cieloAuthorizationCode: null, cieloProofOfSale: null })
     const expira = intent!.pixExpiresAt!.getTime() - Date.now()
@@ -90,8 +94,8 @@ describe('Pix Cielo2 via API (adaptador real + Cielo falsa por TCP)', () => {
     const { res, intent } = await recarregar()
     expect(res.status).toBe(503)
     expect(intent!.status).toBe('FAILED')
-    expect(cielo.contar('POST_SALE', { merchantOrderId: intent!.id })).toBe(1)
-    expect(cielo.efeitos.vendasCriadas.get(intent!.id)).toBe(1) // a Cielo criou a cobrança, mas o QR nunca foi mostrado a ninguém
+    expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent!.id) })).toBe(1)
+    expect(cielo.efeitos.vendasCriadas.get(mo(intent!.id))).toBe(1) // a Cielo criou a cobrança, mas o QR nunca foi mostrado a ninguém
   })
 
   it('Cielo responde 400 de payload: 503 e intent FAILED, sem eco do erro da Cielo na resposta ao motorista', async () => {

@@ -18,6 +18,11 @@ import { apontarAdaptadorParaCieloFalsa, criarCenarioCartaoHttp, type CenarioCar
  * a contagem do que a Cielo FEZ (`efeitos.vendasCriadas`), não do que a resposta disse.
  */
 
+// MUDANÇA DELIBERADA (rodada 3): a conta Cielo é COMPARTILHADA com o Parque das Feiras e o pedido vai à Cielo como `IF-<id do intent>` (I-7, 89f36dd). A Cielo falsa guarda e casa o
+// `MerchantOrderId` EXATAMENTE como recebeu (como a real), então toda leitura do "mundo da Cielo" por pedido passa por `mo()`. Intents ANTIGOS (id cru na Cielo) continuam cobertos
+// pelos `plantarVenda` com o id cru, que exercitam o fallback da consulta por pedido.
+const mo = (intentId: string) => `IF-${intentId}`
+
 // BANCO PRÓPRIO (antes de qualquer import da aplicação): o varredor olha TODOS os intents do banco; no banco compartilhado ele varreria (e poderia mexer em) intents de outras suítes
 // em paralelo, e intents velhos de rodadas anteriores esgotariam o lote de 50 antes dos meus. `vi.hoisted` assíncrono roda antes dos imports estáticos.
 const banco = await vi.hoisted(async () => {
@@ -67,7 +72,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
     expect(res.status, JSON.stringify(res.body)).toBe(202)
     expect(cielo.contar('POST_SALE')).toBe(1)
     expect(cielo.sequencia()).toEqual(['POST_SALE'])
-    const venda = cielo.vendaPorPedido(intent.id)!
+    const venda = cielo.vendaPorPedido(mo(intent.id))!
     expect(intent).toMatchObject({ status: 'AUTHORIZED', cieloPaymentId: venda.paymentId, returnCode: '4', cieloTid: String(venda.tid), cieloAuthorizationCode: venda.authorizationCode, cieloProofOfSale: venda.proofOfSale })
   })
 
@@ -77,18 +82,18 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
     expect(res.status).toBe(503)
     expect(res.body.error?.code ?? res.body.code).toBe('PAYMENT_GATEWAY_UNAVAILABLE')
     expect(intent.status).toBe('CREATED')
-    expect(cielo.efeitos.vendasCriadas.get(intent.id)).toBe(1) // a Cielo AUTORIZOU (reteve o limite do cartão)
+    expect(cielo.efeitos.vendasCriadas.get(mo(intent.id))).toBe(1) // a Cielo AUTORIZOU (reteve o limite do cartão)
     expect(await prisma.authToken.count({ where: { userId: intent.userId, type: 'VIRTUAL' } })).toBe(0) // nenhum idTag foi emitido
 
     await cen.envelhecer(intent.id, 30)
     const r = await varrerPreAutorizacoesCartao()
     expect(r.resolvidasCreated).toBeGreaterThanOrEqual(1)
 
-    const venda = cielo.vendaPorPedido(intent.id)!
+    const venda = cielo.vendaPorPedido(mo(intent.id))!
     expect(venda.status).toBe(10) // cancelada no mundo da Cielo
     expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
-    expect(cielo.efeitos.vendasCriadas.get(intent.id)).toBe(1) // continua UMA venda
-    expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1)
+    expect(cielo.efeitos.vendasCriadas.get(mo(intent.id))).toBe(1) // continua UMA venda
+    expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent.id) })).toBe(1)
     expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
     expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
   })
@@ -97,9 +102,9 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
     cielo.agendar('POST_SALE', { processar: true, resposta: 'travar' })
     const { res, intent } = await iniciarComFalha()
     expect(res.status, JSON.stringify(res.body)).toBe(202)
-    expect(cielo.sequencia({ merchantOrderId: intent.id })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
-    expect(cielo.efeitos.vendasCriadas.get(intent.id)).toBe(1)
-    const venda = cielo.vendaPorPedido(intent.id)!
+    expect(cielo.sequencia({ merchantOrderId: mo(intent.id) })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
+    expect(cielo.efeitos.vendasCriadas.get(mo(intent.id))).toBe(1)
+    const venda = cielo.vendaPorPedido(mo(intent.id))!
     expect(intent).toMatchObject({ status: 'AUTHORIZED', cieloPaymentId: venda.paymentId })
     expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
   })
@@ -109,7 +114,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
     const { res, intent } = await iniciarComFalha()
     expect(res.status).toBe(503)
     expect(intent.status).toBe('CREATED')
-    expect(cielo.sequencia({ merchantOrderId: intent.id })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
+    expect(cielo.sequencia({ merchantOrderId: mo(intent.id) })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
 
     await cen.envelhecer(intent.id, 6) // acima de CARD_PREAUTH_ABANDON_MINUTES (5), abaixo de 3x: só reconsulta
     await varrerPreAutorizacoesCartao()
@@ -118,9 +123,9 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
     await varrerPreAutorizacoesCartao()
     expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('FAILED')
 
-    expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1) // jamais um 2º POST
-    expect(cielo.contar('GET_BY_ORDER', { merchantOrderId: intent.id })).toBeGreaterThanOrEqual(3)
-    expect(cielo.efeitos.vendasCriadas.get(intent.id) ?? 0).toBe(0)
+    expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent.id) })).toBe(1) // jamais um 2º POST
+    expect(cielo.contar('GET_BY_ORDER', { merchantOrderId: mo(intent.id) })).toBeGreaterThanOrEqual(3)
+    expect(cielo.efeitos.vendasCriadas.get(mo(intent.id)) ?? 0).toBe(0)
   })
 
   it('Cielo responde 503 (não processou): o motorista vê 503, 1 POST, intent CREATED; várias rodadas do varredor NUNCA repostam', async () => {
@@ -129,8 +134,8 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
     expect(res.status).toBe(503)
     await cen.envelhecer(intent.id, 6)
     for (let i = 0; i < 3; i++) await varrerPreAutorizacoesCartao()
-    expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1)
-    expect(cielo.efeitos.vendasCriadas.get(intent.id) ?? 0).toBe(0)
+    expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent.id) })).toBe(1)
+    expect(cielo.efeitos.vendasCriadas.get(mo(intent.id)) ?? 0).toBe(0)
   })
 
   it('HTTP 200/201 + Status 1 + ReturnCode 51 (negada dentro de um 2xx): 402, intent DENIED, nenhum idTag, nenhum cancelamento; o Tid da tentativa recusada fica gravado', async () => {
@@ -205,7 +210,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       await cen.envelhecer(intent.id, 30)
       await varrerPreAutorizacoesCartao()
       await varrerPreAutorizacoesCartao()
-      const venda = cielo.vendaPorPedido(intent.id)!
+      const venda = cielo.vendaPorPedido(mo(intent.id))!
       expect(venda.status).toBe(10)
       expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
     })
@@ -216,10 +221,10 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       const { intent } = await iniciarComFalha()
       await cen.envelhecer(intent.id, 30)
       for (let i = 0; i < 3; i++) await varrerPreAutorizacoesCartao()
-      const venda = cielo.vendaPorPedido(intent.id)!
+      const venda = cielo.vendaPorPedido(mo(intent.id))!
       expect(venda.status).toBe(10)
       expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
-      expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1)
+      expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent.id) })).toBe(1)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
       expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
     })
@@ -267,7 +272,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       const { intent } = await iniciarComFalha()
       await cen.envelhecer(intent.id, 30)
       await varrerPreAutorizacoesCartao()
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(10)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
     })
 
@@ -305,7 +310,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       const { res, intent } = await iniciarComFalha()
       expect(res.status).toBe(503)
       expect(intent).toMatchObject({ status: 'CREATED', returnCode: '6' })
-      expect(intent.cieloPaymentId).toBe(cielo.vendaPorPedido(intent.id)!.paymentId)
+      expect(intent.cieloPaymentId).toBe(cielo.vendaPorPedido(mo(intent.id))!.paymentId)
       expect(await prisma.authToken.count({ where: { userId: intent.userId, type: 'VIRTUAL' } })).toBe(0)
       const alertas = erro.mock.calls.filter((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_authorized_status_unlisted_returncode')
       expect(alertas.length).toBeGreaterThanOrEqual(1)
@@ -315,7 +320,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       await cen.envelhecer(intent.id, 6) // acima do abandono (5), abaixo de 3x: reconsulta, NÃO cancela ainda
       await varrerPreAutorizacoesCartao()
       expect(cielo.contar('PUT_VOID')).toBe(0)
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(1)
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(1)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('CREATED')
     })
 
@@ -329,7 +334,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       erro.mockRestore()
       expect(stuck).toHaveLength(1)
       expect((stuck[0][0] as { paymentId?: string }).paymentId).toBe(intent.cieloPaymentId)
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(10)
       expect(cielo.efeitos.cancelamentos.get(intent.cieloPaymentId!)).toBe(1)
       expect(await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).toMatchObject({ status: 'VOIDED', returnCode: '0' })
     })
@@ -343,7 +348,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       expect(cielo.contar('PUT_VOID')).toBe(0)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('CREATED')
       await varrerPreAutorizacoesCartao() // 30ª
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(10)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
     })
 
@@ -353,7 +358,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       expect(res.status).toBe(503)
       expect(intent).toMatchObject({ status: 'CREATED', cieloPaymentId: 'pay-sem-rc-r2' })
       // a Cielo, no mundo real, TEM a venda: planta com esse PaymentId e sem ReturnCode
-      cielo.plantarVenda({ merchantOrderId: intent.id, paymentId: 'pay-sem-rc-r2', status: 1, returnCode: null })
+      cielo.plantarVenda({ merchantOrderId: mo(intent.id), paymentId: 'pay-sem-rc-r2', status: 1, returnCode: null })
       await cen.envelhecer(intent.id, 60)
       const erro = vi.spyOn(logger, 'error')
       await varrerPreAutorizacoesCartao()
@@ -361,7 +366,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       const depois = await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })
       expect(depois.status).toBe('VOIDED')
       expect(depois.status).not.toBe('CREATED')
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(10)
     })
 
     it('55 intents CREATED velhos e NÃO definitivos na frente NÃO geram fome: um intent mais novo (depois deles) é resolvido e CANCELADO na mesma rodada', async () => {
@@ -379,7 +384,7 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       const { intent } = await iniciarComFalha()
       await prisma.paymentIntent.update({ where: { id: intent.id }, data: { createdAt: new Date(Date.now() - 6 * 60_000) } })
       await varrerPreAutorizacoesCartao()
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(10)
       expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
       // os 55 seguem CREATED (ainda não esgotaram) — foram reconsultados, não travaram a rodada
       expect(await prisma.paymentIntent.count({ where: { id: { in: velhos }, status: 'CREATED' } })).toBe(55)
