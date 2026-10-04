@@ -4,6 +4,7 @@ import {
   mockChargePoints,
   mockConnectors,
   mockSites,
+  mockTariffAssignments,
   mockTariffs,
   mockUsers,
   type MockUser,
@@ -58,6 +59,8 @@ import type {
   SessionListRow,
   Site,
   Tariff,
+  TariffAssignment,
+  TariffAssignmentScope,
 } from "@/types/api"
 
 /**
@@ -130,6 +133,40 @@ function requireAdmin(req: Request) {
   if (!user) return { error: HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 }) }
   if (user.role !== "ADMIN") return { error: HttpResponse.json(errorBody("Acesso restrito a administradores.", "FORBIDDEN"), { status: 403 }) }
   return { user }
+}
+
+/** Join leve que `GET /tariff-assignments` faz: `tariff: { id, name, model }`. */
+function withTariffJoin(a: TariffAssignment): TariffAssignment {
+  const t = mockTariffs.find((x) => x.id === a.tariffId)
+  return t ? { ...a, tariff: { id: t.id, name: t.name, model: t.model } } : a
+}
+
+const ASSIGNMENT_TARGET_FIELD: Record<TariffAssignmentScope, "connectorId" | "chargePointId" | "siteId" | null> = {
+  CONNECTOR: "connectorId",
+  CHARGE_POINT: "chargePointId",
+  SITE: "siteId",
+  OPERATOR: null,
+}
+
+/** Mesma mensagem do `checkValidityWindow` do schema Zod real. */
+function validateWindow(validFrom: string | undefined, validTo: string | undefined) {
+  if (validFrom && validTo && new Date(validTo) <= new Date(validFrom)) return [{ path: "validTo", message: "validTo deve ser posterior a validFrom." }]
+  return []
+}
+
+/** Mesmas mensagens do `checkScopeTarget` + `checkValidityWindow`: exatamente o campo certo por escopo, os outros dois ausentes. */
+function validateAssignmentBody(body: Partial<TariffAssignment>) {
+  const details: Array<{ path: string; message: string }> = []
+  const scope = body.scope
+  if (!scope || !(scope in ASSIGNMENT_TARGET_FIELD)) return [{ path: "scope", message: "Invalid enum value." }]
+  if (!body.tariffId) details.push({ path: "tariffId", message: "Required" })
+  const required = ASSIGNMENT_TARGET_FIELD[scope]
+  for (const field of ["connectorId", "chargePointId", "siteId"] as const) {
+    const present = body[field] !== undefined && body[field] !== null
+    if (field === required && !present) details.push({ path: field, message: `${field} é obrigatório quando scope=${scope}.` })
+    if (field !== required && present) details.push({ path: field, message: `${field} não deve ser informado quando scope=${scope}.` })
+  }
+  return [...details, ...validateWindow(body.validFrom, body.validTo ?? undefined)]
 }
 
 /** Rotas `/api/me/*` — DRIVER only (ver PROGRESSO.md §PWA do motorista). */
@@ -542,6 +579,88 @@ export const handlers = [
     const tariff = scopedByOperator(mockTariffs, scope.user).find((t) => t.id === params.id)
     if (!tariff) return HttpResponse.json(errorBody("Tarifa não encontrada.", "NOT_FOUND"), { status: 404 })
     tariff.active = false
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // ---- Vínculos de tarifa (tariff-assignments) -----------------------------------
+  // Espelha `backend/src/api/routes/tariffAssignments.routes.ts` + `schemas/tariffAssignment.schema.ts`:
+  // lista com filtros (ordem priority desc, createdAt desc, join `tariff`); POST valida o campo certo por escopo (400 com `details`);
+  // alvo/tarifa de outro operador = 404 (nunca 403); PATCH só reaponta tarifa/prioridade/validade; DELETE = soft (`validTo = agora`, 204).
+  http.get("/api/admin/tariff-assignments", ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const q = (key: string) => url.searchParams.get(key) || undefined
+    const items = scopedByOperator(mockTariffAssignments, scope.user)
+      .filter(
+        (a) =>
+          (!q("tariffId") || a.tariffId === q("tariffId")) &&
+          (!q("siteId") || a.siteId === q("siteId")) &&
+          (!q("chargePointId") || a.chargePointId === q("chargePointId")) &&
+          (!q("connectorId") || a.connectorId === q("connectorId")) &&
+          (!q("scope") || a.scope === q("scope")),
+      )
+      .sort((a, b) => b.priority - a.priority || b.createdAt.localeCompare(a.createdAt))
+      .map(withTariffJoin)
+    return HttpResponse.json(paginate(items, url))
+  }),
+
+  http.post("/api/admin/tariff-assignments", async ({ request }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const body = (await request.json()) as Partial<TariffAssignment> & { operatorId?: string }
+
+    const details = validateAssignmentBody(body)
+    if (details.length > 0) return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details }, { status: 400 })
+
+    const operatorId = scope.user.role === "ADMIN" ? body.operatorId : scope.user.operatorId
+    if (!operatorId) return HttpResponse.json(errorBody("operatorId é obrigatório neste corpo quando quem cria é ADMIN.", "VALIDATION_ERROR"), { status: 400 })
+
+    if (!mockTariffs.some((t) => t.id === body.tariffId && t.operatorId === operatorId)) return HttpResponse.json(errorBody("Tarifa não encontrada.", "NOT_FOUND"), { status: 404 })
+    if (body.scope === "SITE" && !mockSites.some((s) => s.id === body.siteId && s.operatorId === operatorId)) return HttpResponse.json(errorBody("Site não encontrado.", "NOT_FOUND"), { status: 404 })
+    if (body.scope === "CHARGE_POINT" && !mockChargePoints.some((c) => c.id === body.chargePointId && c.operatorId === operatorId)) return HttpResponse.json(errorBody("Charge point não encontrado.", "NOT_FOUND"), { status: 404 })
+    if (body.scope === "CONNECTOR" && !mockConnectors.some((c) => c.id === body.connectorId && c.operatorId === operatorId)) return HttpResponse.json(errorBody("Conector não encontrado.", "NOT_FOUND"), { status: 404 })
+
+    const now = new Date().toISOString()
+    const created: TariffAssignment = {
+      id: `ta_${Date.now()}`,
+      operatorId,
+      tariffId: body.tariffId!,
+      scope: body.scope!,
+      siteId: body.scope === "SITE" ? (body.siteId ?? null) : null,
+      chargePointId: body.scope === "CHARGE_POINT" ? (body.chargePointId ?? null) : null,
+      connectorId: body.scope === "CONNECTOR" ? (body.connectorId ?? null) : null,
+      priority: body.priority ?? 0,
+      validFrom: body.validFrom ?? now,
+      validTo: body.validTo ?? null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    mockTariffAssignments.push(created)
+    // O POST real devolve a linha SEM o join `tariff` (só GET lista/detalhe incluem).
+    return HttpResponse.json(created, { status: 201 })
+  }),
+
+  http.patch("/api/admin/tariff-assignments/:id", async ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const existing = scopedByOperator(mockTariffAssignments, scope.user).find((a) => a.id === params.id)
+    if (!existing) return HttpResponse.json(errorBody("Vínculo de tarifa não encontrado.", "NOT_FOUND"), { status: 404 })
+    const body = (await request.json()) as { tariffId?: string; priority?: number; validFrom?: string; validTo?: string | null }
+    const details = validateWindow(body.validFrom ?? undefined, body.validTo ?? undefined)
+    if (details.length > 0) return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details }, { status: 400 })
+    if (body.tariffId && !mockTariffs.some((t) => t.id === body.tariffId && t.operatorId === existing.operatorId)) return HttpResponse.json(errorBody("Tarifa não encontrada.", "NOT_FOUND"), { status: 404 })
+    Object.assign(existing, body, { updatedAt: new Date().toISOString() })
+    return HttpResponse.json(existing)
+  }),
+
+  http.delete("/api/admin/tariff-assignments/:id", ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    const existing = scopedByOperator(mockTariffAssignments, scope.user).find((a) => a.id === params.id)
+    if (!existing) return HttpResponse.json(errorBody("Vínculo de tarifa não encontrado.", "NOT_FOUND"), { status: 404 })
+    existing.validTo = new Date().toISOString() // soft: expira a janela, não apaga a linha
+    existing.updatedAt = existing.validTo
     return new HttpResponse(null, { status: 204 })
   }),
 

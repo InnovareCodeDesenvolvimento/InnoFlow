@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { publicSitesKeys } from "@/hooks/useSites"
 import { meKeys } from "@/hooks/useMeSessions"
+import { tariffAssignmentsKeys } from "@/hooks/useTariffAssignments"
+import { tariffsKeys } from "@/hooks/useTariffs"
 import { makeSite } from "@/test/siteFixtures"
 import { handleRealtimeEvent, isChargePointInLoadedStations } from "./realtimeEventHandlers"
 import type { PaginatedResponse, PublicSite, RealtimeEvent } from "@/types/api"
@@ -87,5 +89,28 @@ describe("session.updated", () => {
     client.setQueryData(meKeys.sessionDetail("sess_1"), { id: "sess_1", status: "STOP_UNCONFIRMED" })
     handleRealtimeEvent(updated, client)
     expect(client.getQueryState(meKeys.sessionDetail("sess_1"))?.isInvalidated).toBe(true)
+  })
+})
+
+// Gap antigo: o backend já publicava `admin.entity.changed` com entityType "TariffAssignment" (middleware de auditoria), mas o frontend não tinha o que invalidar.
+describe("admin.entity.changed × TariffAssignment", () => {
+  it("invalida os vínculos de tarifa (lista completa e por filtro) quando OUTRO usuário cria/edita/remove um vínculo", () => {
+    const client = new QueryClient()
+    client.setQueryData(tariffAssignmentsKeys.everything(), { items: [], truncated: false })
+    client.setQueryData(tariffAssignmentsKeys.list({ tariffId: "t1" }), { items: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 1 } })
+
+    const event: RealtimeEvent = { type: "admin.entity.changed", occurredAt: new Date().toISOString(), entityType: "TariffAssignment", entityId: "ta_1", action: "CREATE" }
+    handleRealtimeEvent(event, client)
+
+    expect(client.getQueryState(tariffAssignmentsKeys.everything())?.isInvalidated).toBe(true)
+    expect(client.getQueryState(tariffAssignmentsKeys.list({ tariffId: "t1" }))?.isInvalidated).toBe(true)
+  })
+
+  it("não invalida as tarifas em si (outra entidade)", () => {
+    const client = new QueryClient()
+    client.setQueryData(tariffsKeys.list({}), { items: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 1 } })
+    const event: RealtimeEvent = { type: "admin.entity.changed", occurredAt: new Date().toISOString(), entityType: "TariffAssignment", entityId: "ta_1", action: "UPDATE" }
+    handleRealtimeEvent(event, client)
+    expect(client.getQueryState(tariffsKeys.list({}))?.isInvalidated).toBe(false)
   })
 })

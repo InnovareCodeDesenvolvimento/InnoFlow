@@ -81,3 +81,11 @@ export function getApiErrorCode(err: unknown): string | undefined {
   }
   return undefined
 }
+
+/** Mensagens por campo do 400 `VALIDATION_ERROR` (`details: [{ path, message }]`). Vazio quando o erro não é de validação. */
+export function getApiErrorDetails(err: unknown): string[] {
+  if (axios.isAxiosError<ApiErrorBody>(err)) {
+    return (err.response?.data?.details ?? []).map((d) => d.message).filter((m): m is string => typeof m === "string" && m.length > 0)
+  }
+  return []
+}

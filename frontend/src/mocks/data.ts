@@ -5,7 +5,7 @@
  * (`backend/src/api/routes/*.ts`) — não é fixture de teste automatizado,
  * é sessão de dev manual (`VITE_USE_MOCKS=true npm run dev`).
  */
-import type { AuthToken, ChargePoint, Connector, Site, Tariff, User } from "@/types/api"
+import type { AuthToken, ChargePoint, Connector, Site, Tariff, TariffAssignment, User } from "@/types/api"
 
 export const OPERATOR_A_ID = "operator_a_cuid000000000001"
 export const OPERATOR_B_ID = "operator_b_cuid000000000002"
@@ -314,4 +314,20 @@ export const mockDrivers = [
 
 export const mockAuthTokens: AuthToken[] = [
   { id: "tok_1", idTag: "RFID0001", type: "RFID", status: "ACCEPTED", userId: null, expiresAt: null, createdAt: "2026-08-01T12:00:00.000Z", updatedAt: "2026-08-01T12:00:00.000Z" },
+]
+
+/**
+ * Vínculos de tarifa semeados de propósito para cobrir os estados da tela "Tarifas do carregador":
+ *  - cp_1: tarifa do LOCAL (tariff_1) + uma tomada (conn_2) com tarifa própria de prioridade maior -> "varia por tomada";
+ *  - cp_3: tarifa do CARREGADOR (tariff_2) -> uniforme;
+ *  - cp_4 e cp_5 (operador A) e cp_2 (operador B): SEM vínculo nenhum -> "Sem tarifa" (o QR não inicia recarga);
+ *  - ta_hist: vínculo ENCERRADO (validTo no passado) do site_3 — aparece só em "mostrar encerrados".
+ * A data do encerrado é relativa ao carregamento da página, para "encerrado" não envelhecer.
+ */
+const DAY_MS = 24 * 60 * 60 * 1000
+export const mockTariffAssignments: TariffAssignment[] = [
+  { id: "ta_1", operatorId: OPERATOR_A_ID, tariffId: "tariff_1", scope: "SITE", connectorId: null, chargePointId: null, siteId: "site_1", priority: 0, validFrom: "2026-08-01T12:00:00.000Z", validTo: null, createdAt: "2026-08-01T12:00:00.000Z", updatedAt: "2026-08-01T12:00:00.000Z" },
+  { id: "ta_2", operatorId: OPERATOR_A_ID, tariffId: "tariff_2", scope: "CHARGE_POINT", connectorId: null, chargePointId: "cp_3", siteId: null, priority: 0, validFrom: "2026-08-03T12:00:00.000Z", validTo: null, createdAt: "2026-08-03T12:00:00.000Z", updatedAt: "2026-08-03T12:00:00.000Z" },
+  { id: "ta_3", operatorId: OPERATOR_A_ID, tariffId: "tariff_2", scope: "CONNECTOR", connectorId: "conn_2", chargePointId: null, siteId: null, priority: 5, validFrom: "2026-08-04T12:00:00.000Z", validTo: null, createdAt: "2026-08-04T12:00:00.000Z", updatedAt: "2026-08-04T12:00:00.000Z" },
+  { id: "ta_hist", operatorId: OPERATOR_A_ID, tariffId: "tariff_1", scope: "SITE", connectorId: null, chargePointId: null, siteId: "site_3", priority: 0, validFrom: "2026-07-01T12:00:00.000Z", validTo: new Date(Date.now() - 20 * DAY_MS).toISOString(), createdAt: "2026-07-01T12:00:00.000Z", updatedAt: "2026-07-01T12:00:00.000Z" },
 ]

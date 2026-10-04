@@ -311,6 +311,15 @@ export interface CreateTariffAssignmentInput {
   validTo?: string
 }
 
+/** Filtros de `GET /api/admin/tariff-assignments` (todos opcionais; `pageSize` máx. 100 como nas demais listagens). */
+export interface TariffAssignmentListParams extends PaginationParams {
+  tariffId?: string
+  siteId?: string
+  chargePointId?: string
+  connectorId?: string
+  scope?: TariffAssignmentScope
+}
+
 /** `scope`/`connectorId`/`chargePointId`/`siteId` são imutáveis após criados — só reapontar a tarifa, reordenar prioridade ou ajustar a janela de validade. */
 export interface UpdateTariffAssignmentInput {
   tariffId?: string

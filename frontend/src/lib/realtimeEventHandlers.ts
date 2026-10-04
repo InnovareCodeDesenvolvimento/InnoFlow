@@ -4,16 +4,18 @@ import { publicSitesKeys, sitesKeys } from "@/hooks/useSites"
 import { chargePointsKeys } from "@/hooks/useChargePoints"
 import { connectorsKeys } from "@/hooks/useConnectors"
 import { tariffsKeys } from "@/hooks/useTariffs"
+import { tariffAssignmentsKeys } from "@/hooks/useTariffAssignments"
 import { authTokensKeys } from "@/hooks/useAuthTokens"
 import { driversKeys } from "@/hooks/useDrivers"
 import type { MeActiveSessionResponse, PaginatedResponse, PublicSite, RealtimeEvent } from "@/types/api"
 
-/** `entityType` do evento → raiz da query que precisa ser invalidada (ver `admin.entity.changed`). `TariffAssignment` não tem hook ainda (gap conhecido, ver PROGRESSO.md) — evento chega mas não tem o que invalidar. */
+/** `entityType` do evento → raiz da query que precisa ser invalidada (ver `admin.entity.changed`). */
 const ENTITY_QUERY_KEYS: Partial<Record<string, readonly unknown[]>> = {
   Site: sitesKeys.all,
   ChargePoint: chargePointsKeys.all,
   Connector: connectorsKeys.all,
   Tariff: tariffsKeys.all,
+  TariffAssignment: tariffAssignmentsKeys.all,
   AuthToken: authTokensKeys.all,
 }
 

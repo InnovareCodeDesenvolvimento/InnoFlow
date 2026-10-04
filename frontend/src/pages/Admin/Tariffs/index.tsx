@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Pencil, Plus, Trash2, Wallet } from "lucide-react"
+import { Link2, Pencil, Plus, Trash2, Wallet } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Button } from "@/components/ui/Button"
@@ -11,6 +11,9 @@ import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { useDeleteTariff, useTariffs } from "@/hooks/useTariffs"
+import { useAllTariffAssignments } from "@/hooks/useTariffAssignments"
+import { TariffUsageDialog } from "@/components/tariffAssignments/TariffUsageDialog"
+import { getAssignmentStatus } from "@/lib/tariffAssignments"
 import { getApiErrorMessage } from "@/services/api"
 import { formatCents, formatCurrency } from "@/lib/utils"
 import { TariffFormDialog } from "./TariffFormDialog"
@@ -30,9 +33,15 @@ export default function TariffsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Tariff | null>(null)
   const [deleting, setDeleting] = useState<Tariff | null>(null)
+  const [usageOf, setUsageOf] = useState<Tariff | null>(null)
 
   const { data, isLoading, isError, error, refetch } = useTariffs({ page, pageSize: PAGE_SIZE })
   const deleteTariff = useDeleteTariff()
+  const assignmentsQuery = useAllTariffAssignments()
+
+  /** Quantos vínculos VIGENTES a tarifa tem; `undefined` enquanto a lista não chegou (nunca afirma "sem vínculo" por palpite). */
+  const activeLinksOf = (tariffId: string) =>
+    assignmentsQuery.data ? assignmentsQuery.data.items.filter((a) => a.tariffId === tariffId && getAssignmentStatus(a) === "active").length : undefined
 
   const openCreate = () => {
     setEditing(null)
@@ -68,14 +77,14 @@ export default function TariffsPage() {
         }
       />
 
-      {isLoading && <TableSkeleton cols={5} />}
+      {isLoading && <TableSkeleton cols={6} />}
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar as tarifas.")} onRetry={() => refetch()} />}
 
       {!isLoading && !isError && data && data.items.length === 0 && (
         <EmptyState
           icon={Wallet}
           title="Nenhuma tarifa cadastrada"
-          description="Crie uma tarifa para poder associá-la aos pontos de recarga."
+          description="Crie uma tarifa e depois vincule-a a um local, carregador ou tomada para liberar a recarga."
           action={
             <Button onClick={openCreate}>
               <Plus className="h-4 w-4" aria-hidden="true" />
@@ -94,6 +103,7 @@ export default function TariffsPage() {
                 <TableHead>Modelo</TableHead>
                 <TableHead>Preço</TableHead>
                 <TableHead>Ociosidade</TableHead>
+                <TableHead>Vínculos</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -111,10 +121,20 @@ export default function TariffsPage() {
                   </TableCell>
                   <TableCell>{formatCents(t.idleFeePerMinute)}/min</TableCell>
                   <TableCell>
+                    {(() => {
+                      const links = activeLinksOf(t.id)
+                      if (links === undefined) return <span className="text-ink-softer">—</span>
+                      return links === 0 ? <Badge variant="warning">Sem vínculo</Badge> : <span>{links === 1 ? "1 vínculo" : `${links} vínculos`}</span>
+                    })()}
+                  </TableCell>
+                  <TableCell>
                     <Badge variant={t.active ? "success" : "neutral"}>{t.active ? "Ativa" : "Inativa"}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" aria-label={`Onde ${t.name} vale`} title="Onde vale" onClick={() => setUsageOf(t)}>
+                        <Link2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
                       <Button variant="ghost" size="icon" aria-label={`Editar ${t.name}`} title="Editar" onClick={() => openEdit(t)}>
                         <Pencil className="h-4 w-4" aria-hidden="true" />
                       </Button>
@@ -140,6 +160,8 @@ export default function TariffsPage() {
       )}
 
       <TariffFormDialog open={formOpen} onOpenChange={setFormOpen} tariff={editing} />
+
+      <TariffUsageDialog tariff={usageOf} onOpenChange={(open) => !open && setUsageOf(null)} />
 
       <ConfirmDialog
         open={Boolean(deleting)}
