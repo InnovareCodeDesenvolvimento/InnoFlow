@@ -79,9 +79,11 @@ server {
     #
     # CSP: script-src sem 'unsafe-inline' (é a proteção real contra XSS);
     # style-src precisa de 'unsafe-inline' (componentes React com `style=`
-    # inline) + fonts.googleapis.com (ver index.html, Inter via <link>);
-    # font-src libera fonts.gstatic.com (onde o arquivo da fonte realmente
-    # baixa). connect-src só 'self' — API e SSE são mesma origem, sem CORS
+    # inline); a fonte Inter é AUTO-HOSPEDADA (src/assets/fonts, 04/10/2026),
+    # então font-src é só 'self' — fonts.googleapis.com/fonts.gstatic.com
+    # foram REMOVIDOS (nada no código/build os usa; o CSS do GIS,
+    # accounts.google.com/gsi/style, não carrega fonte). connect-src só 'self'
+    # — API e SSE são mesma origem, sem CORS
     # externo. Permissions-Policy: geolocation=(self) ("eletropostos perto de
     # mim", 19/09/2026 — só a própria origem pode pedir, nunca iframe de
     # terceiro); camera/microphone continuam desligados (o scanner de QR é a
@@ -94,7 +96,7 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
     add_header Strict-Transport-Security "max-age=31536000" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
 
     # ---- CADASTRO DE CARTÃO (F5.3, 30/09/2026) — documento ISOLADO --------
     # SAQ A-EP (ver `.claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md`
@@ -180,7 +182,7 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 
     # ---- Webhook da Cielo (F5.8) — token no CAMINHO, nunca no log ---------
@@ -259,7 +261,7 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
         try_files $uri =404;
     }
 
@@ -271,7 +273,7 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 
     location / {
@@ -282,6 +284,6 @@ server {
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://tile.openstreetmap.org; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     }
 }
