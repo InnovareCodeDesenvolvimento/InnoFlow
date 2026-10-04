@@ -2,6 +2,10 @@ import type {
   PaymentGatewayConfigDTO,
   PaymentGatewayEnvironment,
   PaymentGatewayRequirement,
+  PaymentGatewayTestResult,
+  PaymentGatewayTestStatus,
+  PaymentGatewayTestStep,
+  PaymentGatewayTestStepResult,
   PaymentMethodReadiness,
   UpdatePaymentGatewayConfigRequest,
 } from "@/types/api"
@@ -319,4 +323,108 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
   const resendsAllSecrets = input.merchantKey !== undefined && input.sopClientSecret !== undefined && input.webhookHeaderSecret !== undefined
   scenario.state = { ...next, source: "database", updatedAt: new Date().toISOString(), secretsDecryptable: next.secretsDecryptable || resendsAllSecrets }
   return { ok: true, dto: toDto(scenario) }
+}
+
+// ---- POST /api/admin/payment-gateway/test-connection (C2.1) ----------------------------------------------------
+// Espelha `backend/src/services/pagamentos/testarConexaoGateway.ts`: sempre 200 com os 3 passos (credencial errada é RESULTADO), `ok` = algum OK e nenhuma falha,
+// 429 `RATE_LIMITED_PAYMENT_GATEWAY` a partir da 7ª chamada no mesmo minuto por ADMIN, 503 se a configuração está ilegível. As MENSAGENS são as do servidor.
+// Cenários: pelo estado da conta (credencial salva ou não, segredo ilegível, `gateway-falhas@` = credencial recusada) e, para exercitar CADA status,
+// pelo override `localStorage["mock:gateway-test"]` (os handlers do MSW rodam na página): o NOME de um status vale para o passo da credencial da Cielo
+// (com o cadastro de cartão OK), `OAUTH_<STATUS>` para o passo de autenticação do cartão (o token fica SKIPPED), `HTTP_503` devolve o 503.
+
+const TEST_HOSTS: Record<PaymentGatewayEnvironment, Record<PaymentGatewayTestStep, string>> = {
+  sandbox: { MERCHANT_CREDENTIALS: "apiquerysandbox.cieloecommerce.cielo.com.br", SOP_OAUTH: "authsandbox.braspag.com.br", SOP_ACCESS_TOKEN: "transactionsandbox.pagador.com.br" },
+  production: { MERCHANT_CREDENTIALS: "apiquery.cieloecommerce.cielo.com.br", SOP_OAUTH: "auth.braspag.com.br", SOP_ACCESS_TOKEN: "transaction.pagador.com.br" },
+}
+
+const MERCHANT_MESSAGES: Record<PaymentGatewayTestStatus, { httpStatus: number | null; message: string }> = {
+  OK: { httpStatus: 404, message: "Credencial aceita pela Cielo (a venda de teste, inexistente de propósito, não foi encontrada)." },
+  CREDENTIAL_REJECTED: {
+    httpStatus: 400,
+    message: "Cielo respondeu HTTP 400: credencial recusada (códigos 132). Confira MerchantId e MerchantKey e o AMBIENTE (sandbox e produção são servidores separados: a credencial de um é recusada no outro com este mesmo erro).",
+  },
+  IP_NOT_ALLOWED: {
+    httpStatus: 403,
+    message: "Cielo respondeu HTTP 403: acesso recusado. Causa mais comum: o IP de saída desta API não está na lista de IPs confiáveis do Site Cielo — confira isso ANTES de trocar ou apagar a credencial (ela pode estar correta).",
+  },
+  UNAVAILABLE: { httpStatus: null, message: "Não foi possível falar com a Cielo (timeout ou rede). Tente de novo; se persistir, confira a conectividade de saída do servidor." },
+  RATE_LIMITED: { httpStatus: 429, message: "Cielo respondeu HTTP 429: excesso de chamadas. Aguarde e tente de novo." },
+  REQUEST_REFUSED: { httpStatus: 400, message: "Cielo respondeu HTTP 400: requisição recusada. Provável defeito de payload nosso, não de credencial." },
+  MISCONFIGURED: { httpStatus: null, message: "Configuração incoerente: ambiente sandbox com URL de produção. Corrija o ambiente ou as URLs do servidor." },
+  NOT_CONFIGURED: { httpStatus: null, message: "MerchantId e/ou MerchantKey não configurados: cadastre a credencial da Cielo na tela do gateway." },
+  SKIPPED: { httpStatus: null, message: "Depende do passo anterior." },
+}
+
+function step(environment: PaymentGatewayEnvironment, which: PaymentGatewayTestStep, status: PaymentGatewayTestStatus, message: string, httpStatus: number | null): PaymentGatewayTestStepResult {
+  const touched = status !== "NOT_CONFIGURED" && status !== "SKIPPED" && status !== "MISCONFIGURED"
+  return { step: which, status, host: TEST_HOSTS[environment][which], httpStatus, durationMs: touched ? 120 + (which === "MERCHANT_CREDENTIALS" ? 80 : 0) : 0, message }
+}
+
+function sopSteps(environment: PaymentGatewayEnvironment, oauth: PaymentGatewayTestStatus): PaymentGatewayTestStepResult[] {
+  if (oauth === "OK") {
+    return [
+      step(environment, "SOP_OAUTH", "OK", "ClientId/ClientSecret aceitos pela Braspag.", 200),
+      step(environment, "SOP_ACCESS_TOKEN", "OK", "AccessToken do Silent Order Post emitido (o cadastro de cartão deve funcionar).", 200),
+    ]
+  }
+  if (oauth === "NOT_CONFIGURED") {
+    const msg = "ClientId/ClientSecret do cadastro de cartão não configurados: cadastre-os na tela do gateway."
+    return [step(environment, "SOP_OAUTH", "NOT_CONFIGURED", msg, null), step(environment, "SOP_ACCESS_TOKEN", "NOT_CONFIGURED", msg, null)]
+  }
+  const oauthMessage =
+    oauth === "CREDENTIAL_REJECTED" ? "Braspag respondeu HTTP 400 (invalid_client): ClientId/ClientSecret recusados." : MERCHANT_MESSAGES[oauth].message
+  return [
+    step(environment, "SOP_OAUTH", oauth, oauthMessage, oauth === "CREDENTIAL_REJECTED" ? 400 : MERCHANT_MESSAGES[oauth].httpStatus),
+    step(environment, "SOP_ACCESS_TOKEN", "SKIPPED", "O passo de autenticação falhou; este depende dele.", null),
+  ]
+}
+
+const FAILURES: ReadonlySet<PaymentGatewayTestStatus> = new Set(["CREDENTIAL_REJECTED", "IP_NOT_ALLOWED", "UNAVAILABLE", "RATE_LIMITED", "REQUEST_REFUSED", "MISCONFIGURED"])
+const callsByUser = new Map<string, number[]>()
+const TEST_LIMIT_PER_MINUTE = 6
+
+export type GatewayTestOutcome =
+  | { status: 200; body: PaymentGatewayTestResult }
+  | { status: 429 | 503; body: { error: string; code: string } }
+
+export function testGatewayConnection(userId: string, override: string | null): GatewayTestOutcome {
+  if (userId === "user_admin_gateway_ilegivel" || override === "HTTP_503") {
+    return { status: 503, body: { error: "Não foi possível ler a configuração do gateway agora.", code: "PAYMENT_GATEWAY_UNAVAILABLE" } }
+  }
+  const now = Date.now()
+  const recent = (callsByUser.get(userId) ?? []).filter((t) => now - t < 60_000)
+  if (recent.length >= TEST_LIMIT_PER_MINUTE) {
+    callsByUser.set(userId, recent)
+    return { status: 429, body: { error: "Muitas tentativas. Aguarde um instante e tente de novo.", code: "RATE_LIMITED_PAYMENT_GATEWAY" } }
+  }
+  callsByUser.set(userId, [...recent, now])
+
+  const { state } = scenarioFor(userId)
+  const environment = state.environment
+  const hasMerchant = Boolean(state.merchantId) && state.merchantKeySet
+  const hasSop = Boolean(state.sopClientId) && state.sopClientSecretSet
+
+  let merchant: PaymentGatewayTestStatus = !hasMerchant ? "NOT_CONFIGURED" : "OK"
+  let oauth: PaymentGatewayTestStatus = !hasSop ? "NOT_CONFIGURED" : "OK"
+  if (hasMerchant || hasSop) {
+    if (state.source === "database" && !state.secretsDecryptable) {
+      merchant = hasMerchant ? "MISCONFIGURED" : merchant
+      oauth = hasSop ? "MISCONFIGURED" : oauth
+    }
+    if (userId === "user_admin_gateway_falhas") {
+      merchant = "CREDENTIAL_REJECTED"
+      oauth = "CREDENTIAL_REJECTED"
+    }
+  }
+  if (override && override.startsWith("OAUTH_")) {
+    oauth = override.slice("OAUTH_".length) as PaymentGatewayTestStatus
+  } else if (override && override in MERCHANT_MESSAGES) {
+    merchant = override as PaymentGatewayTestStatus
+    oauth = "OK"
+  }
+
+  const m = MERCHANT_MESSAGES[merchant]
+  const steps = [step(environment, "MERCHANT_CREDENTIALS", merchant, m.message, m.httpStatus), ...sopSteps(environment, oauth)]
+  const ok = steps.some((x) => x.status === "OK") && !steps.some((x) => FAILURES.has(x.status))
+  return { status: 200, body: { environment, testedAt: new Date().toISOString(), ok, steps } }
 }

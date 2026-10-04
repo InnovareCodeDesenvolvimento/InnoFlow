@@ -42,7 +42,7 @@ import {
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
-import { getGatewayConfig, updateGatewayConfig } from "./paymentGatewayData"
+import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -928,6 +928,14 @@ export const handlers = [
       return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status })
     }
     return HttpResponse.json(result.dto)
+  }),
+
+  // C2.1 - sem corpo, ADMIN-only, SEM step-up (só lê). `localStorage["mock:gateway-test"]` escolhe o cenário (ver `testGatewayConnection`).
+  http.post("/api/admin/payment-gateway/test-connection", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const outcome = testGatewayConnection(scope.user.userId, localStorage.getItem("mock:gateway-test"))
+    return HttpResponse.json(outcome.body, { status: outcome.status })
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------

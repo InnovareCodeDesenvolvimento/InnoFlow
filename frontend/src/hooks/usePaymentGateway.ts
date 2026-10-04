@@ -42,3 +42,14 @@ export function useUpdatePaymentGateway() {
     },
   })
 }
+
+/**
+ * "Testar conexão" (C2.1): executa os passos reais com a credencial SALVA. Não invalida a config (não muda nada no servidor) e não guarda o
+ * resultado no cache de mutations além da tela (`gcTime: 0`) - quem mostra é o estado da própria mutation.
+ */
+export function useTestPaymentGatewayConnection() {
+  return useMutation({
+    gcTime: 0,
+    mutationFn: () => paymentGatewayService.testConnection(),
+  })
+}

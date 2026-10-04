@@ -20,6 +20,7 @@ import {
   type GatewaySaveError,
 } from "@/lib/paymentGateway"
 import { ConfirmProductionDialog } from "./ConfirmProductionDialog"
+import { ConnectionTestSection } from "./ConnectionTestSection"
 import { ConfirmSaveDialog } from "./ConfirmSaveDialog"
 import { CredentialsSection } from "./CredentialsSection"
 import { EnvironmentSection } from "./EnvironmentSection"
@@ -213,6 +214,8 @@ export default function GatewayPagamentoPage() {
       />
 
       <CredentialsSection dto={dto} draft={draft} errors={errors} onChange={patchDraft} />
+
+      <ConnectionTestSection hasUnsavedCredentials={dirty} />
 
       <WebhookSection dto={dto} draft={draft} errors={errors} onChange={patchDraft} />
 

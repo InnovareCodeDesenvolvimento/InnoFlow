@@ -1532,6 +1532,43 @@ export interface PaymentMethodReadiness {
   missing: PaymentGatewayRequirement[]
 }
 
+// ---- POST /api/admin/payment-gateway/test-connection (C2.1) ----
+// Sem corpo, ADMIN-only, SEM step-up (só LÊ). Credencial errada NÃO é erro HTTP: vem 200 com o status por passo. Erros HTTP: 401/403 (não admin),
+// 429 `RATE_LIMITED_PAYMENT_GATEWAY` (6/min por ADMIN), 503 `PAYMENT_GATEWAY_UNAVAILABLE` (config ilegível). Nunca devolve segredo nem token.
+
+export type PaymentGatewayTestStep = "MERCHANT_CREDENTIALS" | "SOP_OAUTH" | "SOP_ACCESS_TOKEN"
+
+export type PaymentGatewayTestStatus =
+  | "OK"
+  | "CREDENTIAL_REJECTED" // inclui "credencial de OUTRO ambiente"
+  | "IP_NOT_ALLOWED" // 403: IP de saída fora da lista de IPs confiáveis do Site Cielo - a credencial pode estar certa
+  | "UNAVAILABLE" // 5xx, timeout, rede
+  | "RATE_LIMITED"
+  | "REQUEST_REFUSED" // a Cielo/Braspag recusou a NOSSA requisição por motivo que não parece credencial
+  | "MISCONFIGURED" // ambiente x URLs incoerentes, ou segredo salvo que não decifra
+  | "NOT_CONFIGURED" // falta credencial para este passo (não é falha)
+  | "SKIPPED" // um passo anterior falhou (não é falha)
+
+export interface PaymentGatewayTestStepResult {
+  step: PaymentGatewayTestStep
+  status: PaymentGatewayTestStatus
+  /** Só o HOST contatado (público), sem caminho nem query. */
+  host: string | null
+  httpStatus: number | null
+  durationMs: number
+  /** PT-BR, pronta para o admin; nunca contém segredo, token nem corpo cru da Cielo. */
+  message: string
+}
+
+export interface PaymentGatewayTestResult {
+  environment: PaymentGatewayEnvironment
+  testedAt: string
+  /** `true` só se algum passo deu OK e NENHUM falhou (NOT_CONFIGURED/SKIPPED não são falha, mas sozinhos não bastam). */
+  ok: boolean
+  /** Sempre 3 itens, nesta ordem: MERCHANT_CREDENTIALS, SOP_OAUTH, SOP_ACCESS_TOKEN. */
+  steps: PaymentGatewayTestStepResult[]
+}
+
 export interface PaymentGatewayConfigDTO {
   /**
    * De onde vêm os valores efetivos. `"database"` = existe configuração salva pelo admin (ela manda).
