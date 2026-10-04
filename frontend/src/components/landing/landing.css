@@ -24,6 +24,15 @@
   background: rgb(var(--lnd-night));
 }
 
+/* ---- Espaços das seções abaixo da dobra --------------------------------------------------------------
+   A altura de cada um (min-height por largura de janela) está em landing-reserve.css, GERADO por
+   scripts/gerar-reservas-landing.mjs: a página já nasce do tamanho final e nada é empurrado quando a seção entra.
+   (Testado e descartado: `content-visibility: auto` aqui — não reduziu nenhuma tarefa longa da montagem e esconde o
+   texto das seções fora da tela de `innerText`/leitores baseados em layout.) */
+.lnd-slot {
+  display: block;
+}
+
 /* ---- Superfícies escuras ------------------------------------------------------------------------ */
 .lnd-dark {
   color: #fff;
@@ -252,8 +261,8 @@
   border-radius: 50%;
   border: 1px dashed rgb(var(--color-primary-300) / 0.3);
 }
-.lnd-ring::after {
-  content: "";
+.lnd-ring-sweep {
+  display: block;
   position: absolute;
   inset: -1.5px;
   border-radius: 50%;
@@ -611,7 +620,7 @@
   .lnd-mascot-enter { animation: lnd-rise 700ms var(--lnd-ease) both; }
   .lnd-backlight { animation: lnd-breathe 5.2s ease-in-out infinite; }
   .lnd-ring { animation: lnd-bob 9s ease-in-out infinite; }
-  .lnd-ring::after { animation: lnd-spin 7s linear infinite; }
+  .lnd-ring-sweep { animation: lnd-spin 7s linear infinite; }
   .lnd-eye { animation: lnd-blink 6.4s ease-in-out infinite; }
   .lnd-eye[data-eye="r"] { animation-delay: 0.04s; }
   .lnd-arc .lnd-arc-pulse { animation: lnd-dash 2.4s linear infinite; }

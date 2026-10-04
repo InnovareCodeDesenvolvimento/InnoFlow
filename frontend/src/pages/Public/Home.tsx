@@ -2,9 +2,11 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { Hero } from "@/components/landing/Hero"
 import { LandingFooter } from "@/components/landing/LandingFooter"
 import { LandingHeader } from "@/components/landing/LandingHeader"
+import { BelowFoldReserve } from "@/components/landing/BelowFoldReserve"
 import { StatsStrip } from "@/components/landing/StatsStrip"
 import { SLOGAN } from "@/components/landing/landing-data"
 import "@/components/landing/landing.css"
+import "@/components/landing/landing-reserve.css"
 
 // Tudo abaixo da dobra vem num segundo chunk: o hero (texto + mascote) não espera pelo celular, pelo painel 3D etc.
 const loadBelowFold = () => import("@/components/landing/BelowFold")
@@ -93,11 +95,14 @@ export function Home() {
         <Hero />
         <StatsStrip />
         {belowArmed ? (
-          <Suspense fallback={<div className="h-[60vh] bg-white" aria-hidden="true" />}>
+          <Suspense fallback={<BelowFoldReserve />}>
             <BelowFold />
           </Suspense>
         ) : (
-          <div ref={sentinel} className="h-[60vh] bg-white" aria-hidden="true" data-testid="below-fold-placeholder" />
+          // Sentinela do gate + espaços com a altura FINAL das seções (a página já nasce do tamanho certo: ver BelowFoldReserve).
+          <div ref={sentinel} data-testid="below-fold-placeholder">
+            <BelowFoldReserve />
+          </div>
         )}
       </main>
       <LandingFooter />

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import {
   Battery,
   Check,
@@ -385,8 +385,22 @@ function ReciboScreen() {
   )
 }
 
-/** Moldura do celular com as cinco telas empilhadas; só a ativa aparece (as outras ficam `visibility:hidden`). */
+const SCREEN_ORDER: TourScreen[] = ["mapa", "qr", "iniciar", "carregando", "recibo"]
+const nextScreen = (id: TourScreen) => SCREEN_ORDER[(SCREEN_ORDER.indexOf(id) + 1) % SCREEN_ORDER.length]
+
+/**
+ * Moldura do celular com as cinco telas empilhadas; só a ativa aparece (as outras ficam `visibility:hidden`).
+ * Só estão no DOM a tela ativa, a PRÓXIMA e as já visitadas: as cinco juntas somavam ~470 nós (mais da metade da seção
+ * "Como funciona") e dominavam o layout da 1ª montagem. A próxima nasce inativa e pronta antes de entrar, então a
+ * transição de entrada (fade + deslize) continua funcionando; ir direto a uma aba ainda não vista monta e ativa na hora
+ * (sem o fade do contêiner, mas as animações internas da tela rodam normalmente).
+ */
 export function PhoneFrame({ step }: { step: TourScreen }) {
+  const [seen, setSeen] = useState<ReadonlySet<TourScreen>>(() => new Set([step, nextScreen(step)]))
+  const wanted: TourScreen[] = [step, nextScreen(step)]
+  // Ajuste de estado durante a renderização (padrão documentado do React): só quando aparece uma tela nova.
+  if (wanted.some((id) => !seen.has(id))) setSeen(new Set([...seen, ...wanted]))
+
   const screens: Array<{ id: TourScreen; node: ReactNode }> = [
     { id: "mapa", node: <MapaScreen /> },
     { id: "qr", node: <QrScreen /> },
@@ -397,11 +411,13 @@ export function PhoneFrame({ step }: { step: TourScreen }) {
   return (
     <div className="lnd-phone" aria-hidden="true" data-testid="tour-phone" data-step={step}>
       <div className="lnd-phone-screen">
-        {screens.map((s) => (
-          <div key={s.id} className="lnd-screen" data-active={s.id === step ? "true" : "false"} data-screen={s.id}>
-            {s.node}
-          </div>
-        ))}
+        {screens
+          .filter((s) => seen.has(s.id) || wanted.includes(s.id))
+          .map((s) => (
+            <div key={s.id} className="lnd-screen" data-active={s.id === step ? "true" : "false"} data-screen={s.id}>
+              {s.node}
+            </div>
+          ))}
         <span className="pointer-events-none absolute left-1/2 top-2 z-30 h-[18px] w-20 -translate-x-1/2 rounded-full bg-[#06121b]" />
       </div>
     </div>

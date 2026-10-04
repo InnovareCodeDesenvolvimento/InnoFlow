@@ -1,0 +1,112 @@
+/*
+ * GERADO por frontend/scripts/gerar-reservas-landing.mjs — NÃO editar à mão.
+ * Altura reservada (min-height) do espaço de cada seção abaixo da dobra, por largura de janela, para a página não mudar
+ * de tamanho quando as seções entram (ver o cabeçalho do script). Regerar quando o conteúdo/layout delas mudar.
+ * (As propriedades comuns de .lnd-slot ficam em landing.css.)
+ */
+
+/* tour (como-funciona) */
+.lnd-slot-tour { min-height: 1546px; }
+@media (min-width: 387px) { .lnd-slot-tour { min-height: 1495px; } }
+@media (min-width: 481px) { .lnd-slot-tour { min-height: 1469px; } }
+@media (min-width: 550px) { .lnd-slot-tour { min-height: 1432px; } }
+@media (min-width: 640px) { .lnd-slot-tour { min-height: 1486px; } }
+@media (min-width: 670px) { .lnd-slot-tour { min-height: 1446px; } }
+@media (min-width: 1024px) { .lnd-slot-tour { min-height: 1050px; } }
+
+/* op (para-quem-opera) */
+.lnd-slot-op { min-height: 2993px; }
+@media (min-width: 358px) { .lnd-slot-op { min-height: 2922px; } }
+@media (min-width: 386px) { .lnd-slot-op { min-height: 2855px; } }
+@media (min-width: 418px) { .lnd-slot-op { min-height: 2785px; } }
+@media (min-width: 554px) { .lnd-slot-op { min-height: 2725px; } }
+@media (min-width: 640px) { .lnd-slot-op { min-height: 1950px; } }
+@media (min-width: 771px) { .lnd-slot-op { min-height: 1905px; } }
+@media (min-width: 801px) { .lnd-slot-op { min-height: 1860px; } }
+@media (min-width: 1024px) { .lnd-slot-op { min-height: 1588px; } }
+@media (min-width: 1161px) { .lnd-slot-op { min-height: 1543px; } }
+@media (min-width: 1193px) { .lnd-slot-op { min-height: 1516px; } }
+
+/* feat (recursos) */
+.lnd-slot-feat { min-height: 2326px; }
+@media (min-width: 329px) { .lnd-slot-feat { min-height: 2274px; } }
+@media (min-width: 347px) { .lnd-slot-feat { min-height: 2223px; } }
+@media (min-width: 350px) { .lnd-slot-feat { min-height: 2198px; } }
+@media (min-width: 363px) { .lnd-slot-feat { min-height: 2103px; } }
+@media (min-width: 375px) { .lnd-slot-feat { min-height: 2052px; } }
+@media (min-width: 392px) { .lnd-slot-feat { min-height: 2008px; } }
+@media (min-width: 437px) { .lnd-slot-feat { min-height: 1957px; } }
+@media (min-width: 467px) { .lnd-slot-feat { min-height: 1906px; } }
+@media (min-width: 505px) { .lnd-slot-feat { min-height: 1855px; } }
+@media (min-width: 603px) { .lnd-slot-feat { min-height: 1804px; } }
+@media (min-width: 640px) { .lnd-slot-feat { min-height: 1640px; } }
+@media (min-width: 691px) { .lnd-slot-feat { min-height: 1586px; } }
+@media (min-width: 712px) { .lnd-slot-feat { min-height: 1535px; } }
+@media (min-width: 860px) { .lnd-slot-feat { min-height: 1493px; } }
+@media (min-width: 1005px) { .lnd-slot-feat { min-height: 1468px; } }
+@media (min-width: 1024px) { .lnd-slot-feat { min-height: 1155px; } }
+@media (min-width: 1096px) { .lnd-slot-feat { min-height: 1114px; } }
+@media (min-width: 1129px) { .lnd-slot-feat { min-height: 1082px; } }
+@media (min-width: 1363px) { .lnd-slot-feat { min-height: 1056px; } }
+@media (min-width: 1384px) { .lnd-slot-feat { min-height: 1035px; } }
+
+/* trust (seguranca) */
+.lnd-slot-trust { min-height: 1800px; }
+@media (min-width: 341px) { .lnd-slot-trust { min-height: 1754px; } }
+@media (min-width: 349px) { .lnd-slot-trust { min-height: 1709px; } }
+@media (min-width: 369px) { .lnd-slot-trust { min-height: 1627px; } }
+@media (min-width: 400px) { .lnd-slot-trust { min-height: 1581px; } }
+@media (min-width: 405px) { .lnd-slot-trust { min-height: 1533px; } }
+@media (min-width: 407px) { .lnd-slot-trust { min-height: 1487px; } }
+@media (min-width: 423px) { .lnd-slot-trust { min-height: 1442px; } }
+@media (min-width: 501px) { .lnd-slot-trust { min-height: 1397px; } }
+@media (min-width: 542px) { .lnd-slot-trust { min-height: 1352px; } }
+@media (min-width: 637px) { .lnd-slot-trust { min-height: 1308px; } }
+@media (min-width: 640px) { .lnd-slot-trust { min-height: 1239px; } }
+@media (min-width: 688px) { .lnd-slot-trust { min-height: 1194px; } }
+@media (min-width: 737px) { .lnd-slot-trust { min-height: 1149px; } }
+@media (min-width: 821px) { .lnd-slot-trust { min-height: 1127px; } }
+@media (min-width: 836px) { .lnd-slot-trust { min-height: 1103px; } }
+@media (min-width: 846px) { .lnd-slot-trust { min-height: 1081px; } }
+@media (min-width: 1001px) { .lnd-slot-trust { min-height: 1058px; } }
+@media (min-width: 1024px) { .lnd-slot-trust { min-height: 994px; } }
+@media (min-width: 1056px) { .lnd-slot-trust { min-height: 971px; } }
+@media (min-width: 1067px) { .lnd-slot-trust { min-height: 949px; } }
+@media (min-width: 1140px) { .lnd-slot-trust { min-height: 925px; } }
+@media (min-width: 1194px) { .lnd-slot-trust { min-height: 903px; } }
+@media (min-width: 1209px) { .lnd-slot-trust { min-height: 881px; } }
+@media (min-width: 1277px) { .lnd-slot-trust { min-height: 858px; } }
+@media (min-width: 1400px) { .lnd-slot-trust { min-height: 836px; } }
+
+/* faq (perguntas) */
+.lnd-slot-faq { min-height: 1075px; }
+@media (min-width: 333px) { .lnd-slot-faq { min-height: 1051px; } }
+@media (min-width: 339px) { .lnd-slot-faq { min-height: 1027px; } }
+@media (min-width: 359px) { .lnd-slot-faq { min-height: 1004px; } }
+@media (min-width: 370px) { .lnd-slot-faq { min-height: 980px; } }
+@media (min-width: 403px) { .lnd-slot-faq { min-height: 956px; } }
+@media (min-width: 423px) { .lnd-slot-faq { min-height: 933px; } }
+@media (min-width: 439px) { .lnd-slot-faq { min-height: 909px; } }
+@media (min-width: 472px) { .lnd-slot-faq { min-height: 884px; } }
+@media (min-width: 556px) { .lnd-slot-faq { min-height: 860px; } }
+@media (min-width: 640px) { .lnd-slot-faq { min-height: 927px; } }
+
+/* cta (último <section> de main) */
+.lnd-slot-cta { min-height: 1043px; }
+@media (min-width: 352px) { .lnd-slot-cta { min-height: 1006px; } }
+@media (min-width: 443px) { .lnd-slot-cta { min-height: 978px; } }
+@media (min-width: 464px) { .lnd-slot-cta { min-height: 941px; } }
+@media (min-width: 640px) { .lnd-slot-cta { min-height: 969px; } }
+@media (min-width: 1023px) { .lnd-slot-cta { min-height: 930px; } }
+@media (min-width: 1024px) { .lnd-slot-cta { min-height: 732px; } }
+@media (min-width: 1280px) { .lnd-slot-cta { min-height: 811px; } }
+@media (min-width: 1536px) { .lnd-slot-cta { min-height: 851px; } }
+
+/* tour: com prefers-reduced-motion a seção é mais baixa (sem o botão "Pausar animação") */
+@media (prefers-reduced-motion: reduce) { .lnd-slot-tour { min-height: 1522px; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 387px) { .lnd-slot-tour { min-height: 1471px; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 481px) { .lnd-slot-tour { min-height: 1445px; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 550px) { .lnd-slot-tour { min-height: 1409px; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 640px) { .lnd-slot-tour { min-height: 1462px; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 670px) { .lnd-slot-tour { min-height: 1423px; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 1024px) { .lnd-slot-tour { min-height: 1050px; } }

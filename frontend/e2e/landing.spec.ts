@@ -70,6 +70,57 @@ test.describe("estrutura e conteúdo", () => {
     await expect(page.getByTestId("below-fold-placeholder")).toHaveCount(0)
   })
 
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`espaços reservados (${reducedMotion}): a altura reservada de cada seção abaixo da dobra bate com a real (reserva <= real <= reserva +4%), de 320 a 1920 px`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion })
+    // Falha quando o conteúdo/layout de uma seção muda sem regerar `landing-reserve.css`
+    // (node scripts/gerar-reservas-landing.mjs --write): a página voltaria a "pular" quando as seções entram.
+    await page.goto("/#recursos")
+    await page.locator("#perguntas").waitFor({ state: "attached" })
+    await page.locator("#cta-final-titulo").waitFor({ state: "attached" })
+    for (const width of [320, 340, 360, 375, 390, 412, 430, 480, 540, 600, 639, 640, 700, 768, 900, 1000, 1023, 1024, 1100, 1280, 1440, 1600, 1920]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForTimeout(200)
+      const rows = await page.evaluate(() =>
+        [...document.querySelectorAll(".lnd-slot")].map((slot) => ({
+          slot: slot.className.split(" ").pop(),
+          reserved: parseFloat(getComputedStyle(slot).minHeight),
+          real: (slot.firstElementChild as HTMLElement).getBoundingClientRect().height,
+        })),
+      )
+      expect(rows).toHaveLength(6)
+      for (const r of rows) {
+        expect(r.reserved, `${r.slot} a ${width}px: a reserva não pode passar da altura real (vão em branco)`).toBeLessThanOrEqual(r.real + 1)
+        expect(r.real, `${r.slot} a ${width}px: a seção real não pode passar da reserva em mais de 4% (a página pularia)`).toBeLessThanOrEqual(r.reserved * 1.04)
+      }
+    }
+  })
+  }
+
+  test("rolar rápido até o fim logo depois de abrir não desloca o layout (CLS ~0): a página já nasce do tamanho final", async ({ page }) => {
+    await page.setViewportSize({ width: 412, height: 823 })
+    await page.addInitScript(() => {
+      ;(window as unknown as { __cls: number }).__cls = 0
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries() as unknown as Array<{ value: number; hadRecentInput: boolean }>) {
+          if (!e.hadRecentInput) (window as unknown as { __cls: number }).__cls += e.value
+        }
+      }).observe({ type: "layout-shift", buffered: true })
+    })
+    await page.goto("/")
+    await page.locator("#hero-title").waitFor()
+    const total = await page.evaluate(() => document.documentElement.scrollHeight)
+    expect(total, "o documento já tem a altura final antes de qualquer rolagem").toBeGreaterThan(8000)
+    for (let i = 0; i < 12; i++) {
+      await page.mouse.wheel(0, 700)
+      await page.waitForTimeout(120)
+    }
+    await page.locator("#cta-final-titulo").waitFor({ state: "attached" })
+    await page.waitForTimeout(500)
+    const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls)
+    expect(cls).toBeLessThan(0.05)
+  })
+
   test("o mascote do CTA final e as demais imagens abaixo da dobra carregam sob demanda (lazy)", async ({ page }) => {
     await openLanding(page)
     await scrollThrough(page)

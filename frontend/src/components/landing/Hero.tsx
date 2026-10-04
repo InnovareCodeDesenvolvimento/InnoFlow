@@ -18,7 +18,12 @@ function HeroStage() {
       <div className="lnd-mascot-enter relative">
         <div className="lnd-mascot-box-wrap relative">
           <div className="lnd-backlight" aria-hidden="true" />
-          <div className="lnd-ring" aria-hidden="true" />
+          {/* O arco que gira é um elemento de verdade (`lnd-ring-sweep`), NÃO um ::after: animar um pseudo-elemento dentro de um pai
+              que também anima (o anel flutua) fazia o Chromium refazer o estilo na thread principal a cada quadro (medido: ~700 ms
+              de CPU a cada 3 s a 4x; com elemento real, ~5 ms). */}
+          <div className="lnd-ring" aria-hidden="true">
+            <i className="lnd-ring-sweep" />
+          </div>
           <div className="lnd-mascot-float relative">
             <Mascot
               priority
