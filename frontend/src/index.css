@@ -20,12 +20,26 @@
   src: url("./assets/fonts/inter-latin-ext-var.woff2") format("woff2");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
+/* Fallback com as métricas da Inter, MEDIDAS no navegador (largura de frases reais em pt-BR / Arial, por peso): regular
+   ~1,058x a largura do Arial, negrito ~1,02x do Arial Bold. Os overrides verticais seguem da métrica da Inter
+   (ascent 96,875%, descent 24,12% do em) divididos pelo size-adjust. Sem isto a troca de fonte mudava a quebra de
+   linha e o bloco centralizado da tela de login saltava (CLS 0,041 medido no Lighthouse). */
 @font-face {
   font-family: "Inter Fallback";
   src: local("Arial");
-  size-adjust: 107.4%;
-  ascent-override: 90.2%;
-  descent-override: 22.5%;
+  font-weight: 100 599;
+  size-adjust: 105.8%;
+  ascent-override: 91.6%;
+  descent-override: 22.8%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial Bold"), local("Arial-BoldMT");
+  font-weight: 600 900;
+  size-adjust: 101.8%;
+  ascent-override: 95.2%;
+  descent-override: 23.7%;
   line-gap-override: 0%;
 }
 

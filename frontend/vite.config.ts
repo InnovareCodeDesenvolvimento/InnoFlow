@@ -225,47 +225,35 @@ export default defineConfig({
         // Dialog.tsx/DropdownMenu.tsx (já dentro de "ui-kit"): com um único
         // consumidor, o bundler sempre funde de volta. Removido por ser
         // morto — não é bug, é como esse app usa Radix hoje.
-        manualChunks(id) {
-          // Núcleo que TODA rota (inclusive a landing "/", que é a mais sensível a peso) precisa para renderizar:
-          // React, roteador, estado (zustand) e TanStack Query. SEM esta regra, os buckets abaixo (`ui-kit`,
-          // `app-hooks`) absorviam o React e o zustand por serem "dependência compartilhada", e o entry passava a
-          // importar (e a landing a esperar) ~280 KB de Radix/axios/sonner/tailwind-merge que ela não usa
-          // (medido: modulepreload de `ui-kit` + `app-hooks` no index.html de "/").
-          if (
-            /node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|zustand|@tanstack\/(react-query|query-core))\//.test(id)
-          ) {
-            return "vendor-core"
-          }
-
-          // lucide-react: cada ícone vira seu próprio arquivo de <0,4kB
-          // quando usado por 2+ chunks assíncronos. Um chunk único de ícones
-          // custa poucos KB a mais pra quem não usa todos, mas elimina a
-          // fragmentação.
-          if (id.includes("node_modules/lucide-react")) return "vendor-icons"
-
-          // zod + react-hook-form + resolvers: usados em login/cadastro e em
-          // todos os formulários do admin — um chunk só evita duplicar zod
-          // em cada form (já ficavam praticamente assim antes, sem eager
-          // load: nenhum dos dois está no grafo estático de Home/Header).
-          if (
-            id.includes("node_modules/zod") ||
-            id.includes("node_modules/react-hook-form") ||
-            id.includes("node_modules/@hookform/resolvers")
-          ) {
-            return "vendor-forms"
-          }
-
-          // Design system local (Button/Card/Badge/Input/Select/Skeleton/
-          // Table/EmptyState/ErrorState/ConfirmDialog/Pagination/Dialog/
-          // DropdownMenu/Toaster): reusado por quase toda rota do PWA e do
-          // Admin — hoje virava ~12 arquivos de menos de 1kB cada.
-          // if (id.includes("/src/components/ui/")) return "ui-kit"
-
-          // Hooks de dados locais (useMeSessions, useSites, useReports, ...):
-          // compartilhados entre páginas assíncronas, hoje fragmentados
-          // 1 arquivo por combinação de rotas que os consome em comum.
-          // if (id.includes("/src/hooks/")) return "app-hooks"
-
+        // `codeSplitting.groups` (e não `manualChunks`) porque aqui a PRIORIDADE importa. Com `manualChunks` cada nome vira
+        // um grupo de mesma prioridade e o grupo "dono" de um módulo dependia da ordem: `ui-kit`/`app-hooks` absorviam o
+        // React, o zustand e o query-core por serem dependência compartilhada, e o ENTRY (portanto a landing "/") passava
+        // a importar ~280 KB de Radix/axios/sonner/tailwind-merge que ela não usa (medido: modulepreload de `ui-kit` +
+        // `app-hooks` no index.html de "/"). Com prioridade, o `vendor-core` é extraído primeiro e os buckets de baixo só
+        // pegam o que sobrar — e continuam consolidando as rotas lazy (ver o comentário acima).
+        codeSplitting: {
+          groups: [
+            // Núcleo que TODA rota (inclusive a landing, a mais sensível a peso) precisa para renderizar.
+            {
+              name: "vendor-core",
+              test: /node_modules[/\\](react|react-dom|scheduler|react-router|react-router-dom|zustand|@tanstack[/\\](react-query|query-core))[/\\]/,
+              priority: 40,
+            },
+            // Estado global (authStore etc.) e a chave do token: o entry e a landing importam o `authStore`. Sem isto ele era
+            // capturado como "dependência" do `app-hooks` e arrastava o bucket inteiro (~190 KB) para o caminho crítico.
+            { name: "vendor-core", test: /[/\\]src[/\\](store|lib[/\\]storageKeys)/, priority: 40 },
+            // lucide-react: cada ícone vira seu próprio arquivo de <0,4kB quando usado por 2+ chunks assíncronos. Um chunk
+            // único de ícones custa poucos KB a mais, mas elimina a fragmentação.
+            { name: "vendor-icons", test: /node_modules[/\\]lucide-react/, priority: 30 },
+            // zod + react-hook-form + resolvers: login/cadastro e todos os formulários do admin; nenhum está no grafo
+            // estático de Home/Header.
+            { name: "vendor-forms", test: /node_modules[/\\](zod|react-hook-form|@hookform[/\\]resolvers)/, priority: 30 },
+            // Design system local (Button/Card/Badge/Input/Select/.../Dialog/DropdownMenu/Toaster): reusado por quase toda
+            // rota do PWA e do Admin — sem o bucket virava ~12 arquivos de menos de 1 kB.
+            { name: "ui-kit", test: /[/\\]src[/\\]components[/\\]ui[/\\]/, priority: 20 },
+            // Hooks de dados locais (useMeSessions, useSites, useReports, ...): compartilhados entre páginas assíncronas.
+            { name: "app-hooks", test: /[/\\]src[/\\]hooks[/\\]/, priority: 10 },
+          ],
         },
       },
     },
