@@ -38,8 +38,10 @@ describe('normalizarStatusCartaoCielo', () => {
     expect(normalizarStatusCartaoCielo({ status: 12, returnCode: null })).toBe('PENDING')
   })
 
-  it('Status desconhecido -> FAILED (fail-closed, nunca assume sucesso por default)', () => {
-    expect(normalizarStatusCartaoCielo({ status: 999, returnCode: '00' })).toBe('FAILED')
+  it('Status desconhecido -> UNKNOWN (C2.3): nunca aprovação, mas também não uma falha definitiva inventada (reconsulta)', () => {
+    const r = normalizarStatusCartaoCielo({ status: 999, returnCode: '00' })
+    expect(r).toBe('UNKNOWN')
+    expect(['AUTHORIZED', 'CAPTURED']).not.toContain(r)
   })
 })
 

@@ -1,4 +1,6 @@
 import { logger } from '../../lib/logger'
+import { createLogGate } from '../../lib/rateLimitedLog'
+import { classificarFalhaHttpCielo, mensagemDeFalhaCielo, type FalhaCieloClassificada, type TipoFalhaCielo } from '../../core/pagamentos/classificarFalhaCielo'
 
 /**
  * Transporte HTTP cru para a API 3.0 da Cielo. NÃO conhece `PaymentIntent`
@@ -40,6 +42,9 @@ export class CieloTimeoutError extends Error {
 }
 
 export class CieloHttpError extends Error {
+  /** Classificação da falha (C2.2): credencial, IP fora da lista, indisponível... Só tipo e códigos numéricos — nunca texto da Cielo. */
+  readonly tipo: TipoFalhaCielo
+  readonly codigos: number[]
   /** Corpo de erro já parseado — só usado internamente para extrair Status/ReturnCode; NUNCA logado (NÃO enumerável, ver o construtor). */
   declare readonly body: unknown
 
@@ -50,11 +55,30 @@ export class CieloHttpError extends Error {
   ) {
     super(message)
     this.name = 'CieloHttpError'
+    const falha = classificarFalhaHttpCielo(httpStatus, body)
+    this.tipo = falha.tipo
+    this.codigos = falha.codigos
     // F5.7 (B5): propriedade NÃO enumerável. O corpo de erro da Cielo pode ECOAR o payload enviado (`CardNumber`, `Holder`,
     // `Identity`), e todo `logger.error({ err })` serializa as propriedades enumeráveis do erro — era um vazamento de PAN em
     // potencial. Continua legível por `err.body` (o adaptador extrai Status/ReturnCode dele); só some do JSON/spread/serializer.
     Object.defineProperty(this, 'body', { value: body, enumerable: false, writable: false, configurable: true })
   }
+}
+
+/** No máximo 1 alerta/minuto por tipo: uma credencial errada falha em TODA chamada e o log viraria uma parede. */
+let alertarCredencialRecusada = createLogGate(60_000)
+let alertarIpNaoPermitido = createLogGate(60_000)
+
+/** Só para teste: o porteiro é global do processo e um teste não pode depender do que outro já alertou. */
+export function resetAlertasCieloParaTeste(): void {
+  alertarCredencialRecusada = createLogGate(60_000)
+  alertarIpNaoPermitido = createLogGate(60_000)
+}
+
+/** O `path` vai a log: o do `GET /1/card/{CardToken}` carrega o token (segredo) — nunca em claro. */
+function pathParaLog(path: string): string {
+  const PREFIXO_CARD = '/1/card/'
+  return path.startsWith(PREFIXO_CARD) ? `${PREFIXO_CARD}***` : path
 }
 
 export class CieloHttpClient {
@@ -82,18 +106,25 @@ export class CieloHttpClient {
       const body = bodyText ? safeJsonParse(bodyText) : null
 
       if (!res.ok) {
-        logger.warn({ httpStatus: res.status, path }, '[cielo] resposta HTTP não-OK')
-        throw new CieloHttpError(`Cielo respondeu HTTP ${res.status}`, res.status, body)
+        const falha: FalhaCieloClassificada = classificarFalhaHttpCielo(res.status, body)
+        const mensagem = mensagemDeFalhaCielo(falha, res.status)
+        logger.warn({ httpStatus: res.status, path: pathParaLog(path), tipo: falha.tipo, codigos: falha.codigos }, '[cielo] resposta HTTP não-OK')
+        if (falha.tipo === 'CREDENCIAL') {
+          alertarCredencialRecusada(() => logger.error({ alert: 'payment_gateway_credential_rejected', httpStatus: res.status, codigos: falha.codigos }, `[cielo] ALERTA: ${mensagem}`))
+        } else if (falha.tipo === 'IP_NAO_PERMITIDO') {
+          alertarIpNaoPermitido(() => logger.error({ alert: 'payment_gateway_ip_not_allowed', httpStatus: res.status }, `[cielo] ALERTA: ${mensagem}`))
+        }
+        throw new CieloHttpError(mensagem, res.status, body)
       }
 
       return body as T
     } catch (err) {
       if (err instanceof CieloHttpError) throw err
       if (isAbortError(err)) {
-        logger.warn({ path, timeoutMs: this.config.timeoutMs }, '[cielo] timeout')
+        logger.warn({ path: pathParaLog(path), timeoutMs: this.config.timeoutMs }, '[cielo] timeout')
         throw new CieloTimeoutError(path)
       }
-      logger.error({ path, err: err instanceof Error ? err.message : String(err) }, '[cielo] erro de rede')
+      logger.error({ path: pathParaLog(path), err: err instanceof Error ? err.message : String(err) }, '[cielo] erro de rede')
       throw err
     } finally {
       clearTimeout(timer)

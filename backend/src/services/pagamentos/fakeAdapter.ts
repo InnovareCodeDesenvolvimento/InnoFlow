@@ -2,6 +2,7 @@ import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, Result
 import type { CardPaymentStatus, DadosCliente, PedidoAutorizacaoCartao, PedidoPix, PixPaymentStatus } from '../../core/pagamentos/tipos'
 import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
 import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
+import { SEM_IDENTIFICADORES_ADQUIRENTE, type IdentificadoresAdquirente } from '../../core/pagamentos/identificadoresAdquirente'
 
 /**
  * `PagamentoPort` em memória — para Íris/Lyra/outros times de F5.2+
@@ -28,6 +29,16 @@ export interface FakeAdapterOptions {
    * Mutável em runtime via `definirModoCaptura()`.
    */
   modoCaptura?: 'NORMAL' | 'PENDENTE' | 'NEGADA'
+  /**
+   * Como `cancelar()` se comporta (C2.3, F19) — para provar que o estado do intent só muda com cancelamento CONFIRMADO:
+   *  - `NORMAL` (default): cancelou (Status 10, `ReturnCode` 0);
+   *  - `ESTORNO`: depois de 23h59 a Cielo estorna (Status 11, `ReturnCode` 9) — confirmado, `reversao: 'REFUNDED'`;
+   *  - `EM_ANDAMENTO`: já existe um cancelamento andando (`ReturnCode` 476) — nem sucesso nem recusa;
+   *  - `RECUSADO`: recusa definitiva (`ReturnCode` 41, status não permite);
+   *  - `INDEFINIDO`: resposta que não sabemos ler.
+   * Em qualquer modo diferente de NORMAL/ESTORNO o pagamento simulado NÃO é cancelado. Mutável em runtime via `definirModoCancelamento()`.
+   */
+  modoCancelamento?: 'NORMAL' | 'ESTORNO' | 'EM_ANDAMENTO' | 'RECUSADO' | 'INDEFINIDO'
   /** Gera IDs previsíveis para asserção em teste (`fake-payment-1`, `fake-payment-2`, ...). Default: `crypto.randomUUID()`. */
   gerarId?: () => string
 }
@@ -39,6 +50,8 @@ interface IntentSimulado {
   returnCode: string | null
   amountAuthorizedCents: number | null
   amountCapturedCents: number | null
+  /** `Tid`/`AuthorizationCode`/`ProofOfSale` simulados (C2.5) — nascem na autorização e são devolvidos de novo na captura. */
+  identificadores: IdentificadoresAdquirente
   /** Captura aceita mas ainda em processamento (modo PENDENTE): `consultar()` devolve CREATED enquanto isto existir. */
   capturaPendenteCents?: number
 }
@@ -57,9 +70,22 @@ export class FakeAdapter implements PagamentoPort {
   private readonly pixIntents = new Map<string, IntentPixSimulado>()
   private readonly capturasSolicitadas = new Map<string, number>()
   private modoCaptura: 'NORMAL' | 'PENDENTE' | 'NEGADA'
+  private modoCancelamento: 'NORMAL' | 'ESTORNO' | 'EM_ANDAMENTO' | 'RECUSADO' | 'INDEFINIDO'
+  private readonly cancelamentosSolicitados = new Map<string, number>()
 
   constructor(private readonly options: FakeAdapterOptions = {}) {
     this.modoCaptura = options.modoCaptura ?? 'NORMAL'
+    this.modoCancelamento = options.modoCancelamento ?? 'NORMAL'
+  }
+
+  /** Só de teste: muda como os PRÓXIMOS cancelamentos se comportam (ver `FakeAdapterOptions.modoCancelamento`). */
+  definirModoCancelamento(modo: 'NORMAL' | 'ESTORNO' | 'EM_ANDAMENTO' | 'RECUSADO' | 'INDEFINIDO'): void {
+    this.modoCancelamento = modo
+  }
+
+  /** Só de teste: quantas vezes `cancelar()` foi CHAMADO para este pagamento. */
+  contagemCancelar(providerPaymentId: string): number {
+    return this.cancelamentosSolicitados.get(providerPaymentId) ?? 0
   }
 
   /** Só de teste: muda como as PRÓXIMAS capturas se comportam (ver `FakeAdapterOptions.modoCaptura`). */
@@ -99,14 +125,18 @@ export class FakeAdapter implements PagamentoPort {
     const negado = this.options.cardTokensNegados?.includes(pedido.cartao.cardToken) ?? false
     const providerPaymentId = this.proximoId()
 
+    const sufixo = providerPaymentId.replace(/[^A-Za-z0-9]/g, '').slice(0, 12).toUpperCase()
+    const identificadores: IdentificadoresAdquirente = negado
+      ? { tid: `FAKETID${sufixo}`, authorizationCode: null, proofOfSale: null } // negada: tem Tid, não tem código de autorização
+      : { tid: `FAKETID${sufixo}`, authorizationCode: `A${sufixo.slice(0, 5)}`, proofOfSale: `P${sufixo.slice(0, 6)}` }
     const intent: IntentSimulado = negado
-      ? { providerPaymentId, merchantOrderId: pedido.merchantOrderId, status: 'FAILED', returnCode: '2', amountAuthorizedCents: null, amountCapturedCents: null }
-      : { providerPaymentId, merchantOrderId: pedido.merchantOrderId, status: 'AUTHORIZED', returnCode: '00', amountAuthorizedCents: pedido.amountRequestedCents, amountCapturedCents: null }
+      ? { providerPaymentId, merchantOrderId: pedido.merchantOrderId, status: 'FAILED', returnCode: '2', amountAuthorizedCents: null, amountCapturedCents: null, identificadores }
+      : { providerPaymentId, merchantOrderId: pedido.merchantOrderId, status: 'AUTHORIZED', returnCode: '00', amountAuthorizedCents: pedido.amountRequestedCents, amountCapturedCents: null, identificadores }
 
     this.intents.set(providerPaymentId, intent)
     this.porMerchantOrderId.set(pedido.merchantOrderId, providerPaymentId)
 
-    return { providerPaymentId, status: intent.status, returnCode: intent.returnCode, amountAuthorizedCents: intent.amountAuthorizedCents }
+    return { providerPaymentId, status: intent.status, returnCode: intent.returnCode, amountAuthorizedCents: intent.amountAuthorizedCents, identificadores: intent.identificadores }
   }
 
   async capturar(providerPaymentId: string, amountCents: number): Promise<ResultadoCaptura> {
@@ -117,23 +147,36 @@ export class FakeAdapter implements PagamentoPort {
     this.capturasSolicitadas.set(providerPaymentId, this.contagemCapturar(providerPaymentId) + 1)
     if (this.modoCaptura === 'PENDENTE') {
       intent.capturaPendenteCents = amountCents
-      return { providerPaymentId, status: 'CREATED', returnCode: null, amountCapturedCents: null }
+      return { providerPaymentId, status: 'CREATED', returnCode: null, amountCapturedCents: null, identificadores: SEM_IDENTIFICADORES_ADQUIRENTE }
     }
     if (this.modoCaptura === 'NEGADA') {
       intent.status = 'FAILED'
       intent.returnCode = '57'
-      return { providerPaymentId, status: 'FAILED', returnCode: intent.returnCode, amountCapturedCents: null }
+      return { providerPaymentId, status: 'FAILED', returnCode: intent.returnCode, amountCapturedCents: null, identificadores: SEM_IDENTIFICADORES_ADQUIRENTE }
     }
     intent.status = 'CAPTURED'
     intent.amountCapturedCents = amountCents
     intent.returnCode = '6'
-    return { providerPaymentId, status: intent.status, returnCode: intent.returnCode, amountCapturedCents: intent.amountCapturedCents }
+    return { providerPaymentId, status: intent.status, returnCode: intent.returnCode, amountCapturedCents: intent.amountCapturedCents, identificadores: intent.identificadores }
   }
 
   async cancelar(providerPaymentId: string): Promise<ResultadoCancelamento> {
     const intent = this.exigirIntent(providerPaymentId)
-    intent.status = 'VOIDED'
-    return { providerPaymentId, status: intent.status, returnCode: intent.returnCode }
+    this.cancelamentosSolicitados.set(providerPaymentId, this.contagemCancelar(providerPaymentId) + 1)
+    switch (this.modoCancelamento) {
+      case 'NORMAL':
+        intent.status = 'VOIDED'
+        return { providerPaymentId, status: 'VOIDED', returnCode: '0', desfecho: 'CONFIRMADO', reversao: 'VOIDED', restricaoCadastral: false }
+      case 'ESTORNO':
+        intent.status = 'VOIDED'
+        return { providerPaymentId, status: 'VOIDED', returnCode: '9', desfecho: 'CONFIRMADO', reversao: 'REFUNDED', restricaoCadastral: false }
+      case 'EM_ANDAMENTO':
+        return { providerPaymentId, status: 'AUTHORIZED', returnCode: '476', desfecho: 'EM_ANDAMENTO', reversao: null, restricaoCadastral: false }
+      case 'RECUSADO':
+        return { providerPaymentId, status: 'FAILED', returnCode: '41', desfecho: 'RECUSADO', reversao: null, restricaoCadastral: false }
+      case 'INDEFINIDO':
+        return { providerPaymentId, status: 'AUTHORIZED', returnCode: null, desfecho: 'INDEFINIDO', reversao: null, restricaoCadastral: false }
+    }
   }
 
   async consultar(providerPaymentId: string): Promise<ResultadoConsultaPagamento> {
@@ -145,6 +188,7 @@ export class FakeAdapter implements PagamentoPort {
       returnCode: intent.returnCode,
       amountAuthorizedCents: intent.amountAuthorizedCents,
       amountCapturedCents: intent.amountCapturedCents,
+      identificadores: intent.identificadores,
     }
   }
 

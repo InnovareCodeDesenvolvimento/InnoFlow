@@ -13,6 +13,7 @@ import { recordCommandResult, isAcceptedCommandResult } from '../../ocpp/command
 import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
+import { identificadoresParaGravar } from '../../core/pagamentos/identificadoresAdquirente'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../pagamentos/gatewayConfig'
 import { criarPaymentIntentNoAmbienteEfetivo } from '../pagamentos/criarIntentNoAmbiente'
 
@@ -214,10 +215,22 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       throw new AppError('O pagamento com cartão está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
     }
 
+    // F16/C2.3: a Cielo ainda NÃO decidiu (Status 0/12) ou respondeu o que não sabemos ler (Status fora da tabela / incoerente com o ReturnCode). Isto NÃO é
+    // aprovação (nenhuma recarga começa) e também NÃO é recusa: ela pode autorizar DEPOIS, e marcar DENIED deixaria uma pré-autorização viva que ninguém
+    // cancela. O intent fica CREATED (com o PaymentId, se veio) e o varredor (caso B) reconsulta por MerchantOrderId e cancela/espelha.
+    if (autorizacao.status === 'CREATED') {
+      await prisma.paymentIntent.update({
+        where: { id: intent.id },
+        data: { returnCode: autorizacao.returnCode, cieloPaymentId: autorizacao.providerPaymentId || null, ...identificadoresParaGravar(autorizacao.identificadores) },
+      })
+      logger.warn({ alert: 'payment_authorization_not_definitive', paymentIntentId: intent.id, userId, returnCode: autorizacao.returnCode }, '[sessao] a Cielo não deu resposta definitiva à pré-autorização — nada iniciado, o varredor reconsulta')
+      throw new AppError('O pagamento com cartão está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+    }
+
     if (autorizacao.status !== 'AUTHORIZED') {
       await prisma.paymentIntent.update({
         where: { id: intent.id },
-        data: { status: 'DENIED', returnCode: autorizacao.returnCode, cieloPaymentId: autorizacao.providerPaymentId || null, failureReason: 'Pagamento recusado pela operadora do cartão.' },
+        data: { status: 'DENIED', returnCode: autorizacao.returnCode, cieloPaymentId: autorizacao.providerPaymentId || null, failureReason: 'Pagamento recusado pela operadora do cartão.', ...identificadoresParaGravar(autorizacao.identificadores) },
       })
       // Mensagem amigável — NUNCA o ReturnCode cru da Cielo (mesma regra da F5.2).
       throw new AppError('Pagamento recusado pela operadora do cartão.', 402, 'CARD_AUTHORIZATION_DENIED')
@@ -236,6 +249,8 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
           amountAuthorizedCents: autorizacao.amountAuthorizedCents,
           authorizedAt: new Date(),
           authTokenId: authToken.id,
+          // C2.5: Tid/AuthorizationCode/ProofOfSale ficam GRAVADOS na hora (a consulta de venda só alcança 3 meses; o chargeback chega depois).
+          ...identificadoresParaGravar(autorizacao.identificadores),
         },
       })
     })

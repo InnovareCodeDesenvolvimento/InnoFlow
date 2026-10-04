@@ -5,6 +5,7 @@ import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { getPagamentoPort } from './pagamentoPortInstance'
 import { ambienteDoIntentConfere } from './ambienteDoIntent'
 import { cancelarPreAutorizacaoCartao } from './cancelarPreAutorizacaoCartao'
+import { identificadoresParaGravar } from '../../core/pagamentos/identificadoresAdquirente'
 
 /**
  * Rede de segurança das pré-autorizações de cartão (F5.4, 2026-09-30) — sem
@@ -85,8 +86,8 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
     try {
       // F5.7 (M4d): intent de OUTRO ambiente => pula (nem chama a Cielo nem conta como cancelada).
       if (!(await ambienteDoIntentConfere(intent, 'varrerPreAutorizacoesCartao:abandonada'))) continue
-      await cancelarPreAutorizacaoCartao(intent.id, pagamentoPort)
-      canceladasAbandonadas++
+      // Só conta quando o intent realmente virou VOIDED nesta chamada (cancelamento em andamento/recusado/indefinido NÃO conta — segue AUTHORIZED).
+      if (await cancelarPreAutorizacaoCartao(intent.id, pagamentoPort)) canceladasAbandonadas++
     } catch (err) {
       logger.error({ err, intentId: intent.id }, '[varrerPreAutorizacoesCartao] falha ao cancelar pré-autorização abandonada/presa — tentando de novo na próxima rodada')
     }
@@ -129,11 +130,12 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
             returnCode: consulta.returnCode,
             amountAuthorizedCents: consulta.amountAuthorizedCents,
             authorizedAt: new Date(),
+            ...identificadoresParaGravar(consulta.identificadores),
           },
         })
         if (atualizado.count > 0) {
           await cancelarPreAutorizacaoCartao(intent.id, pagamentoPort)
-          resolvidasCreated++
+          resolvidasCreated++ // espelhado AUTHORIZED; se o cancelamento não pegou, o caso A cancela nas próximas rodadas
         }
         continue
       }
@@ -141,7 +143,7 @@ export async function varrerPreAutorizacoesCartao(pagamentoPortInjetado?: Pagame
       if (consulta.status === 'CAPTURED' || consulta.status === 'FAILED' || consulta.status === 'VOIDED') {
         const atualizado = await prisma.paymentIntent.updateMany({
           where: { id: intent.id, status: 'CREATED' },
-          data: { status: consulta.status, cieloPaymentId: consulta.providerPaymentId || null, returnCode: consulta.returnCode },
+          data: { status: consulta.status, cieloPaymentId: consulta.providerPaymentId || null, returnCode: consulta.returnCode, ...identificadoresParaGravar(consulta.identificadores) },
         })
         if (atualizado.count > 0) resolvidasCreated++
       }

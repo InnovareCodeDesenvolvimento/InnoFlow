@@ -1,6 +1,8 @@
 import type { PedidoAutorizacaoCartao, PedidoPix } from '../../core/pagamentos/tipos'
 import type { RespostaPagamentoCielo } from '../../core/pagamentos/normalizarStatusCielo'
 import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
+import { normalizarIdentificadorAdquirente, type IdentificadoresAdquirente } from '../../core/pagamentos/identificadoresAdquirente'
+import { higienizarSoftDescriptor } from '../../core/pagamentos/softDescriptor'
 
 /**
  * Mapeamento LITERAL do formato de fio (wire format) da API 3.0 da Cielo —
@@ -41,7 +43,8 @@ export function montarPayloadAutorizacaoCartao(pedido: PedidoAutorizacaoCartao):
       Installments: 1,
       // Pré-autorização — captura é sempre um passo separado (decisão #2 da Nova).
       Capture: false,
-      ...(pedido.softDescriptor ? { SoftDescriptor: pedido.softDescriptor } : {}),
+      // F21: só A-Z0-9, até 13 — um caractere especial faz a Cielo recusar a transação inteira. Vazio depois de higienizar = o campo não vai.
+      ...(higienizarSoftDescriptor(pedido.softDescriptor) ? { SoftDescriptor: higienizarSoftDescriptor(pedido.softDescriptor)! } : {}),
       CreditCard: {
         CardToken: pedido.cartao.cardToken,
         // Já é um CardToken permanente do cofre — não pedimos pra Cielo tokenizar de novo.
@@ -94,6 +97,10 @@ export interface CamposPagamentoCielo extends RespostaPagamentoCielo {
   merchantOrderId: string | null
   amountAuthorizedCents: number | null
   amountCapturedCents: number | null
+  /** `Tid`/`AuthorizationCode`/`ProofOfSale` já normalizados (vazio -> null; > 64 -> truncado). */
+  identificadores: IdentificadoresAdquirente
+  /** Nomes (nunca valores) dos identificadores que passaram de 64 caracteres e foram truncados — o adaptador avisa no log. */
+  identificadoresTruncados: string[]
 }
 
 export function extrairCamposPagamento(body: unknown): CamposPagamentoCielo {
@@ -107,7 +114,21 @@ export function extrairCamposPagamento(body: unknown): CamposPagamentoCielo {
   const amountAuthorizedCents = typeof payment.Amount === 'number' ? payment.Amount : null
   const amountCapturedCents = typeof payment.CapturedAmount === 'number' ? payment.CapturedAmount : null
 
-  return { status, returnCode, paymentId, merchantOrderId, amountAuthorizedCents, amountCapturedCents }
+  const tid = normalizarIdentificadorAdquirente(payment.Tid)
+  const authorizationCode = normalizarIdentificadorAdquirente(payment.AuthorizationCode)
+  const proofOfSale = normalizarIdentificadorAdquirente(payment.ProofOfSale)
+  const identificadoresTruncados = [tid.truncado ? 'Tid' : null, authorizationCode.truncado ? 'AuthorizationCode' : null, proofOfSale.truncado ? 'ProofOfSale' : null].filter((n): n is string => n !== null)
+
+  return {
+    status,
+    returnCode,
+    paymentId,
+    merchantOrderId,
+    amountAuthorizedCents,
+    amountCapturedCents,
+    identificadores: { tid: tid.valor, authorizationCode: authorizationCode.valor, proofOfSale: proofOfSale.valor },
+    identificadoresTruncados,
+  }
 }
 
 /** `GET /1/sales?merchantOrderId=` devolve `{ MerchantOrderId, Payments: [...] }` — pega o pagamento mais recente. */

@@ -1,6 +1,6 @@
 import type { DadosCliente, PedidoAutorizacaoCartao, PedidoPix } from '../../core/pagamentos/tipos'
 import type { CardPaymentStatus, PixPaymentStatus } from '../../core/pagamentos/tipos'
-import { normalizarStatusCartaoCielo, normalizarStatusPixCielo, type StatusCartaoNormalizado, type StatusPixNormalizado } from '../../core/pagamentos/normalizarStatusCielo'
+import { interpretarCancelamentoCielo, normalizarStatusCartaoCielo, normalizarStatusPixCielo, type StatusCartaoNormalizado, type StatusPixNormalizado } from '../../core/pagamentos/normalizarStatusCielo'
 import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaCartao, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
 import { resolverUrlsSop } from '../../core/pagamentos/configGateway'
 import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
@@ -54,10 +54,11 @@ export class CieloAdapter implements PagamentoPort {
       return camposParaResultadoAutorizacao(campos)
     } catch (err) {
       if (err instanceof CieloTimeoutError) {
+        // F20: a Cielo NÃO tem chave de idempotência — um POST /1/sales que deu timeout PODE ter autorizado. NUNCA repetimos o POST: consultamos por MerchantOrderId.
         logger.warn({ merchantOrderId: pedido.merchantOrderId }, '[cielo] timeout em autorizar — reconciliando por MerchantOrderId antes de propagar')
         const consulta = await this.consultarPorPedido(pedido.merchantOrderId)
         if (consulta) {
-          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountAuthorizedCents: consulta.amountAuthorizedCents }
+          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountAuthorizedCents: consulta.amountAuthorizedCents, identificadores: consulta.identificadores }
         }
         // Cielo não tem registro nenhum deste MerchantOrderId ainda — o timeout
         // foi mesmo antes de qualquer processamento. Quem chama decide se tenta de novo.
@@ -76,27 +77,38 @@ export class CieloAdapter implements PagamentoPort {
         status: mapStatusCartaoParaDominio(normalizarStatusCartaoCielo(campos)),
         returnCode: campos.returnCode,
         amountCapturedCents: campos.amountCapturedCents,
+        identificadores: campos.identificadores,
       }
     } catch (err) {
       if (err instanceof CieloTimeoutError) {
+        // F20: PUT /capture também não é idempotente (captura parcial só uma vez) — reconsulta por PaymentId, nunca repete o PUT às cegas.
         logger.warn({ providerPaymentId }, '[cielo] timeout em capturar — reconciliando por PaymentId antes de propagar')
         const consulta = await this.consultar(providerPaymentId)
         if (consulta.status === 'CAPTURED' || consulta.status === 'FAILED' || consulta.status === 'VOIDED') {
-          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountCapturedCents: consulta.amountCapturedCents }
+          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountCapturedCents: consulta.amountCapturedCents, identificadores: consulta.identificadores }
         }
       }
       throw err
     }
   }
 
+  /**
+   * `PUT /1/sales/{id}/void`. HTTP 2xx NÃO é "cancelado" (F19, C2.3): o desfecho sai do `ReturnCode` E do `Status` (`interpretarCancelamentoCielo`).
+   * `status: 'VOIDED'` só quando a Cielo confirmou (cancelou, Status 10, OU estornou, Status 11); em andamento/indefinido nada foi provado e devolvemos
+   * `AUTHORIZED` (segue como estava); recusa definitiva devolve `FAILED`. Quem chama decide o estado do intent pelo `desfecho`.
+   */
   async cancelar(providerPaymentId: string): Promise<ResultadoCancelamento> {
     const body = await this.client.void(providerPaymentId)
     const campos = extrairCamposPagamento(body)
-    logResultadoCartao('cancelar', campos)
+    const interpretacao = interpretarCancelamentoCielo(campos)
+    logResultadoCartao('cancelar', campos, interpretacao.desfecho)
     return {
       providerPaymentId: campos.paymentId ?? providerPaymentId,
-      status: mapStatusCartaoParaDominio(normalizarStatusCartaoCielo(campos)),
+      status: interpretacao.desfecho === 'CONFIRMADO' ? 'VOIDED' : interpretacao.desfecho === 'RECUSADO' ? 'FAILED' : 'AUTHORIZED',
       returnCode: campos.returnCode,
+      desfecho: interpretacao.desfecho,
+      reversao: interpretacao.reversao,
+      restricaoCadastral: interpretacao.restricaoCadastral,
     }
   }
 
@@ -232,6 +244,7 @@ function camposParaResultadoAutorizacao(campos: CamposPagamentoCielo): Resultado
     status: mapStatusCartaoParaDominio(normalizarStatusCartaoCielo(campos)),
     returnCode: campos.returnCode,
     amountAuthorizedCents: campos.amountAuthorizedCents,
+    identificadores: campos.identificadores,
   }
 }
 
@@ -243,6 +256,7 @@ function camposParaResultadoConsulta(campos: CamposPagamentoCielo, fallbackPayme
     returnCode: campos.returnCode,
     amountAuthorizedCents: campos.amountAuthorizedCents,
     amountCapturedCents: campos.amountCapturedCents,
+    identificadores: campos.identificadores,
   }
 }
 
@@ -255,10 +269,13 @@ function mapStatusCartaoParaDominio(normalizado: StatusCartaoNormalizado): CardP
       return 'CAPTURED'
     case 'VOIDED':
       return 'VOIDED'
+    case 'REFUNDED': // estorno aprovado (Status 11): o dinheiro voltou — para o domínio é "revertido", como VOIDED
+      return 'VOIDED'
     case 'DENIED':
     case 'FAILED':
       return 'FAILED'
     case 'PENDING':
+    case 'UNKNOWN': // ainda não sei (Status fora da tabela ou incoerente com o ReturnCode): NÃO definitivo, quem chama reconsulta — ver `normalizarStatusCartaoCielo`
       return 'CREATED'
   }
 }
@@ -275,12 +292,22 @@ function mapStatusPixParaDominio(normalizado: StatusPixNormalizado): PixPaymentS
   }
 }
 
-/** Log SEM corpo inteiro — só os campos não sensíveis (regra dura da tarefa). */
-function logResultadoCartao(operacao: string, campos: CamposPagamentoCielo): void {
+/**
+ * Log SEM corpo inteiro — só os campos não sensíveis (regra dura da tarefa). Os identificadores (`Tid` etc.) NÃO vão ao log. Avisa (sem valores) quando
+ * um identificador estourou 64 caracteres e foi truncado (C2.5: o fluxo segue, o metadado é que fica cortado) e quando o par Status/ReturnCode não é
+ * reconhecido (`UNKNOWN`: nunca aprovação, mas o plantão precisa saber).
+ */
+function logResultadoCartao(operacao: string, campos: CamposPagamentoCielo, desfechoCancelamento?: string): void {
   logger.info(
-    { operacao, paymentId: campos.paymentId, status: campos.status, returnCode: campos.returnCode, amountAuthorizedCents: campos.amountAuthorizedCents, amountCapturedCents: campos.amountCapturedCents },
+    { operacao, paymentId: campos.paymentId, status: campos.status, returnCode: campos.returnCode, amountAuthorizedCents: campos.amountAuthorizedCents, amountCapturedCents: campos.amountCapturedCents, ...(desfechoCancelamento ? { desfechoCancelamento } : {}) },
     `[cielo] ${operacao}`,
   )
+  if (campos.identificadoresTruncados.length > 0) {
+    logger.warn({ alert: 'payment_cielo_identifier_truncated', operacao, paymentId: campos.paymentId, campos: campos.identificadoresTruncados }, '[cielo] identificador da adquirente acima de 64 caracteres — gravado TRUNCADO (o pagamento segue)')
+  }
+  if (operacao !== 'cancelar' && normalizarStatusCartaoCielo(campos) === 'UNKNOWN') {
+    logger.warn({ alert: 'payment_cielo_status_unrecognized', operacao, paymentId: campos.paymentId, status: campos.status, returnCode: campos.returnCode }, '[cielo] Status/ReturnCode não reconhecido — tratado como NÃO definitivo (será reconsultado)')
+  }
 }
 
 export function criarCieloAdapterFromEnv(env: {

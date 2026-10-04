@@ -7,6 +7,7 @@ import { redis } from '../../lib/redis'
 import { adquirirLock, liberarLock } from '../../lib/redisLock'
 import { withDeadline } from '../../lib/withDeadline'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
+import { identificadoresParaGravar } from '../../core/pagamentos/identificadoresAdquirente'
 import { getPagamentoPort } from './pagamentoPortInstance'
 import { exigirAmbienteDoIntent } from './ambienteDoIntent'
 import { createQueue, CAPTURAR_SESSAO_CARTAO_QUEUE_NAME, type CapturarSessaoCartaoJobData } from '../../worker/queues'
@@ -127,10 +128,10 @@ async function capturarSessaoCartaoSobLock(paymentIntentId: string, pagamentoPor
   const consultaAtual = await pagamentoPort.consultar(intent.cieloPaymentId)
   const resultadoCaptura =
     consultaAtual.status === 'CAPTURED'
-      ? { status: 'CAPTURED' as const, returnCode: consultaAtual.returnCode, amountCapturedCents: consultaAtual.amountCapturedCents }
+      ? { status: 'CAPTURED' as const, returnCode: consultaAtual.returnCode, amountCapturedCents: consultaAtual.amountCapturedCents, identificadores: consultaAtual.identificadores }
       : consultaAtual.status === 'AUTHORIZED'
         ? await pagamentoPort.capturar(intent.cieloPaymentId, intent.captureAmountCents)
-        : { status: consultaAtual.status, returnCode: consultaAtual.returnCode, amountCapturedCents: consultaAtual.amountCapturedCents }
+        : { status: consultaAtual.status, returnCode: consultaAtual.returnCode, amountCapturedCents: consultaAtual.amountCapturedCents, identificadores: consultaAtual.identificadores }
 
   // F5.7 (M1, achado do Órion): SÓ um resultado DEFINITIVO decide a cobrança. CAPTURED = cobrou; FAILED/VOIDED =
   // a Cielo disse que NÃO cobrou e não vai cobrar (negado, cancelado/expirado) — único caso que vira dívida.
@@ -164,7 +165,8 @@ async function capturarSessaoCartaoSobLock(paymentIntentId: string, pagamentoPor
       const amountCapturedCents = resultadoCaptura.amountCapturedCents ?? intent.captureAmountCents!
       await tx.paymentIntent.update({
         where: { id: paymentIntentId },
-        data: { status: 'CAPTURED', amountCapturedCents, returnCode: resultadoCaptura.returnCode, capturedAt: new Date() },
+        // C2.5: grava DE NOVO na captura o que a Cielo devolver (só as chaves com valor: um `null` não apaga o que a autorização já gravou).
+        data: { status: 'CAPTURED', amountCapturedCents, returnCode: resultadoCaptura.returnCode, capturedAt: new Date(), ...identificadoresParaGravar(resultadoCaptura.identificadores) },
       })
 
       const shortfallCents = Math.max(0, totalCostCents - amountCapturedCents)

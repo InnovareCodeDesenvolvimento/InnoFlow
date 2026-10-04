@@ -1,3 +1,5 @@
+import type { IdentificadoresAdquirente } from './identificadoresAdquirente'
+import type { DesfechoCancelamento } from './normalizarStatusCielo'
 import type { CardPaymentStatus, DadosCliente, PedidoAutorizacaoCartao, PedidoPix, PixPaymentStatus } from './tipos'
 
 /**
@@ -25,6 +27,8 @@ export interface ResultadoAutorizacao {
   /** `ReturnCode` cru da Cielo — guardar para auditoria/suporte, nunca para decidir sozinho (ver normalizador). */
   returnCode: string | null
   amountAuthorizedCents: number | null
+  /** `Tid`/`AuthorizationCode`/`ProofOfSale` (C2.5) — quem chama grava no `PaymentIntent` na hora; vazio = `null`. */
+  identificadores: IdentificadoresAdquirente
 }
 
 export interface ResultadoCaptura {
@@ -32,12 +36,21 @@ export interface ResultadoCaptura {
   status: CardPaymentStatus
   returnCode: string | null
   amountCapturedCents: number | null
+  /** Gravados DE NOVO na captura quando a Cielo os devolve (C2.5). */
+  identificadores: IdentificadoresAdquirente
 }
 
 export interface ResultadoCancelamento {
   providerPaymentId: string
+  /** `VOIDED` só com `desfecho: 'CONFIRMADO'` (cancelamento OU estorno aprovado); senão nada foi provado e o pagamento segue como estava (`AUTHORIZED`) ou foi recusado em definitivo (`FAILED`). */
   status: CardPaymentStatus
   returnCode: string | null
+  /** F19 (C2.3): lido do `ReturnCode` E do `Status`, nunca de um só — ver `interpretarCancelamentoCielo`. `EM_ANDAMENTO`/`INDEFINIDO` NÃO são nem sucesso nem recusa. */
+  desfecho: DesfechoCancelamento
+  /** Só com `CONFIRMADO`: `VOIDED` (Status 10, até 23h59 do dia) ou `REFUNDED` (Status 11, depois) — a Cielo decide pelo relógio. */
+  reversao: 'VOIDED' | 'REFUNDED' | null
+  /** Recusa por restrição cadastral (103–107): problema da CONTA, alerta ao admin. */
+  restricaoCadastral: boolean
 }
 
 export interface ResultadoConsultaPagamento {
@@ -47,6 +60,7 @@ export interface ResultadoConsultaPagamento {
   returnCode: string | null
   amountAuthorizedCents: number | null
   amountCapturedCents: number | null
+  identificadores: IdentificadoresAdquirente
 }
 
 export interface ResultadoPix {
