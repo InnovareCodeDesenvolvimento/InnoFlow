@@ -1082,3 +1082,13 @@ Nenhuma mudança de código ou de variável de ambiente é necessária: os padr�
 - **Conta Cielo: a MESMA do Parque das Feiras** (contra a recomendação da Nova de EC próprio). Consequências assumidas: a URL de notificação do Site Cielo é UMA por EC e já pertence ao Parque → o InnoFlow NÃO cadastra webhook; o Pix é creditado por **polling** (consulta periódica dos Pix pendentes; o webhook sempre foi só uma dica); sem notificação de chargeback pelo InnoFlow; `MerchantKey`/IP confiáveis/extrato/modo da conta Pix compartilhados (rotacionar a chave num sistema exige rotacionar no outro no mesmo momento); `SoftDescriptor` próprio ("INNOFLOW") para distinguir na fatura. NÃO alterar a URL de notificação do Parque.
 - **Porta 9000 do OCPP: wss:// (TLS)** — passo a passo em `docs/DEPLOY-EASYPANEL.md` §4.
 - Demais sugestões (Nova/Órion/Vulcano) aceitas; seguem as implementações.
+
+## Decisões do dono sobre o design system unificado (04/10/2026)
+
+Regra permanente: 100% das telas seguem o padrão premium da landing (plano em `docs/DESIGN-SYSTEM-UNIFICACAO.md`, Nova, `3cfc54e`).
+- **D1 tema:** moldura escura, miolo claro (cabeçalho/sidebar/faixas escuros com acento lima; tabelas, formulários e textos longos em fundo claro).
+- **D2 botão principal:** lima como CTA único de destaque por tela; petróleo para salvar/confirmar em formulário e diálogo.
+- **D3 mascote: MAIS PRESENTE no app e no admin** (escolha do dono, diferente da recomendação da Nova: auth, QR, 404/erro, vazios de primeiro uso, recibo — e também carregamentos, topo do dashboard e mais estados vazios). Regra de contenção que a Lyra mantém: peso (rosto 64 px como data URI, assets fora do precache quando grandes), nunca atrapalhar telas de trabalho (não sobre dados/tabelas), `prefers-reduced-motion`, e sem gerar poses novas por IA.
+- **D4:** Login/Cadastro falam com o motorista (consistente com a landing).
+- **D5:** página 404 de verdade com mascote (o E2E `landing.spec.ts:314` que fixa o redirecionamento é reescrito de propósito).
+- **D6:** sem poses novas do mascote agora (só com arte fornecida). **D7:** portão de desempenho = não piorar a linha de base medida pela Íris (A0).
