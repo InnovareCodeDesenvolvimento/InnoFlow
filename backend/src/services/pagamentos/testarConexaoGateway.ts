@@ -103,7 +103,7 @@ async function testarCredencialDoEstabelecimento(config: ConfigEfetiva): Promise
   if (!merchantKey) return semChamada(step, 'NOT_CONFIGURED', 'MerchantKey não disponível para o teste.', hostDe(urls.query))
 
   const host = hostDe(urls.query)
-  const client = new CieloHttpClient({ merchantId: estado.merchantId, merchantKey, apiBaseUrl: urls.api, apiQueryBaseUrl: urls.query, timeoutMs: env.CIELO_TIMEOUT_MS })
+  const client = new CieloHttpClient({ merchantId: estado.merchantId, merchantKey, apiBaseUrl: urls.api, apiQueryBaseUrl: urls.query, timeoutMs: env.CIELO_TIMEOUT_MS, queryTimeoutMs: env.CIELO_QUERY_TIMEOUT_MS })
   const { resultado, durationMs } = await medir(async (): Promise<ParcialPasso> => {
     try {
       await client.getByMerchantOrderId(`innoflow-teste-conexao-${randomUUID()}`)

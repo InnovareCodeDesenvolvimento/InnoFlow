@@ -558,7 +558,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       expect((await put(admin, { cardEnabled: false, pixEnabled: false })).status).toBe(200)
 
       const sessao = await request(app).post('/api/me/payment-methods/tokenization-session').set(auth(motorista))
-      const cadastro = await request(app).post('/api/me/payment-methods').set(auth(motorista)).send({ cardToken: 'token-qualquer', brand: 'Visa' })
+      const cadastro = await request(app).post('/api/me/payment-methods').set(auth(motorista)).send({ cardToken: '7a9b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d', brand: 'Visa' })
       const inicio = await request(app).post('/api/me/sessions/start').set(auth(motorista)).send({ ocppIdentity: 'cp-inexistente', connectorId: 1, payment: { mode: 'CARD', paymentMethodId: 'cabcdefghijklmnopqrstuvwx' } })
       for (const res of [sessao, cadastro, inicio]) {
         expect(res.status, dumpSeguro(res.body)).toBe(409)
@@ -612,6 +612,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       const webhook = await request(app).post(`/api/webhooks/cielo/${PATH_TOKEN}`).set('InnoFlowWebhookSecret', ENV_HEADER_SECRET).send({ PaymentId: pix.providerPaymentId, ChangeType: 1 })
       expect(webhook.status).toBe(200)
 
+      adapter.associarPixAoPedido(pix.providerPaymentId, intent.id) // I-6: o crédito confere o MerchantOrderId da consulta com o intent
       adapter.marcarPixComoPago(pix.providerPaymentId)
       const resultado = await m.creditarTopupPix(intent.id, adapter)
       expect(resultado?.totalCreditedCents).toBe(3000)

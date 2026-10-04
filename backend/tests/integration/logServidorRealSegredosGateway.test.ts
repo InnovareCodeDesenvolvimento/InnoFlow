@@ -28,8 +28,8 @@ const BASE_URL = process.env.DATABASE_URL!
 const NOME_BANCO = `pgl_${Math.random().toString(36).slice(2, 10)}`
 const URL_BANCO = BASE_URL.replace(/\/[^/?]+(\?|$)/, `/${NOME_BANCO}$1`)
 
-const PATH_TOKEN = 'pathtoken-log-real-9d8c7b6a'
-const HEADER_SECRET_ENV = 'ENVHDRSECRET-log-real-aaa111'
+const PATH_TOKEN = 'pathtoken-log-real-9d8c7b6a-0123456789abcdef0123'
+const HEADER_SECRET_ENV = 'ENVHDRSECRET-log-real-aaa111-0123456789abcdef'
 const CONTROLE_POSITIVO = 'CONTROLEPOSITIVO-valor-visivel-no-log'
 const SEGREDOS_PUT = {
   merchantKey: 'MKEY-log-real-bbb222',

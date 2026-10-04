@@ -120,7 +120,7 @@ describe('M4 — lacunas dos cartões por ambiente (teto transacional, padrão n
       await cartao(u.id, 'SANDBOX') // a "outra aba" cadastrou o 5º enquanto esta requisição falava com a Cielo (a checagem rápida já tinha visto 4)
       return { cardToken, brand: 'Visa', last4: '4242', holderName: 'TESTE', expiryMonth: 12, expiryYear: 2030 }
     })
-    const res = await request(app).post('/api/me/payment-methods').set(auth(u)).send({ cardToken: `mocktok.${randomUUID()}`, brand: 'Visa' })
+    const res = await request(app).post('/api/me/payment-methods').set(auth(u)).send({ cardToken: `${randomUUID()}`, brand: 'Visa' })
     expect(res.status, JSON.stringify(res.body)).toBe(409)
     expect(res.body.code).toBe('TOO_MANY_PAYMENT_METHODS')
     expect(await m.prisma.paymentMethod.count({ where: { userId: u.id, active: true, environment: 'SANDBOX' } })).toBe(5) // nunca 6

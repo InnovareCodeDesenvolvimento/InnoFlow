@@ -177,7 +177,10 @@ const envSchema = z.object({
   // faz sentido segurá-lo por dezenas de segundos. Timeout NÃO deve disparar
   // retry cego — a API 3.0 da Cielo não tem chave de idempotência; o
   // caminho certo é reconsultar por `MerchantOrderId` (ver `PagamentoPort`).
-  CIELO_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  // S-6 (auditoria): 8 s multiplicava os timeouts do `POST /1/sales` e do `PUT /capture` — exatamente os caminhos que dependem da reconciliação. O Parque usa 20 s. ESTE é o prazo das ESCRITAS
+  // (POST/PUT) e do SOP; as CONSULTAS (GET) usam `CIELO_QUERY_TIMEOUT_MS`, menor. O lock da captura/cancelamento (`max(60 s, 6 x isto)`) acompanha.
+  CIELO_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  CIELO_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
 
   // F5.2 (30/09/2026) — recarga de carteira via Pix real. Expiração do QR:
   // Nova recomendou 30 min (NÃO o default de 86400s/24h da própria Cielo) —
@@ -324,6 +327,16 @@ function loadEnv(): Env {
     console.warn(
       `[env] AVISO: CARD_SESSION_MAX_HOLD_HOURS (${parsed.data.CARD_SESSION_MAX_HOLD_HOURS}) < SESSION_MAX_OPEN_HOURS (${parsed.data.SESSION_MAX_OPEN_HOURS}) — sessões em cartão serão forçadas a encerrar pelo prazo do hold antes da duração máxima.`,
     )
+  }
+  // S-4 (auditoria): em PRODUÇÃO o token do caminho e o segredo do header do webhook da Cielo precisam ter >= 32 caracteres. O schema aceita >= 8 para dev/CI (o uso avisa < 32), mas um
+  // segredo curto em produção é um webhook adivinhável — fail-closed: não sobe. Ausente continua válido (o token aleatório por processo deixa a rota inalcançável).
+  if (parsed.data.NODE_ENV === 'production') {
+    for (const [nome, valor] of [['CIELO_WEBHOOK_PATH_TOKEN', parsed.data.CIELO_WEBHOOK_PATH_TOKEN], ['CIELO_WEBHOOK_HEADER_SECRET', parsed.data.CIELO_WEBHOOK_HEADER_SECRET]] as const) {
+      if (valor !== undefined && valor.length < 32) {
+        console.error(`[env] ${nome} tem ${valor.length} caracteres — em produção exige >= 32 (openssl rand -hex 24).`)
+        process.exit(1)
+      }
+    }
   }
   return parsed.data
 }

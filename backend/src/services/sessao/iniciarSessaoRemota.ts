@@ -14,6 +14,7 @@ import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
 import { identificadoresParaGravar } from '../../core/pagamentos/identificadoresAdquirente'
+import { CieloHttpError } from '../pagamentos/cieloHttpClient'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../pagamentos/gatewayConfig'
 import { criarPaymentIntentNoAmbienteEfetivo } from '../pagamentos/criarIntentNoAmbiente'
 
@@ -205,6 +206,14 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
         cliente: { name: user?.name ?? 'Motorista InnoElektron' },
       })
     } catch (err) {
+      // I-4: 4xx DEFINITIVO da Cielo (`REQUISICAO_RECUSADA`: token do cartão inválido/expirado/lixo, payload recusado) NÃO é "gateway indisponível": repetir não adianta e o motorista ficaria
+      // para sempre com um 503 sem saber que o problema é o cartão (e cada tentativa criaria outro intent e outra chamada à Cielo). Vira DENIED na hora e um 4xx claro para recadastrar.
+      // SEM ReturnCode na resposta. CREDENCIAL/IP_NAO_PERMITIDO (problema NOSSO, alertado no cliente HTTP), 429, 5xx, timeout e rede seguem 503.
+      if (err instanceof CieloHttpError && err.tipo === 'REQUISICAO_RECUSADA') {
+        await prisma.paymentIntent.update({ where: { id: intent.id }, data: { status: 'DENIED', failureReason: 'Requisição de autorização recusada pela Cielo (cartão não aceito).' } })
+        logger.error({ alert: 'payment_authorization_request_refused', paymentIntentId: intent.id, userId, httpStatus: err.httpStatus, codigos: err.codigos }, '[sessao] a Cielo recusou a REQUISIÇÃO de pré-autorização (4xx definitivo) — cartão salvo inválido ou payload nosso incorreto')
+        throw new AppError('Não foi possível usar este cartão. Remova-o e cadastre-o novamente, ou use outro cartão.', 402, 'CARD_AUTHORIZATION_DENIED')
+      }
       // Timeout/erro de rede — `CieloAdapter.autorizar` JÁ reconsultou por
       // `merchantOrderId` antes de propagar (decisão §2 da Nova); se ainda
       // assim chegou aqui, é falha real do gateway. O intent fica CREATED —
@@ -257,6 +266,10 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
 
     cardPaymentIntentId = intent.id
     authorizedCents = autorizacao.amountAuthorizedCents
+    // S-7: o valor autorizado deveria ser o que pedimos (o teto da reserva). A captura usa min(consumo, autorizado) e por isso não perde dinheiro, mas a divergência é anomalia da Cielo/adquirente.
+    if (autorizacao.amountAuthorizedCents !== null && autorizacao.amountAuthorizedCents !== estimatedMaxCostCents) {
+      logger.warn({ alert: 'payment_authorized_amount_mismatch', paymentIntentId: intent.id, requestedCents: estimatedMaxCostCents, authorizedCents: autorizacao.amountAuthorizedCents }, '[sessao] a Cielo autorizou um valor diferente do pedido')
+    }
   } else {
     // idTag VIRTUAL fresco por disparo — evita janela de reuso entre
     // remote-starts concorrentes do mesmo motorista. Limite de 20 chars do

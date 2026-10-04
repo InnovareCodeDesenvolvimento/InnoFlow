@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
-import { getPagamentoPort } from '../../services/pagamentos/pagamentoPortInstance'
+import { getPagamentoPort, isUsandoFakeAdapter } from '../../services/pagamentos/pagamentoPortInstance'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../../services/pagamentos/gatewayConfig'
 import { encryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
@@ -10,7 +10,7 @@ import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { validateBody } from '../middleware/validate'
 import { meCreatePaymentMethodRateLimit, meTokenizationSessionRateLimit } from '../middleware/rateLimit'
-import { meCreatePaymentMethodSchema, meUpdatePaymentMethodSchema, type MeCreatePaymentMethodInput, type MeUpdatePaymentMethodInput } from '../schemas/mePaymentMethods.schema'
+import { ehCardTokenDeMock, meCreatePaymentMethodSchema, meUpdatePaymentMethodSchema, type MeCreatePaymentMethodInput, type MeUpdatePaymentMethodInput } from '../schemas/mePaymentMethods.schema'
 
 /**
  * Cadastro de cartão do motorista (F5.3, D1 do dono: cartão salvo/SAQ A-EP).
@@ -65,6 +65,8 @@ router.post(
       throw new AppError('O cadastro de cartão está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
     }
 
+    // S-5: o AccessToken do SOP vai ao navegador (validade ~540 s) — nunca em cache de proxy/navegador.
+    res.setHeader('Cache-Control', 'no-store')
     res.json({
       accessToken: sessao.accessToken,
       merchantId: sessao.merchantId,
@@ -105,6 +107,10 @@ router.post(
     // C1.3: com a Cielo real a consulta é só enriquecimento e NUNCA lança (o `GET /1/card` não está confirmado) — `INVALID_CARD_TOKEN`/502 abaixo
     // só valem para adaptadores que conseguem afirmar que o token é inválido (o FakeAdapter dos testes); a validade real do token se prova na 1ª pré-autorização.
     const pagamentoPort = await resolverPortOu503()
+    // S-1: o token do SOP SIMULADO só vale com o FakeAdapter. Com a Cielo real ele iria à Cielo como "CardToken" (e poderia carregar o que o motorista digitou).
+    if (ehCardTokenDeMock(cardToken) && !isUsandoFakeAdapter()) {
+      throw new AppError('Cartão inválido ou não reconhecido.', 400, 'INVALID_CARD_TOKEN')
+    }
     let dadosCartao
     try {
       dadosCartao = await pagamentoPort.consultarCartaoTokenizado(cardToken)

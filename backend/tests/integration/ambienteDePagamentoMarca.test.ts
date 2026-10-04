@@ -141,7 +141,7 @@ describe('marca de ambiente de pagamento (M4) — Postgres + Redis reais, banco 
   }
   const auth = (u: { token: string }) => ({ Authorization: `Bearer ${u.token}` })
   const cadastrarCartao = (u: { token: string }, extra: Record<string, unknown> = {}) =>
-    request(app).post('/api/me/payment-methods').set(auth(u)).send({ cardToken: `mocktok.${randomUUID()}`, brand: 'Visa', ...extra })
+    request(app).post('/api/me/payment-methods').set(auth(u)).send({ cardToken: `${randomUUID()}`, brand: 'Visa', ...extra })
   const listarCartoes = (u: { token: string }) => request(app).get('/api/me/payment-methods').set(auth(u))
   const putConfig = (u: { token: string }, body: Record<string, unknown>) =>
     request(app).put('/api/admin/payment-gateway').set(auth(u)).send({ currentPassword: SENHA_ADMIN_TESTE, ...body })

@@ -29,7 +29,10 @@ export interface CieloHttpClientConfig {
   merchantKey: string
   apiBaseUrl: string
   apiQueryBaseUrl: string
+  /** Prazo das ESCRITAS (`POST /1/sales`, `PUT capture/void`). */
   timeoutMs: number
+  /** Prazo das CONSULTAS (GET). Padrão: o mesmo de `timeoutMs`. Menor que o das escritas (S-6): uma consulta lenta não deve segurar o fluxo como uma escrita. */
+  queryTimeoutMs?: number
   /** Injeção para teste — nunca bate na rede de verdade nos testes unitários. */
   fetchImpl?: typeof fetch
 }
@@ -84,10 +87,14 @@ function pathParaLog(path: string): string {
 export class CieloHttpClient {
   constructor(private readonly config: CieloHttpClientConfig) {}
 
-  private async request<T>(baseUrl: string, path: string, init: RequestInit): Promise<T> {
+  private queryTimeout(): number {
+    return this.config.queryTimeoutMs ?? this.config.timeoutMs
+  }
+
+  private async request<T>(baseUrl: string, path: string, init: RequestInit, timeoutMs: number = this.config.timeoutMs): Promise<T> {
     const fetchImpl = this.config.fetchImpl ?? fetch
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const res = await fetchImpl(`${baseUrl}${path}`, {
@@ -100,6 +107,8 @@ export class CieloHttpClient {
           ...(init.headers ?? {}),
         },
         signal: controller.signal,
+        // S-2: NUNCA seguir redirect — o `fetch` só remove `Authorization` em outra origem; `MerchantId`/`MerchantKey` seguiriam para o destino do redirect.
+        redirect: 'error',
       })
 
       const bodyText = await res.text()
@@ -121,7 +130,7 @@ export class CieloHttpClient {
     } catch (err) {
       if (err instanceof CieloHttpError) throw err
       if (isAbortError(err)) {
-        logger.warn({ path: pathParaLog(path), timeoutMs: this.config.timeoutMs }, '[cielo] timeout')
+        logger.warn({ path: pathParaLog(path), timeoutMs }, '[cielo] timeout')
         throw new CieloTimeoutError(path)
       }
       logger.error({ path: pathParaLog(path), err: err instanceof Error ? err.message : String(err) }, '[cielo] erro de rede')
@@ -150,12 +159,12 @@ export class CieloHttpClient {
 
   /** `GET /1/sales/{PaymentId}` no host de CONSULTA. */
   getByPaymentId(providerPaymentId: string): Promise<unknown> {
-    return this.request(this.config.apiQueryBaseUrl, `/1/sales/${encodeURIComponent(providerPaymentId)}`, { method: 'GET' })
+    return this.request(this.config.apiQueryBaseUrl, `/1/sales/${encodeURIComponent(providerPaymentId)}`, { method: 'GET' }, this.queryTimeout())
   }
 
   /** `GET /1/sales?merchantOrderId=` no host de CONSULTA — caminho de reconciliação pós-timeout. */
   getByMerchantOrderId(merchantOrderId: string): Promise<unknown> {
-    return this.request(this.config.apiQueryBaseUrl, `/1/sales?merchantOrderId=${encodeURIComponent(merchantOrderId)}`, { method: 'GET' })
+    return this.request(this.config.apiQueryBaseUrl, `/1/sales?merchantOrderId=${encodeURIComponent(merchantOrderId)}`, { method: 'GET' }, this.queryTimeout())
   }
 
   /**
@@ -175,7 +184,7 @@ export class CieloHttpClient {
    * confirmado: GET /1/card/{token} devolver bandeira/final").
    */
   getCard(cardToken: string): Promise<unknown> {
-    return this.request(this.config.apiBaseUrl, `/1/card/${encodeURIComponent(cardToken)}`, { method: 'GET' })
+    return this.request(this.config.apiBaseUrl, `/1/card/${encodeURIComponent(cardToken)}`, { method: 'GET' }, this.queryTimeout())
   }
 }
 
@@ -204,6 +213,7 @@ export function criarCieloHttpClientFromEnv(env: {
   CIELO_API_BASE_URL: string
   CIELO_API_QUERY_BASE_URL: string
   CIELO_TIMEOUT_MS: number
+  CIELO_QUERY_TIMEOUT_MS?: number
 }): CieloHttpClient {
   if (!env.CIELO_MERCHANT_ID || !env.CIELO_MERCHANT_KEY) {
     throw new Error('CIELO_MERCHANT_ID/CIELO_MERCHANT_KEY não configurados — use FakeAdapter em ambiente sem credencial Cielo.')
@@ -214,5 +224,6 @@ export function criarCieloHttpClientFromEnv(env: {
     apiBaseUrl: env.CIELO_API_BASE_URL,
     apiQueryBaseUrl: env.CIELO_API_QUERY_BASE_URL,
     timeoutMs: env.CIELO_TIMEOUT_MS,
+    queryTimeoutMs: env.CIELO_QUERY_TIMEOUT_MS,
   })
 }

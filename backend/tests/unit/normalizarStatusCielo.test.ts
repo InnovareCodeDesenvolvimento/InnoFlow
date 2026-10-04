@@ -10,12 +10,17 @@ describe('normalizarStatusCartaoCielo', () => {
     expect(normalizarStatusCartaoCielo({ status: 1, returnCode: '4' })).toBe('AUTHORIZED')
   })
 
-  it('Status=1 (Authorized) sem ReturnCode capturável -> DENIED (Status sozinho NÃO prova aprovação)', () => {
+  it('Status=1 (Authorized) com ReturnCode de RECUSA conhecido (51, 05...) -> DENIED (Status sozinho NÃO prova aprovação)', () => {
     expect(normalizarStatusCartaoCielo({ status: 1, returnCode: '99' })).toBe('DENIED')
+    expect(normalizarStatusCartaoCielo({ status: 1, returnCode: '51' })).toBe('DENIED')
   })
 
-  it('Status=1 (Authorized) com ReturnCode nulo -> DENIED (fail-closed)', () => {
-    expect(normalizarStatusCartaoCielo({ status: 1, returnCode: null })).toBe('DENIED')
+  it('Status=1 (Authorized) com ReturnCode AUSENTE ou fora das tabelas -> UNKNOWN (I-2): nem aprovação nem recusa silenciosa — pode ser uma autorização viva', () => {
+    for (const returnCode of [null, '', '88', 'XYZ', '0', '6']) {
+      const r = normalizarStatusCartaoCielo({ status: 1, returnCode })
+      expect(r, JSON.stringify(returnCode)).toBe('UNKNOWN')
+      expect(r).not.toBe('AUTHORIZED')
+    }
   })
 
   it('Status=2 (PaymentConfirmed) -> CAPTURED', () => {

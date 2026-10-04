@@ -34,6 +34,13 @@ export interface RespostaPagamentoCielo {
 const RETURN_CODES_APROVAM_STATUS_1 = new Set(['00', '4'])
 const RETURN_CODES_APROVAM_STATUS_2 = new Set(['00', '4', '6'])
 
+/**
+ * `ReturnCode` de RECUSA conhecidos (tabela do Parque, `traducao.ts`). Só estes tornam um `Status 1` uma recusa DEFINITIVA (o caso documentado Status 1 + 51: negada
+ * dentro de um HTTP 2xx). Status 1 com código AUSENTE ou FORA das duas tabelas é outra coisa (I-2 da auditoria): a Cielo pode ter autorizado de verdade com um código que não
+ * conhecemos — tratar como recusa deixaria uma autorização viva sem dono. Vira `UNKNOWN` (não definitivo) e quem chama reconsulta/alerta. O conjunto aprovador NÃO é ampliado.
+ */
+const RETURN_CODES_RECUSA_CONHECIDOS = new Set(['01', '02', '03', '04', '05', '07', '12', '13', '14', '15', '41', '43', '51', '54', '55', '57', '58', '59', '60', '61', '62', '63', '70', '77', '78', '82', '86', '96', '99'])
+
 export type StatusCartaoNormalizado = 'PENDING' | 'AUTHORIZED' | 'CAPTURED' | 'DENIED' | 'VOIDED' | 'REFUNDED' | 'FAILED' | 'UNKNOWN'
 
 /**
@@ -51,7 +58,8 @@ export function normalizarReturnCodeCielo(bruto: unknown): string | null {
 /**
  * Status + ReturnCode -> estado do CARTÃO. Regras:
  *  - 0 (NotFinished) e 12 (Pending): PENDING, qualquer `ReturnCode` (ainda processando);
- *  - 1 (Authorized): AUTHORIZED só com `ReturnCode` 00/4; senão DENIED (o caso documentado Status 1 + ReturnCode 51 é negada dentro de um HTTP 2xx);
+ *  - 1 (Authorized): AUTHORIZED só com `ReturnCode` 00/4; recusa CONHECIDA (51, 05, 57...) é DENIED (o caso documentado Status 1 + ReturnCode 51 é negada dentro de um HTTP 2xx);
+ *    ReturnCode ausente ou fora das duas tabelas é UNKNOWN (I-2: pode ser uma autorização viva — nunca recusa silenciosa);
  *  - 2 (PaymentConfirmed): CAPTURED só com `ReturnCode` 00/4/6. Status 2 com outro código (ou sem código) é INCOERENTE: não vira CAPTURED (não
  *    afirmamos cobrança sem o autorizador) NEM FAILED (a venda pode estar de fato capturada — marcar falha criaria dívida em dobro): vira UNKNOWN,
  *    não definitivo, e quem chama reconsulta;
@@ -67,7 +75,8 @@ export function normalizarStatusCartaoCielo(resposta: RespostaPagamentoCielo): S
     case 12:
       return 'PENDING'
     case 1:
-      return code !== null && RETURN_CODES_APROVAM_STATUS_1.has(code) ? 'AUTHORIZED' : 'DENIED'
+      if (code !== null && RETURN_CODES_APROVAM_STATUS_1.has(code)) return 'AUTHORIZED'
+      return code !== null && RETURN_CODES_RECUSA_CONHECIDOS.has(code) ? 'DENIED' : 'UNKNOWN'
     case 2:
       return code !== null && RETURN_CODES_APROVAM_STATUS_2.has(code) ? 'CAPTURED' : 'UNKNOWN'
     case 3:

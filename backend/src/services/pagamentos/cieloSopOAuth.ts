@@ -134,7 +134,8 @@ async function chamar(config: CieloSopConfig, passo: CieloSopPasso, url: string,
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), config.timeoutMs)
   try {
-    return await (config.fetchImpl ?? fetch)(url, { ...init, signal: controller.signal })
+    // S-2: nunca seguir redirect (o Basic/Bearer/MerchantId iriam junto para o destino).
+    return await (config.fetchImpl ?? fetch)(url, { ...init, signal: controller.signal, redirect: 'error' })
   } catch (err) {
     const abortou = controller.signal.aborted || isAbortError(err)
     logger.warn({ passo, timeout: abortou, err: err instanceof Error ? `${err.name}: ${err.message}` : String(err) }, '[cielo][sop] falha de rede')

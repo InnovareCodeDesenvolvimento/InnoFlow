@@ -29,6 +29,8 @@ export interface ResultadoAutorizacao {
   amountAuthorizedCents: number | null
   /** `Tid`/`AuthorizationCode`/`ProofOfSale` (C2.5) — quem chama grava no `PaymentIntent` na hora; vazio = `null`. */
   identificadores: IdentificadoresAdquirente
+  /** `Payment.Status` BRUTO da Cielo (`null` se ausente). `status` acima funde DENIED e FAILED e mapeia o não definitivo para CREATED; isto preserva o que a Cielo disse (I-2). */
+  statusBruto?: number | null
 }
 
 export interface ResultadoCaptura {
@@ -38,6 +40,7 @@ export interface ResultadoCaptura {
   amountCapturedCents: number | null
   /** Gravados DE NOVO na captura quando a Cielo os devolve (C2.5). */
   identificadores: IdentificadoresAdquirente
+  statusBruto?: number | null
 }
 
 export interface ResultadoCancelamento {
@@ -61,6 +64,7 @@ export interface ResultadoConsultaPagamento {
   amountAuthorizedCents: number | null
   amountCapturedCents: number | null
   identificadores: IdentificadoresAdquirente
+  statusBruto?: number | null
 }
 
 export interface ResultadoPix {

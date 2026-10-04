@@ -135,7 +135,7 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
   /** As 4 ENTRADAS de começo novo que têm a guarda. */
   const entradas = {
     'POST /api/me/payment-methods/tokenization-session': { method: 'CARD', chamar: (u: { token: string }) => request(app).post('/api/me/payment-methods/tokenization-session').set(auth(u)).send({}) },
-    'POST /api/me/payment-methods': { method: 'CARD', chamar: (u: { token: string }) => request(app).post('/api/me/payment-methods').set(auth(u)).send({ cardToken: 'mocktok.fake-token-restrito-0001', brand: 'Visa' }) },
+    'POST /api/me/payment-methods': { method: 'CARD', chamar: (u: { token: string }) => request(app).post('/api/me/payment-methods').set(auth(u)).send({ cardToken: '0b1c2d3e-4f5a-4b6c-9d7e-8f9a0b1c2d3e', brand: 'Visa' }) },
     'POST /api/me/sessions/start (CARD)': {
       method: 'CARD',
       chamar: (u: { token: string }) => request(app).post('/api/me/sessions/start').set(auth(u)).send({ ocppIdentity: 'carregador-que-nao-existe', connectorId: 1, payment: { mode: 'CARD', paymentMethodId: 'cabcdefghijklmnopqrstuvwx' } }),

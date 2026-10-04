@@ -101,6 +101,18 @@ export interface CamposPagamentoCielo extends RespostaPagamentoCielo {
   identificadores: IdentificadoresAdquirente
   /** Nomes (nunca valores) dos identificadores que passaram de 64 caracteres e foram truncados — o adaptador avisa no log. */
   identificadoresTruncados: string[]
+  /** `ReceivedDate` da venda (ms desde a época; `null` se ausente/ilegível). Serve para escolher entre vendas do mesmo `MerchantOrderId`. */
+  receivedDateMs: number | null
+}
+
+/**
+ * A Cielo escreve `ReceveidDate` (sic) na lista de `GET /1/sales?merchantOrderId=` e `ReceivedDate` na venda. Aceita os dois. O formato é `YYYY-MM-DD HH:mm:ss`
+ * sem fuso: serve para COMPARAR entre vendas da mesma resposta (mesmo formato/fuso), não como instante absoluto.
+ */
+export function lerDataCielo(bruto: unknown): number | null {
+  if (typeof bruto !== 'string' || bruto.trim() === '') return null
+  const ms = Date.parse(bruto.trim().replace(' ', 'T'))
+  return Number.isFinite(ms) ? ms : null
 }
 
 export function extrairCamposPagamento(body: unknown): CamposPagamentoCielo {
@@ -128,14 +140,35 @@ export function extrairCamposPagamento(body: unknown): CamposPagamentoCielo {
     amountCapturedCents,
     identificadores: { tid: tid.valor, authorizationCode: authorizationCode.valor, proofOfSale: proofOfSale.valor },
     identificadoresTruncados,
+    receivedDateMs: lerDataCielo(payment.ReceivedDate ?? payment.ReceveidDate),
   }
 }
 
-/** `GET /1/sales?merchantOrderId=` devolve `{ MerchantOrderId, Payments: [...] }` — pega o pagamento mais recente. */
-export function extrairPagamentoMaisRecenteDaConsulta(body: unknown): CamposPagamentoCielo | null {
-  const raw = body as { MerchantOrderId?: unknown; Payments?: unknown[] } | null | undefined
-  const payments = raw?.Payments
-  if (!Array.isArray(payments) || payments.length === 0) return null
-  const ultimo = payments[payments.length - 1] as Record<string, unknown>
-  return extrairCamposPagamento({ MerchantOrderId: raw?.MerchantOrderId, Payment: ultimo })
+/** Uma venda listada por `GET /1/sales?merchantOrderId=`. */
+export interface EntradaDaListaPorPedido {
+  paymentId: string | null
+  receivedDateMs: number | null
+  /** Só quando a entrada JÁ traz `Status` (formato antigo/tolerado): então não precisa do `GET /1/sales/{id}`. */
+  inline: CamposPagamentoCielo | null
+}
+
+/**
+ * `GET /1/sales?merchantOrderId=` — o corpo real da Cielo (doc, ainda NÃO visto em sandbox: I-1 da auditoria) lista só `PaymentId` e a data de cada venda
+ * (`ReceveidDate`, sic) e NÃO traz `Status`/`ReturnCode`/`Amount`. O formato antigo que o código assumia (`Payments[]` com tudo dentro) continua TOLERADO:
+ * a entrada com `Status` numérico é lida direto. O estado de uma entrada só-com-id exige `GET /1/sales/{PaymentId}` (feito pelo adaptador).
+ */
+export function lerListaDaConsultaPorPedido(body: unknown): { merchantOrderIdTopo: string | null; entradas: EntradaDaListaPorPedido[] } {
+  const raw = body as { MerchantOrderId?: unknown; Payments?: unknown } | null | undefined
+  const topo = typeof raw?.MerchantOrderId === 'string' ? raw.MerchantOrderId : null
+  const payments = Array.isArray(raw?.Payments) ? raw.Payments : []
+  const entradas = payments.flatMap((p): EntradaDaListaPorPedido[] => {
+    if (p === null || typeof p !== 'object') return []
+    const e = p as Record<string, unknown>
+    const paymentId = typeof e.PaymentId === 'string' && e.PaymentId.trim() !== '' ? e.PaymentId.trim() : null
+    const traz = typeof e.Status === 'number'
+    const inline = traz ? extrairCamposPagamento({ MerchantOrderId: topo ?? undefined, Payment: e }) : null
+    if (!paymentId && !inline) return []
+    return [{ paymentId, receivedDateMs: lerDataCielo(e.ReceivedDate ?? e.ReceveidDate), inline }]
+  })
+  return { merchantOrderIdTopo: topo, entradas }
 }

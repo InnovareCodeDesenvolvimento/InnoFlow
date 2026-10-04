@@ -39,7 +39,7 @@ describe('CieloAdapter.autorizar', () => {
     const adapter = criarAdapterComFetch(fetchImpl)
 
     const resultado = await adapter.autorizar(pedidoCartao())
-    expect(resultado).toEqual({ providerPaymentId: 'p1', status: 'AUTHORIZED', returnCode: '00', amountAuthorizedCents: 5000, identificadores: { tid: null, authorizationCode: null, proofOfSale: null } })
+    expect(resultado).toEqual({ providerPaymentId: 'p1', status: 'AUTHORIZED', returnCode: '00', amountAuthorizedCents: 5000, identificadores: { tid: null, authorizationCode: null, proofOfSale: null }, statusBruto: 1 })
   })
 
   it('resposta OK com Status Denied -> FAILED (mapeado do domínio DENIED)', async () => {
@@ -75,7 +75,7 @@ describe('CieloAdapter.autorizar', () => {
     const adapter = criarAdapterComFetch(fetchImpl)
     const resultado = await adapter.autorizar(pedidoCartao())
 
-    expect(resultado).toEqual({ providerPaymentId: 'p1', status: 'AUTHORIZED', returnCode: '00', amountAuthorizedCents: 5000, identificadores: { tid: null, authorizationCode: null, proofOfSale: null } })
+    expect(resultado).toEqual({ providerPaymentId: 'p1', status: 'AUTHORIZED', returnCode: '00', amountAuthorizedCents: 5000, identificadores: { tid: null, authorizationCode: null, proofOfSale: null }, statusBruto: 1 })
     expect(chamadas).toBe(2) // 1 POST original (abortado) + 1 GET de reconciliação — nunca um 2º POST
   })
 

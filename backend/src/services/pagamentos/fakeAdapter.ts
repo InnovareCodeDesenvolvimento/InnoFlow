@@ -293,6 +293,16 @@ export class FakeAdapter implements PagamentoPort {
   // EXPIRED sem precisar de rede.
   // ------------------------------------------------------------
 
+  /**
+   * Só de teste (I-6): reassocia um Pix simulado ao `MerchantOrderId` (= `PaymentIntent.id`) REAL. Testes que criam o Pix ANTES do intent usam um `merchantOrderId` provisório; o crédito agora
+   * confere o `MerchantOrderId` da consulta com o intent, então o provisório precisa ser trocado pelo id do intent.
+   */
+  associarPixAoPedido(providerPaymentId: string, merchantOrderId: string): void {
+    const intent = this.pixIntents.get(providerPaymentId)
+    if (!intent) throw new Error(`FakeAdapter.associarPixAoPedido: providerPaymentId desconhecido: ${providerPaymentId}`)
+    intent.merchantOrderId = merchantOrderId
+  }
+
   /** Simula o pagamento confirmado do lado da Cielo — depois disto, `consultarPix(providerPaymentId)` devolve `PAID`. */
   marcarPixComoPago(providerPaymentId: string): void {
     const intent = this.pixIntents.get(providerPaymentId)

@@ -3,17 +3,24 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import request from 'supertest'
 import { createApp } from '../../src/api/app'
 import { prisma } from '../../src/lib/prisma'
-import { redis } from '../../src/lib/redis'
+import { redis, createRedisConnection } from '../../src/lib/redis'
 import { issueToken } from '../../src/lib/jwt'
 import { encryptPaymentSecret } from '../../src/lib/crypto/paymentSecrets'
 import { logger } from '../../src/lib/logger'
 import { FakeAdapter } from '../../src/services/pagamentos/fakeAdapter'
 import { getPagamentoPort, resetPagamentoPortCacheParaTeste } from '../../src/services/pagamentos/pagamentoPortInstance'
+import { limparControleCancelamento } from '../../src/services/pagamentos/controleCancelamentoPreAuth'
 import { cancelarPreAutorizacaoCartao } from '../../src/services/pagamentos/cancelarPreAutorizacaoCartao'
 import { capturarSessaoCartao } from '../../src/services/pagamentos/capturarSessaoCartao'
 import { varrerPreAutorizacoesCartao } from '../../src/services/pagamentos/varrerPreAutorizacoesCartao'
 import { criarFixtureCartao, type FixtureCartao } from './helpers/cartaoSessaoFixture'
 import { uniqueSuffix } from './helpers/fixtures'
+
+// BANCO PRÓPRIO: o varredor olha TODOS os intents AUTHORIZED/CREATED do banco; no compartilhado ele varreria (e cancelaria) intents de outras suítes em paralelo. `vi.hoisted` assíncrono roda antes dos imports estáticos.
+const banco = await vi.hoisted(async () => {
+  const { criarBancoProprio } = await import('./helpers/bancoProprio')
+  return criarBancoProprio('cielo_c2')
+})
 
 /**
  * C2 contra Postgres + Redis reais (a Cielo é o `FakeAdapter`; nenhuma chamada de rede):
@@ -39,6 +46,7 @@ describe('C2 — identificadores da adquirente, autorização não definitiva e 
   afterAll(async () => {
     await prisma.$disconnect()
     redis.disconnect()
+    await banco.descartar()
   })
 
   // ------------------------------------------------------------------------------------------------------------------
@@ -125,6 +133,35 @@ describe('C2 — identificadores da adquirente, autorização não definitiva e 
       expect(intent.status).toBe('CREATED') // NÃO DENIED: a Cielo pode autorizar depois e o varredor precisa enxergá-lo
       expect(intent.cieloPaymentId).toBeTruthy()
       expect(intent.cieloTid).toBe('TID-PEND')
+    })
+
+    it('S-7: a Cielo autorizou um valor DIFERENTE do pedido -> a recarga segue (a captura usa min(consumo, autorizado)) e sai o alerta payment_authorized_amount_mismatch', async () => {
+      const user = await prisma.user.create({ data: { role: 'DRIVER', name: `Driver s7 ${suffix}`, email: `s7-c2-${suffix}@example.com` } })
+      const pm = await prisma.paymentMethod.create({ data: { userId: user.id, type: 'CREDIT_CARD', cieloCardTokenCiphertext: encryptPaymentSecret(`tok-s7-${suffix}`), brand: 'Visa', last4: '4242', isDefault: true } })
+      const connector = await prisma.connector.create({ data: { operatorId: fixture.tenant.operatorId, chargePointId: fixture.tenant.chargePointId, connectorId: 779, type: 'AC_TYPE2', status: 'AVAILABLE' } })
+      const real = fake.autorizar.bind(fake)
+      vi.spyOn(fake, 'autorizar').mockImplementation(async (pedido) => ({ ...(await real(pedido)), amountAuthorizedCents: pedido.amountRequestedCents - 1 }))
+      const aviso = vi.spyOn(logger, 'warn')
+      const subscriber = createRedisConnection()
+      const publisher = createRedisConnection()
+      const channel = `ocpp:cmd:${fixture.tenant.chargePointId}`
+      await subscriber.subscribe(channel)
+      subscriber.on('message', (ch, message) => {
+        const payload = JSON.parse(message) as { correlationId: string; method: string }
+        if (ch === channel && payload.method === 'RemoteStartTransaction') publisher.publish(`ocpp:reply:${payload.correlationId}`, JSON.stringify({ correlationId: payload.correlationId, ok: true, result: { status: 'Accepted' } })).catch(() => {})
+      })
+      try {
+        const res = await request(app)
+          .post('/api/me/sessions/start')
+          .set('Authorization', `Bearer ${issueToken({ id: user.id, role: 'DRIVER', operatorId: null })}`)
+          .send({ ocppIdentity: fixture.tenant.ocppIdentity, connectorId: connector.connectorId, payment: { mode: 'CARD', paymentMethodId: pm.id } })
+        expect(res.status, JSON.stringify(res.body)).toBe(202)
+        expect(aviso.mock.calls.map((c) => (c[0] as { alert?: string }).alert)).toContain('payment_authorized_amount_mismatch')
+      } finally {
+        await new Promise((r) => setTimeout(r, 120))
+        subscriber.disconnect()
+        publisher.disconnect()
+      }
     })
 
     it('a Cielo NEGA (status FAILED na porta): continua 402 + DENIED, e grava o Tid da tentativa recusada', async () => {
@@ -245,6 +282,7 @@ describe('C2 — identificadores da adquirente, autorização não definitiva e 
       expect(r1.canceladasAbandonadas).toBe(0)
       expect((await estado(p.intentId)).status).toBe('AUTHORIZED')
       f.definirModoCancelamento('NORMAL')
+      await limparControleCancelamento(p.intentId) // o desfecho "em andamento" deixou um backoff (I-3); limpa para a próxima rodada ser imediata
       const r2 = await varrerPreAutorizacoesCartao(f)
       expect(r2.canceladasAbandonadas).toBeGreaterThanOrEqual(1)
       expect((await estado(p.intentId)).status).toBe('VOIDED')

@@ -5,7 +5,7 @@ import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, Result
 import { resolverUrlsSop } from '../../core/pagamentos/configGateway'
 import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
 import { CieloHttpClient, CieloHttpError, CieloTimeoutError } from './cieloHttpClient'
-import { extrairCamposPagamento, extrairPagamentoMaisRecenteDaConsulta, montarPayloadAutorizacaoCartao, montarPayloadPix, type CamposPagamentoCielo } from './cieloPayloads'
+import { extrairCamposPagamento, lerListaDaConsultaPorPedido, montarPayloadAutorizacaoCartao, montarPayloadPix, type CamposPagamentoCielo } from './cieloPayloads'
 import { emitirAccessTokenSop } from './cieloSopOAuth'
 import { logger } from '../../lib/logger'
 
@@ -39,6 +39,9 @@ export interface CieloAdapterConfig {
   }
 }
 
+/** Teto de vendas detalhadas por reconciliação (as mais recentes): um pedido legítimo tem 1; mais que isso já é anomalia. */
+const MAX_DETALHES_POR_PEDIDO = 5
+
 export class CieloAdapter implements PagamentoPort {
   constructor(
     private readonly client: CieloHttpClient,
@@ -58,7 +61,7 @@ export class CieloAdapter implements PagamentoPort {
         logger.warn({ merchantOrderId: pedido.merchantOrderId }, '[cielo] timeout em autorizar — reconciliando por MerchantOrderId antes de propagar')
         const consulta = await this.consultarPorPedido(pedido.merchantOrderId)
         if (consulta) {
-          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountAuthorizedCents: consulta.amountAuthorizedCents, identificadores: consulta.identificadores }
+          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountAuthorizedCents: consulta.amountAuthorizedCents, identificadores: consulta.identificadores, statusBruto: consulta.statusBruto }
         }
         // Cielo não tem registro nenhum deste MerchantOrderId ainda — o timeout
         // foi mesmo antes de qualquer processamento. Quem chama decide se tenta de novo.
@@ -78,6 +81,7 @@ export class CieloAdapter implements PagamentoPort {
         returnCode: campos.returnCode,
         amountCapturedCents: campos.amountCapturedCents,
         identificadores: campos.identificadores,
+        statusBruto: statusBrutoDe(campos),
       }
     } catch (err) {
       if (err instanceof CieloTimeoutError) {
@@ -85,7 +89,7 @@ export class CieloAdapter implements PagamentoPort {
         logger.warn({ providerPaymentId }, '[cielo] timeout em capturar — reconciliando por PaymentId antes de propagar')
         const consulta = await this.consultar(providerPaymentId)
         if (consulta.status === 'CAPTURED' || consulta.status === 'FAILED' || consulta.status === 'VOIDED') {
-          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountCapturedCents: consulta.amountCapturedCents, identificadores: consulta.identificadores }
+          return { providerPaymentId: consulta.providerPaymentId, status: consulta.status, returnCode: consulta.returnCode, amountCapturedCents: consulta.amountCapturedCents, identificadores: consulta.identificadores, statusBruto: consulta.statusBruto }
         }
       }
       throw err
@@ -115,14 +119,43 @@ export class CieloAdapter implements PagamentoPort {
   async consultar(providerPaymentId: string): Promise<ResultadoConsultaPagamento> {
     const body = await this.client.getByPaymentId(providerPaymentId)
     const campos = extrairCamposPagamento(body)
+    alertarSeNaoConclusivo('consultar', campos)
     return camposParaResultadoConsulta(campos, providerPaymentId)
   }
 
+  /**
+   * Reconciliação por `MerchantOrderId` (I-1 da auditoria). `GET /1/sales?merchantOrderId=` provavelmente lista só `PaymentId` + data (`ReceveidDate`, sic), SEM
+   * `Status`/`ReturnCode`: o estado vem de `GET /1/sales/{PaymentId}` de cada venda listada. Escolha entre vendas do mesmo pedido: só as cujo `MerchantOrderId`
+   * devolvido bate com o pedido, a de `ReceivedDate` mais recente (nunca "a última do array"); empate/sem data prefere a que está VIVA (autorizada/capturada),
+   * porque é o dinheiro. Mais de uma venda para o mesmo pedido emite `payment_reconciliation_multiple_payments`. Formato antigo (entrada já com `Status`) é tolerado.
+   * Falha em qualquer `GET` de detalhe PROPAGA (sem o estado de todas não dá para escolher: quem chama reconsulta depois).
+   */
   async consultarPorPedido(merchantOrderId: string): Promise<ResultadoConsultaPagamento | null> {
-    const body = await this.client.getByMerchantOrderId(merchantOrderId)
-    const campos = extrairPagamentoMaisRecenteDaConsulta(body)
-    if (!campos) return null
-    return camposParaResultadoConsulta(campos, campos.paymentId ?? '')
+    const lista = lerListaDaConsultaPorPedido(await this.client.getByMerchantOrderId(merchantOrderId))
+    if (lista.entradas.length === 0) return null
+
+    const entradas = [...lista.entradas].sort((x, y) => (y.receivedDateMs ?? -Infinity) - (x.receivedDateMs ?? -Infinity)).slice(0, MAX_DETALHES_POR_PEDIDO)
+    const candidatos: Array<{ campos: CamposPagamentoCielo; data: number | null }> = []
+    for (const entrada of entradas) {
+      let campos = entrada.inline
+      if (!campos && entrada.paymentId) {
+        campos = extrairCamposPagamento(await this.client.getByPaymentId(entrada.paymentId))
+        if (!campos.paymentId) campos = { ...campos, paymentId: entrada.paymentId }
+      }
+      if (!campos) continue
+      const dono = campos.merchantOrderId ?? lista.merchantOrderIdTopo
+      if (dono !== null && dono !== merchantOrderId) continue // venda de OUTRO pedido: nunca é a resposta desta reconciliação
+      candidatos.push({ campos, data: entrada.receivedDateMs ?? campos.receivedDateMs })
+    }
+    if (candidatos.length === 0) return null
+    if (candidatos.length > 1) {
+      logger.warn({ alert: 'payment_reconciliation_multiple_payments', merchantOrderId, quantidade: candidatos.length }, '[cielo] mais de uma venda para o mesmo MerchantOrderId — escolhida a mais recente (conferir se sobrou autorização viva)')
+    }
+    const viva = (c: CamposPagamentoCielo) => (c.status === 1 || c.status === 2 ? 1 : 0)
+    candidatos.sort((x, y) => (y.data ?? -Infinity) - (x.data ?? -Infinity) || viva(y.campos) - viva(x.campos))
+    const escolhida = candidatos[0].campos
+    alertarSeNaoConclusivo('consultarPorPedido', escolhida)
+    return camposParaResultadoConsulta({ ...escolhida, merchantOrderId: escolhida.merchantOrderId ?? merchantOrderId }, escolhida.paymentId ?? '')
   }
 
   async criarPix(pedido: PedidoPix): Promise<ResultadoPix> {
@@ -135,6 +168,7 @@ export class CieloAdapter implements PagamentoPort {
     const qrCodeBase64Image = typeof payment.QrCodeBase64Image === 'string' ? payment.QrCodeBase64Image : null
 
     logger.info({ merchantOrderId: pedido.merchantOrderId, paymentId: campos.paymentId, status: campos.status }, '[cielo] Pix criado')
+    alertarReturnCodePixInesperado('criarPix', campos)
 
     const expiresInSeconds = expiracaoPixEfetivaSegundos(pedido.expiresInSeconds)
     return {
@@ -156,6 +190,7 @@ export class CieloAdapter implements PagamentoPort {
   async consultarPix(providerPaymentId: string): Promise<ResultadoConsultaPix> {
     const body = await this.client.getByPaymentId(providerPaymentId)
     const campos = extrairCamposPagamento(body)
+    alertarReturnCodePixInesperado('consultarPix', campos)
     return {
       providerPaymentId: campos.paymentId ?? providerPaymentId,
       merchantOrderId: campos.merchantOrderId ?? '',
@@ -245,7 +280,13 @@ function camposParaResultadoAutorizacao(campos: CamposPagamentoCielo): Resultado
     returnCode: campos.returnCode,
     amountAuthorizedCents: campos.amountAuthorizedCents,
     identificadores: campos.identificadores,
+    statusBruto: statusBrutoDe(campos),
   }
+}
+
+/** `Status` bruto da Cielo (`null` quando a resposta não trouxe um — o extrator usa -1 internamente). */
+function statusBrutoDe(campos: CamposPagamentoCielo): number | null {
+  return campos.status === -1 ? null : campos.status
 }
 
 function camposParaResultadoConsulta(campos: CamposPagamentoCielo, fallbackPaymentId: string): ResultadoConsultaPagamento {
@@ -257,6 +298,7 @@ function camposParaResultadoConsulta(campos: CamposPagamentoCielo, fallbackPayme
     amountAuthorizedCents: campos.amountAuthorizedCents,
     amountCapturedCents: campos.amountCapturedCents,
     identificadores: campos.identificadores,
+    statusBruto: statusBrutoDe(campos),
   }
 }
 
@@ -292,6 +334,19 @@ function mapStatusPixParaDominio(normalizado: StatusPixNormalizado): PixPaymentS
   }
 }
 
+const RETURN_CODES_PIX_ESPERADOS = new Set(['0', '00', '4', '6'])
+
+/**
+ * I-6: o ReturnCode real do Pix `Cielo2` nunca foi visto (sem sandbox). NÃO bloqueia nada (o crédito decide por Status + identidade + valor); só avisa quando sair do conjunto
+ * esperado {0, 00, 4, 6}, para anotar o valor real na prova de R$ 10 e decidir depois se vira regra.
+ */
+function alertarReturnCodePixInesperado(operacao: string, campos: CamposPagamentoCielo): void {
+  const code = campos.returnCode?.trim() ?? null
+  if (code !== null && !RETURN_CODES_PIX_ESPERADOS.has(code)) {
+    logger.warn({ alert: 'payment_pix_returncode_unexpected', operacao, paymentId: campos.paymentId, returnCode: code, status: campos.status }, '[cielo] ReturnCode do Pix fora de {0,00,4,6} — registrado para conferência (não bloqueia)')
+  }
+}
+
 /**
  * Log SEM corpo inteiro — só os campos não sensíveis (regra dura da tarefa). Os identificadores (`Tid` etc.) NÃO vão ao log. Avisa (sem valores) quando
  * um identificador estourou 64 caracteres e foi truncado (C2.5: o fluxo segue, o metadado é que fica cortado) e quando o par Status/ReturnCode não é
@@ -305,7 +360,19 @@ function logResultadoCartao(operacao: string, campos: CamposPagamentoCielo, desf
   if (campos.identificadoresTruncados.length > 0) {
     logger.warn({ alert: 'payment_cielo_identifier_truncated', operacao, paymentId: campos.paymentId, campos: campos.identificadoresTruncados }, '[cielo] identificador da adquirente acima de 64 caracteres — gravado TRUNCADO (o pagamento segue)')
   }
-  if (operacao !== 'cancelar' && normalizarStatusCartaoCielo(campos) === 'UNKNOWN') {
+  if (operacao !== 'cancelar') alertarSeNaoConclusivo(operacao, campos)
+}
+
+/** Alerta quando o par Status/ReturnCode da venda não é conclusivo (`UNKNOWN`). Chamado em toda leitura de venda — autorizar, capturar E consultar. */
+function alertarSeNaoConclusivo(operacao: string, campos: CamposPagamentoCielo): void {
+  if (normalizarStatusCartaoCielo(campos) === 'UNKNOWN') {
+    // I-2: o par Status/ReturnCode não é conclusivo. Com Status 1 pode haver uma AUTORIZAÇÃO VIVA (limite do cartão preso); com Status 2 a venda pode estar capturada. O PaymentId vai no
+    // alerta para a conferência manual (o ReturnCode é código da adquirente, não dado do pagador).
+    if (campos.status === 1) {
+      logger.error({ alert: 'payment_authorized_status_unlisted_returncode', operacao, paymentId: campos.paymentId, returnCode: campos.returnCode }, '[cielo] Status 1 (autorizada) com ReturnCode ausente/fora das tabelas — NÃO é recusa nem aprovação: tratado como não definitivo e reconsultado; ao esgotar a autorização é cancelada por precaução')
+    } else if (campos.status === 2) {
+      logger.error({ alert: 'payment_captured_status_unlisted_returncode', operacao, paymentId: campos.paymentId, returnCode: campos.returnCode }, '[cielo] Status 2 (capturada) com ReturnCode ausente/fora de 00/4/6 — NÃO afirmo a cobrança nem a falha; reconsultando. Se persistir, conferir a venda na Cielo à mão')
+    }
     logger.warn({ alert: 'payment_cielo_status_unrecognized', operacao, paymentId: campos.paymentId, status: campos.status, returnCode: campos.returnCode }, '[cielo] Status/ReturnCode não reconhecido — tratado como NÃO definitivo (será reconsultado)')
   }
 }
@@ -316,6 +383,7 @@ export function criarCieloAdapterFromEnv(env: {
   CIELO_API_BASE_URL: string
   CIELO_API_QUERY_BASE_URL: string
   CIELO_TIMEOUT_MS: number
+  CIELO_QUERY_TIMEOUT_MS?: number
   CIELO_SANDBOX: boolean
   CIELO_SOP_SCRIPT_URL?: string
   CIELO_SOP_CLIENT_ID?: string
@@ -332,6 +400,7 @@ export function criarCieloAdapterFromEnv(env: {
     apiBaseUrl: env.CIELO_API_BASE_URL,
     apiQueryBaseUrl: env.CIELO_API_QUERY_BASE_URL,
     timeoutMs: env.CIELO_TIMEOUT_MS,
+    queryTimeoutMs: env.CIELO_QUERY_TIMEOUT_MS,
   })
   // C1.1: URLs do SOP por AMBIENTE (default = as do Parque, provadas em produção); as envs `CIELO_SOP_*_URL` são só override.
   const urlsSop = resolverUrlsSop(env.CIELO_SANDBOX ? 'sandbox' : 'production', { oauthToken: env.CIELO_SOP_OAUTH_TOKEN_URL, accessToken: env.CIELO_SOP_ACCESS_TOKEN_URL, script: env.CIELO_SOP_SCRIPT_URL })

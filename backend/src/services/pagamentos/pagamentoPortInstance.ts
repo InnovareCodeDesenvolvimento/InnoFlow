@@ -84,6 +84,7 @@ function construirAdaptadorCielo(config: ConfigEfetiva): PagamentoPort {
     CIELO_API_BASE_URL: urls.api,
     CIELO_API_QUERY_BASE_URL: urls.query,
     CIELO_TIMEOUT_MS: env.CIELO_TIMEOUT_MS,
+    CIELO_QUERY_TIMEOUT_MS: env.CIELO_QUERY_TIMEOUT_MS,
     CIELO_SANDBOX: estado.environment === 'sandbox',
     CIELO_SOP_SCRIPT_URL: config.envGateway.sopScriptUrl ?? undefined,
     CIELO_SOP_CLIENT_ID: estado.sopClientId ?? undefined,

@@ -374,7 +374,7 @@ describe('M4c — lock consultivo: corridas forçadas nos dois sentidos, primeir
       return original(tok)
     })
     try {
-      const postCartao = request(app).post('/api/me/payment-methods').set(auth(motorista)).send({ cardToken: 'tok-m5-4242', brand: 'Visa' }).then((r) => r)
+      const postCartao = request(app).post('/api/me/payment-methods').set(auth(motorista)).send({ cardToken: '3f1f0a2e-5b6c-4d7e-8f90-a1b2c3d4e5f6', brand: 'Visa' }).then((r) => r)
       await Promise.race([dentro, dormir(15_000).then(() => Promise.reject(new Error('o POST do cartão nunca chegou à consulta do token')))])
       const troca = await putProducao(admin) // nenhum intent vivo: a troca é permitida
       expect(troca.status, dump(troca.body)).toBe(200)

@@ -31,7 +31,7 @@ describe('POST /api/me/payment-methods com os dados enviados pela página isolad
     return { id: user.id, auth: { Authorization: `Bearer ${issueToken({ id: user.id, role: 'DRIVER', operatorId: null })}` } }
   }
 
-  const cadastrar = (m: { auth: Record<string, string> }, corpo: Record<string, unknown>) => request(app).post('/api/me/payment-methods').set(m.auth).send({ cardToken: `tok-${randomUUID()}`, brand: 'Visa', ...corpo })
+  const cadastrar = (m: { auth: Record<string, string> }, corpo: Record<string, unknown>) => request(app).post('/api/me/payment-methods').set(m.auth).send({ cardToken: `${randomUUID()}`, brand: 'Visa', ...corpo })
 
   function consultaSemDados() {
     return vi.spyOn(FakeAdapter.prototype, 'consultarCartaoTokenizado').mockImplementation(async (cardToken: string) => ({ cardToken, ...SEM_DADOS }))
@@ -92,6 +92,25 @@ describe('POST /api/me/payment-methods com os dados enviados pela página isolad
       const res = await cadastrar(m, extra)
       expect(res.status, JSON.stringify(res.body)).toBe(400)
       expect(await prisma.paymentMethod.count({ where: { userId: m.id } })).toBe(0)
+    })
+
+    it('S-1: PAN em qualquer formato e texto livre são recusados (400) e nada é gravado; o token do SOP SIMULADO estruturado é aceito COM o FakeAdapter', async () => {
+      consultaSemDados()
+      const m = await novoMotorista('s1')
+      for (const ruim of ['4111111111111111', '4111 1111 1111 1111', '4111-1111-1111-1111', 'qualquer-texto', 'tok-123']) {
+        const res = await request(app).post('/api/me/payment-methods').set(m.auth).send({ cardToken: ruim, brand: 'Visa' })
+        expect(res.status, ruim).toBe(400)
+      }
+      expect(await prisma.paymentMethod.count({ where: { userId: m.id } })).toBe(0)
+      const mock = await request(app).post('/api/me/payment-methods').set(m.auth).send({ cardToken: 'mocktok.4242.122030.Rm9vIEJhcg==.17910000000001', brand: 'Visa' })
+      expect(mock.status, JSON.stringify(mock.body)).toBe(201)
+    })
+
+    it('S-5: a sessão de tokenização (AccessToken do SOP) nunca é cacheável', async () => {
+      const m = await novoMotorista('s5')
+      const res = await request(app).post('/api/me/payment-methods/tokenization-session').set(m.auth)
+      expect(res.status, JSON.stringify(res.body)).toBe(200)
+      expect(res.headers['cache-control']).toBe('no-store')
     })
 
     it('cardToken gigante (> 256) é recusado', async () => {

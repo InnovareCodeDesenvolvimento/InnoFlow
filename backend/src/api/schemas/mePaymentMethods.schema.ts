@@ -15,9 +15,39 @@ import { z } from 'zod'
 export const CARD_BRANDS = ['Visa', 'Master', 'Elo', 'Amex', 'Hipercard', 'Diners'] as const
 export type CardBrand = (typeof CARD_BRANDS)[number]
 
+/**
+ * S-1 (auditoria): `cardToken` só pode ser o token do cofre da Cielo (GUID) — antes aceitava qualquer texto de até 256 caracteres, e um PAN inteiro passaria pela nossa API, seria cifrado e
+ * enviado à Cielo, quebrando o escopo SAQ A-EP. Exceção controlada: o token do SOP SIMULADO da página isolada (`mocktok.<last4>.<MMAAAA>.<titular>.<selo>`), que só é válido com o
+ * `FakeAdapter` ativo (a ROTA recusa `mocktok.*` com a Cielo real). Qualquer sequência de 13 a 19 dígitos (com ou sem separador) fora do selo do mock é recusada.
+ */
+const CARD_TOKEN_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const CARD_TOKEN_MOCK_SOP = /^mocktok[.][0-9]{4}[.][0-9]{6}[.][A-Za-z0-9_=-]{0,200}[.][0-9]{1,24}$/
+const SEQUENCIA_PARECIDA_COM_PAN = new RegExp('(?:[0-9][ -]?){13,19}')
+
+export function cardTokenTemFormatoValido(token: string): boolean {
+  if (CARD_TOKEN_GUID.test(token)) return true
+  if (CARD_TOKEN_MOCK_SOP.test(token)) return true
+  return false
+}
+
+/** `true` se o token é do SOP simulado (só aceito com o `FakeAdapter`). */
+export function ehCardTokenDeMock(token: string): boolean {
+  return token.startsWith('mocktok.')
+}
+
+export function pareceConterPan(token: string): boolean {
+  return !CARD_TOKEN_MOCK_SOP.test(token) && SEQUENCIA_PARECIDA_COM_PAN.test(token)
+}
+
 export const meCreatePaymentMethodSchema = z
   .object({
-    cardToken: z.string().trim().min(1).max(256),
+    cardToken: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .refine((t) => !pareceConterPan(t), { message: 'cardToken inválido' })
+      .refine(cardTokenTemFormatoValido, { message: 'cardToken inválido: esperado o token do cofre da Cielo' }),
     brand: z.enum(CARD_BRANDS),
     makeDefault: z.boolean().optional(),
     /** Últimos 4 dígitos — exatamente 4 dígitos (um PAN inteiro ou lixo é recusado, nunca truncado em silêncio). */

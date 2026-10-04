@@ -106,7 +106,7 @@ describe('ALTO-2 revalidado — sandbox restrito só vale para identidade VERIFI
   const idGoogle = (email: string, sub: string, over: Partial<IdentidadeGoogle> = {}): IdentidadeGoogle => ({ sub, email, emailVerified: true, name: 'Google', ...over })
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` })
   const pix = (token: string) => request(app).post('/api/me/wallet/topups').set(auth(token)).send({ amountCents: 2000 })
-  const cartao = (token: string) => request(app).post('/api/me/payment-methods').set(auth(token)).send({ cardToken: `tok-${sufixo()}-4242`, brand: 'Visa' })
+  const cartao = (token: string) => request(app).post('/api/me/payment-methods').set(auth(token)).send({ cardToken: crypto.randomUUID(), brand: 'Visa' })
   const trocarSenha = (token: string) => request(app).post('/api/auth/password').set(auth(token)).send({ newPassword: 'Outra-Senha-456' })
 
   async function esperaRestrito(token: string, quem: string) {
