@@ -155,7 +155,7 @@ commit `3bc8116`, novo = `bdbf8fc`, cada um rodado **2 vezes** (ruído medido). 
 |---|---:|
 | IDENTICA (nada mudou) | 6 (as 2 imagens do documento isolado do cartão ×3) |
 | ACEITA (só recolor de texto/ícone; todo pixel alterado dentro de um elemento recolorido) | **107** |
-| REPORTAR (recolor de fundo de elemento de estado) | **10** |
+| REPORTAR (recolor de fundo de elemento de estado) → **aceitas pelo Atlas e regravadas** | **10** |
 
 - `opacity 0.7→1` do selo "Desenvolvido por" (aceito pelo Atlas): atinge também o **logo da Innovare** (a `<img>` fica 100% opaca), 1 elemento por página admin.
 - Ruído de rasterização que NÃO é diferença: blocos de 37 a 66 px em bordas/sombras (3 páginas) com DOM idêntico; mesmo tamanho de ruído aparece entre duas execuções do MESMO estado.
@@ -164,9 +164,12 @@ commit `3bc8116`, novo = `bdbf8fc`, cada um rodado **2 vezes** (ruído medido). 
 - Contraste (axe): 0 reprovados, 3.753 aprovados, 898 incompletos (landing/vidro: `bgGradient` 449, `pseudoContent` 312, `bgOverlap` 98...) — lista por motivo em `CONTRASTE-ESTADO-ATUAL.md`.
 - Autoteste da ferramenta: um "fix de contraste" que também muda `px-3.5→px-4` na sidebar → `comparar-geometria` REPORTAR em 9/9 páginas testadas (retângulos e `padding-left/right` listados) e o `test:visual` falha nos 3 de 1440 (a 375/768 a sidebar está oculta).
 
+- **DÍVIDA registrada (para a Lyra, F-B/F-D):** `ink-softer` é usado como cor de TEXTO e como cor de FUNDO de elemento de estado (Switch desligado, pino/marcador cinza). Escurecer o token para passar no contraste de texto escureceu os fundos também. Criar um token separado para fundos de estado (ex.: `--color-state-off`) e migrar `bg-ink-softer`, para que mudar um não arraste o outro.
+- A aprovação do Atlas das 10 REPORTADAS e das notas (logo da Innovare 100% opaco, `flex-shrink` do IconBadge) está na mensagem de 04/10/2026; aqui só registro a decisão.
+
 ### Registro por fase (continuação)
 
 | Fase | Data | Diferenças esperadas (rota · o que mudou) | Regressões achadas | Baseline regravada por |
 |---|---|---|---|---|
 | A0 | 04/10/2026 | — (linha de base original) | — | Íris (única gravação inicial) |
-| F-A | 04/10/2026 | **107 imagens regravadas** (ver §7): só recolor de TEXTO/ÍCONE (tokens `ink-softer`/`muted-foreground` #6B7280→#5F6673, 26 usos de `ink-subtle` como texto→`ink-softer`, sidebar `white/35→60` e `white/50→70`, selo "Desenvolvido por" sem `opacity-70`, ícone de busca/"R$" do Input, legenda do `StatCard`). Geometria idêntica nos 123 pares. | **10 imagens NÃO regravadas** (REPORTAR): recolor de FUNDO de elemento de estado por efeito colateral do token (`bg-ink-softer`): trilho do Switch desligado (`/admin/gateway-pagamento` ×3), pino cinza do mockup da landing (`/` e `/nao-existe-xyz` ×3 cada, 6 imagens) e marcador/legenda "Fora do ar" do mapa (`/app/mapa` a 1440). 1 mudança latente aceita com nota: `flex-shrink 1→0` no `IconBadge` do EmptyState. | Lyra/Atlas (aprovação do Atlas dada no briefing de 04/10/2026), classificado e gravado pela Íris |
+| F-A | 04/10/2026 | **107 imagens regravadas** (ver §7): só recolor de TEXTO/ÍCONE (tokens `ink-softer`/`muted-foreground` #6B7280→#5F6673, 26 usos de `ink-subtle` como texto→`ink-softer`, sidebar `white/35→60` e `white/50→70`, selo "Desenvolvido por" sem `opacity-70`, ícone de busca/"R$" do Input, legenda do `StatCard`). Geometria idêntica nos 123 pares. | **10 imagens reportadas e DEPOIS aceitas pelo Atlas** (recolor de FUNDO de elemento de estado por efeito colateral do token, `bg-ink-softer`): trilho do Switch desligado (`/admin/gateway-pagamento` ×3), pino cinza do mockup da landing (`/` e `/nao-existe-xyz` ×3 cada, 6 imagens) e marcador/legenda "Fora do ar" do mapa (`/app/mapa` a 1440). Regravadas num worktree limpo do HEAD (`9912d3d`): `test:visual` **114/114 em 2 rodadas**. Mudança latente aceita com nota: `flex-shrink 1→0` no `IconBadge` do EmptyState (já nas 107). | Lyra/Atlas (aprovação do Atlas, 04/10/2026), classificado e gravado pela Íris (107 em `6ada5dc`, +10 no commit seguinte) |
