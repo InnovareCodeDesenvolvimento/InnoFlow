@@ -2,10 +2,11 @@ import type { DadosCliente, PedidoAutorizacaoCartao, PedidoPix } from '../../cor
 import type { CardPaymentStatus, PixPaymentStatus } from '../../core/pagamentos/tipos'
 import { normalizarStatusCartaoCielo, normalizarStatusPixCielo, type StatusCartaoNormalizado, type StatusPixNormalizado } from '../../core/pagamentos/normalizarStatusCielo'
 import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaCartao, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
-import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
+import { resolverUrlsSop } from '../../core/pagamentos/configGateway'
+import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
 import { CieloHttpClient, CieloHttpError, CieloTimeoutError } from './cieloHttpClient'
 import { extrairCamposPagamento, extrairPagamentoMaisRecenteDaConsulta, montarPayloadAutorizacaoCartao, montarPayloadPix, type CamposPagamentoCielo } from './cieloPayloads'
-import { obterAccessTokenSop } from './cieloSopOAuth'
+import { emitirAccessTokenSop } from './cieloSopOAuth'
 import { logger } from '../../lib/logger'
 
 /**
@@ -21,10 +22,21 @@ import { logger } from '../../lib/logger'
 export interface CieloAdapterConfig {
   merchantId: string
   sandbox: boolean
-  /** URL do script do Silent Order Post (SOP) que a página isolada da Lyra carrega — o navegador do motorista tokeniza o cartão direto na Cielo, nunca pelo nosso backend (F5.3). */
-  sopScriptUrl?: string
-  /** `client_credentials` OAuth para obter o `accessToken` da sessão de tokenização — ⚠️ não confirmado contra doc/sandbox real (ver `cieloSopOAuth.ts`). */
-  sopOAuth?: { tokenUrl: string; clientId: string; clientSecret: string; timeoutMs: number; fetchImpl?: typeof fetch }
+  /**
+   * Silent Order Post (C1.1): o navegador do motorista tokeniza o cartão direto na Braspag/Cielo, nunca pelo nosso backend (F5.3). O servidor
+   * faz os DOIS passos (OAuth + `accesstoken`, ver `cieloSopOAuth.ts`) e entrega ao navegador o `AccessToken` e a URL do script.
+   * Ausente = sem par ClientId/ClientSecret configurado (as URLs sempre existem: default por ambiente em `URLS_SOP`).
+   */
+  sop?: {
+    clientId: string
+    clientSecret: string
+    oauthTokenUrl: string
+    accessTokenUrl: string
+    /** URL do script que a página isolada da Lyra carrega (`<script src>`). */
+    scriptUrl: string
+    timeoutMs: number
+    fetchImpl?: typeof fetch
+  }
 }
 
 export class CieloAdapter implements PagamentoPort {
@@ -112,7 +124,7 @@ export class CieloAdapter implements PagamentoPort {
 
     logger.info({ merchantOrderId: pedido.merchantOrderId, paymentId: campos.paymentId, status: campos.status }, '[cielo] Pix criado')
 
-    const expiresInSeconds = pedido.expiresInSeconds ?? 86_400
+    const expiresInSeconds = expiracaoPixEfetivaSegundos(pedido.expiresInSeconds)
     return {
       providerPaymentId: campos.paymentId ?? '',
       merchantOrderId: pedido.merchantOrderId,
@@ -142,52 +154,48 @@ export class CieloAdapter implements PagamentoPort {
   }
 
   async sessaoTokenizacao(_cliente?: DadosCliente): Promise<SessaoTokenizacao> {
-    if (!this.config.sopScriptUrl) {
-      throw new Error(
-        'CIELO_SOP_SCRIPT_URL não configurada — URL do script do Silent Order Post não foi confirmada contra a doc oficial (F5.1/F5.3). Configurar antes de expor a rota de tokenização.',
-      )
+    const sop = this.config.sop
+    if (!sop) {
+      throw new Error('Par ClientId/ClientSecret do Silent Order Post (Braspag) não configurado — o AccessToken de tokenização não pode ser emitido. Cadastre-o na tela do gateway.')
     }
-    if (!this.config.sopOAuth) {
-      throw new Error(
-        'CIELO_SOP_CLIENT_ID/CIELO_SOP_CLIENT_SECRET/CIELO_SOP_OAUTH_TOKEN_URL não configurados — accessToken de tokenização (F5.3) não pode ser emitido. Ver cieloSopOAuth.ts (mecanismo ainda não confirmado contra a doc real da Cielo).',
-      )
-    }
-    const token = await obterAccessTokenSop(this.config.sopOAuth)
+    const token = await emitirAccessTokenSop({
+      clientId: sop.clientId,
+      clientSecret: sop.clientSecret,
+      merchantId: this.config.merchantId,
+      oauthTokenUrl: sop.oauthTokenUrl,
+      accessTokenUrl: sop.accessTokenUrl,
+      timeoutMs: sop.timeoutMs,
+      fetchImpl: sop.fetchImpl,
+    })
     return {
+      // O AccessToken do PASSO 2 (não o token OAuth do passo 1): é o que o script do SOP aceita no navegador.
       accessToken: token.accessToken,
       merchantId: this.config.merchantId,
       environment: this.config.sandbox ? 'sandbox' : 'production',
-      scriptUrl: this.config.sopScriptUrl,
+      scriptUrl: sop.scriptUrl,
       expiresAt: new Date(Date.now() + token.expiresInSeconds * 1000),
     }
   }
 
   /**
-   * `GET /1/card/{token}` — valida + consulta o CardToken recebido do
-   * frontend ANTES de gravar `PaymentMethod` (F5.3). HTTP 404 é o caso
-   * "token desconhecido/inválido" (achado nesta tarefa, sem sandbox — melhor
-   * esforço a partir da convenção REST da própria Cielo no resto da API) e
-   * vira `CartaoTokenInvalidoError` (a rota mapeia para 400
-   * `INVALID_CARD_TOKEN`); qualquer outro erro (timeout, 5xx) propaga cru
-   * (a rota mapeia para `CARD_VERIFICATION_FAILED`).
+   * `GET /1/card/{token}` — ENRIQUECIMENTO de melhor esforço (C1.3, R2/F25): esse endpoint NÃO está confirmado (não aparece no índice da doc
+   * oficial e o Parque nunca o usou), então o cadastro de cartão NÃO depende dele. A fonte principal de `last4`/validade/bandeira é a página
+   * isolada (o script do SOP não devolve a bandeira, que é detectada no navegador). Qualquer falha aqui — 404 (endpoint inexistente OU token
+   * desconhecido: indistinguíveis), 5xx, timeout, rede — vira "sem dados" com um aviso no log; NUNCA lança e NUNCA vira
+   * `CartaoTokenInvalidoError`. A validade do token só é provada na primeira pré-autorização. O `cardToken` nunca vai ao log.
    */
   async consultarCartaoTokenizado(cardToken: string): Promise<ResultadoConsultaCartao> {
-    let body: unknown
+    const semDados: ResultadoConsultaCartao = { cardToken, brand: null, last4: null, holderName: null, expiryMonth: null, expiryYear: null }
     try {
-      body = await this.client.getCard(cardToken)
+      return extrairDadosCartao(await this.client.getCard(cardToken), cardToken)
     } catch (err) {
-      if (err instanceof CieloHttpError && err.httpStatus === 404) {
-        throw new CartaoTokenInvalidoError(mascararCardToken(cardToken))
-      }
-      throw err
+      logger.warn(
+        { httpStatus: err instanceof CieloHttpError ? err.httpStatus : null, timeout: err instanceof CieloTimeoutError },
+        '[cielo] consulta do CardToken indisponível — seguindo só com os dados enviados pela página de cartão (enriquecimento é opcional)',
+      )
+      return semDados
     }
-    return extrairDadosCartao(body, cardToken)
   }
-}
-
-/** Nunca logar/propagar o token inteiro em mensagem de erro — só os 4 últimos caracteres, suficiente para correlacionar sem expor o segredo. */
-function mascararCardToken(cardToken: string): string {
-  return cardToken.length > 4 ? `***${cardToken.slice(-4)}` : '***'
 }
 
 /**
@@ -286,6 +294,7 @@ export function criarCieloAdapterFromEnv(env: {
   CIELO_SOP_CLIENT_ID?: string
   CIELO_SOP_CLIENT_SECRET?: string
   CIELO_SOP_OAUTH_TOKEN_URL?: string
+  CIELO_SOP_ACCESS_TOKEN_URL?: string
 }): CieloAdapter {
   if (!env.CIELO_MERCHANT_ID || !env.CIELO_MERCHANT_KEY) {
     throw new Error('CIELO_MERCHANT_ID/CIELO_MERCHANT_KEY não configurados — use FakeAdapter em ambiente sem credencial Cielo.')
@@ -297,9 +306,11 @@ export function criarCieloAdapterFromEnv(env: {
     apiQueryBaseUrl: env.CIELO_API_QUERY_BASE_URL,
     timeoutMs: env.CIELO_TIMEOUT_MS,
   })
-  const sopOAuth =
-    env.CIELO_SOP_CLIENT_ID && env.CIELO_SOP_CLIENT_SECRET && env.CIELO_SOP_OAUTH_TOKEN_URL
-      ? { tokenUrl: env.CIELO_SOP_OAUTH_TOKEN_URL, clientId: env.CIELO_SOP_CLIENT_ID, clientSecret: env.CIELO_SOP_CLIENT_SECRET, timeoutMs: env.CIELO_TIMEOUT_MS }
+  // C1.1: URLs do SOP por AMBIENTE (default = as do Parque, provadas em produção); as envs `CIELO_SOP_*_URL` são só override.
+  const urlsSop = resolverUrlsSop(env.CIELO_SANDBOX ? 'sandbox' : 'production', { oauthToken: env.CIELO_SOP_OAUTH_TOKEN_URL, accessToken: env.CIELO_SOP_ACCESS_TOKEN_URL, script: env.CIELO_SOP_SCRIPT_URL })
+  const sop =
+    env.CIELO_SOP_CLIENT_ID && env.CIELO_SOP_CLIENT_SECRET
+      ? { clientId: env.CIELO_SOP_CLIENT_ID, clientSecret: env.CIELO_SOP_CLIENT_SECRET, oauthTokenUrl: urlsSop.oauthToken, accessTokenUrl: urlsSop.accessToken, scriptUrl: urlsSop.script, timeoutMs: env.CIELO_TIMEOUT_MS }
       : undefined
-  return new CieloAdapter(client, { merchantId: env.CIELO_MERCHANT_ID, sandbox: env.CIELO_SANDBOX, sopScriptUrl: env.CIELO_SOP_SCRIPT_URL, sopOAuth })
+  return new CieloAdapter(client, { merchantId: env.CIELO_MERCHANT_ID, sandbox: env.CIELO_SANDBOX, sop })
 }

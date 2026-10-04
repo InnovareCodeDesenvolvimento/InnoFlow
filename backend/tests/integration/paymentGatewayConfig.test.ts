@@ -82,14 +82,15 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
     process.env.DATABASE_URL = URL_BANCO
     process.env.CIELO_WEBHOOK_PATH_TOKEN = PATH_TOKEN
     process.env.CIELO_WEBHOOK_HEADER_SECRET = ENV_HEADER_SECRET
-    for (const k of ['CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'CIELO_SOP_CLIENT_ID', 'CIELO_SOP_CLIENT_SECRET', 'CIELO_SOP_SCRIPT_URL', 'CIELO_SOP_OAUTH_TOKEN_URL', 'PUBLIC_API_BASE_URL', 'CIELO_API_BASE_URL', 'CIELO_API_QUERY_BASE_URL']) {
+    for (const k of ['CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'CIELO_SOP_CLIENT_ID', 'CIELO_SOP_CLIENT_SECRET', 'CIELO_SOP_SCRIPT_URL', 'CIELO_SOP_OAUTH_TOKEN_URL', 'CIELO_SOP_ACCESS_TOKEN_URL', 'PUBLIC_API_BASE_URL', 'CIELO_API_BASE_URL', 'CIELO_API_QUERY_BASE_URL']) {
       delete process.env[k]
     }
 
     // Servidor OAuth falso (SOP) — a única "Cielo" deste teste; nada sai da máquina.
     oauthServer = createServer((_req, res) => {
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ access_token: 'access-token-falso', expires_in: 300 }))
+      // Responde os DOIS passos do SOP: `access_token` (passo 1, OAuth) e `AccessToken` (passo 2, o que vai ao navegador).
+      res.end(JSON.stringify({ access_token: 'oauth-token-falso', expires_in: 300, AccessToken: 'access-token-falso', ExpiresIn: 300 }))
     })
     await new Promise<void>((resolve) => oauthServer.listen(0, '127.0.0.1', resolve))
     oauthUrl = `http://127.0.0.1:${(oauthServer.address() as AddressInfo).port}`
@@ -126,7 +127,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
     }
     app = m.createApp()
 
-    for (const k of ['NODE_ENV', 'CIELO_SANDBOX', 'CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'CIELO_SOP_CLIENT_ID', 'CIELO_SOP_CLIENT_SECRET', 'CIELO_SOP_SCRIPT_URL', 'CIELO_SOP_OAUTH_TOKEN_URL', 'PUBLIC_API_BASE_URL', 'PAYMENT_SECRETS_KEY']) {
+    for (const k of ['NODE_ENV', 'CIELO_SANDBOX', 'CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'CIELO_SOP_CLIENT_ID', 'CIELO_SOP_CLIENT_SECRET', 'CIELO_SOP_SCRIPT_URL', 'CIELO_SOP_OAUTH_TOKEN_URL', 'CIELO_SOP_ACCESS_TOKEN_URL', 'PUBLIC_API_BASE_URL', 'PAYMENT_SECRETS_KEY']) {
       envBaseline[k] = m.env[k]
     }
 
@@ -181,6 +182,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
   function servidorComPreRequisitosDeCartao() {
     m.env.CIELO_SOP_SCRIPT_URL = 'https://sop.example/script.js'
     m.env.CIELO_SOP_OAUTH_TOKEN_URL = `${oauthUrl}/token`
+    m.env.CIELO_SOP_ACCESS_TOKEN_URL = `${oauthUrl}/accesstoken`
   }
 
   async function auditoriaDe(userId: string) {
@@ -241,14 +243,14 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
         sopClientId: null,
         sopClientSecretSet: false,
         webhookHeaderSecretSet: true,
-        webhookHeaderName: 'x-innoelektron-webhook-secret',
+        webhookHeaderName: 'InnoFlowWebhookSecret',
         cardEnabled: true,
         pixEnabled: true,
         updatedAt: null,
       })
       expect(res.body.webhookUrl).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+/api/webhooks/cielo/${PATH_TOKEN}$`))
       expect(res.body.readiness.pix).toEqual({ ready: true, missing: [] })
-      expect(res.body.readiness.card.missing).toEqual(['SOP_CLIENT_ID', 'SOP_CLIENT_SECRET', 'SOP_SCRIPT_URL', 'SOP_OAUTH_TOKEN_URL'])
+      expect(res.body.readiness.card.missing).toEqual(['SOP_CLIENT_ID', 'SOP_CLIENT_SECRET'])
       expectSemSegredos(res.body)
       expect(Object.keys(res.body).sort()).toEqual(
         ['source', 'environment', 'merchantId', 'merchantKeySet', 'sopClientId', 'sopClientSecretSet', 'webhookHeaderSecretSet', 'webhookUrl', 'webhookHeaderName', 'cardEnabled', 'pixEnabled', 'readiness', 'secretsDecryptable', 'sandboxRestricted', 'updatedAt'].sort(),
@@ -454,7 +456,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       const res = await put(admin, { merchantId: 'm', merchantKey: SEGREDOS.merchantKey, cardEnabled: true })
       expect(res.status).toBe(409)
       expect(res.body.code).toBe('GATEWAY_NOT_READY')
-      expect(res.body.details).toEqual(['SOP_CLIENT_ID', 'SOP_CLIENT_SECRET', 'SOP_SCRIPT_URL', 'SOP_OAUTH_TOKEN_URL'])
+      expect(res.body.details).toEqual(['SOP_CLIENT_ID', 'SOP_CLIENT_SECRET'])
       expect(await m.prisma.paymentGatewayConfig.count()).toBe(0)
     })
   })
@@ -607,7 +609,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
 
       expect((await put(admin, { cardEnabled: false, pixEnabled: false })).status).toBe(200)
 
-      const webhook = await request(app).post(`/api/webhooks/cielo/${PATH_TOKEN}`).set('x-innoelektron-webhook-secret', ENV_HEADER_SECRET).send({ PaymentId: pix.providerPaymentId, ChangeType: 1 })
+      const webhook = await request(app).post(`/api/webhooks/cielo/${PATH_TOKEN}`).set('InnoFlowWebhookSecret', ENV_HEADER_SECRET).send({ PaymentId: pix.providerPaymentId, ChangeType: 1 })
       expect(webhook.status).toBe(200)
 
       adapter.marcarPixComoPago(pix.providerPaymentId)
@@ -621,7 +623,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
   describe('webhook: segredo do header vem da config efetiva', () => {
     const post = (header: string | undefined) => {
       const req = request(app).post(`/api/webhooks/cielo/${PATH_TOKEN}`).send({ PaymentId: 'pagamento-desconhecido', ChangeType: 1 })
-      return header === undefined ? req : req.set('x-innoelektron-webhook-secret', header)
+      return header === undefined ? req : req.set('InnoFlowWebhookSecret', header)
     }
 
     it('banco (decifrado) > env: depois de gravar, só o segredo do banco vale; o do env deixa de valer; sem header e header errado = 401', async () => {

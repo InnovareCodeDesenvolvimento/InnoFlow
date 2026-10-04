@@ -169,6 +169,9 @@ const envSchema = z.object({
   CIELO_SOP_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
   CIELO_SOP_CLIENT_SECRET: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
   CIELO_SOP_OAUTH_TOKEN_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+  // C1.1: as 3 URLs do SOP (OAuth, emissão do AccessToken, script) têm DEFAULT por ambiente (`URLS_SOP` em `core/pagamentos/configGateway.ts`, as mesmas do
+  // Parque das Feiras). As 3 envs `CIELO_SOP_*_URL` são só OVERRIDE opcional (servidor falso em teste, URL canônica nova da Cielo) — não são requisito.
+  CIELO_SOP_ACCESS_TOKEN_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
   // Timeout de chamada — curto de propósito: o motorista está esperando num
   // HTTP síncrono (`POST /api/me/sessions/start`, decisão #2 da Nova), não
   // faz sentido segurá-lo por dezenas de segundos. Timeout NÃO deve disparar

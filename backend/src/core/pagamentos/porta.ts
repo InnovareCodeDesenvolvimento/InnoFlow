@@ -82,11 +82,9 @@ export interface ResultadoConsultaPix {
  * carregar o script do Silent Order Post da Cielo e tokenizar o cartão DIRETO
  * no navegador do motorista — o número nunca passa pelo nosso backend.
  *
- * `accessToken` é um token de sessão de curta duração — a doc consultada até
- * agora (ver `.claude/agent-memory/nova/cielo-fatos-verificados.md`) NÃO
- * confirma um endpoint OAuth para isto; o desenho segue o par `sopClientId`/
- * `sopClientSecretCiphertext` que o Cronos já previu em `PaymentGatewayConfig`
- * (client_credentials). Marcado "a confirmar" — ver `CieloAdapter.sessaoTokenizacao`.
+ * `accessToken` é o `AccessToken` do SOP (C1.1): resultado de DOIS passos no servidor — OAuth2 na Braspag (`client_credentials` com o par
+ * `sopClientId`/`sopClientSecret`) e depois `POST .../post/api/public/v2/accesstoken` (Bearer do passo 1 + `MerchantId`). NÃO é o token OAuth
+ * do passo 1. Ver `services/pagamentos/cieloSopOAuth.ts`.
  */
 export interface SessaoTokenizacao {
   accessToken: string

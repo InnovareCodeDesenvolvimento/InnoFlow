@@ -127,7 +127,7 @@ describe('calcularReadiness', () => {
   it('tudo vazio: lista cada requisito, na ordem estável do contrato; PIX não exige PAYMENT_SECRETS_KEY se nada está cifrado no banco', () => {
     const r = calcularReadiness(resolverEstadoEfetivo(null, { ...ENV_VAZIO, paymentSecretsKeyOk: false }), { ...ENV_VAZIO, paymentSecretsKeyOk: false })
     expect(r.pix.missing).toEqual(['MERCHANT_ID', 'MERCHANT_KEY', 'WEBHOOK_PATH_TOKEN', 'WEBHOOK_HEADER_SECRET'])
-    expect(r.card.missing).toEqual(['MERCHANT_ID', 'MERCHANT_KEY', 'SOP_CLIENT_ID', 'SOP_CLIENT_SECRET', 'SOP_SCRIPT_URL', 'SOP_OAUTH_TOKEN_URL', 'PAYMENT_SECRETS_KEY'])
+    expect(r.card.missing).toEqual(['MERCHANT_ID', 'MERCHANT_KEY', 'SOP_CLIENT_ID', 'SOP_CLIENT_SECRET', 'PAYMENT_SECRETS_KEY']) // C1.1: as URLs do SOP têm default por ambiente — não são mais requisito
   })
 
   it('PIX passa a exigir PAYMENT_SECRETS_KEY quando a chave Cielo (ou o segredo do webhook) está cifrada no banco', () => {

@@ -146,7 +146,7 @@ export interface ReadinessMeio {
  *    header (sem o segredo configurado o webhook fica inalcançável — o aleatório por processo não conta).
  *    `PAYMENT_SECRETS_KEY` só entra quando algum segredo que o Pix usa está CIFRADO no banco: Pix não cifra
  *    nada de cartão, mas sem a chave não dá para decifrar `merchantKey`/segredo do webhook que vieram do banco.
- *  - CARD: credencial + par SOP + script SOP + URL OAuth do SOP (`sessaoTokenizacao`) + `PAYMENT_SECRETS_KEY`
+ *  - CARD: credencial + par SOP (`sessaoTokenizacao`; as URLs do SOP vêm por ambiente, ver `URLS_SOP`) + `PAYMENT_SECRETS_KEY`
  *    SEMPRE (o `CardToken` do motorista é cifrado em repouso, F5.3).
  */
 export function calcularReadiness(estado: EstadoEfetivo, env: EnvGateway): { card: ReadinessMeio; pix: ReadinessMeio } {
@@ -168,8 +168,7 @@ export function calcularReadiness(estado: EstadoEfetivo, env: EnvGateway): { car
 
   if (!estado.sopClientId) faltandoCard.add('SOP_CLIENT_ID')
   if (!estado.temSopClientSecret) faltandoCard.add('SOP_CLIENT_SECRET')
-  if (!env.sopScriptUrl) faltandoCard.add('SOP_SCRIPT_URL')
-  if (!env.sopOauthTokenUrl) faltandoCard.add('SOP_OAUTH_TOKEN_URL')
+  // C1.1: as URLs do script e do OAuth do SOP têm DEFAULT por ambiente (`URLS_SOP`); as envs são só override opcional, então não são mais pré-requisito.
   if (!env.paymentSecretsKeyOk) faltandoCard.add('PAYMENT_SECRETS_KEY')
 
   const ordenar = (s: Set<RequisitoGateway>): RequisitoGateway[] => ORDEM_REQUISITOS.filter((r) => s.has(r))
@@ -339,6 +338,47 @@ export function verificarCoerenciaUrls(ambiente: AmbienteGateway, urls: Pick<Url
     if (ambiente === 'sandbox' && hostsProducaoOficiais.has(host)) return `ambiente "sandbox" mas ${nome} aponta para o host de PRODUÇÃO da Cielo (${host})`
   }
   return null
+}
+
+/**
+ * Silent Order Post (C1.1): URLs por ambiente — as MESMAS que rodam em produção no Parque das Feiras (F7/F8/F9 de
+ * `docs/GATEWAY-CIELO-PARQUE-VS-INNOFLOW.md`). `oauthToken` é o passo 1 (Braspag), `accessToken` o passo 2 (emite o AccessToken do navegador) e
+ * `script` o que a página isolada carrega. ATENÇÃO: o host do script de produção (`transaction.cieloecommerce.cielo.com.br`) é DIFERENTE do
+ * host da emissão do AccessToken (`transaction.pagador.com.br`) — não unificar. A doc oficial cita uma URL única de script
+ * (`www.pagador.com.br/...`); a do Parque é a que está provada em produção (P5 do documento: confirmar com a Cielo qual é a canônica).
+ */
+export const URLS_SOP: Record<AmbienteGateway, { oauthToken: string; accessToken: string; script: string }> = {
+  sandbox: {
+    oauthToken: 'https://authsandbox.braspag.com.br/oauth2/token',
+    accessToken: 'https://transactionsandbox.pagador.com.br/post/api/public/v2/accesstoken',
+    script: 'https://transactionsandbox.pagador.com.br/post/scripts/silentorderpost-1.0.min.js',
+  },
+  production: {
+    oauthToken: 'https://auth.braspag.com.br/oauth2/token',
+    accessToken: 'https://transaction.pagador.com.br/post/api/public/v2/accesstoken',
+    script: 'https://transaction.cieloecommerce.cielo.com.br/post/scripts/silentorderpost-1.0.min.js',
+  },
+}
+
+export interface UrlsSop {
+  oauthToken: string
+  accessToken: string
+  script: string
+}
+
+/** Default do ambiente; `CIELO_SOP_OAUTH_TOKEN_URL` / `CIELO_SOP_ACCESS_TOKEN_URL` / `CIELO_SOP_SCRIPT_URL` (env do servidor) continuam como override opcional (servidor falso em teste, URL canônica nova). */
+export function resolverUrlsSop(
+  ambiente: AmbienteGateway,
+  override: { oauthToken?: string | null | undefined; accessToken?: string | null | undefined; script?: string | null | undefined } = {},
+): UrlsSop {
+  const oauthToken = override.oauthToken?.trim()
+  const accessToken = override.accessToken?.trim()
+  const script = override.script?.trim()
+  return {
+    oauthToken: oauthToken ? oauthToken : URLS_SOP[ambiente].oauthToken,
+    accessToken: accessToken ? accessToken : URLS_SOP[ambiente].accessToken,
+    script: script ? script : URLS_SOP[ambiente].script,
+  }
 }
 
 /** `{base}/api/webhooks/cielo/{token}`; `null` sem token (a rota usa um aleatório por processo — inalcançável de fora). */

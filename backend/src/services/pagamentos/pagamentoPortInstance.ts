@@ -89,6 +89,7 @@ function construirAdaptadorCielo(config: ConfigEfetiva): PagamentoPort {
     CIELO_SOP_CLIENT_ID: estado.sopClientId ?? undefined,
     CIELO_SOP_CLIENT_SECRET: sopClientSecret,
     CIELO_SOP_OAUTH_TOKEN_URL: config.envGateway.sopOauthTokenUrl ?? undefined,
+    CIELO_SOP_ACCESS_TOKEN_URL: env.CIELO_SOP_ACCESS_TOKEN_URL,
   })
   cieloCache = { chave, adapter }
   logger.info(

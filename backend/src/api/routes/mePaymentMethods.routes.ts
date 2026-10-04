@@ -85,7 +85,7 @@ router.post(
   validateBody(meCreatePaymentMethodSchema),
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
-    const { cardToken, brand, makeDefault } = req.body as MeCreatePaymentMethodInput
+    const { cardToken, brand, makeDefault, last4: last4Enviado, expiryMonth: expiryMonthEnviado, expiryYear: expiryYearEnviado } = req.body as MeCreatePaymentMethodInput
 
     // F5.5: cartão desligado na tela do gateway => não cadastra cartão novo (checagem ANTES de qualquer chamada à Cielo).
     await assertMeioDePagamentoHabilitado('CARD', userId)
@@ -102,6 +102,8 @@ router.post(
     }
 
     // Resolver o adaptador FORA do try: gateway bloqueado/ilegível é 503 (indisponível), não "falha ao verificar o cartão" (502).
+    // C1.3: com a Cielo real a consulta é só enriquecimento e NUNCA lança (o `GET /1/card` não está confirmado) — `INVALID_CARD_TOKEN`/502 abaixo
+    // só valem para adaptadores que conseguem afirmar que o token é inválido (o FakeAdapter dos testes); a validade real do token se prova na 1ª pré-autorização.
     const pagamentoPort = await resolverPortOu503()
     let dadosCartao
     try {
@@ -123,10 +125,12 @@ router.post(
     // Cifra ANTES de qualquer log/erro subsequente poder tocar a variável —
     // `cardToken` em claro nunca é passado adiante depois deste ponto.
     const cieloCardTokenCiphertext = encryptPaymentSecret(cardToken)
-    // Brand da Cielo é a fonte de VERDADE quando disponível (não confirmado
-    // se `GET /1/card/{token}` devolve — ver `cieloAdapter.ts`); cai pro
-    // valor que o cliente mandou (resultado da própria tokenização) senão.
+    // C1.3: a Cielo é a fonte de VERDADE quando a consulta (opcional, melhor esforço) devolve dados; senão valem os que a página isolada enviou
+    // (o script do SOP não devolve bandeira nem final — a página os conhece do que o motorista digitou).
     const resolvedBrand = dadosCartao.brand ?? brand
+    const last4 = dadosCartao.last4 ?? last4Enviado ?? null
+    const expiryMonth = dadosCartao.expiryMonth ?? expiryMonthEnviado ?? null
+    const expiryYear = dadosCartao.expiryYear ?? expiryYearEnviado ?? null
 
     const created = await prisma.$transaction(async (tx) => {
       const activeCountAgora = await tx.paymentMethod.count({ where: { userId, active: true, environment } })
@@ -144,10 +148,10 @@ router.post(
           type: 'CREDIT_CARD',
           cieloCardTokenCiphertext,
           brand: resolvedBrand,
-          last4: dadosCartao.last4,
+          last4,
           holderName: dadosCartao.holderName,
-          expiryMonth: dadosCartao.expiryMonth,
-          expiryYear: dadosCartao.expiryYear,
+          expiryMonth,
+          expiryYear,
           isDefault: shouldBeDefault,
         },
       })
