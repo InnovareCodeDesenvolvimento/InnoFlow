@@ -1075,3 +1075,10 @@ Entregue e validado: schema (5 migrations: enums, colunas+CHECKs+índice do watc
 - **D1, D4, D5, D6:** padrões da Nova aceitos (espera de 2 h pelo carregador offline; 3 tentativas de parada e Reset manual pelo admin; duração máxima 24 h; textos ao motorista em `frontend/src/lib/sessionClosureCopy.ts`).
 - **M2 e M5 (perdas aceitas):** reconexão após queda longa (o servidor pode encerrar pela última amostra antes de o Stop verdadeiro chegar; a diferença cai em D3) e carregador que recusa a parada e fica mudo (sem cobrança por D2, só alerta de erro). Aceitas explicitamente.
 Nenhuma mudança de código ou de variável de ambiente é necessária: os padrões implementados já são estes.
+
+## Decisões do dono sobre os pagamentos Cielo (04/10/2026)
+
+- **I-7 (carding): SIM** — pagar com cartão exige identidade verificada (login com Google, ou conta de equipe) + limite de recusas por usuário/IP/dia com bloqueio temporário do modo cartão e alerta. Pix e carteira seguem abertos.
+- **Conta Cielo: a MESMA do Parque das Feiras** (contra a recomendação da Nova de EC próprio). Consequências assumidas: a URL de notificação do Site Cielo é UMA por EC e já pertence ao Parque → o InnoFlow NÃO cadastra webhook; o Pix é creditado por **polling** (consulta periódica dos Pix pendentes; o webhook sempre foi só uma dica); sem notificação de chargeback pelo InnoFlow; `MerchantKey`/IP confiáveis/extrato/modo da conta Pix compartilhados (rotacionar a chave num sistema exige rotacionar no outro no mesmo momento); `SoftDescriptor` próprio ("INNOFLOW") para distinguir na fatura. NÃO alterar a URL de notificação do Parque.
+- **Porta 9000 do OCPP: wss:// (TLS)** — passo a passo em `docs/DEPLOY-EASYPANEL.md` §4.
+- Demais sugestões (Nova/Órion/Vulcano) aceitas; seguem as implementações.
