@@ -12,6 +12,8 @@ import { useMePaymentMethods, useRemovePaymentMethod, useSetDefaultPaymentMethod
 import { useAddCardFlow } from "@/hooks/useAddCardFlow"
 import { getApiErrorMessage } from "@/services/api"
 import { CARD_GATEWAY_DISABLED_ADD_MESSAGE } from "@/lib/paymentMethodDisabled"
+import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
+import { disabledCardReason, issueFromEligibility } from "@/lib/cardEligibility"
 import { toast } from "sonner"
 import type { MePaymentMethodDTO } from "@/types/api"
 
@@ -38,6 +40,10 @@ export function Cartoes() {
   const setDefault = useSetDefaultPaymentMethod()
   const removeMethod = useRemovePaymentMethod()
   const [removing, setRemoving] = useState<MePaymentMethodDTO | null>(null)
+
+  // I-7: o que o servidor diz agora (GET) ou o que acabou de recusar ao tentar adicionar (403/429) - o mais recente manda.
+  const issue = addCardFlow.eligibilityIssue ?? issueFromEligibility(data?.cardEligibility)
+  const cardsDisabled = issue !== null
 
   const handleSetDefault = async (method: MePaymentMethodDTO) => {
     try {
@@ -73,10 +79,15 @@ export function Cartoes() {
         </div>
       </div>
 
-      <Button type="button" className="mt-4 w-full" loading={addCardFlow.isBusy} onClick={() => addCardFlow.start()}>
-        <Plus className="h-4 w-4" aria-hidden="true" />
-        Adicionar cartão
-      </Button>
+      {/* Sem identidade verificada ou bloqueado: NÃO se oferece "Adicionar cartão" - o card explica o motivo (Pix e carteira seguem normais). */}
+      {issue ? (
+        <CardEligibilityNotice issue={issue} className="mt-4" onLinked={addCardFlow.clearEligibilityIssue} />
+      ) : (
+        <Button type="button" className="mt-4 w-full" loading={addCardFlow.isBusy} onClick={() => addCardFlow.start()}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Adicionar cartão
+        </Button>
+      )}
       {addCardFlow.unavailable && (
         <p role="alert" data-testid="add-card-unavailable" className="mt-3 flex items-start gap-2 rounded-xl bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -95,7 +106,11 @@ export function Cartoes() {
         {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar seus cartões.")} onRetry={() => refetch()} />}
 
         {!isLoading && !isError && data && data.items.length === 0 && (
-          <EmptyState icon={CreditCard} title="Nenhum cartão cadastrado" description="Adicione um cartão para pagar as recargas sem digitar os dados toda vez." />
+          <EmptyState
+            icon={CreditCard}
+            title="Nenhum cartão cadastrado"
+            description={cardsDisabled ? "Quando o cartão estiver disponível, ele aparece aqui. Por enquanto, use o Pix ou a carteira." : "Adicione um cartão para pagar as recargas sem digitar os dados toda vez."}
+          />
         )}
 
         {!isLoading && !isError && data && data.items.length > 0 && (
@@ -105,21 +120,30 @@ export function Cartoes() {
               return (
                 <li
                   key={method.id}
+                  data-disabled={cardsDisabled || undefined}
                   className={`stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card`}
                 >
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
+                  <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ${cardsDisabled ? "opacity-50 grayscale" : ""}`} aria-hidden="true">
                     <CreditCard className="h-5 w-5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-2 text-sm font-bold text-ink">
+                    <p className={`flex items-center gap-2 text-sm font-bold ${cardsDisabled ? "text-ink-softer" : "text-ink"}`}>
                       {brandLabel(method.brand)} {method.last4 && <span className="font-normal text-ink-softer">•••• {method.last4}</span>}
                     </p>
                     <p className="text-xs text-ink-softer">
                       {method.holderName ? `${method.holderName}${exp ? " · " : ""}` : ""}
                       {exp ? `validade ${exp}` : ""}
                     </p>
+                    {issue && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Badge variant="neutral">Indisponível</Badge>
+                        <span className="text-xs font-medium text-ink-soft" data-testid="card-disabled-reason">
+                          {disabledCardReason(issue)}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  {method.isDefault && (
+                  {method.isDefault && !cardsDisabled && (
                     <Badge variant="primary" className="shrink-0">
                       <Star className="h-3 w-3" aria-hidden="true" />
                       Padrão
@@ -136,7 +160,7 @@ export function Cartoes() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {!method.isDefault && (
+                      {!method.isDefault && !cardsDisabled && (
                         <DropdownMenuItem onSelect={() => handleSetDefault(method)}>
                           <Star className="h-4 w-4" aria-hidden="true" />
                           Tornar padrão

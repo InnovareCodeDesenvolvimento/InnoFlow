@@ -21,6 +21,8 @@ import {
   type Scope,
 } from "./reportsAggregate"
 import {
+  cardEligibilityFor,
+  cardRefusalFor,
   createMockPaymentMethod,
   createMockTokenizationSession,
   createMockTopup,
@@ -32,6 +34,8 @@ import {
   getMockWallet,
   getPublicChargePointCard,
   isGatewayDisabledFor,
+  isMockDriverGoogleLinkable,
+  linkGoogleToMockDriver,
   listMockPaymentMethods,
   listMockSessions,
   removeMockPaymentMethod,
@@ -336,6 +340,22 @@ export const handlers = [
       }
       mockUsers.push(created)
       return HttpResponse.json({ token: fakeToken(created), user: toUserDTO(created) }, { status: 201 })
+    }
+    // I-7: o servidor real não olha o token (rota pública) - vincula pelo E-MAIL do Google, que tem de ser o da conta. O mock simula "Google do mesmo e-mail" pela conta
+    // logada que está na tela; `credential = "outro-email"` simula o Google de OUTRO e-mail (o servidor cria/entra em OUTRA conta).
+    const current = currentUser(request)
+    if (credential === "outro-email" || (credential === "mock-google-credential" && localStorage.getItem("mock:google-other-email") === "1")) {
+      const other: MockUser = { id: `user_google_${Date.now()}`, name: "Outra Conta Google", email: `outra.${Date.now()}@example.com`, role: "DRIVER", operatorId: null, operatorName: null, password: "" }
+      mockUsers.push(other)
+      return HttpResponse.json({ token: fakeToken(other), user: toUserDTO(other) }, { status: 201 })
+    }
+    if (current && isMockDriverGoogleLinkable(current.userId)) {
+      const linkable = mockUsers.find((u) => u.id === current.userId)
+      if (linkable) {
+        linkGoogleToMockDriver(linkable.id)
+        // Vincular zera a senha no servidor real (conta passa a ser só-Google) e devolve token novo.
+        return HttpResponse.json({ token: fakeToken(linkable), user: { ...toUserDTO(linkable), hasPassword: false } })
+      }
     }
     const driver = mockUsers.find((u) => u.role === "DRIVER" && u.id === "user_driver")
     if (!driver) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
@@ -1033,6 +1053,11 @@ export const handlers = [
       connectorId: number
       payment?: { mode: "WALLET" } | { mode: "CARD"; paymentMethodId: string }
     }
+    // I-7: só o pagamento com CARTÃO é recusado; carteira segue normal para a mesma conta.
+    if (body.payment?.mode === "CARD") {
+      const refusal = cardRefusalFor(scope.user.userId, localStorage.getItem("mock:card-refusal"))
+      if (refusal) return HttpResponse.json(refusal.body, { status: refusal.status, headers: refusal.headers })
+    }
     if (body.payment?.mode === "CARD" && isGatewayDisabledFor(scope.user.userId)) {
       return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     }
@@ -1132,12 +1157,14 @@ export const handlers = [
   http.get("/api/me/payment-methods", ({ request }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
-    return HttpResponse.json({ items: listMockPaymentMethods(scope.user.userId) })
+    return HttpResponse.json({ items: listMockPaymentMethods(scope.user.userId), cardEligibility: cardEligibilityFor(scope.user.userId) })
   }),
 
   http.post("/api/me/payment-methods/tokenization-session", ({ request }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
+    const refusal = cardRefusalFor(scope.user.userId, localStorage.getItem("mock:card-refusal"))
+    if (refusal) return HttpResponse.json(refusal.body, { status: refusal.status, headers: refusal.headers })
     if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     return HttpResponse.json(createMockTokenizationSession(scope.user.userId))
   }),
@@ -1153,6 +1180,8 @@ export const handlers = [
       expiryMonth?: unknown
       expiryYear?: unknown
     }
+    const refusal = cardRefusalFor(scope.user.userId, localStorage.getItem("mock:card-refusal"))
+    if (refusal) return HttpResponse.json(refusal.body, { status: refusal.status, headers: refusal.headers })
     if (isGatewayDisabledFor(scope.user.userId)) return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     const result = createMockPaymentMethod(scope.user.userId, body.cardToken, body.brand, body.makeDefault === true, body)
     if (!result.ok) {

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { useCreateTokenizationSession, useAddPaymentMethod } from "./useMePaymentMethods"
+import { useCreateTokenizationSession, useAddPaymentMethod, paymentMethodsKeys } from "./useMePaymentMethods"
 import { getApiErrorMessage } from "@/services/api"
 import { isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
+import { issueFromError, type CardEligibilityIssue } from "@/lib/cardEligibility"
 import type { MeCardTokenizationSessionResponse, MeCreatePaymentMethodRequest } from "@/types/api"
 import {
   CARD_TOKENIZATION_CHANNEL_SOURCE,
@@ -58,6 +60,9 @@ export function useAddCardFlow() {
   // `true` quando o ADMIN desligou o meio cartão (409 `PAYMENT_METHOD_DISABLED` + `GATEWAY_DISABLED`)
   // na criação da sessão de tokenização OU ao salvar o cartão. Estado local: some ao sair da tela.
   const [unavailable, setUnavailable] = useState(false)
+  // I-7: o servidor recusou por identidade não verificada (403) ou bloqueio temporário (429) - a tela mostra o card explicativo em vez de um toast de erro.
+  const [eligibilityIssue, setEligibilityIssue] = useState<CardEligibilityIssue | null>(null)
+  const queryClient = useQueryClient()
   const childRef = useRef<Window | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -78,12 +83,17 @@ export function useAddCardFlow() {
     if (status !== "idle") return
     setStatus("opening")
     setUnavailable(false)
+    setEligibilityIssue(null)
 
     let session: MeCardTokenizationSessionResponse | undefined
     try {
       session = await createSession.mutateAsync()
     } catch (err) {
-      if (isGatewayDisabledError(err)) setUnavailable(true)
+      const issue = issueFromError(err)
+      if (issue) {
+        setEligibilityIssue(issue)
+        void queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
+      } else if (isGatewayDisabledError(err)) setUnavailable(true)
       else toast.error("Não foi possível iniciar o cadastro do cartão.", { description: getApiErrorMessage(err) })
       setStatus("idle")
       return
@@ -114,7 +124,11 @@ export function useAddCardFlow() {
             toast.success("Cartão cadastrado.")
           })
           .catch((err: unknown) => {
-            if (isGatewayDisabledError(err)) setUnavailable(true)
+            const issue = issueFromError(err)
+            if (issue) {
+              setEligibilityIssue(issue)
+              void queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
+            } else if (isGatewayDisabledError(err)) setUnavailable(true)
             else toast.error("Não foi possível salvar o cartão.", { description: getApiErrorMessage(err) })
           })
           .finally(() => {
@@ -160,7 +174,7 @@ export function useAddCardFlow() {
         setStatus((s) => (s === "saving" ? s : "idle"))
       }
     }, 500)
-  }, [status, createSession, addPaymentMethod, cleanup])
+  }, [status, createSession, addPaymentMethod, cleanup, queryClient])
 
-  return { start, status, isBusy: status !== "idle", unavailable }
+  return { start, status, isBusy: status !== "idle", unavailable, eligibilityIssue, clearEligibilityIssue: () => setEligibilityIssue(null) }
 }

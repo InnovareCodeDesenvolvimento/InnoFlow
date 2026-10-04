@@ -42,7 +42,16 @@ function GoogleGlyph() {
  * não reserva nada — a config é buscada antes da tela montar
  * (`lib/prefetchPublicConfig.ts`), então quase sempre já está no cache.
  */
-export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => void }) {
+export function GoogleAuthSection({
+  onSuccess,
+  showDivider = true,
+  className,
+}: {
+  onSuccess: (user: User) => void
+  /** `false` fora de Login/Cadastro (ex.: vincular o Google a uma conta já logada): sem o "ou continue com e-mail". */
+  showDivider?: boolean
+  className?: string
+}) {
   const { data: config, isLoading: configLoading } = usePublicConfig()
   const googleLogin = useAuthStore((s) => s.googleLogin)
 
@@ -159,7 +168,7 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
   const ready = USE_MOCK_GOOGLE ? enabled : rendered
 
   return (
-    <div className="mt-6 space-y-4">
+    <div className={cn("space-y-4", className ?? "mt-6")}>
       <div ref={containerRef} className={cn("relative w-full", BUTTON_AREA)} aria-busy={!ready}>
         {!ready && <Skeleton className="absolute inset-0 rounded-full" />}
 
@@ -197,7 +206,7 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
         </p>
       )}
 
-      {USE_MOCK_GOOGLE && enabled && (
+      {USE_MOCK_GOOGLE && enabled && showDivider && (
         <button
           type="button"
           onClick={() => void handleCredential("bloqueado")}
@@ -208,11 +217,13 @@ export function GoogleAuthSection({ onSuccess }: { onSuccess: (user: User) => vo
         </button>
       )}
 
-      <div className="flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" aria-hidden="true" />
-        <span className="text-xs font-semibold text-ink-softer">ou continue com e-mail</span>
-        <span className="h-px flex-1 bg-border" aria-hidden="true" />
-      </div>
+      {showDivider && (
+        <div className="flex items-center gap-3">
+          <span className="h-px flex-1 bg-border" aria-hidden="true" />
+          <span className="text-xs font-semibold text-ink-softer">ou continue com e-mail</span>
+          <span className="h-px flex-1 bg-border" aria-hidden="true" />
+        </div>
+      )}
     </div>
   )
 }

@@ -79,6 +79,11 @@ export const mockUsers: MockUser[] = [
   // C1.2: sessão de tokenização com `scriptUrl` do SOP REAL (host da Cielo) em vez do marcador `mock` - exercita no E2E o caminho
   // `bpSop_silentOrderPost` (o script em si é interceptado/substituído pelo teste; nada vai à Cielo). Conta separada de propósito, como as outras.
   { id: "user_driver_sop_real", name: "Sônia SOP", email: "sop-real@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // I-7 (cartão exige identidade verificada): conta só com SENHA (nunca entrou pelo Google) - `cardEligibility` volta GOOGLE_LOGIN_REQUIRED até vincular o Google
+  // (o mock vincula ao clicar em "Continuar com o Google (mock)" ESTANDO logada nesta conta). Nasce com 2 cartões, que a tela mostra desabilitados.
+  { id: "user_driver_so_senha", name: "Sofia Só-Senha", email: "so-senha@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  // I-7: bloqueio TEMPORÁRIO por recusas em excesso (`TEMPORARILY_BLOCKED`, `blockedUntil` = ~47 min depois de a página carregar). Nasce com 1 cartão.
+  { id: "user_driver_bloqueado", name: "Bruno Bloqueado", email: "bloqueado-cartao@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
 ]
 

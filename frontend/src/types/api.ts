@@ -991,6 +991,10 @@ export type MeStartSessionErrorCode =
   | "PAYMENT_METHOD_DISABLED"
   | "CARD_AUTHORIZATION_DENIED"
   | "PAYMENT_GATEWAY_UNAVAILABLE"
+  /** I-7: `payment.mode = "CARD"` sem identidade verificada (login Google) — 403. Carteira/Pix seguem normais. */
+  | "CARD_REQUIRES_VERIFIED_IDENTITY"
+  /** I-7: cartão bloqueado por recusas em excesso — 429 com `Retry-After` e `details: { blockedUntil }`. */
+  | "CARD_TEMPORARILY_BLOCKED"
 
 /**
  * Forma de pagamento usada na sessão (F5.4) — `card` só existe quando
@@ -1222,8 +1226,21 @@ export interface MePaymentMethodDTO {
 }
 
 // ---- GET /api/me/payment-methods ----
+/**
+ * I-7 (decisão do dono, 04/10/2026): pagar com CARTÃO exige identidade verificada (login com Google, ou conta de equipe) e some por um tempo se houver
+ * recusas em excesso (suspeita de teste de cartões roubados). Pix e carteira NÃO são afetados. `eligible=false` -> a tela explica o motivo em vez de oferecer
+ * "Adicionar cartão"/"Pagar com cartão"; o servidor também recusa (403 `CARD_REQUIRES_VERIFIED_IDENTITY` / 429 `CARD_TEMPORARILY_BLOCKED`).
+ */
+export type CardEligibilityReason = "GOOGLE_LOGIN_REQUIRED" | "TEMPORARILY_BLOCKED"
+export interface CardEligibility {
+  eligible: boolean
+  reason: CardEligibilityReason | null
+  /** ISO — só quando `reason = "TEMPORARILY_BLOCKED"`. */
+  blockedUntil: string | null
+}
 export interface MePaymentMethodsResponse {
   items: MePaymentMethodDTO[]
+  cardEligibility: CardEligibility
 }
 
 // ---- POST /api/me/payment-methods/tokenization-session ----
@@ -1269,6 +1286,8 @@ export type MePaymentMethodErrorCode =
   | "TOO_MANY_PAYMENT_METHODS"
   | "PAYMENT_METHOD_NOT_FOUND"
   | "PAYMENT_GATEWAY_UNAVAILABLE" // 503 — configuração do gateway ilegível (GET/POST) ou ambiente mudou durante a verificação do cartão (POST)
+  | "CARD_REQUIRES_VERIFIED_IDENTITY" // 403 — I-7: cartão só com login Google (ou equipe); vale também em tokenization-session e ao iniciar sessão com paymentMode CARD
+  | "CARD_TEMPORARILY_BLOCKED" // 429 (com `Retry-After`) — I-7: recusas em excesso; `details: { blockedUntil }`
 
 // ---- PATCH /api/me/payment-methods/:id { isDefault: true } -> MePaymentMethodDTO ----
 export interface MeUpdatePaymentMethodRequest {

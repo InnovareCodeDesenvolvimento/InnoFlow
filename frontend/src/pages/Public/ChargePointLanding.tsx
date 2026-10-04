@@ -17,6 +17,8 @@ import { useMePaymentMethods, paymentMethodsKeys } from "@/hooks/useMePaymentMet
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
 import { CARD_GATEWAY_DISABLED_START_MESSAGE, isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
+import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
+import { issueErrorMessage, issueFromEligibility, issueFromError, type CardEligibilityIssue } from "@/lib/cardEligibility"
 import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
 // Variante pequena (128×128, ~16kB) do ícone — a original (512×512, ~140kB)
 // é overkill para um `h-7 w-7` no hero e pesava sozinha mais que todo o JS
@@ -79,11 +81,16 @@ export function ChargePointLanding() {
   // nesta sessão da tela, o seletor some e a seleção efetiva é sempre Carteira. Estado local
   // de propósito (não é do servidor nem compartilhado): recarregar a página tenta o cartão de novo.
   const [cardGatewayDisabled, setCardGatewayDisabled] = useState(false)
+  // I-7: cartão exige identidade verificada (login Google) e some por um tempo depois de recusas em excesso. Vem do GET (`cardEligibility`) e, se o
+  // servidor recusar ao iniciar (403/429 - o bloqueio pode ter começado depois do GET), do próprio erro; o que o servidor acabou de dizer manda.
+  // Carteira e Pix não são afetados: com problema de cartão a seleção efetiva é sempre Carteira e o botão "Iniciar recarga" segue normal.
+  const [serverCardIssue, setServerCardIssue] = useState<CardEligibilityIssue | null>(null)
+  const cardIssue = serverCardIssue ?? issueFromEligibility(paymentMethodsData?.cardEligibility)
   const defaultPaymentMethod = paymentMethods.find((m) => m.isDefault)
   const paymentSelectionIsValid =
     !!userPaymentSelection &&
     (userPaymentSelection.mode === "WALLET" || paymentMethods.some((m) => m.id === userPaymentSelection.paymentMethodId))
-  const paymentSelection: PaymentSelection = cardGatewayDisabled
+  const paymentSelection: PaymentSelection = cardGatewayDisabled || cardIssue
     ? { mode: "WALLET" }
     : paymentSelectionIsValid && userPaymentSelection
       ? userPaymentSelection
@@ -114,6 +121,14 @@ export function ChargePointLanding() {
         return
       }
       const code = getApiErrorCode(err)
+      const issue = issueFromError(err)
+      if (issue) {
+        // 403 CARD_REQUIRES_VERIFIED_IDENTITY / 429 CARD_TEMPORARILY_BLOCKED: o seletor some, o card explica e a carteira fica selecionada.
+        setServerCardIssue(issue)
+        queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
+        setStartError(issueErrorMessage(issue))
+        return
+      }
       if (code === "PAYMENT_METHOD_NOT_FOUND") {
         // Cartão pode ter sido removido em outra aba — recarrega a lista (a
         // seleção derivada acima volta sozinha pro padrão/Carteira) e pede
@@ -357,7 +372,8 @@ export function ChargePointLanding() {
                             {CARD_GATEWAY_DISABLED_START_MESSAGE}
                           </p>
                         )}
-                        {paymentMethods.length > 0 && !cardGatewayDisabled && (
+                        {cardIssue && (paymentMethods.length > 0 || serverCardIssue) && <CardEligibilityNotice issue={cardIssue} onLinked={() => setServerCardIssue(null)} />}
+                        {paymentMethods.length > 0 && !cardGatewayDisabled && !cardIssue && (
                           <PaymentMethodSelector methods={paymentMethods} value={paymentSelection} onChange={setUserPaymentSelection} />
                         )}
                         {paymentSelection.mode === "CARD" && (
