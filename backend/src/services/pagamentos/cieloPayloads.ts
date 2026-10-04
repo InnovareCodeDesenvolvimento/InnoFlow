@@ -2,6 +2,7 @@ import type { PedidoAutorizacaoCartao, PedidoPix } from '../../core/pagamentos/t
 import type { RespostaPagamentoCielo } from '../../core/pagamentos/normalizarStatusCielo'
 import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
 import { normalizarIdentificadorAdquirente, type IdentificadoresAdquirente } from '../../core/pagamentos/identificadoresAdquirente'
+import { paraMerchantOrderIdDaCielo } from '../../core/pagamentos/merchantOrderId'
 import { higienizarSoftDescriptor } from '../../core/pagamentos/softDescriptor'
 
 /**
@@ -32,7 +33,7 @@ export interface CieloSalePayload {
 
 export function montarPayloadAutorizacaoCartao(pedido: PedidoAutorizacaoCartao): CieloSalePayload {
   return {
-    MerchantOrderId: pedido.merchantOrderId,
+    MerchantOrderId: paraMerchantOrderIdDaCielo(pedido.merchantOrderId), // prefixo IF-: conta compartilhada com o Parque (ver core/pagamentos/merchantOrderId.ts)
     Customer: {
       Name: pedido.cliente.name,
       ...(pedido.cliente.identity ? { Identity: pedido.cliente.identity, IdentityType: 'CPF' } : {}),
@@ -69,7 +70,7 @@ export interface CieloPixPayload {
 
 export function montarPayloadPix(pedido: PedidoPix): CieloPixPayload {
   return {
-    MerchantOrderId: pedido.merchantOrderId,
+    MerchantOrderId: paraMerchantOrderIdDaCielo(pedido.merchantOrderId), // prefixo IF-: conta compartilhada com o Parque (ver core/pagamentos/merchantOrderId.ts)
     Customer: {
       Name: pedido.cliente.name,
       ...(pedido.cliente.identity ? { Identity: pedido.cliente.identity, IdentityType: 'CPF' } : {}),

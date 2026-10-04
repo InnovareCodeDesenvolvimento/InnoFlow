@@ -118,6 +118,12 @@ describe('meioHabilitadoParaNovosPagamentos', () => {
 })
 
 describe('calcularReadiness', () => {
+  it('Pix pronto SEM webhook (nem token do caminho nem segredo do header): é o modo da conta compartilhada', () => {
+    const e = { ...ENV_COMPLETO, webhookPathToken: null, temWebhookHeaderSecret: false }
+    const r = calcularReadiness(resolverEstadoEfetivo(null, e), e)
+    expect(r.pix).toEqual({ ready: true, missing: [] })
+  })
+
   it('env completo: os dois meios prontos', () => {
     const r = calcularReadiness(resolverEstadoEfetivo(null, ENV_COMPLETO), ENV_COMPLETO)
     expect(r.card).toEqual({ ready: true, missing: [] })
@@ -126,7 +132,7 @@ describe('calcularReadiness', () => {
 
   it('tudo vazio: lista cada requisito, na ordem estável do contrato; PIX não exige PAYMENT_SECRETS_KEY se nada está cifrado no banco', () => {
     const r = calcularReadiness(resolverEstadoEfetivo(null, { ...ENV_VAZIO, paymentSecretsKeyOk: false }), { ...ENV_VAZIO, paymentSecretsKeyOk: false })
-    expect(r.pix.missing).toEqual(['MERCHANT_ID', 'MERCHANT_KEY', 'WEBHOOK_PATH_TOKEN', 'WEBHOOK_HEADER_SECRET'])
+    expect(r.pix.missing).toEqual(['MERCHANT_ID', 'MERCHANT_KEY']) // conta compartilhada com o Parque: o webhook NÃO é mais pré-requisito do Pix (crédito por polling)
     expect(r.card.missing).toEqual(['MERCHANT_ID', 'MERCHANT_KEY', 'SOP_CLIENT_ID', 'SOP_CLIENT_SECRET', 'PAYMENT_SECRETS_KEY']) // C1.1: as URLs do SOP têm default por ambiente — não são mais requisito
   })
 
@@ -168,7 +174,7 @@ describe('avaliarMudancaDeConfig', () => {
 
   it('sandbox -> production confirmado, com meio habilitado e NÃO pronto: GATEWAY_NOT_READY lista o que falta', () => {
     const r = avaliar(linha(), linha({ environment: 'production', pixEnabled: true }), ENV_VAZIO, true)
-    expect(r).toEqual({ kind: 'GATEWAY_NOT_READY', missing: ['MERCHANT_ID', 'MERCHANT_KEY', 'WEBHOOK_PATH_TOKEN', 'WEBHOOK_HEADER_SECRET'] })
+    expect(r).toEqual({ kind: 'GATEWAY_NOT_READY', missing: ['MERCHANT_ID', 'MERCHANT_KEY'] })
   })
 
   it('sandbox -> production confirmado e meios desligados: passa (nada habilitado para ficar pronto)', () => {
@@ -217,10 +223,11 @@ describe('avaliarMudancaDeConfig', () => {
     expect(avaliar(linha({ pixEnabled: true }), linha({ pixEnabled: true, sopClientId: 'novo-sop' }), env)).toBeNull()
   })
 
-  it('...mas virar production com esse meio quebrado habilitado bloqueia (production exige o estado resultante pronto)', () => {
-    const env = { ...ENV_COMPLETO, webhookPathToken: null }
-    const r = avaliar(linha({ pixEnabled: true }), linha({ pixEnabled: true, environment: 'production' }), env, true)
-    expect(r).toEqual({ kind: 'GATEWAY_NOT_READY', missing: ['WEBHOOK_PATH_TOKEN'] })
+  it('MUDANÇA DELIBERADA (conta Cielo compartilhada, 04/10/2026): virar production SEM webhook configurado NÃO bloqueia — o Pix é creditado por polling; só a falta de credencial bloqueia', () => {
+    const env = { ...ENV_COMPLETO, webhookPathToken: null, temWebhookHeaderSecret: false }
+    expect(avaliar(linha({ pixEnabled: true }), linha({ pixEnabled: true, environment: 'production' }), env, true)).toBeNull()
+    const semCredencial = { ...ENV_VAZIO }
+    expect(avaliar(linha({ pixEnabled: true }), linha({ pixEnabled: true, environment: 'production' }), semCredencial, true)).toEqual({ kind: 'GATEWAY_NOT_READY', missing: ['MERCHANT_ID', 'MERCHANT_KEY'] })
   })
 })
 

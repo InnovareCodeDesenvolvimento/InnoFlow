@@ -68,7 +68,7 @@ describe('CieloAdapter.autorizar', () => {
       }
       // Reconciliação: GET .../sales?merchantOrderId=... no host de consulta.
       expect(path).toContain('apiquery.example.test')
-      expect(path).toContain('merchantOrderId=intent-1')
+      expect(path).toContain('merchantOrderId=IF-intent-1')
       return fakeResponse(200, { MerchantOrderId: 'intent-1', Payments: [{ PaymentId: 'p1', Status: 1, ReturnCode: '00', Amount: 5000 }] })
     }) as typeof fetch
 

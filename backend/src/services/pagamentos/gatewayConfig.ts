@@ -1,3 +1,4 @@
+import { exigirCartaoElegivel } from './elegibilidadeCartao'
 import type { PaymentGatewayConfig } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { env } from '../../lib/env'
@@ -210,7 +211,7 @@ export function resetAvisoSegredosIlegiveisParaTeste(): void {
  * Config ilegível => 503 `PAYMENT_GATEWAY_UNAVAILABLE` (fail-closed). Só COMEÇOS novos (cartão novo, pré-auth, Pix novo): captura, cancelamento,
  * webhook, varredores e Pix já pago NUNCA passam por aqui — dinheiro em trânsito precisa liquidar; a carteira também nunca é bloqueada.
  */
-export async function assertMeioDePagamentoHabilitado(meio: MeioPagamento, userId: string): Promise<void> {
+export async function assertMeioDePagamentoHabilitado(meio: MeioPagamento, userId: string, opcoes: { ip?: string | null } = {}): Promise<void> {
   let config: ConfigEfetiva
   try {
     config = await getConfigEfetiva()
@@ -230,5 +231,7 @@ export async function assertMeioDePagamentoHabilitado(meio: MeioPagamento, userI
       throw new AppError(mensagem, 409, 'PAYMENT_METHOD_DISABLED', [{ method: meio, reason: 'SANDBOX_RESTRICTED' }])
     }
   }
+  // I-7: identidade verificada + bloqueio por recusas — só CARTÃO (Pix e carteira nunca passam por aqui). Depois dos 409 acima, para não mudar a ordem de erros de quem já depende dela.
+  if (meio === 'CARD') await exigirCartaoElegivel(userId, opcoes.ip)
 }
 

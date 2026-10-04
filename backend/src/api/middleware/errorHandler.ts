@@ -16,6 +16,8 @@ export class AppError extends Error {
     public code: string = 'ERROR',
     // Array (lista de pendências/itens) OU objeto (`GATEWAY_HAS_INFLIGHT_PAYMENTS`: `{ count }`, contrato literal de `PaymentGatewayConfigErrorCode`).
     public details?: Array<Record<string, unknown> | string> | Record<string, unknown>,
+    /** Headers extras da resposta de erro (ex.: `Retry-After` do 429 `CARD_TEMPORARILY_BLOCKED`). */
+    public headers?: Record<string, string>,
   ) {
     super(message)
     this.name = 'AppError'
@@ -36,6 +38,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   }
 
   if (err instanceof AppError) {
+    if (err.headers) for (const [nome, valor] of Object.entries(err.headers)) res.setHeader(nome, valor)
     res.status(err.statusCode).json({
       error: err.message,
       code: err.code,

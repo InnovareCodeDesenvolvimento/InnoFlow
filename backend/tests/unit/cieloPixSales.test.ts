@@ -17,7 +17,7 @@ describe('montarPayloadPix', () => {
   it('formato EXATO da doc: Type Pix, Provider Cielo2, Payment.QrCode.Expiration (objeto aninhado) — e NADA de QrCodeExpiration', () => {
     const payload = montarPayloadPix({ ...PEDIDO, expiresInSeconds: 1800 })
     expect(payload).toEqual({
-      MerchantOrderId: 'topup-1',
+      MerchantOrderId: 'IF-topup-1', // prefixo da conta compartilhada com o Parque
       Customer: { Name: 'Motorista Teste', Identity: '12345678909', IdentityType: 'CPF' },
       Payment: { Type: 'Pix', Amount: 1000, Provider: 'Cielo2', QrCode: { Expiration: 1800 } },
     })

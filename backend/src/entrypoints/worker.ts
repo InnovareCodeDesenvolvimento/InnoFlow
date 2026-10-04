@@ -3,6 +3,7 @@ import { logger } from '../lib/logger'
 import { startLiquidarSessaoWorker } from '../worker/jobs/liquidarSessaoJob'
 import { startCreditarTopupPixWorker } from '../worker/jobs/creditarTopupPixJob'
 import { startExpirarTopupsPixWorker, scheduleExpirarTopupsPixScan } from '../worker/jobs/expirarTopupsPixJob'
+import { startPollTopupsPixWorker, schedulePollTopupsPixScan } from '../worker/jobs/pollTopupsPixJob'
 import { startCapturarSessaoCartaoWorker } from '../worker/jobs/capturarSessaoCartaoJob'
 import { startVarrerPreAutorizacoesCartaoWorker, scheduleVarrerPreAutorizacoesCartaoScan } from '../worker/jobs/varrerPreAutorizacoesCartaoJob'
 import { startVigiarSessoesWorker, scheduleVigiarSessoesScan } from '../worker/jobs/vigiarSessoesJob'
@@ -18,6 +19,10 @@ startLiquidarSessaoWorker()
 startCreditarTopupPixWorker()
 startExpirarTopupsPixWorker()
 scheduleExpirarTopupsPixScan().catch((err) => logger.error({ err }, '[worker] falha ao agendar a varredura de expiração de Pix — o worker segue de pé, mas sem varredura automática até reiniciar'))
+
+// Conta Cielo COMPARTILHADA com o Parque (04/10/2026): sem webhook do InnoFlow, o Pix pago é descoberto por POLLING (backoff por intent, ver services/pagamentos/pollTopupsPix.ts).
+startPollTopupsPixWorker()
+schedulePollTopupsPixScan().catch((err) => logger.error({ err }, '[worker] falha ao agendar o polling de Pix — o worker segue de pé, mas sem crédito automático por polling até reiniciar'))
 
 // F5.4 (Vega, 2026-09-30): sessão de recarga cobrando de cartão — captura
 // parcial (disparada por finalizarSessao ao marcar CAPTURE_PENDING) + rede de

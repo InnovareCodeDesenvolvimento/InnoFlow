@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
+import { avaliarElegibilidadeCartao, registrarTentativaDeCadastroDeCartao } from '../../services/pagamentos/elegibilidadeCartao'
 import { getPagamentoPort, isUsandoFakeAdapter } from '../../services/pagamentos/pagamentoPortInstance'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../../services/pagamentos/gatewayConfig'
 import { encryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
@@ -53,7 +54,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
     // F5.5: cartão desligado na tela do gateway => nem sessão de tokenização (cadastro de cartão novo).
-    await assertMeioDePagamentoHabilitado('CARD', userId)
+    await assertMeioDePagamentoHabilitado('CARD', userId, { ip: req.ip })
     let sessao
     try {
       sessao = await (await getPagamentoPort()).sessaoTokenizacao()
@@ -90,7 +91,9 @@ router.post(
     const { cardToken, brand, makeDefault, last4: last4Enviado, expiryMonth: expiryMonthEnviado, expiryYear: expiryYearEnviado } = req.body as MeCreatePaymentMethodInput
 
     // F5.5: cartão desligado na tela do gateway => não cadastra cartão novo (checagem ANTES de qualquer chamada à Cielo).
-    await assertMeioDePagamentoHabilitado('CARD', userId)
+    await assertMeioDePagamentoHabilitado('CARD', userId, { ip: req.ip })
+    // I-7: conta o cadastro TENTADO (mesmo que falhe depois) — 10 por dia por padrão; o bloqueio vale na PRÓXIMA tentativa.
+    await registrarTentativaDeCadastroDeCartao({ userId, ip: req.ip })
 
     // O cartão nasce com o ambiente EFETIVO (explícito: a coluna tem DEFAULT SANDBOX e esquecer isto em produção rotularia token real como teste).
     const environment = await getAmbienteEfetivoParaBancoOu503()
@@ -182,7 +185,9 @@ router.get(
       where: { userId, active: true, environment },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     })
-    res.json({ items: items.map(toMePaymentMethodDto) })
+    // I-7: a lista continua mostrando os cartões já cadastrados de quem não é elegível (inutilizáveis); `cardEligibility` diz se PODE pagar/cadastrar agora e por que não.
+    const cardEligibility = await avaliarElegibilidadeCartao(userId, req.ip)
+    res.json({ items: items.map(toMePaymentMethodDto), cardEligibility })
   }),
 )
 

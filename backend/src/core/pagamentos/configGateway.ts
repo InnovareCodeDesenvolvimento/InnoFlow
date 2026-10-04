@@ -142,8 +142,7 @@ export interface ReadinessMeio {
 
 /**
  * Pré-requisitos por meio, conferidos contra o código (F5.5):
- *  - PIX: credencial (`criarPix`/`consultarPix`), caminho do webhook (`/api/webhooks/cielo/:token`) e segredo do
- *    header (sem o segredo configurado o webhook fica inalcançável — o aleatório por processo não conta).
+ *  - PIX: credencial (`criarPix`/`consultarPix`). O webhook é OPCIONAL (conta compartilhada: crédito por polling).
  *    `PAYMENT_SECRETS_KEY` só entra quando algum segredo que o Pix usa está CIFRADO no banco: Pix não cifra
  *    nada de cartão, mas sem a chave não dá para decifrar `merchantKey`/segredo do webhook que vieram do banco.
  *  - CARD: credencial + par SOP (`sessaoTokenizacao`; as URLs do SOP vêm por ambiente, ver `URLS_SOP`) + `PAYMENT_SECRETS_KEY`
@@ -162,8 +161,9 @@ export function calcularReadiness(estado: EstadoEfetivo, env: EnvGateway): { car
     faltandoCard.add('MERCHANT_KEY')
   }
 
-  if (!env.webhookPathToken) faltandoPix.add('WEBHOOK_PATH_TOKEN')
-  if (!estado.temWebhookHeaderSecret) faltandoPix.add('WEBHOOK_HEADER_SECRET')
+  // Conta Cielo COMPARTILHADA com o Parque (decisão do dono, 04/10/2026): a URL de notificação do Site Cielo é UMA por estabelecimento e é do Parque, então o InnoFlow NÃO usa webhook — o
+  // Pix é creditado por POLLING (`services/pagamentos/pollTopupsPix.ts`). O webhook (token do caminho + segredo do header) deixou de ser pré-requisito do Pix; se estiver configurado, continua
+  // funcionando como DICA que adianta a reconsulta. Os códigos WEBHOOK_PATH_TOKEN / WEBHOOK_HEADER_SECRET seguem na união do contrato do frontend, mas esta função não os emite mais.
   if ((estado.origem.merchant === 'database' || estado.origem.webhookHeaderSecret === 'database') && !env.paymentSecretsKeyOk) faltandoPix.add('PAYMENT_SECRETS_KEY')
 
   if (!estado.sopClientId) faltandoCard.add('SOP_CLIENT_ID')
@@ -275,7 +275,25 @@ export interface IdentidadeParaTestador {
 export function identidadeEhTestador(usuario: IdentidadeParaTestador | null | undefined, testadores: ReadonlySet<string>): boolean {
   if (!usuario) return false
   if (!emailEhTestador(usuario.email, testadores)) return false
+  return identidadeVerificada(usuario)
+}
+
+/**
+ * REGRA ÚNICA de "identidade verificada" (F5.8 ALTO-2 e I-7 da auditoria): `googleSub != null` (o Google entregou o e-mail verificado) OU role diferente de DRIVER (staff é criado pelo
+ * admin/seed, nunca se auto-registra). `POST /api/auth/register` NÃO confirma o e-mail, então um DRIVER só com senha NÃO é verificado. Usada por `identidadeEhTestador` (sandbox) e por
+ * `cartaoLiberadoParaUsuario` (pagar com cartão) — uma definição só, para as duas não divergirem.
+ */
+export function identidadeVerificada(usuario: Pick<IdentidadeParaTestador, 'googleSub' | 'role'> | null | undefined): boolean {
+  if (!usuario) return false
   return usuario.role !== 'DRIVER' || Boolean(usuario.googleSub)
+}
+
+/**
+ * I-7 (decisão do dono, 04/10/2026): pagar com CARTÃO exige identidade verificada — entre com Google. O cadastro por e-mail/senha não confirma o e-mail, e o cartão roubado testado em
+ * contas descartáveis é o risco que a Cielo cobra (recusas, chargeback). Pix e carteira não são afetados.
+ */
+export function cartaoLiberadoParaUsuario(usuario: Pick<IdentidadeParaTestador, 'googleSub' | 'role'> | null | undefined): boolean {
+  return identidadeVerificada(usuario)
 }
 
 /** `AmbienteGateway` (minúsculo, coluna String de `PaymentGatewayConfig`) -> enum `PaymentEnvironment` do Prisma (maiúsculo, `PaymentIntent`/`PaymentMethod`). */

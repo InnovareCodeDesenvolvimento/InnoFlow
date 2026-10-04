@@ -15,6 +15,7 @@ import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
 import { identificadoresParaGravar } from '../../core/pagamentos/identificadoresAdquirente'
 import { CieloHttpError } from '../pagamentos/cieloHttpClient'
+import { registrarRecusaDeCartao } from '../pagamentos/elegibilidadeCartao'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../pagamentos/gatewayConfig'
 import { criarPaymentIntentNoAmbienteEfetivo } from '../pagamentos/criarIntentNoAmbiente'
 
@@ -35,6 +36,8 @@ export interface IniciarSessaoRemotaParams {
   connectorId: number
   /** Já resolvido pelo chamador — admin valida que o `userId` do body existe e é DRIVER antes de chamar; a rota do motorista usa sempre `req.user!.userId`. */
   userId: string
+  /** IP do cliente (só para o controle de abuso do cartão — contador de recusas por IP). Opcional: admin/OCPP não têm. */
+  clientIp?: string | null
   /** Ausente = WALLET (retrocompatível — o remote-start do admin nunca manda isto, F5.4). */
   payment?: SessaoPaymentInput
 }
@@ -78,11 +81,11 @@ export interface IniciarSessaoRemotaResultado {
  * WALLET — CARD não olha `walletBalanceCents` pra decidir se pode começar.
  */
 export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Promise<IniciarSessaoRemotaResultado> {
-  const { chargePointId, chargePointScope, connectorId, userId, payment } = params
+  const { chargePointId, chargePointScope, connectorId, userId, payment, clientIp } = params
   const mode = payment?.mode ?? 'WALLET'
 
   // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED ANTES de qualquer efeito (nem PaymentIntent, nem pré-auth). Só COMEÇOS novos: a carteira não passa por aqui.
-  if (mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD', userId)
+  if (mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD', userId, { ip: clientIp })
 
   const chargePoint = await prisma.chargePoint.findFirst({ where: { id: chargePointId, ...chargePointScope } })
   if (!chargePoint) throw new AppError('Charge point não encontrado.', 404, 'CHARGE_POINT_NOT_FOUND')
@@ -204,6 +207,8 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
         amountRequestedCents: estimatedMaxCostCents,
         cartao: { cardToken, brand: paymentMethod.brand ?? undefined },
         cliente: { name: user?.name ?? 'Motorista InnoElektron' },
+        // Conta Cielo COMPARTILHADA com o Parque das Feiras: o descritor distingue a cobrança do InnoFlow na fatura (higienizado A-Z0-9, até 13, no payload).
+        softDescriptor: env.CIELO_SOFT_DESCRIPTOR,
       })
     } catch (err) {
       // I-4: 4xx DEFINITIVO da Cielo (`REQUISICAO_RECUSADA`: token do cartão inválido/expirado/lixo, payload recusado) NÃO é "gateway indisponível": repetir não adianta e o motorista ficaria
@@ -212,6 +217,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       if (err instanceof CieloHttpError && err.tipo === 'REQUISICAO_RECUSADA') {
         await prisma.paymentIntent.update({ where: { id: intent.id }, data: { status: 'DENIED', failureReason: 'Requisição de autorização recusada pela Cielo (cartão não aceito).' } })
         logger.error({ alert: 'payment_authorization_request_refused', paymentIntentId: intent.id, userId, httpStatus: err.httpStatus, codigos: err.codigos }, '[sessao] a Cielo recusou a REQUISIÇÃO de pré-autorização (4xx definitivo) — cartão salvo inválido ou payload nosso incorreto')
+        await registrarRecusaDeCartao({ userId, ip: clientIp }) // I-7: recusa da Cielo conta para o bloqueio por carding
         throw new AppError('Não foi possível usar este cartão. Remova-o e cadastre-o novamente, ou use outro cartão.', 402, 'CARD_AUTHORIZATION_DENIED')
       }
       // Timeout/erro de rede — `CieloAdapter.autorizar` JÁ reconsultou por
@@ -242,6 +248,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
         data: { status: 'DENIED', returnCode: autorizacao.returnCode, cieloPaymentId: autorizacao.providerPaymentId || null, failureReason: 'Pagamento recusado pela operadora do cartão.', ...identificadoresParaGravar(autorizacao.identificadores) },
       })
       // Mensagem amigável — NUNCA o ReturnCode cru da Cielo (mesma regra da F5.2).
+      await registrarRecusaDeCartao({ userId, ip: clientIp }) // I-7
       throw new AppError('Pagamento recusado pela operadora do cartão.', 402, 'CARD_AUTHORIZATION_DENIED')
     }
 

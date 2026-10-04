@@ -13,6 +13,11 @@ export interface PaymentGatewayConfigDto {
   webhookHeaderSecretSet: boolean
   webhookUrl: string | null
   webhookHeaderName: string
+  /**
+   * `true` só se o webhook está CONFIGURADO por inteiro (token do caminho no servidor + segredo do header). `false` = "webhook não usado": o Pix é creditado por polling. NÃO é erro — conta Cielo
+   * compartilhada com o Parque não tem URL de notificação do InnoFlow. Campo ADITIVO (a tela decide o texto).
+   */
+  webhookInUse: boolean
   cardEnabled: boolean
   pixEnabled: boolean
   readiness: { card: ReadinessMeio; pix: ReadinessMeio }
@@ -35,6 +40,7 @@ export function toPaymentGatewayConfigDto(config: ConfigEfetiva, publicBaseUrl: 
     webhookHeaderSecretSet: estado.temWebhookHeaderSecret,
     webhookUrl: montarWebhookUrl(publicBaseUrl, envGateway.webhookPathToken),
     webhookHeaderName: WEBHOOK_SECRET_HEADER_NAME,
+    webhookInUse: Boolean(envGateway.webhookPathToken) && estado.temWebhookHeaderSecret,
     cardEnabled: estado.cardEnabled,
     pixEnabled: estado.pixEnabled,
     readiness: calcularReadiness(estado, envGateway),

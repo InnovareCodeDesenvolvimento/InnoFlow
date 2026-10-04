@@ -3,6 +3,7 @@ import type { CardPaymentStatus, PixPaymentStatus } from '../../core/pagamentos/
 import { interpretarCancelamentoCielo, normalizarStatusCartaoCielo, normalizarStatusPixCielo, type StatusCartaoNormalizado, type StatusPixNormalizado } from '../../core/pagamentos/normalizarStatusCielo'
 import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaCartao, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
 import { resolverUrlsSop } from '../../core/pagamentos/configGateway'
+import { intentIdDoMerchantOrderId, merchantOrderIdCorrespondeAoIntent, paraMerchantOrderIdDaCielo } from '../../core/pagamentos/merchantOrderId'
 import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
 import { CieloHttpClient, CieloHttpError, CieloTimeoutError } from './cieloHttpClient'
 import { extrairCamposPagamento, lerListaDaConsultaPorPedido, montarPayloadAutorizacaoCartao, montarPayloadPix, type CamposPagamentoCielo } from './cieloPayloads'
@@ -131,7 +132,9 @@ export class CieloAdapter implements PagamentoPort {
    * Falha em qualquer `GET` de detalhe PROPAGA (sem o estado de todas não dá para escolher: quem chama reconsulta depois).
    */
   async consultarPorPedido(merchantOrderId: string): Promise<ResultadoConsultaPagamento | null> {
-    const lista = lerListaDaConsultaPorPedido(await this.client.getByMerchantOrderId(merchantOrderId))
+    // Conta compartilhada com o Parque: o pedido vai à Cielo como `IF-<id>`. Intents ANTIGOS (anteriores ao prefixo) foram gravados com o id cru — se `IF-<id>` não acha nada, tenta o cru.
+    let lista = lerListaDaConsultaPorPedido(await this.client.getByMerchantOrderId(paraMerchantOrderIdDaCielo(merchantOrderId)))
+    if (lista.entradas.length === 0 && paraMerchantOrderIdDaCielo(merchantOrderId) !== merchantOrderId) lista = lerListaDaConsultaPorPedido(await this.client.getByMerchantOrderId(merchantOrderId))
     if (lista.entradas.length === 0) return null
 
     const entradas = [...lista.entradas].sort((x, y) => (y.receivedDateMs ?? -Infinity) - (x.receivedDateMs ?? -Infinity)).slice(0, MAX_DETALHES_POR_PEDIDO)
@@ -144,7 +147,7 @@ export class CieloAdapter implements PagamentoPort {
       }
       if (!campos) continue
       const dono = campos.merchantOrderId ?? lista.merchantOrderIdTopo
-      if (dono !== null && dono !== merchantOrderId) continue // venda de OUTRO pedido: nunca é a resposta desta reconciliação
+      if (dono !== null && !merchantOrderIdCorrespondeAoIntent(dono, merchantOrderId)) continue // venda de OUTRO pedido (inclusive uma venda do Parque no mesmo EC): nunca é a resposta desta reconciliação
       candidatos.push({ campos, data: entrada.receivedDateMs ?? campos.receivedDateMs })
     }
     if (candidatos.length === 0) return null
@@ -193,7 +196,7 @@ export class CieloAdapter implements PagamentoPort {
     alertarReturnCodePixInesperado('consultarPix', campos)
     return {
       providerPaymentId: campos.paymentId ?? providerPaymentId,
-      merchantOrderId: campos.merchantOrderId ?? '',
+      merchantOrderId: intentIdDoMerchantOrderId(campos.merchantOrderId ?? ''),
       status: mapStatusPixParaDominio(normalizarStatusPixCielo(campos)),
       returnCode: campos.returnCode,
       amountCents: campos.amountAuthorizedCents,
@@ -292,7 +295,7 @@ function statusBrutoDe(campos: CamposPagamentoCielo): number | null {
 function camposParaResultadoConsulta(campos: CamposPagamentoCielo, fallbackPaymentId: string): ResultadoConsultaPagamento {
   return {
     providerPaymentId: campos.paymentId ?? fallbackPaymentId,
-    merchantOrderId: campos.merchantOrderId ?? '',
+    merchantOrderId: intentIdDoMerchantOrderId(campos.merchantOrderId ?? ''),
     status: mapStatusCartaoParaDominio(normalizarStatusCartaoCielo(campos)),
     returnCode: campos.returnCode,
     amountAuthorizedCents: campos.amountAuthorizedCents,

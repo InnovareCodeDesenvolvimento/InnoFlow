@@ -181,6 +181,19 @@ const envSchema = z.object({
   // (POST/PUT) e do SOP; as CONSULTAS (GET) usam `CIELO_QUERY_TIMEOUT_MS`, menor. O lock da captura/cancelamento (`max(60 s, 6 x isto)`) acompanha.
   CIELO_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   CIELO_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
+  // I-7 (decisão do dono, 04/10/2026): pagar com CARTÃO exige identidade verificada (Google). Padrão: LIGADO em produção, desligado em dev/CI (o seed e as fixtures usam motoristas só-senha) — `true`/`false`
+  // explícito vence. Ver `services/pagamentos/elegibilidadeCartao.ts`.
+  CARD_REQUIRE_VERIFIED_IDENTITY: envBoolean(process.env.NODE_ENV === 'production'),
+  // Bloqueio por recusas (carding): cartão fica indisponível (429 CARD_TEMPORARILY_BLOCKED) quando o usuário acumula recusas de cartão na janela de 24 h, o mesmo IP acumula recusas na janela de 1 h,
+  // ou o usuário tenta cadastrar cartões demais em 24 h. Janela FIXA contada a partir do 1º evento; só vale para CARTÃO (Pix e carteira seguem).
+  CARD_BLOCK_MAX_REFUSALS_PER_USER_DAY: z.coerce.number().int().positive().default(3),
+  CARD_BLOCK_MAX_REFUSALS_PER_IP_HOUR: z.coerce.number().int().positive().default(10),
+  CARD_BLOCK_MAX_REGISTRATIONS_PER_USER_DAY: z.coerce.number().int().positive().default(10),
+  // Descritor na fatura do cartão (A-Z0-9, até 13). A conta Cielo é COMPARTILHADA com o Parque das Feiras: o descritor distingue as cobranças do InnoFlow na fatura. Higienizado em runtime.
+  CIELO_SOFT_DESCRIPTOR: z.string().trim().max(60).default('INNOFLOW'),
+  // Crédito do Pix por POLLING (a conta Cielo compartilhada não tem webhook do InnoFlow): intervalo do varredor e idade mínima do Pix antes da 1ª consulta.
+  TOPUP_PIX_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
+  TOPUP_PIX_POLL_MIN_AGE_MS: z.coerce.number().int().min(0).default(15_000),
 
   // F5.2 (30/09/2026) — recarga de carteira via Pix real. Expiração do QR:
   // Nova recomendou 30 min (NÃO o default de 86400s/24h da própria Cielo) —

@@ -42,14 +42,14 @@ describe('F20 — timeout em escrita NUNCA leva a repetir a escrita', () => {
     const r = await adapter.autorizar(pedido)
     expect(r).toMatchObject({ providerPaymentId: 'p1', status: 'AUTHORIZED' })
     expect(chamadas.map((c) => c.method)).toEqual(['POST', 'GET'])
-    expect(chamadas[1].url).toContain('merchantOrderId=intent-1')
+    expect(chamadas[1].url).toContain('merchantOrderId=IF-intent-1')
   })
 
   it('autorizar com timeout e a Cielo sem registro: propaga o timeout depois de UMA consulta — ainda 1 POST só (quem chama decide; o varredor reconsulta)', async () => {
     const { adapter, chamadas } = timeoutNaEscrita(() => json({ MerchantOrderId: 'intent-1', Payments: [] }))
     await expect(adapter.autorizar(pedido)).rejects.toThrow(/timeout/)
     expect(chamadas.filter((c) => c.method === 'POST')).toHaveLength(1)
-    expect(chamadas.filter((c) => c.method === 'GET')).toHaveLength(1)
+    expect(chamadas.filter((c) => c.method === 'GET')).toHaveLength(2) // `IF-<id>` e depois o id cru (intents anteriores ao prefixo)
   })
 
   it('capturar com timeout: 1 PUT e 1 GET por PaymentId; já capturada lá -> devolve CAPTURED sem nova captura; ainda AUTHORIZED lá -> propaga com 1 PUT só', async () => {
@@ -60,6 +60,20 @@ describe('F20 — timeout em escrita NUNCA leva a repetir a escrita', () => {
     const autorizada = timeoutNaEscrita(() => json({ Payment: { PaymentId: 'p1', Status: 1, ReturnCode: '4', Amount: 5000 } }))
     await expect(autorizada.adapter.capturar('p1', 3000)).rejects.toThrow(/timeout/)
     expect(autorizada.chamadas.filter((c) => c.method === 'PUT')).toHaveLength(1)
+  })
+
+  it('MerchantOrderId com prefixo IF- (conta compartilhada com o Parque): o POST leva `IF-<id>`; a reconciliação consulta `IF-<id>` e, sem achar, o id CRU (intents anteriores ao prefixo) — 2 GETs, nunca um 2º POST', async () => {
+    const urls: string[] = []
+    const { adapter, chamadas } = timeoutNaEscrita((url) => {
+      urls.push(url)
+      return json({ Payments: [] })
+    })
+    await expect(adapter.autorizar(pedido)).rejects.toThrow(/timeout/)
+    expect(chamadas.filter((c) => c.method === 'POST')).toHaveLength(1)
+    expect(urls).toHaveLength(2)
+    expect(urls[0]).toContain('merchantOrderId=IF-intent-1')
+    expect(urls[1]).toContain('merchantOrderId=intent-1')
+    expect(urls[1]).not.toContain('IF-')
   })
 
   it('cancelar (void) não tem retry interno: 1 PUT, ponto — a política de repetir é do chamador, que CONSULTA antes (ver cancelarPreAutorizacaoCartao)', async () => {

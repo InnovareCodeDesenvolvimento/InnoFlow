@@ -43,6 +43,12 @@ export interface CreditarTopupPixJobData {
  */
 export const EXPIRAR_TOPUPS_PIX_QUEUE_NAME = 'expirar-topups-pix'
 
+/**
+ * Polling do Pix PENDING (conta Cielo compartilhada, sem webhook do InnoFlow) — job REPEATABLE sem dado próprio; ver `services/pagamentos/pollTopupsPix.ts`.
+ */
+export const POLL_TOPUPS_PIX_QUEUE_NAME = 'poll-topups-pix'
+export type PollTopupsPixJobData = Record<string, never>
+
 /** Sem dado próprio: cada disparo varre tudo que estiver vencido NO MOMENTO em que roda (nunca usa dado fixado no agendamento). */
 export type ExpirarTopupsPixJobData = Record<string, never>
 

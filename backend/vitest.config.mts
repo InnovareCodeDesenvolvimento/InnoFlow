@@ -17,6 +17,9 @@ export default defineConfig({
       // teste NÃO garantiria (imports do próprio arquivo já rodaram antes).
       // NUNCA usar este valor fora de teste.
       PAYMENT_SECRETS_KEY: 'N9kxeAXn4BnqUUoF1v+dbfdbLGJLH0WPqIdGIqbbK28=',
+      // I-7: o contador de recusas de cartão POR IP (janela de 1 h, no Redis COMPARTILHADO entre as suítes paralelas e entre execuções) somaria as recusas de todos os testes, que enxergam o
+      // mesmo IP (127.0.0.1) — bloquearia suítes inocentes. Nos testes o limite por IP é efetivamente desligado; os testes de bloqueio usam IPs próprios e sobrescrevem o limite no `env`.
+      CARD_BLOCK_MAX_REFUSALS_PER_IP_HOUR: '1000000',
     },
     coverage: {
       provider: 'v8',

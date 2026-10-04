@@ -19,6 +19,9 @@ import { apontarAdaptadorParaCieloFalsa, criarCenarioCartaoHttp, type CenarioCar
  * O formato `so_ids` é o que a doc da Cielo descreve para `GET /1/sales?merchantOrderId=` (só `PaymentId` + `ReceveidDate`, sic) — AINDA NÃO visto em sandbox.
  */
 
+/** A conta Cielo é compartilhada com o Parque: o pedido vai à Cielo como `IF-<id do intent>` (ver core/pagamentos/merchantOrderId.ts). */
+const mo = (intentId: string) => `IF-${intentId}`
+
 // Banco próprio (o varredor olha TODOS os intents do banco; no compartilhado ele varreria intents de outras suítes). `vi.hoisted` assíncrono roda antes dos imports estáticos.
 const banco = await vi.hoisted(async () => {
   const { criarBancoProprio } = await import('./helpers/bancoProprio')
@@ -74,9 +77,9 @@ describe('I-1/I-2 — reconciliação por pedido e autorização não definitiva
       const { res, intent } = await iniciarComFalha()
       expect(res.status, JSON.stringify(res.body)).toBe(202)
       expect(intent.status).toBe('AUTHORIZED')
-      expect(cielo.sequencia({ merchantOrderId: intent.id })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
+      expect(cielo.sequencia({ merchantOrderId: mo(intent.id) })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
       expect(cielo.contar('GET_BY_ID')).toBe(1) // o estado vem do detalhe
-      expect(cielo.efeitos.vendasCriadas.get(intent.id)).toBe(1)
+      expect(cielo.efeitos.vendasCriadas.get(mo(intent.id))).toBe(1)
       expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
     })
 
@@ -85,16 +88,16 @@ describe('I-1/I-2 — reconciliação por pedido e autorização não definitiva
       const { res, intent } = await iniciarComFalha()
       expect(res.status).toBe(503)
       expect(intent.status).toBe('CREATED')
-      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(1) // viva no cartão do motorista
+      expect(cielo.vendaPorPedido(mo(intent.id))!.status).toBe(1) // viva no cartão do motorista
 
       await cen.envelhecer(intent.id, 30)
       const r = await varrerPreAutorizacoesCartao()
       expect(r.resolvidasCreated).toBeGreaterThanOrEqual(1)
 
-      const venda = cielo.vendaPorPedido(intent.id)!
+      const venda = cielo.vendaPorPedido(mo(intent.id))!
       expect(venda.status).toBe(10)
       expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
-      expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1)
+      expect(cielo.contar('POST_SALE', { merchantOrderId: mo(intent.id) })).toBe(1)
       expect((await intentAtual(intent.id)).status).toBe('VOIDED')
     })
 
@@ -112,8 +115,8 @@ describe('I-1/I-2 — reconciliação por pedido e autorização não definitiva
       const intent = await prisma.paymentIntent.create({
         data: { purpose: 'SESSION_CARD_CAPTURE', provider: 'CIELO_CARD', userId: motorista.user.id, amountRequestedCents: 1_000, status: 'CREATED', environment: 'SANDBOX' },
       })
-      const viva = cielo.plantarVenda({ merchantOrderId: intent.id, status: 1, returnCode: '4', amount: 1_000 })
-      cielo.plantarVenda({ merchantOrderId: intent.id, status: 10, returnCode: '0', amount: 1_000 }) // a ÚLTIMA do array é a cancelada
+      const viva = cielo.plantarVenda({ merchantOrderId: mo(intent.id), status: 1, returnCode: '4', amount: 1_000 })
+      cielo.plantarVenda({ merchantOrderId: mo(intent.id), status: 10, returnCode: '0', amount: 1_000 }) // a ÚLTIMA do array é a cancelada
       await cen.envelhecer(intent.id, 30)
 
       await varrerPreAutorizacoesCartao()
@@ -135,7 +138,7 @@ describe('I-1/I-2 — reconciliação por pedido e autorização não definitiva
       const orfao = await prisma.paymentIntent.create({
         data: { purpose: 'SESSION_CARD_CAPTURE', provider: 'CIELO_CARD', userId: motorista.user.id, amountRequestedCents: 1_000, status: 'CREATED', environment: 'SANDBOX', createdAt: new Date(agora - 8 * 60_000) },
       })
-      const venda = cielo.plantarVenda({ merchantOrderId: orfao.id, status: 1, returnCode: '4', amount: 1_000 })
+      const venda = cielo.plantarVenda({ merchantOrderId: mo(orfao.id), status: 1, returnCode: '4', amount: 1_000 })
 
       await varrerPreAutorizacoesCartao()
 
@@ -166,7 +169,7 @@ describe('I-1/I-2 — reconciliação por pedido e autorização não definitiva
 
     it('REPRODUÇÃO do relatório: antes da correção o varredor B caía em "nada a fazer" PARA SEMPRE e a venda ficava viva. Agora reconsulta por PaymentId a cada rodada e, ao esgotar a idade, CANCELA por precaução (consulta antes) — a venda deixa de estar viva', async () => {
       const { intent } = await iniciarComStatus1CodigoDesconhecido('88')
-      const venda = cielo.vendaPorPedido(intent.id)!
+      const venda = cielo.vendaPorPedido(mo(intent.id))!
       expect(venda.status).toBe(1)
 
       // Antes de esgotar (30 min: acima do abandono, abaixo de 3x): reconsulta POR PaymentId (não por pedido), sem void e sem sair de CREATED.
@@ -194,7 +197,7 @@ describe('I-1/I-2 — reconciliação por pedido e autorização não definitiva
 
     it('esgota também por NÚMERO de reconsultas (MAX_TENTATIVAS_CREATED), sem depender da idade', async () => {
       const { intent } = await iniciarComStatus1CodigoDesconhecido(null) // ReturnCode AUSENTE
-      const venda = cielo.vendaPorPedido(intent.id)!
+      const venda = cielo.vendaPorPedido(mo(intent.id))!
       await cen.envelhecer(intent.id, 10)
       await redis.set(`card-preauth:created-sweeps:${intent.id}`, String(MAX_TENTATIVAS_CREATED - 1), 'EX', 600)
 

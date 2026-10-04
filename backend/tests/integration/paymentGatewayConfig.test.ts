@@ -250,10 +250,11 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       })
       expect(res.body.webhookUrl).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+/api/webhooks/cielo/${PATH_TOKEN}$`))
       expect(res.body.readiness.pix).toEqual({ ready: true, missing: [] })
+      expect(res.body.webhookInUse).toBe(true) // token do caminho (env) + segredo do header: configurado por inteiro
       expect(res.body.readiness.card.missing).toEqual(['SOP_CLIENT_ID', 'SOP_CLIENT_SECRET'])
       expectSemSegredos(res.body)
       expect(Object.keys(res.body).sort()).toEqual(
-        ['source', 'environment', 'merchantId', 'merchantKeySet', 'sopClientId', 'sopClientSecretSet', 'webhookHeaderSecretSet', 'webhookUrl', 'webhookHeaderName', 'cardEnabled', 'pixEnabled', 'readiness', 'secretsDecryptable', 'sandboxRestricted', 'updatedAt'].sort(),
+        ['source', 'environment', 'merchantId', 'merchantKeySet', 'sopClientId', 'sopClientSecretSet', 'webhookHeaderSecretSet', 'webhookUrl', 'webhookHeaderName', 'webhookInUse', 'cardEnabled', 'pixEnabled', 'readiness', 'secretsDecryptable', 'sandboxRestricted', 'updatedAt'].sort(),
       )
     })
 
@@ -271,7 +272,10 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       try {
         const res = await get(admin)
         expect(res.body.webhookUrl).toBeNull()
-        expect(res.body.readiness.pix.missing).toContain('WEBHOOK_PATH_TOKEN')
+        // conta compartilhada: webhook ausente NÃO é pendência do Pix; a tela só indica "webhook não usado"
+        expect(res.body.readiness.pix.missing).not.toContain('WEBHOOK_PATH_TOKEN')
+        expect(res.body.readiness.pix.missing).not.toContain('WEBHOOK_HEADER_SECRET')
+        expect(res.body.webhookInUse).toBe(false)
       } finally {
         m.env.CIELO_WEBHOOK_PATH_TOKEN = original
       }
@@ -338,6 +342,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       })
       expect(res.body.readiness.card).toEqual({ ready: true, missing: [] })
       expect(res.body.readiness.pix).toEqual({ ready: true, missing: [] })
+      expect(res.body.webhookInUse).toBe(true) // token do caminho (env) + segredo do header: configurado por inteiro
       expect(typeof res.body.updatedAt).toBe('string')
 
       const row = await m.prisma.paymentGatewayConfig.findUniqueOrThrow({ where: { id: 1 } })

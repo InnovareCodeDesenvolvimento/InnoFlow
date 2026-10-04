@@ -1,3 +1,4 @@
+import { tentarCreditarPixPendente } from '../../services/pagamentos/pollTopupsPix'
 import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
@@ -88,7 +89,7 @@ router.post(
     const body = req.body as MeStartSessionInput
 
     // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED já na porta (sem lock, sem consulta). `iniciarSessaoRemota` repete a checagem (defesa em profundidade); a carteira nunca passa por aqui.
-    if (body.payment?.mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD', userId)
+    if (body.payment?.mode === 'CARD') await assertMeioDePagamentoHabilitado('CARD', userId, { ip: req.ip })
 
     // Lock anti-duplo-toque: duas requisições de start quase simultâneas do
     // MESMO motorista (ex.: usuário toca duas vezes o botão no PWA antes do
@@ -120,6 +121,7 @@ router.post(
         connectorId: body.connectorId,
         userId,
         payment: body.payment,
+        clientIp: req.ip ?? null,
       })
 
       res.status(202).json({
@@ -664,8 +666,14 @@ router.get(
   asyncHandler(async (req, res) => {
     const userId = req.user!.userId
 
-    const intent = await prisma.paymentIntent.findFirst({ where: { id: req.params.id, userId, purpose: 'WALLET_TOPUP_PIX' } })
+    let intent = await prisma.paymentIntent.findFirst({ where: { id: req.params.id, userId, purpose: 'WALLET_TOPUP_PIX' } })
     if (!intent) throw new AppError('Recarga não encontrada.', 404, 'TOPUP_NOT_FOUND')
+
+    // Sem webhook do InnoFlow (conta Cielo compartilhada), quem está olhando a tela de um Pix PENDING dispara a reconsulta (no máximo 1x/5 s por recarga, com prazo): se já foi pago, credita
+    // agora — pelo MESMO caminho idempotente do varredor — e a resposta já vem PAID. Nunca falha a leitura.
+    if (intent.status === 'PENDING' && intent.cieloPaymentId && (await tentarCreditarPixPendente(intent.id))) {
+      intent = (await prisma.paymentIntent.findFirst({ where: { id: req.params.id, userId, purpose: 'WALLET_TOPUP_PIX' } })) ?? intent
+    }
 
     const [qrCodeImageBase64, debtSettledCents] = await Promise.all([getTopupQrImage(intent.id), getTopupDebtSettledCents(intent.id)])
 

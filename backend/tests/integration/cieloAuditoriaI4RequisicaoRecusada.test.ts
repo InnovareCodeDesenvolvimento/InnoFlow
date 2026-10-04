@@ -17,6 +17,9 @@ import { apontarAdaptadorParaCieloFalsa, criarCenarioCartaoHttp, type CenarioCar
  * S-1 (rota): o token do SOP simulado (`mocktok.*`) é recusado quando o adaptador é o REAL.
  */
 
+/** A conta Cielo é compartilhada com o Parque: o pedido vai à Cielo como `IF-<id do intent>`. */
+const mo = (intentId: string) => `IF-${intentId}`
+
 const banco = await vi.hoisted(async () => {
   const { criarBancoProprio } = await import('./helpers/bancoProprio')
   return criarBancoProprio('cielo_aud_i4')
@@ -102,7 +105,7 @@ describe('I-4 — 4xx definitivo da Cielo na autorização x indisponibilidade (
     const { res, intent } = await iniciar()
     expect(res.status).toBe(503)
     expect(intent.status).toBe('CREATED')
-    expect(cielo.sequencia({ merchantOrderId: intent.id })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
+    expect(cielo.sequencia({ merchantOrderId: mo(intent.id) })).toEqual(['POST_SALE', 'GET_BY_ORDER'])
   })
 
   it('S-1 (rota): com o adaptador REAL, o token do SOP simulado (mocktok.*) é recusado no cadastro — 400 INVALID_CARD_TOKEN; um GUID passa', async () => {
