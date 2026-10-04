@@ -12,16 +12,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="InnoFlow" />
-    <!-- Fonte Inter movida do `@import` em index.css para cá — achado
-         medindo Lighthouse mobile da landing pós-QR: `@import` dentro de CSS
-         só é descoberto DEPOIS do navegador buscar e parsear o stylesheet
-         principal (bloqueia o primeiro paint numa segunda viagem de rede);
-         como `<link>` aqui, o preload scanner do HTML já dispara a busca em
-         paralelo. Preconnect antecipa a conexão TLS com o CDN da Google
-         Fonts. Nada de visual muda, só a ordem de carregamento. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+    <!-- Fonte Inter AUTO-HOSPEDADA (@font-face em src/index.css). Antes: <link> para fonts.googleapis.com, um
+         stylesheet de outra origem que bloqueava o primeiro paint (~1 s de bloqueio simulado no Lighthouse mobile).
+         O preload do subconjunto latin deixa o navegador baixar o arquivo em paralelo ao CSS e ao JS, em vez de só
+         descobri-lo depois de montar a árvore de estilo. `crossorigin` é obrigatório em preload de fonte. -->
+    <link rel="preload" href="/src/assets/fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin />
     <title>InnoFlow — Carregue um futuro melhor</title>
     <!-- SEO e compartilhamento da landing "/". Ficam aqui (e não só no React) porque os rastreadores de link —
          WhatsApp, LinkedIn, Facebook — leem o HTML servido e NÃO executam JavaScript. A imagem 1200x630 é gerada a
