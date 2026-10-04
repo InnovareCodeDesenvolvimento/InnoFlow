@@ -77,6 +77,25 @@ export interface GoogleAuthRequest {
   credential: string
 }
 
+/**
+ * I-7 (04/10/2026) — `POST /api/auth/google/link` (COM auth, Bearer): vincula o Google à conta JÁ LOGADA (motorista que entrou por senha) para liberar o pagamento
+ * com cartão, SEM trocar de conta e SEM apagar a senha (diferente de `POST /api/auth/google`, que é público, ignora o token atual, zera a senha e pode cair em
+ * OUTRA conta). Corpo = `GoogleAuthRequest`. Só vincula se o e-mail VERIFICADO do Google for igual ao e-mail da conta (senão o vínculo viraria atalho para
+ * a restrição de sandbox/cartão por e-mail). 200 `{ linked: true }`. Erros: `INVALID_GOOGLE_TOKEN` (401), `GOOGLE_EMAIL_NOT_VERIFIED` (403),
+ * `GOOGLE_EMAIL_MISMATCH` (403 — o Google escolhido tem outro e-mail), `GOOGLE_ALREADY_LINKED` (409 — esta conta já tem Google, ou este Google já está em
+ * outra conta), `GOOGLE_NOT_CONFIGURED` (503), `GOOGLE_LOGIN_NOT_ALLOWED` (403 — só DRIVER).
+ */
+export interface LinkGoogleResponse {
+  linked: true
+}
+export type LinkGoogleErrorCode =
+  | "INVALID_GOOGLE_TOKEN"
+  | "GOOGLE_EMAIL_NOT_VERIFIED"
+  | "GOOGLE_EMAIL_MISMATCH"
+  | "GOOGLE_ALREADY_LINKED"
+  | "GOOGLE_NOT_CONFIGURED"
+  | "GOOGLE_LOGIN_NOT_ALLOWED"
+
 /** Envelope de erro da API: `{ error, code, details? }` — sempre trate por `code`. */
 export interface ApiErrorBody {
   error: string
