@@ -221,6 +221,7 @@ describe('Sessão de recarga com cartão — captura parcial real, conciliação
           pixExpiresAt: pix.expiresAt,
         },
       })
+      adapterPix.associarPixAoPedido(pix.providerPaymentId, topupIntent.id) // I-6: o crédito confere o MerchantOrderId da consulta com o intent
       const credito = await creditarTopupPix(topupIntent.id, adapterPix)
       expect(credito).toMatchObject({ debtSettledCents: 300, totalCreditedCents: 300 })
 

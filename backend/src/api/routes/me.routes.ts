@@ -626,6 +626,16 @@ router.post(
       throw new AppError('O Pix está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
     }
 
+    // I-6: resposta da Cielo que não é um Pix pendente utilizável (recusada, sem PaymentId, sem QR) NÃO vira recarga PENDING: o intent vai a FAILED (não conta no limite de pendentes)
+    // e o motorista recebe o 503 de sempre. Com `PaymentId` vazio o `@unique` de `cieloPaymentId` colidiria no 2º caso (500); sem QR o motorista ficaria com uma recarga impagável.
+    const paymentIdPix = resultadoPix.providerPaymentId?.trim() ?? ''
+    const qrPix = resultadoPix.qrCodeString?.trim() ?? ''
+    if (paymentIdPix === '' || qrPix === '' || resultadoPix.status !== 'PENDING') {
+      logger.error({ alert: 'payment_pix_creation_invalid_response', intentId: intent.id, statusPix: resultadoPix.status, temPaymentId: paymentIdPix !== '', temQrCode: qrPix !== '' }, '[api][me] a Cielo respondeu à criação do Pix sem um Pix pendente utilizável — recarga marcada FAILED')
+      await prisma.paymentIntent.update({ where: { id: intent.id }, data: { status: 'FAILED', failureReason: 'Resposta do gateway sem Pix pendente utilizável (sem PaymentId/QR ou status diferente de pendente).', ...(paymentIdPix !== '' ? { cieloPaymentId: paymentIdPix } : {}) } }).catch((err: unknown) => logger.error({ err, intentId: intent.id }, '[api][me] falha ao marcar o intent Pix como FAILED'))
+      throw new AppError('O Pix está indisponível no momento. Tente novamente em instantes.', 503, 'PAYMENT_GATEWAY_UNAVAILABLE')
+    }
+
     const updated = await prisma.paymentIntent.update({
       where: { id: intent.id },
       data: {

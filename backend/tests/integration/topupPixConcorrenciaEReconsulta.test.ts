@@ -68,6 +68,7 @@ describe('creditarTopupPix — concorrência real e reconsulta-sempre (Íris)', 
         pixExpiresAt: pix.expiresAt,
       },
     })
+    adapter.associarPixAoPedido(pix.providerPaymentId, intent.id) // I-6: o crédito confere o MerchantOrderId da consulta com o intent
     return intent
   }
 
@@ -153,6 +154,7 @@ describe('creditarTopupPix — concorrência real e reconsulta-sempre (Íris)', 
         },
       })
 
+      adapter.associarPixAoPedido(pix.providerPaymentId, intent.id) // I-6: o crédito confere o MerchantOrderId da consulta com o intent
       const resultado = await creditarTopupPix(intent.id, adapter)
       expect(resultado).toBeNull()
       expect(await saldo(driver.walletId)).toBe(0)

@@ -50,6 +50,7 @@ describe('creditarTopupPix — auditoria FAIL-CLOSED (Órion)', () => {
       },
     })
 
+    adapter.associarPixAoPedido(pix.providerPaymentId, intent.id) // I-6: o crédito confere o MerchantOrderId da consulta com o intent
     await expect(creditarTopupPix(intent.id, adapter)).rejects.toThrow(/falha simulada de auditoria/)
 
     // Nada foi creditado — nem o TOPUP_PIX nem a quitação da dívida.

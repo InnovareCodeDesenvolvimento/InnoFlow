@@ -66,6 +66,17 @@ export async function creditarTopupPix(paymentIntentId: string, pagamentoPortInj
     logger.info({ paymentIntentId, statusCielo: consulta.status }, '[creditarTopupPix] Cielo ainda não confirma PAID — nada a creditar agora')
     return null
   }
+
+  // I-6: o crédito confere IDENTIDADE e VALOR da venda consultada com o intent. O `PaymentId` vem do nosso próprio POST, então o risco real é baixo, mas é a última barreira antes de
+  // mexer no saldo: venda de OUTRO pedido, ou valor pago diferente do pedido, NÃO credita (alerta com os dois lados, sem dado do pagador) e fica para conferência manual.
+  if (consulta.merchantOrderId && consulta.merchantOrderId !== intent.id) {
+    logger.error({ alert: 'payment_pix_credit_divergence', motivo: 'merchant_order_id', paymentIntentId, paymentId: intent.cieloPaymentId }, '[creditarTopupPix] a venda consultada pertence a OUTRO MerchantOrderId — NÃO credito; conferir à mão')
+    return null
+  }
+  if (consulta.amountCents !== null && consulta.amountCents !== intent.amountRequestedCents) {
+    logger.error({ alert: 'payment_pix_credit_divergence', motivo: 'amount', paymentIntentId, paymentId: intent.cieloPaymentId, esperadoCents: intent.amountRequestedCents, pagoCents: consulta.amountCents }, '[creditarTopupPix] o valor da venda na Cielo difere do valor do pedido — NÃO credito; conferir à mão')
+    return null
+  }
   const totalCents = consulta.amountCents ?? intent.amountRequestedCents
 
   const resultado = await prisma.$transaction(async (tx) => {
