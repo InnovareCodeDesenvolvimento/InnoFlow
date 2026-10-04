@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import { authService, type LoginPayload, type RegisterPayload } from "@/services/auth"
-import { TOKEN_STORAGE_KEY } from "@/services/api"
+import type { LoginPayload, RegisterPayload } from "@/services/auth"
+import { TOKEN_STORAGE_KEY } from "@/lib/storageKeys"
 import type { User } from "@/types/api"
 
 /**
@@ -31,6 +31,13 @@ interface AuthState {
   logout: () => void
 }
 
+/**
+ * `services/auth` arrasta o axios (~49 KB) e a landing "/" só LÊ o estado de sessão (cabeçalho: "Entrar" x "Meu app").
+ * Import dinâmico: o axios só é baixado quando alguém de fato faz login/cadastro (a tela de login já o tem no próprio
+ * chunk). Medido: tirou ~50 KB do JS do caminho crítico da landing.
+ */
+const loadAuthService = () => import("@/services/auth").then((m) => m.authService)
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -42,7 +49,7 @@ export const useAuthStore = create<AuthState>()(
       login: async (payload) => {
         set({ isLoading: true })
         try {
-          const { token, user } = await authService.login(payload)
+          const { token, user } = await (await loadAuthService()).login(payload)
           localStorage.setItem(TOKEN_STORAGE_KEY, token)
           set({ user, token, isAuthenticated: true, isLoading: false })
           return user
@@ -55,7 +62,7 @@ export const useAuthStore = create<AuthState>()(
       register: async (payload) => {
         set({ isLoading: true })
         try {
-          const { token, user } = await authService.register(payload)
+          const { token, user } = await (await loadAuthService()).register(payload)
           localStorage.setItem(TOKEN_STORAGE_KEY, token)
           set({ user, token, isAuthenticated: true, isLoading: false })
           return user
@@ -68,7 +75,7 @@ export const useAuthStore = create<AuthState>()(
       googleLogin: async (credential) => {
         set({ isLoading: true })
         try {
-          const { token, user } = await authService.google({ credential })
+          const { token, user } = await (await loadAuthService()).google({ credential })
           localStorage.setItem(TOKEN_STORAGE_KEY, token)
           set({ user, token, isAuthenticated: true, isLoading: false })
           return user

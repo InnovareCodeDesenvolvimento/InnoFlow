@@ -54,13 +54,29 @@ function preloadLandingChunk(): Plugin {
     apply: "build",
     transformIndexHtml: {
       order: "post",
-      handler(_html, ctx) {
+      handler(html, ctx) {
         const bundle = ctx.bundle ?? {}
         const tags: Array<{ tag: string; attrs: Record<string, string | boolean>; injectTo: "head" }> = []
+        const chunks = new Map<string, { imports: string[] }>()
+        for (const file of Object.values(bundle)) if (file.type === "chunk") chunks.set(file.fileName, file)
+        const wanted = new Set<string>()
+        // O chunk da landing E as dependências ESTÁTICAS dele (recursivo). Só o chunk não bastava: o navegador só descobre
+        // os imports dele (ex.: `logo-icon-sm-*.js`, `appInfo-*.js`, minúsculos) DEPOIS de baixar e analisar a landing —
+        // mais uma viagem de rede (RTT) na corrente crítica do hero. Pré-carregados aqui, vêm em paralelo.
+        const visit = (name: string) => {
+          if (wanted.has(name)) return
+          wanted.add(name)
+          for (const dep of chunks.get(name)?.imports ?? []) visit(dep)
+        }
+        for (const name of chunks.keys()) {
+          if (/^assets\/landing-[\w-]+\.js$/.test(name) && !name.includes("below")) visit(name)
+        }
+        for (const name of wanted) {
+          // O que o próprio index.html já pré-carrega (dependências do entry) não se repete.
+          if (html.includes(`/${name}"`)) continue
+          tags.push({ tag: "link", attrs: { rel: "modulepreload", crossorigin: true, href: `/${name}` }, injectTo: "head" })
+        }
         for (const file of Object.values(bundle)) {
-          if (file.type === "chunk" && /^assets\/landing-[\w-]+\.js$/.test(file.fileName) && !file.fileName.includes("below")) {
-            tags.push({ tag: "link", attrs: { rel: "modulepreload", crossorigin: true, href: `/${file.fileName}` }, injectTo: "head" })
-          }
           if (file.type === "asset" && /^assets\/landing-[\w-]+\.css$/.test(file.fileName)) {
             tags.push({ tag: "link", attrs: { rel: "preload", as: "style", href: `/${file.fileName}` }, injectTo: "head" })
           }
@@ -78,7 +94,9 @@ export default defineConfig({
     preloadLandingChunk(),
     VitePWA({
       registerType: "autoUpdate",
-      injectRegister: "auto",
+      // "script-defer": <script defer src="/registerSW.js"> (o "auto" injetava um <script> SÍNCRONO no <head>, que bloqueia o parse
+      // do HTML; medido no Lighthouse como recurso que bloqueia a renderização, ~150 ms simulados).
+      injectRegister: "script-defer",
       // skipWaiting + clientsClaim: a versão nova assume o controle das abas
       // abertas assim que instala, sem esperar todas fecharem — essencial
       // aqui porque o motorista abre o PWA uma vez por recarga, não fica com
@@ -208,6 +226,17 @@ export default defineConfig({
         // consumidor, o bundler sempre funde de volta. Removido por ser
         // morto — não é bug, é como esse app usa Radix hoje.
         manualChunks(id) {
+          // Núcleo que TODA rota (inclusive a landing "/", que é a mais sensível a peso) precisa para renderizar:
+          // React, roteador, estado (zustand) e TanStack Query. SEM esta regra, os buckets abaixo (`ui-kit`,
+          // `app-hooks`) absorviam o React e o zustand por serem "dependência compartilhada", e o entry passava a
+          // importar (e a landing a esperar) ~280 KB de Radix/axios/sonner/tailwind-merge que ela não usa
+          // (medido: modulepreload de `ui-kit` + `app-hooks` no index.html de "/").
+          if (
+            /node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|zustand|@tanstack\/(react-query|query-core))\//.test(id)
+          ) {
+            return "vendor-core"
+          }
+
           // lucide-react: cada ícone vira seu próprio arquivo de <0,4kB
           // quando usado por 2+ chunks assíncronos. Um chunk único de ícones
           // custa poucos KB a mais pra quem não usa todos, mas elimina a
@@ -230,12 +259,12 @@ export default defineConfig({
           // Table/EmptyState/ErrorState/ConfirmDialog/Pagination/Dialog/
           // DropdownMenu/Toaster): reusado por quase toda rota do PWA e do
           // Admin — hoje virava ~12 arquivos de menos de 1kB cada.
-          if (id.includes("/src/components/ui/")) return "ui-kit"
+          // if (id.includes("/src/components/ui/")) return "ui-kit"
 
           // Hooks de dados locais (useMeSessions, useSites, useReports, ...):
           // compartilhados entre páginas assíncronas, hoje fragmentados
           // 1 arquivo por combinação de rotas que os consome em comum.
-          if (id.includes("/src/hooks/")) return "app-hooks"
+          // if (id.includes("/src/hooks/")) return "app-hooks"
 
         },
       },

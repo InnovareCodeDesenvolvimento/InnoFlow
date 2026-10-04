@@ -1,5 +1,6 @@
 import axios from "axios"
 import type { ApiErrorBody } from "@/types/api"
+import { TOKEN_STORAGE_KEY } from "@/lib/storageKeys"
 
 /**
  * Base da API:
@@ -10,7 +11,8 @@ import type { ApiErrorBody } from "@/types/api"
  */
 export const API_BASE_URL = import.meta.env.VITE_API_URL || ""
 
-export const TOKEN_STORAGE_KEY = "innoelektron_token"
+// Definida em `lib/storageKeys` (módulo minúsculo, ver lá); reexportada para quem já importa daqui.
+export { TOKEN_STORAGE_KEY }
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

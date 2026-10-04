@@ -1,18 +1,22 @@
 import { lazy, Suspense, useEffect } from "react"
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { Loader2 } from "lucide-react"
-import { Toaster } from "@/components/ui/Toaster"
-import { Layout } from "@/components/layout/Layout"
 import { ScrollToTop } from "@/components/layout/ScrollToTop"
 import { RequireAuth } from "@/components/layout/RequireAuth"
-import { RealtimeConnection } from "@/components/realtime/RealtimeConnection"
 import { registerInstallPromptListeners } from "@/store/installPromptStore"
+import { useAuthStore } from "@/store/authStore"
 
 // Code-splitting por rota: o painel admin (maior parte do bundle — RHF, Zod,
 // Radix Dialog/Dropdown) só carrega para quem de fato entra em /admin. O PWA
 // do motorista (`/c/...`, `/app/*`) segue a mesma regra — nenhuma dessas
 // telas entra no bundle inicial do site público.
 // A landing "/" é pesada (canvas, mockups, animações) e só serve à rota raiz: chunk próprio, fora do bundle inicial.
+// FORA do bundle inicial de propósito (medido no Lighthouse mobile da landing "/"): a casca pública (`Layout` ->
+// Header/Footer -> Radix/ui-kit), o Toaster (sonner) e a conexão SSE (axios, hooks de dados) só servem a rotas que NÃO
+// são a landing e eram baixados + avaliados antes de o hero aparecer (~300 KB de JS, ~80 KB gzip).
+const Layout = lazy(() => import("@/components/layout/Layout").then((m) => ({ default: m.Layout })))
+const Toaster = lazy(() => import("@/components/ui/Toaster").then((m) => ({ default: m.Toaster })))
+const RealtimeConnection = lazy(() => import("@/components/realtime/RealtimeConnection").then((m) => ({ default: m.RealtimeConnection })))
 const Home = lazy(() => import("@/pages/Public/Home").then((m) => ({ default: m.Home })))
 const Eletropostos = lazy(() => import("@/pages/Public/Eletropostos").then((m) => ({ default: m.Eletropostos })))
 const Login = lazy(() => import("@/pages/Auth/Login").then((m) => ({ default: m.Login })))
@@ -62,6 +66,28 @@ function LandingFallback() {
   )
 }
 
+/** Toaster só fora da landing: ela nunca dispara toast, e o sonner pesa ~33 KB no caminho crítico. Ao navegar para outra rota monta na hora. */
+function AppToaster() {
+  const onLanding = useLocation().pathname === "/"
+  if (onLanding) return null
+  return (
+    <Suspense fallback={null}>
+      <Toaster />
+    </Suspense>
+  )
+}
+
+/** A conexão SSE só existe com sessão (ver `RealtimeConnection`): quem não está logado nem baixa o código dela. */
+function AppRealtime() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  if (!isAuthenticated) return null
+  return (
+    <Suspense fallback={null}>
+      <RealtimeConnection />
+    </Suspense>
+  )
+}
+
 export default function App() {
   // Captura `beforeinstallprompt` uma única vez, na raiz — o evento pode
   // disparar em qualquer tela (landing `/c/...`, sessão ativa) bem antes do
@@ -71,7 +97,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <RealtimeConnection />
+      <AppRealtime />
       <ScrollToTop />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -156,7 +182,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
-      <Toaster />
+      <AppToaster />
     </BrowserRouter>
   )
 }
