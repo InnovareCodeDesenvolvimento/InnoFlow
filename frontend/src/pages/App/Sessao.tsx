@@ -191,7 +191,7 @@ export function Sessao() {
         </div>
       )}
 
-      <p className="text-xs font-bold uppercase tracking-wide text-ink-subtle">{session.site.name}</p>
+      <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">{session.site.name}</p>
       <p className="text-sm text-ink-softer">
         {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
       </p>
@@ -227,11 +227,11 @@ export function Sessao() {
 
           <div className="mt-5 grid grid-cols-2 gap-3 text-left">
             <div className="rounded-xl bg-muted px-3 py-2.5">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Potência</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Potência</p>
               <p className="text-sm font-bold text-ink">{session.lastPowerW !== null ? `${(session.lastPowerW / 1000).toFixed(1)} kW` : "—"}</p>
             </div>
             <div className="rounded-xl bg-muted px-3 py-2.5">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Bateria</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Bateria</p>
               <p className="text-sm font-bold text-ink">{session.lastSoc !== null ? `${session.lastSoc}%` : "—"}</p>
             </div>
           </div>

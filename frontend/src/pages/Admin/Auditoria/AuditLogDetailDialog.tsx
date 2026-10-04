@@ -46,7 +46,7 @@ export function AuditLogDetailDialog({ id, onOpenChange }: { id: string | null; 
               <span className="text-ink-softer">{AUDIT_ACTION_LABELS[data.action]}</span>
               {data.httpStatus && (
                 <>
-                  <span className="text-ink-subtle">·</span>
+                  <span className="text-ink-softer">·</span>
                   <span className="text-ink-softer">HTTP {data.httpStatus}</span>
                 </>
               )}
@@ -79,7 +79,7 @@ export function AuditLogDetailDialog({ id, onOpenChange }: { id: string | null; 
                         <span className="font-semibold text-ink">{field}</span>
                         {isPair ? (
                           <span className="text-ink-soft">
-                            <span className="text-ink-subtle line-through">{formatChangeValue((change as { from?: unknown }).from)}</span>{" "}
+                            <span className="text-ink-softer line-through">{formatChangeValue((change as { from?: unknown }).from)}</span>{" "}
                             <span aria-hidden="true">→</span> <span className="font-medium">{formatChangeValue((change as { to?: unknown }).to)}</span>
                           </span>
                         ) : (

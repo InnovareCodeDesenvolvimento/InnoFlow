@@ -99,7 +99,7 @@ export function NearbyStationsSection() {
             })}
           </ul>
           <div className="mt-1.5 flex justify-end">
-            <UpdatedAgo dataUpdatedAt={dataUpdatedAt} className="text-[11px] text-ink-subtle" />
+            <UpdatedAgo dataUpdatedAt={dataUpdatedAt} className="text-[11px] text-ink-softer" />
           </div>
         </>
       )}

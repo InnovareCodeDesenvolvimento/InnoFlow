@@ -111,19 +111,19 @@ export function SessaoDetalhe() {
           <Card className="card-premium animate-fade-in-up mt-4">
             <CardContent className="grid grid-cols-2 gap-4 p-5">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Início</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Início</p>
                 <p className="text-sm font-semibold text-ink">{formatDateTime(session.startedAt)}</p>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Fim</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Fim</p>
                 <p className="text-sm font-semibold text-ink">{formatDateTime(session.stoppedAt)}</p>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Energia</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Energia</p>
                 <p className="text-sm font-semibold text-ink">{formatEnergyWh(session.energyDeliveredWh)}</p>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Tarifa</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Tarifa</p>
                 <p className="truncate text-sm font-semibold text-ink">{session.tariff.name}</p>
               </div>
             </CardContent>
@@ -133,7 +133,7 @@ export function SessaoDetalhe() {
           {!isUnconfirmed && !isReanimated && (
             <Card className="card-premium stagger-1 animate-fade-in-up mt-4">
               <CardContent className="p-5">
-                <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-subtle">Detalhamento do custo</p>
+                <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-softer">Detalhamento do custo</p>
                 <dl className="space-y-2">
                   {COST_ROWS.filter((row) => session[row.key] !== null).map((row) => (
                     <div key={row.key} className="flex items-center justify-between text-sm">

@@ -51,7 +51,7 @@ export function PeriodSelector({
             onChange={(e) => onCustomChange({ from: e.target.value, to })}
             className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
           />
-          <span className="text-xs text-ink-subtle">até</span>
+          <span className="text-xs text-ink-softer">até</span>
           <label className="sr-only" htmlFor="period-to">
             Até
           </label>

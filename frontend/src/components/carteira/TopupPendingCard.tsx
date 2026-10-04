@@ -51,7 +51,7 @@ export function TopupPendingCard({ topup }: { topup: MeTopupDTO }) {
           )}
 
           <div className="mt-4 w-full rounded-xl bg-muted px-3.5 py-2.5 text-left">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-ink-subtle">Pix copia e cola</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Pix copia e cola</p>
             <p className="mt-0.5 truncate text-xs text-ink-softer" title={topup.qrCodeString ?? undefined}>
               {topup.qrCodeString ?? "Indisponível"}
             </p>
@@ -71,7 +71,7 @@ export function TopupPendingCard({ topup }: { topup: MeTopupDTO }) {
         </p>
       )}
 
-      <p className="mt-2 text-xs text-ink-subtle">Assim que o pagamento for confirmado, esta tela atualiza sozinha.</p>
+      <p className="mt-2 text-xs text-ink-softer">Assim que o pagamento for confirmado, esta tela atualiza sozinha.</p>
     </div>
   )
 }

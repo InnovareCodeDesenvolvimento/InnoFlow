@@ -149,7 +149,7 @@ function AdminShell() {
             {!collapsed && (
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold text-white">{user?.name}</p>
-                <p className="truncate text-[11px] text-white/50">{user ? ROLE_LABELS[user.role] : ""}</p>
+                <p className="truncate text-[11px] text-white/70">{user ? ROLE_LABELS[user.role] : ""}</p>
               </div>
             )}
             <button
@@ -219,7 +219,7 @@ function AdminShell() {
       <div className={cn("flex h-screen flex-col transition-[padding] duration-200", collapsed ? "lg:pl-20" : "lg:pl-64")}>
         <header className="z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border-subtle bg-background/85 px-4 backdrop-blur-md backdrop-saturate-150 sm:px-6">
           <div className="hidden min-w-0 flex-1 lg:block">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-subtle">Painel administrativo</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-softer">Painel administrativo</p>
             <h2 className="truncate text-lg font-black tracking-tight text-ink">{current?.label ?? "Administração"}</h2>
           </div>
 

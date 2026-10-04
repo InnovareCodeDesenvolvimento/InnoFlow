@@ -41,7 +41,7 @@ DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName
 function DropdownMenuLabel({ className, ...props }: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label>) {
   return (
     <DropdownMenuPrimitive.Label
-      className={cn("px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-ink-subtle", className)}
+      className={cn("px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-ink-softer", className)}
       {...props}
     />
   )

@@ -275,7 +275,7 @@ export function ChargePointLanding() {
               // nela, evitando o vazio entre o herói e o card.
               <Card className="card-premium animate-fade-in-up -mt-8">
                 <CardContent className="p-5">
-                  <p className="text-xs font-bold uppercase tracking-wide text-ink-subtle">{cp.site.name}</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">{cp.site.name}</p>
                   {(cp.site.addressLine || cp.site.city) && (
                     <p className="mt-0.5 flex items-start gap-1.5 text-sm text-ink-softer">
                       <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />

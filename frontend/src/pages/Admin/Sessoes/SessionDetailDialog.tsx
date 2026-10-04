@@ -48,7 +48,7 @@ export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: st
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={sessionStatusBadgeVariant(data.status)}>{CHARGING_SESSION_STATUS_LABELS[data.status]}</Badge>
               <span className="text-ink-softer">{data.site.name}</span>
-              <span className="text-ink-subtle">·</span>
+              <span className="text-ink-softer">·</span>
               <span className="text-ink-softer">
                 {data.chargePoint.ocppIdentity} · conector {data.connectorId}
               </span>

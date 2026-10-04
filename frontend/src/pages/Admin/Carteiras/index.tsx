@@ -132,7 +132,7 @@ export default function CarteirasPage() {
                           {formatCents(driver.openDebtCents)}
                         </Badge>
                       ) : (
-                        <span className="text-ink-subtle">—</span>
+                        <span className="text-ink-softer">—</span>
                       )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{formatDate(driver.createdAt)}</TableCell>

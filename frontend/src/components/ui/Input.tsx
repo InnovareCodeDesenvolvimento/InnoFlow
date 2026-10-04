@@ -25,7 +25,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
         )}
         <div className="relative">
           {leftIcon && (
-            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle">
+            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-softer">
               {leftIcon}
             </div>
           )}

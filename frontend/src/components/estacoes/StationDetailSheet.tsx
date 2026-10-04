@@ -112,7 +112,7 @@ export function StationDetailSheet({
                 {STATION_STATE_LABELS[state]}
               </Badge>
               <span className="text-sm font-semibold text-ink-soft">{freeSummaryLabel(site.connectorSummary)}</span>
-              <UpdatedAgo dataUpdatedAt={dataUpdatedAt} className="text-xs text-ink-subtle" />
+              <UpdatedAgo dataUpdatedAt={dataUpdatedAt} className="text-xs text-ink-softer" />
             </div>
 
             <div className="mt-4 space-y-3">

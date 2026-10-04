@@ -76,7 +76,7 @@ function Row({ label, value, hint, tone, highlight }: { label: string; value: nu
     <div className="flex items-center justify-between gap-4 py-3">
       <div>
         <dt className="font-medium text-ink-soft">{label}</dt>
-        {hint && <p className="mt-0.5 text-xs text-ink-subtle">{hint}</p>}
+        {hint && <p className="mt-0.5 text-xs text-ink-softer">{hint}</p>}
       </div>
       <dd
         className={

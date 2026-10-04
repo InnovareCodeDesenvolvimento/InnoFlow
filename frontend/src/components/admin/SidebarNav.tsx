@@ -86,7 +86,7 @@ export function SidebarNav({
               type="button"
               onClick={() => onToggleGroup(group.title)}
               aria-expanded={open}
-              className="mb-1 flex w-full items-center justify-between rounded-lg px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/35 transition-colors hover:text-white/60"
+              className="mb-1 flex w-full items-center justify-between rounded-lg px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/60 transition-colors hover:text-white/85"
             >
               {group.title}
               <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", !open && "-rotate-90")} aria-hidden="true" />

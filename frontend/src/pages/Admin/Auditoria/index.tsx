@@ -137,7 +137,7 @@ export default function AuditoriaPage() {
                   <TableCell>
                     <div className="flex flex-col gap-0.5">
                       <Badge variant={auditOutcomeBadgeVariant(log.outcome)}>{AUDIT_OUTCOME_LABELS[log.outcome]}</Badge>
-                      {log.httpStatus && <span className="text-[11px] text-ink-subtle">HTTP {log.httpStatus}</span>}
+                      {log.httpStatus && <span className="text-[11px] text-ink-softer">HTTP {log.httpStatus}</span>}
                     </div>
                   </TableCell>
                 </TableRow>

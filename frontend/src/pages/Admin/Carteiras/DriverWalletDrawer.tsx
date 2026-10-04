@@ -28,11 +28,11 @@ function EntryRow({ entry }: { entry: WalletEntryRow }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-ink">{WALLET_ENTRY_TYPE_LABELS[entry.type]}</p>
         {entry.description && <p className="break-words text-xs text-ink-softer">{entry.description}</p>}
-        <p className="mt-0.5 text-[11px] text-ink-subtle">{formatDateTime(entry.createdAt)}</p>
+        <p className="mt-0.5 text-[11px] text-ink-softer">{formatDateTime(entry.createdAt)}</p>
       </div>
       <div className="shrink-0 text-right">
         <p className={`text-sm font-black tabular-nums ${credit ? "text-success-700" : "text-danger-700"}`}>{signedAmount(entry.amountCents)}</p>
-        <p className="text-[11px] tabular-nums text-ink-subtle">saldo {formatCents(entry.balanceAfterCents)}</p>
+        <p className="text-[11px] tabular-nums text-ink-softer">saldo {formatCents(entry.balanceAfterCents)}</p>
       </div>
     </li>
   )

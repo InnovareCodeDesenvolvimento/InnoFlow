@@ -22,7 +22,7 @@ export function InnovareCodeBadge({ className }: { className?: string }) {
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        "flex items-center gap-2 rounded-xl px-2 py-1 opacity-70 transition-opacity hover:opacity-100",
+        "flex items-center gap-2 rounded-xl px-2 py-1 transition-colors hover:bg-muted/60",
         className,
       )}
       aria-label={`Desenvolvido por ${DESENVOLVEDORA} — versão ${APP_VERSION}`}
@@ -37,7 +37,7 @@ export function InnovareCodeBadge({ className }: { className?: string }) {
         className="h-6 w-auto sm:h-7"
       />
       <span className="hidden flex-col leading-none sm:flex">
-        <span className="text-[8px] font-bold uppercase tracking-widest text-ink-subtle">Desenvolvido por</span>
+        <span className="text-[8px] font-bold uppercase tracking-widest text-ink-softer">Desenvolvido por</span>
         <span className="text-[11px] font-black tracking-tight text-ink">{DESENVOLVEDORA}</span>
       </span>
       {/* A versão vive aqui, junto do selo — duas fontes para a mesma

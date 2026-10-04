@@ -28,7 +28,7 @@ export function PaymentMethodSelector({
 }) {
   return (
     <fieldset>
-      <legend className="mb-2 block text-xs font-bold uppercase tracking-wide text-ink-subtle">Forma de pagamento</legend>
+      <legend className="mb-2 block text-xs font-bold uppercase tracking-wide text-ink-softer">Forma de pagamento</legend>
       <div className="space-y-2" role="radiogroup" aria-label="Forma de pagamento">
         <label htmlFor="payment-option-wallet" className="relative block cursor-pointer">
           <input
