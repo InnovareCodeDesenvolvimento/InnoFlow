@@ -17,10 +17,10 @@ describe('mascararUrlComSegredo (pathToken do webhook da Cielo nunca vai ao log)
 
 describe('serializarReq', () => {
   it('mascara url e preserva o resto do req serializado', () => {
-    const out = serializarReq({ id: 1, method: 'POST', url: '/api/webhooks/cielo/segredo', headers: { a: 'b' } }) as Record<string, unknown>
+    const out = serializarReq({ id: 1, method: 'POST', url: '/api/webhooks/cielo/segredo', headers: { host: 'api.exemplo.com.br', a: 'b' } }) as Record<string, unknown>
     expect(out.url).toBe('/api/webhooks/cielo/***')
     expect(out.method).toBe('POST')
-    expect(out.headers).toEqual({ a: 'b' })
+    expect(out.headers).toEqual({ host: 'api.exemplo.com.br', a: '[redacted]' }) // allowlist de headers: `host` aparece, o resto sai mascarado
     expect(JSON.stringify(out)).not.toContain('segredo')
   })
   it('e defensivo com entradas estranhas', () => {

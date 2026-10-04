@@ -43,7 +43,7 @@ describe('log REAL + AuditLog do servidor de verdade — step-up: rajada de senh
 
   async function logAssentado(): Promise<string> {
     const sentinela = `SENTINELA-${Math.random().toString(36).slice(2, 12)}`
-    await fetch(`${base}/health`, { headers: { 'x-sentinela': sentinela } })
+    await fetch(`${base}/health`, { headers: { 'x-request-id': sentinela } })
     const deadline = Date.now() + 25_000
     while (!saida.includes(sentinela)) {
       if (Date.now() > deadline) throw new Error(`a requisição sentinela nunca apareceu no log em 25s:\n${saida.slice(-1500)}`)

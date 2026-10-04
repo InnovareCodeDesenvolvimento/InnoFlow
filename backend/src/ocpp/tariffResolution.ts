@@ -25,6 +25,14 @@ const SCOPE_SPECIFICITY: Record<TariffScope, number> = {
   OPERATOR: 1,
 }
 
+/** Nenhuma tarifa ATIVA e vigente para o conector. Subclasse de `Error` com a mesma mensagem de antes (quem só captura `Error` segue funcionando). */
+export class NenhumaTarifaAtivaError extends Error {
+  constructor(connectorId: string, operatorId: string) {
+    super(`Nenhuma tarifa ativa encontrada para o conector ${connectorId} (operador ${operatorId})`)
+    this.name = 'NenhumaTarifaAtivaError'
+  }
+}
+
 export async function resolveActiveTariff(
   connector: { id: string },
   chargePoint: { id: string; siteId: string; operatorId: string },
@@ -54,7 +62,7 @@ export async function resolveActiveTariff(
   })
 
   if (assignments.length === 0) {
-    throw new Error(`Nenhuma tarifa ativa encontrada para o conector ${connector.id} (operador ${chargePoint.operatorId})`)
+    throw new NenhumaTarifaAtivaError(connector.id, chargePoint.operatorId)
   }
 
   const best = [...assignments].sort((a, b) => {

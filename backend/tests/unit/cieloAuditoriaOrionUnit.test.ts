@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { CieloHttpClient } from '../../src/services/pagamentos/cieloHttpClient'
 import { CieloAdapter } from '../../src/services/pagamentos/cieloAdapter'
 import { emitirAccessTokenSop } from '../../src/services/pagamentos/cieloSopOAuth'
 import { lerListaDaConsultaPorPedido, lerDataCielo } from '../../src/services/pagamentos/cieloPayloads'
-import { cardTokenTemFormatoValido, meCreatePaymentMethodSchema, pareceConterPan } from '../../src/api/schemas/mePaymentMethods.schema'
+import { cardTokenTemFormatoValido, meCreatePaymentMethodSchema } from '../../src/api/schemas/mePaymentMethods.schema'
 import { logger } from '../../src/lib/logger'
 
 /**
@@ -163,8 +164,16 @@ describe('S-1 — cardToken só no formato do cofre da Cielo (GUID) e nunca um P
     }
     expect(meCreatePaymentMethodSchema.safeParse({ ...base, cardToken: 'qualquer-texto' }).success).toBe(false)
     expect(meCreatePaymentMethodSchema.safeParse({ ...base, cardToken: GUID }).success).toBe(true)
-    expect(pareceConterPan('4111 1111 1111 1111')).toBe(true)
-    expect(pareceConterPan(GUID)).toBe(false) // o GUID tem grupos de no máximo 12 dígitos
+  })
+
+  it('GUID LEGÍTIMO nunca é recusado como "PAN" (bug do S-1: o filtro de 13–19 dígitos recusava ~2,2 % dos randomUUID, ex.: 13+ dígitos decimais seguidos entre hífens)', () => {
+    const base = { brand: 'Visa' }
+    for (const exemplo of ['2e121917-4239-4922-8ab6-ab3ce68bc645', '12345678-1234-4123-8123-123456789012', '00000000-0000-4000-8000-000000000000']) {
+      expect(meCreatePaymentMethodSchema.safeParse({ ...base, cardToken: exemplo }).success, exemplo).toBe(true)
+    }
+    let recusados = 0
+    for (let i = 0; i < 20_000; i++) if (!meCreatePaymentMethodSchema.safeParse({ ...base, cardToken: randomUUID() }).success) recusados++
+    expect(recusados).toBe(0)
   })
 })
 

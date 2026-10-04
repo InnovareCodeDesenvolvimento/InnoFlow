@@ -96,14 +96,36 @@ export function mascararUrlComSegredo(url: string): string {
 }
 
 /**
- * Headers cujo NOME denuncia segredo: `secret`, `token`, `key`, `auth`, `cookie`, `password`/`senha`, `signature`, `credential`. O `redact` do pino só casa NOMES EXATOS (e o `pino-http` loga `req.headers` de toda
- * requisição): o segredo do webhook da Cielo vazava em claro se chegasse sob um nome fora da lista (ex.: o nome antigo, ou um que o dono cadastre no Site Cielo). Este padrão faz a redação NÃO depender do
- * nome exato — qualquer header novo com cara de segredo sai mascarado por padrão. Falso positivo (mascarar algo inocente) custa só uma linha de log menos útil; o contrário custa um segredo no log.
+ * ALLOWLIST de headers que podem ir ao log do pino-http; TODO o resto sai com o valor mascarado (o NOME fica, para saber que o header existiu). Antes era uma heurística por NOME
+ * (`secret|token|key|auth...`, em inglês): um header com nome em português/neutro (`Segredo`, `Chave`, `Codigo`, `Notificacao`, `Webhook`) carregando o segredo do webhook da Cielo saía em claro. Allowlist
+ * é a defesa de verdade: o que nunca foi previsto nunca vaza. Só entra aqui header que é diagnóstico de rede/requisição e jamais carrega segredo.
  */
-const PADRAO_NOME_DE_HEADER_SENSIVEL = /secret|token|key|auth|cookie|passw|senha|signature|credential/i
+const HEADERS_PERMITIDOS_NO_LOG: ReadonlySet<string> = new Set([
+  'host',
+  'user-agent',
+  'content-type',
+  'content-length',
+  'content-encoding',
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'connection',
+  'cache-control',
+  'origin',
+  'referer',
+  'x-forwarded-for',
+  'x-forwarded-proto',
+  'x-forwarded-host',
+  'x-forwarded-port',
+  'x-real-ip',
+  'x-request-id',
+  'cf-connecting-ip',
+  'via',
+])
 
+/** `true` = o header NÃO está na allowlist (valor mascarado no log). */
 export function nomeDeHeaderEhSensivel(nome: string): boolean {
-  return PADRAO_NOME_DE_HEADER_SENSIVEL.test(nome) || CAMPOS_SENSIVEIS.has(nome.toLowerCase())
+  return !HEADERS_PERMITIDOS_NO_LOG.has(nome.toLowerCase())
 }
 
 export function mascararHeadersSensiveis(headers: unknown): unknown {

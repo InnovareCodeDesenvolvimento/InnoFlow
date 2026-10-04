@@ -288,7 +288,7 @@ describe('rodada 2 — API de pagamentos com adaptador real + Cielo falsa por TC
      * válido, sem causa que ele consiga entender (repetir a tokenização gera outro token e normalmente passa — então parece "intermitente"). Correção: como o GUID já é um formato
      * fechado, o filtro de PAN só precisa valer para o que NÃO é GUID (ou comparar só dígitos contíguos sem separador).
      */
-    it.fails('(achado S-1) GUID VÁLIDO com 13+ dígitos decimais seguidos NÃO pode ser recusado como "PAN" (ex.: 2e121917-4239-4922-8ab6-ab3ce68bc645)', async () => {
+    it('(achado S-1) GUID VÁLIDO com 13+ dígitos decimais seguidos NÃO pode ser recusado como "PAN" (ex.: 2e121917-4239-4922-8ab6-ab3ce68bc645)', async () => {
       for (const t of ['2e121917-4239-4922-8ab6-ab3ce68bc645', '93b58220-7108-4802-8822-105d9d901d20', '03658120-2899-40bd-8ec9-0d5c15df345c']) {
         expect(cardTokenTemFormatoValido(t), `formato ${t}`).toBe(true)
         expect(pareceConterPan(t), `parece PAN ${t}`).toBe(false)
@@ -296,7 +296,7 @@ describe('rodada 2 — API de pagamentos com adaptador real + Cielo falsa por TC
       }
     })
 
-    it.fails('(achado S-1) taxa de falso positivo em 5000 GUIDs v4 aleatórios deve ser ZERO (hoje ~2%)', () => {
+    it('(achado S-1) taxa de falso positivo em 5000 GUIDs v4 aleatórios deve ser ZERO (hoje ~2%)', () => {
       let rejeitados = 0
       for (let i = 0; i < 5000; i++) {
         if (!meCreatePaymentMethodSchema.safeParse({ cardToken: randomUUID(), brand: 'Visa' }).success) rejeitados++

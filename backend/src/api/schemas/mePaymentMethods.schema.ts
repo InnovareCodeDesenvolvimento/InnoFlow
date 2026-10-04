@@ -18,7 +18,11 @@ export type CardBrand = (typeof CARD_BRANDS)[number]
 /**
  * S-1 (auditoria): `cardToken` só pode ser o token do cofre da Cielo (GUID) — antes aceitava qualquer texto de até 256 caracteres, e um PAN inteiro passaria pela nossa API, seria cifrado e
  * enviado à Cielo, quebrando o escopo SAQ A-EP. Exceção controlada: o token do SOP SIMULADO da página isolada (`mocktok.<last4>.<MMAAAA>.<titular>.<selo>`), que só é válido com o
- * `FakeAdapter` ativo (a ROTA recusa `mocktok.*` com a Cielo real). Qualquer sequência de 13 a 19 dígitos (com ou sem separador) fora do selo do mock é recusada.
+ * `FakeAdapter` ativo (a ROTA recusa `mocktok.*` com a Cielo real).
+ *
+ * O filtro "parece PAN" (13–19 dígitos seguidos, com ou sem separador) agora vale SÓ para o que NÃO tem formato de token válido: nos GUIDs os hífens não quebram a sequência e ~2,2 % dos
+ * `randomUUID()` v4 (ex.: `2e121917-4239-4922-8ab6-ab3ce68bc645`) tinham 13+ dígitos decimais seguidos — o motorista recebia "Dados inválidos" ao cadastrar um cartão VÁLIDO (achado S-1 da
+ * Íris, rodada 2). Um GUID tem 32 dígitos hexa e nunca é um PAN; o que não é GUID nem `mocktok.*` já é recusado pelo formato, e o filtro só melhora a mensagem para quem colar um número.
  */
 const CARD_TOKEN_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const CARD_TOKEN_MOCK_SOP = /^mocktok[.][0-9]{4}[.][0-9]{6}[.][A-Za-z0-9_=-]{0,200}[.][0-9]{1,24}$/
@@ -35,8 +39,10 @@ export function ehCardTokenDeMock(token: string): boolean {
   return token.startsWith('mocktok.')
 }
 
+/** Só para o que NÃO é um token de formato válido (GUID do cofre ou `mocktok.*`): um token válido nunca é tratado como PAN. */
 export function pareceConterPan(token: string): boolean {
-  return !CARD_TOKEN_MOCK_SOP.test(token) && SEQUENCIA_PARECIDA_COM_PAN.test(token)
+  if (CARD_TOKEN_GUID.test(token) || CARD_TOKEN_MOCK_SOP.test(token)) return false
+  return SEQUENCIA_PARECIDA_COM_PAN.test(token)
 }
 
 export const meCreatePaymentMethodSchema = z

@@ -3,7 +3,7 @@ import { createRPCError } from 'ocpp-rpc'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { startTransactionReqSchema } from '../schemas/startTransaction'
-import { resolveActiveTariff } from '../tariffResolution'
+import { NenhumaTarifaAtivaError, resolveActiveTariff } from '../tariffResolution'
 import { checkAuthorization } from '../authorizationCheck'
 import { serializeTariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { defineOcppHandler } from './defineHandler'
@@ -48,7 +48,16 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
     return { transactionId: 0, idTagInfo: { status: resultado.decision } }
   }
 
-  const tariff = await resolveActiveTariff(connector, chargePoint)
+  // Sem tarifa ATIVA (nunca houve vínculo, ou a tarifa foi desativada no admin) o `resolveActiveTariff` lança: antes isso virava InternalError para o carregador. Agora é uma RECUSA limpa
+  // (`Blocked`, transactionId 0 — o carregador não libera a tomada) + alerta para o operador. Só esta falha é tratada; qualquer outro erro continua propagando.
+  let tariff: Awaited<ReturnType<typeof resolveActiveTariff>>
+  try {
+    tariff = await resolveActiveTariff(connector, chargePoint)
+  } catch (err) {
+    if (!(err instanceof NenhumaTarifaAtivaError)) throw err
+    logger.error({ alert: 'ocpp_start_transaction_no_active_tariff', chargePointId: ctx.chargePointId, connectorId: data.connectorId, operatorId: ctx.operatorId }, '[ocpp] StartTransaction recusado: nenhuma tarifa ativa para este conector (tarifa desativada ou sem vínculo)')
+    return { transactionId: 0, idTagInfo: { status: 'Blocked' as const } }
+  }
   // Capturado numa const FORA do callback da transação: narrowing de
   // `token.userId` (via `!token?.userId` acima) não atravessa o limite de
   // uma função aninhada (`prisma.$transaction(async (tx) => ...)`) — TS

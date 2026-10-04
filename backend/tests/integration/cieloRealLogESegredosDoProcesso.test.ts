@@ -381,7 +381,7 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
    * claro — p.ex. nomes em português que o dono pode digitar no campo "Key" do Site Cielo (só letras): `Segredo`, `Chave`, `Codigo`. O ideal é lista PERMITIDA para a rota do webhook (logar só
    * host/user-agent/content-type) em vez de lista de proibidos. Vira `it` quando o `req` do webhook deixar de logar headers desconhecidos.
    */
-  it.fails('(aberto) segredo do webhook sob um nome de header SEM palavra sensível (`Segredo`, `Chave`, `Codigo`, `Notificacao`) NÃO pode sair em claro no log', async () => {
+  it('(aberto) segredo do webhook sob um nome de header SEM palavra sensível (`Segredo`, `Chave`, `Codigo`, `Notificacao`) NÃO pode sair em claro no log', async () => {
     const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
     const nomes = ['Segredo', 'Chave', 'Codigo', 'Notificacao', 'Webhook']
     const iscas = nomes.map((n, i) => [n, `ISCA-ABERTA-${i}-${Math.random().toString(36).slice(2, 10)}`] as const)

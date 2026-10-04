@@ -65,7 +65,7 @@ describe('log REAL do servidor (NODE_ENV=production, LOG_LEVEL=info) — nenhum 
    */
   async function logAssentado(): Promise<string> {
     const sentinela = `SENTINELA-${Math.random().toString(36).slice(2, 12)}`
-    await fetch(`${base}/health`, { headers: { 'x-sentinela': sentinela } })
+    await fetch(`${base}/health`, { headers: { 'x-request-id': sentinela } })
     const deadline = Date.now() + 20_000
     while (!saida.includes(sentinela)) {
       if (Date.now() > deadline) throw new Error(`a requisição sentinela nunca apareceu no log em 20s — captura do stdout quebrada:
@@ -130,7 +130,7 @@ ${saida.slice(-2000)}`)
   const webhook = (headerSecret: string | null, path = PATH_TOKEN) =>
     fetch(`${base}/api/webhooks/cielo/${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-controle-positivo': CONTROLE_POSITIVO, ...(headerSecret ? { 'InnoFlowWebhookSecret': headerSecret } : {}) },
+      headers: { 'content-type': 'application/json', 'x-request-id': CONTROLE_POSITIVO, ...(headerSecret ? { 'InnoFlowWebhookSecret': headerSecret } : {}) },
       body: JSON.stringify({ PaymentId: 'pagamento-desconhecido-log-real', ChangeType: 1 }),
     })
 
@@ -161,7 +161,7 @@ ${saida.slice(-2000)}`)
   it('PUT /api/admin/payment-gateway com segredos no corpo (200): nem o corpo, nem o Authorization, nem o segredo do webhook trocado vão para o log', async () => {
     const r = await fetch(`${base}/api/admin/payment-gateway`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}`, 'x-controle-positivo': CONTROLE_POSITIVO },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}`, 'x-request-id': CONTROLE_POSITIVO },
       body: JSON.stringify({ merchantId: 'mid-log-real', ...SEGREDOS_PUT, pixEnabled: true, currentPassword: SENHA_ADMIN_TESTE }),
     })
     expect(r.status, await r.clone().text()).toBe(200)
