@@ -85,7 +85,8 @@ describe('Cielo HTTP real — aprovação e cancelamento (invariantes + oráculo
 
   it('"04" (código ISO 8583 de "capturar cartão") NÃO é o "4" da Cielo: não aprova (comparação é por string, não por número)', async () => {
     expect((await autorizarCom(1, '04')).status).toBe('FAILED')
-    expect((await autorizarCom(1, '004')).status).toBe('FAILED')
+    // MUDANÇA DELIBERADA (rodada 2, I-2): '04' é recusa CONHECIDA (ISO) => FAILED; '004' não está em NENHUMA tabela => não definitivo (CREATED), nunca aprovação
+    expect((await autorizarCom(1, '004')).status).toBe('CREATED')
   })
 
   it('Status 2 (capturada) SEM ReturnCode, ou com código de negação, é UNKNOWN->CREATED: nem CAPTURED (não afirma cobrança) nem FAILED (a venda pode estar capturada)', async () => {
@@ -129,12 +130,33 @@ describe('Cielo HTTP real — aprovação e cancelamento (invariantes + oráculo
       }
     }
     expect(maisLargoQueParque, 'o InnoFlow aprova algo que o Parque (produção) recusa').toEqual([])
-    expect(maisEstreitoQueParque).toEqual(['Status 1 RC 0: nós=FAILED parque=em_analise', 'Status 1 RC 6: nós=FAILED parque=em_analise', 'Status 2 RC 0: nós=CREATED parque=confirmada'])
+    // MUDANÇA DELIBERADA (rodada 2, I-2): Status 1 + RC 0/6 deixou de ser recusa (FAILED) e virou NÃO DEFINITIVO (CREATED) — continua sem aprovar, mas agora o varredor reconsulta e cancela
+    // por precaução em vez de deixar a autorização viva sem dono. O conjunto que APROVA não foi ampliado.
+    expect(maisEstreitoQueParque).toEqual(['Status 1 RC 0: nós=CREATED parque=em_analise', 'Status 1 RC 6: nós=CREATED parque=em_analise', 'Status 2 RC 0: nós=CREATED parque=confirmada'])
   }, 60_000)
 
-  it('Status vindo como TEXTO ("1") no JSON vira não-definitivo (CREATED), nunca aprovação — o Parque aceita texto numérico (divergência de tolerância, a Cielo documenta número)', async () => {
-    expect((await autorizarCom('1', '4')).status).toBe('CREATED')
-    expect((await autorizarCom('2', '6')).status).toBe('CREATED')
+  it('I-2 (rodada 2) — Status 1: recusa CONHECIDA (51, 05, 57, 04...) é FAILED; ReturnCode AUSENTE ou FORA das duas tabelas é CREATED (nunca FAILED, nunca aprovação), e o Status bruto é preservado na porta', async () => {
+    for (const rc of ['51', '05', '57', '04', '14', '78', '99', '96']) expect((await autorizarCom(1, rc)).status, `RC ${rc}`).toBe('FAILED')
+    for (const rc of [undefined, null, '', '   ', '0', '6', '000', '04x', 'XYZ', '777', '9999', '-1', '3']) {
+      const r = await autorizarCom(1, rc)
+      expect(r.status, `RC ${JSON.stringify(rc)}`).toBe('CREATED')
+      expect(r.statusBruto, `RC ${JSON.stringify(rc)}`).toBe(1)
+    }
+    expect((await autorizarCom(1, '4')).statusBruto).toBe(1)
+    expect((await autorizarCom(3, '4')).status).toBe('FAILED')
+  })
+
+  // MUDANÇA DELIBERADA (rodada 2, commit da47cc0): o Status em TEXTO numérico ("1") passou a ser aceito como no Parque — era "vira CREATED". Texto não numérico, decimal e vazio continuam sem Status.
+  it('Status vindo como TEXTO numérico ("1", " 2 ") é lido como número (igual ao Parque); texto não numérico, decimal, negativo e vazio NÃO viram aprovação', async () => {
+    expect((await autorizarCom('1', '4')).status).toBe('AUTHORIZED')
+    expect((await autorizarCom(' 1 ', '00')).status).toBe('AUTHORIZED')
+    expect((await autorizarCom('2', '6')).status).toBe('CAPTURED')
+    expect((await autorizarCom('1', '51')).status).toBe('FAILED')
+    for (const ruim of ['Authorized', '1.0', '1.5', '-1', '', '  ', '1e0', '0x1', '١', '01a', '1000']) {
+      const r = await autorizarCom(ruim, '4')
+      expect(r.status, `Status ${JSON.stringify(ruim)}`).not.toBe('AUTHORIZED')
+      expect(r.status, `Status ${JSON.stringify(ruim)}`).not.toBe('CAPTURED')
+    }
   })
 
   describe('cancelamento (PUT void) — desfecho pelos DOIS sinais', () => {
@@ -168,7 +190,7 @@ describe('Cielo HTTP real — aprovação e cancelamento (invariantes + oráculo
       [10, '', 'INDEFINIDO', 'AUTHORIZED'],
       [10, '77', 'INDEFINIDO', 'AUTHORIZED'],
       [undefined, '0', 'INDEFINIDO', 'AUTHORIZED'],
-      ['10', '0', 'INDEFINIDO', 'AUTHORIZED'], // Status texto
+      ['10', '0', 'CONFIRMADO', 'VOIDED'], // MUDANÇA DELIBERADA (rodada 2, da47cc0): Status em texto numérico agora é lido como número
     ])('void devolve Status %j + ReturnCode %j -> desfecho %s, status do domínio %s', async (status, rc, desfecho, statusDominio) => {
       const r = await cancelarCom(status, rc)
       expect(r.desfecho).toBe(desfecho)
@@ -180,7 +202,8 @@ describe('Cielo HTTP real — aprovação e cancelamento (invariantes + oráculo
       for (const status of [-1, 0, 1, 2, 3, 10, 11, 12, 13, 20, undefined, null, '10']) {
         for (const rc of ['0', '00', '9', '10', '223', '476', '40', '41', '53', '101', '103', '51', '4', '6', '', undefined, null]) {
           const r = await cancelarCom(status, rc)
-          const legitimo = ['0', '00', '9'].includes(String(rc)) && (status === 10 || status === 11)
+          const statusNum = typeof status === 'string' && /^[0-9]{1,3}$/.test(status.trim()) ? Number(status.trim()) : status
+          const legitimo = ['0', '00', '9'].includes(String(rc)) && (statusNum === 10 || statusNum === 11)
           if (r.status === 'VOIDED' && !legitimo) voided.push(`Status=${JSON.stringify(status)} RC=${JSON.stringify(rc)}`)
           if (legitimo && r.status !== 'VOIDED') voided.push(`LEGÍTIMO NÃO CONFIRMADO: Status=${status} RC=${rc}`)
         }

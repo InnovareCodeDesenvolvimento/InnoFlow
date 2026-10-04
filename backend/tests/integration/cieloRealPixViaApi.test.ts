@@ -107,7 +107,7 @@ describe('Pix Cielo2 via API (adaptador real + Cielo falsa por TCP)', () => {
    * com `Status` 13/3 (abortada/negada) ou sem `QrCodeString` (campo renomeado, Pix não habilitado na conta), o motorista recebe um "Pix" sem QR pagável (ou de uma cobrança que
    * a Cielo abortou) e a recarga fica PENDING até expirar. Desejado: tratar como falha (503 + FAILED) e logar. Os Pix `Cielo2` não têm sandbox: a forma real da resposta só se vê em produção.
    */
-  it.fails('(achado) Pix com Status 13 (abortado) ou sem QR pagável NÃO deveria virar recarga PENDING com 201', async () => {
+  it('(I-6, CORRIGIDO na rodada 2) Pix com Status 13 (abortado) ou sem QR pagável NÃO vira recarga PENDING com 201', async () => {
     cielo.agendar('POST_SALE', { corpoRespostaCru: { MerchantOrderId: 'x', Payment: { PaymentId: 'pay-pix-abortado', Status: 13, ReturnCode: '0', Type: 'Pix' } } })
     const { res, intent } = await recarregar()
     expect(res.status).not.toBe(201)

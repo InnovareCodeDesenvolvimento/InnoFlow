@@ -9,6 +9,7 @@ import { CapturaCartaoEmAndamentoError, CapturaCartaoNaoDefinitivaError, captura
 import { cancelarPreAutorizacaoCartao } from '../../src/services/pagamentos/cancelarPreAutorizacaoCartao'
 import { varrerPreAutorizacoesCartao } from '../../src/services/pagamentos/varrerPreAutorizacoesCartao'
 import { reenfileirarCapturasPendentes } from '../../src/services/pagamentos/reenfileirarCapturasPendentes'
+import { chaveLockCancelamento, pararCancelamento } from '../../src/services/pagamentos/controleCancelamentoPreAuth'
 import { resetGatewayConfigCacheParaTeste } from '../../src/services/pagamentos/gatewayConfig'
 import { resetPagamentoPortCacheParaTeste } from '../../src/services/pagamentos/pagamentoPortInstance'
 import { startCapturarSessaoCartaoWorker } from '../../src/worker/jobs/capturarSessaoCartaoJob'
@@ -150,6 +151,35 @@ describe('captura/cancelamento de cartão — nunca um 2º PUT sem consulta ante
       expect(depois.cieloProofOfSale).toBe(antes.cieloProofOfSale) // null não apaga
       expect(aviso.mock.calls.some((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_cielo_identifier_truncated')).toBe(true)
       aviso.mockRestore()
+    })
+
+    it('I-2 (rodada 2) — na CAPTURA a consulta devolve Status 1 SEM ReturnCode (ou com código fora das tabelas): NÃO vira FAILED nem dívida e NÃO tenta capturar às cegas; fica CAPTURE_PENDING com alerta; recusa CONHECIDA (51) continua FAILED + dívida', async () => {
+      const a = await cen.sessaoParada('cap-status1-sem-rc')
+      const venda = cielo.vendas.get(a.cieloPaymentId)!
+      venda.returnCode = null // Status 1 e nenhum código
+      const erro = vi.spyOn(logger, 'error')
+      try {
+        for (let i = 0; i < 3; i++) await expect(capturarSessaoCartao(a.intentId)).rejects.toBeInstanceOf(CapturaCartaoNaoDefinitivaError)
+        const alertasEmitidos = erro.mock.calls.map((c) => (c[0] as { alert?: string; paymentId?: string } | undefined)).filter((o) => o?.alert === 'payment_authorized_status_unlisted_returncode')
+        expect(alertasEmitidos.length).toBeGreaterThanOrEqual(1)
+        expect(alertasEmitidos[0]!.paymentId).toBe(a.cieloPaymentId)
+      } finally {
+        erro.mockRestore()
+      }
+      expect(await intentDe(a.intentId)).toMatchObject({ status: 'CAPTURE_PENDING' })
+      expect(await prisma.debt.count({ where: { paymentIntentId: a.intentId } })).toBe(0)
+      expect(cielo.contar('PUT_CAPTURE', { paymentId: a.cieloPaymentId })).toBe(0)
+
+      // a Cielo "se completa" (ReturnCode 4): a volta seguinte captura normalmente
+      venda.returnCode = '4'
+      expect(await capturarSessaoCartao(a.intentId)).toMatchObject({ status: 'CAPTURED' })
+
+      // controle: Status 1 + ReturnCode de recusa CONHECIDA (51) na captura é definitivo (FAILED + dívida integral) — o comportamento anterior, intacto
+      const b = await cen.sessaoParada('cap-status1-51')
+      const vb = cielo.vendas.get(b.cieloPaymentId)!
+      vb.returnCode = '51'
+      expect(await capturarSessaoCartao(b.intentId)).toMatchObject({ status: 'FAILED' })
+      expect(await prisma.debt.count({ where: { paymentIntentId: b.intentId } })).toBe(1)
     })
 
     it('DOIS executores do mesmo intent ao mesmo tempo (PUT lento): 1 PUT, 1 captura efetiva; o perdedor lança "em andamento" e NÃO chama a Cielo', async () => {
@@ -300,10 +330,17 @@ describe('captura/cancelamento de cartão — nunca um 2º PUT sem consulta ante
       expect((await prisma.authToken.findUniqueOrThrow({ where: { id: antes.authTokenId! } })).status).toBe('ACCEPTED')
     })
 
-    it('INDEFINIDO que na verdade cancelou (Status 10 sem ReturnCode na resposta do void): a 1ª volta não dá por feito, a 2ª CONSULTA, vê VOIDED e espelha — auto-cura com 1 PUT só', async () => {
+    // MUDANÇA DELIBERADA (rodada 2, I-3): havia a asserção "a 2ª volta imediata consulta e espelha". Agora o INDEFINIDO entra em BACKOFF (60 s x 2^n) e a volta IMEDIATA não chama a Cielo;
+    // passado o backoff (simulado apagando a chave de pausa) a consulta vê VOIDED e espelha — auto-cura continua, com 1 PUT só.
+    it('INDEFINIDO que na verdade cancelou (Status 10 sem ReturnCode no void): a 1ª volta não dá por feito e entra em backoff; a volta imediata NÃO chama a Cielo; passado o backoff CONSULTA, vê VOIDED e espelha — 1 PUT só', async () => {
       const { intentId, cieloPaymentId } = await cen.autorizadaAbandonada('x-indef-cura')
       cielo.agendar('PUT_VOID', { processar: true, corpoRespostaCru: { Status: 10, ReasonCode: 0 } })
       expect(await cancelarPreAutorizacaoCartao(intentId)).toBe(false)
+      const chamadasAntes = cielo.chamadas.length
+      expect(await cancelarPreAutorizacaoCartao(intentId)).toBe(false) // backoff em curso
+      expect(cielo.chamadas.length).toBe(chamadasAntes)
+      expect(await redis.ttl(`card-void:next:${intentId}`)).toBeGreaterThan(50)
+      await redis.del(`card-void:next:${intentId}`) // "passou o backoff"
       expect(await cancelarPreAutorizacaoCartao(intentId)).toBe(true)
       expect(cielo.contar('PUT_VOID', { paymentId: cieloPaymentId })).toBe(1)
     })
@@ -340,19 +377,39 @@ describe('captura/cancelamento de cartão — nunca um 2º PUT sem consulta ante
       }
     })
 
-    /**
-     * ACHADO (Íris): o cancelamento NÃO tem lock por intent (a captura tem). Dois varredores (2 workers) leem AUTHORIZED, consultam (ambos veem AUTHORIZED) e os DOIS
-     * enviam PUT /void. A Cielo recusa o 2º (venda já cancelada, 400), então o dinheiro está salvo — mas o 2º vira um erro "falha ao cancelar" no log e, para um
-     * estorno de venda já capturada ou um void parcial, repetir é exatamente o que a política "consulta antes" existe para evitar. Desejado: no máximo 1 PUT /void
-     * por pré-autorização. Vira `it` quando `cancelarPreAutorizacaoCartao` serializar por intent (lock Redis como a captura).
-     */
-    it.fails('(achado) com dois varredores simultâneos o 2º PUT /void sai SEM consulta no meio (regra: nunca 2ª escrita sem consultar antes) — deveria ser no máximo 1 PUT por pré-autorização', async () => {
+    // MUDANÇA DELIBERADA (rodada 2, I-3): `it.fails` -> `it`, asserção INTACTA (era "no máximo 1 PUT /void por pré-autorização com dois varredores, nunca 2ª escrita sem consulta").
+    // O cancelamento ganhou LOCK por intent (Redis) como a captura.
+    it('(I-3, CORRIGIDO) com dois varredores simultâneos NUNCA há 2º PUT /void sem consulta no meio — no máximo 1 PUT por pré-autorização', async () => {
       const itens = await abandonadas(5, 'v2wb')
       cielo.agendar('GET_BY_ID', ...atrasos(40))
       cielo.agendar('PUT_VOID', ...atrasos(40))
       await Promise.all([varrerPreAutorizacoesCartao(), varrerPreAutorizacoesCartao()])
       expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
-      for (const { cieloPaymentId } of itens) expect(cielo.contar('PUT_VOID', { paymentId: cieloPaymentId })).toBe(1)
+      for (const { intentId, cieloPaymentId } of itens) {
+        expect(cielo.contar('PUT_VOID', { paymentId: cieloPaymentId })).toBe(1)
+        expect(cielo.efeitos.cancelamentos.get(cieloPaymentId)).toBe(1)
+        expect((await intentDe(intentId)).status).toBe('VOIDED')
+      }
+    })
+
+    it('TRÊS executores ao mesmo tempo no MESMO intent (varredor, varredor e chamada direta do finalizarSessao): 1 PUT; o lock perdido NÃO chama a Cielo nem alerta', async () => {
+      const [x] = await abandonadas(1, 'lock3')
+      cielo.agendar('GET_BY_ID', ...atrasos(10))
+      cielo.agendar('PUT_VOID', ...atrasos(10))
+      const resultados = await Promise.all([cancelarPreAutorizacaoCartao(x.intentId), cancelarPreAutorizacaoCartao(x.intentId), cancelarPreAutorizacaoCartao(x.intentId)])
+      expect(resultados.filter(Boolean)).toHaveLength(1)
+      expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(1)
+      expect(cielo.contar('GET_BY_ID', { paymentId: x.cieloPaymentId })).toBe(1) // quem perdeu o lock nem consulta
+    })
+
+    it('lock do cancelamento tomado por OUTRO executor: NÃO cancela e não chama a Cielo (o mesmo caminho da falha fechada com Redis fora, que NÃO foi provada com Redis derrubado de verdade)', async () => {
+      const [x] = await abandonadas(1, 'redis-fora')
+      await redis.set(chaveLockCancelamento(x.intentId), 'outro-executor', 'EX', 60) // lock já tomado por outro
+      const antes = cielo.chamadas.length
+      expect(await cancelarPreAutorizacaoCartao(x.intentId)).toBe(false)
+      expect(cielo.chamadas.length).toBe(antes)
+      await redis.del(chaveLockCancelamento(x.intentId))
+      expect(await cancelarPreAutorizacaoCartao(x.intentId)).toBe(true)
     })
 
     it('DOIS varredores sobre intents CREATED (Cielo autorizou, resposta perdida): cada venda é cancelada uma vez e NENHUM 2º POST sai — a gravação condicional (CREATED -> AUTHORIZED) tem um único vencedor', async () => {
@@ -380,34 +437,112 @@ describe('captura/cancelamento de cartão — nunca um 2º PUT sem consulta ante
       }
     })
 
-    /**
-     * ACHADO (Íris): quando a Cielo RECUSA o cancelamento em definitivo (ReturnCode 40/41/53/101/103-107) o log diz "não vou repetir às cegas", mas o intent
-     * continua AUTHORIZED e o caso A do varredor o pega DE NOVO a cada rodada (60 s): consulta, PUT /void, recusa, alerta de ERRO — para sempre. Idem para
-     * "em andamento" (10/223/476), que o próprio doc de desenho (F19) manda NÃO retentar. Não é dinheiro em risco (sempre há consulta antes e a Cielo recusa de novo),
-     * mas é um loop de PUTs e de alertas de erro por intent, sem teto nem backoff. Desejado: depois de uma recusa definitiva, parar de enviar PUT (alertar 1x e
-     * deixar para conciliação manual). Vira `it` quando o desfecho RECUSADO/EM_ANDAMENTO deixar de ser reenviado.
-     */
-    it.fails('(achado) recusa DEFINITIVA do cancelamento (ReturnCode 40): em 4 rodadas do varredor o PUT /void deveria sair no máximo 1 vez', async () => {
-      const [x] = await abandonadas(1, 'rec-def')
-      cielo.agendar('PUT_VOID', ...Array.from({ length: 4 }, () => ({ processar: false, corpoRespostaCru: { Status: 1, ReturnCode: '40' } })))
-      for (let i = 0; i < 4; i++) await varrerPreAutorizacoesCartao()
-      expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBeLessThanOrEqual(1)
+    // MUDANÇA DELIBERADA (rodada 2, I-3): os `it.fails` "recusa DEFINITIVA => no máximo 1 PUT" e "EM ANDAMENTO => no máximo 1 PUT" viraram `it` (asserção mantida) e a MEDIÇÃO do loop
+    // (4 PUTs) passou a fixar o novo comportamento (1 PUT, 1 alerta de revisão manual, parada).
+    describe.each([['40'], ['41'], ['53'], ['101'], ['103'], ['104'], ['105'], ['106'], ['107']])('recusa DEFINITIVA do cancelamento (ReturnCode %s)', (codigo) => {
+      it('4 rodadas do varredor: 1 PUT /void (precedido de GET), `payment_void_manual_review` UMA vez (com o PaymentId), parada persistente, intent segue AUTHORIZED com o idTag ACCEPTED', async () => {
+        const [x] = await abandonadas(1, `rec-def-${codigo}`)
+        const erro = vi.spyOn(logger, 'error')
+        try {
+          cielo.agendar('PUT_VOID', ...Array.from({ length: 4 }, () => ({ processar: false, corpoRespostaCru: { Status: 1, ReturnCode: codigo } })))
+          for (let i = 0; i < 4; i++) await varrerPreAutorizacoesCartao()
+          const alertas = erro.mock.calls.map((c) => c[0] as { alert?: string; paymentId?: string }).filter((o) => o?.alert)
+          expect(alertas.filter((a) => a.alert === 'payment_void_manual_review')).toHaveLength(1)
+          expect(alertas.find((a) => a.alert === 'payment_void_manual_review')!.paymentId).toBe(x.cieloPaymentId)
+          expect(alertas.filter((a) => a.alert === 'payment_void_refused').length).toBeLessThanOrEqual(1)
+          expect(alertas.some((a) => a.alert === 'payment_gateway_account_restriction')).toBe(Number(codigo) >= 103)
+        } finally {
+          erro.mockRestore()
+        }
+        expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(1)
+        expect(cielo.contar('GET_BY_ID', { paymentId: x.cieloPaymentId })).toBe(1) // as rodadas seguintes nem consultam: PARADO
+        expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
+        expect(await redis.exists(`card-void:stop:${x.intentId}`)).toBe(1)
+        const intent = await intentDe(x.intentId)
+        expect(intent.status).toBe('AUTHORIZED')
+        expect((await prisma.authToken.findUniqueOrThrow({ where: { id: intent.authTokenId! } })).status).toBe('ACCEPTED')
+        // mesmo "passado o backoff" a parada é definitiva (30 dias): apagar a pausa não reabre
+        await redis.del(`card-void:next:${x.intentId}`)
+        await varrerPreAutorizacoesCartao()
+        expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(1)
+      })
     })
 
-    it.fails('(achado) cancelamento "EM ANDAMENTO" (ReturnCode 476): em 4 rodadas do varredor o PUT /void deveria sair no máximo 1 vez (a doc de desenho manda não retentar)', async () => {
+    it('(I-3, CORRIGIDO) cancelamento "EM ANDAMENTO" (ReturnCode 476): rodadas seguidas NÃO repetem o PUT (backoff 60 s x 2^n); passado o backoff repete COM consulta; alerta de "em andamento" no máximo 1x/h', async () => {
       const [x] = await abandonadas(1, 'rec-and')
-      cielo.agendar('PUT_VOID', ...Array.from({ length: 4 }, () => ({ processar: false, corpoRespostaCru: { Status: 1, ReturnCode: '476' } })))
-      for (let i = 0; i < 4; i++) await varrerPreAutorizacoesCartao()
-      expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBeLessThanOrEqual(1)
+      cielo.agendar('PUT_VOID', ...Array.from({ length: 6 }, () => ({ processar: false, corpoRespostaCru: { Status: 1, ReturnCode: '476' } })))
+      const aviso = vi.spyOn(logger, 'warn')
+      try {
+        for (let i = 0; i < 4; i++) await varrerPreAutorizacoesCartao() // 4 rodadas seguidas
+        expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(1)
+        expect(await redis.ttl(`card-void:next:${x.intentId}`)).toBeGreaterThan(50)
+        expect(await redis.ttl(`card-void:next:${x.intentId}`)).toBeLessThanOrEqual(60)
+
+        const ttls: number[] = []
+        for (let n = 0; n < 3; n++) {
+          await redis.del(`card-void:next:${x.intentId}`) // "passou o backoff"
+          await varrerPreAutorizacoesCartao()
+          ttls.push(await redis.ttl(`card-void:next:${x.intentId}`))
+        }
+        expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(4)
+        expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
+        // backoff CRESCENTE: 120, 240, 480 s (2ª, 3ª e 4ª tentativas)
+        expect(ttls[0]).toBeGreaterThan(100)
+        expect(ttls[1]).toBeGreaterThan(ttls[0])
+        expect(ttls[2]).toBeGreaterThan(ttls[1])
+        const alertasAndamento = aviso.mock.calls.filter((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_void_in_progress')
+        expect(alertasAndamento).toHaveLength(1) // 4 PUTs, 1 alerta (limite 1/h por intent)
+      } finally {
+        aviso.mockRestore()
+      }
+      expect((await intentDe(x.intentId)).status).toBe('AUTHORIZED')
     })
 
-    it('MEDIÇÃO do loop acima: 4 rodadas com recusa definitiva => 4 PUTs (cada um precedido de GET) e o intent segue AUTHORIZED com o idTag ainda ACCEPTED', async () => {
+    it('INDEFINIDO repetido 5 vezes (ReturnCode 77, Status 1): vira revisão manual e PARA; antes da 5ª só há backoff', async () => {
+      const [x] = await abandonadas(1, 'indef-5')
+      cielo.agendar('PUT_VOID', ...Array.from({ length: 6 }, () => ({ processar: false, corpoRespostaCru: { Status: 1, ReturnCode: '77' } })))
+      const erro = vi.spyOn(logger, 'error')
+      try {
+        for (let n = 0; n < 7; n++) {
+          await redis.del(`card-void:next:${x.intentId}`)
+          await varrerPreAutorizacoesCartao()
+        }
+        expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(5) // a 5ª já pede revisão e para; as 2 voltas seguintes não chamam a Cielo
+        expect(erro.mock.calls.filter((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_void_manual_review')).toHaveLength(1)
+        expect(await redis.exists(`card-void:stop:${x.intentId}`)).toBe(1)
+      } finally {
+        erro.mockRestore()
+      }
+    })
+
+    it('a consulta diz FAILED (negada/abortada): NÃO tenta void — espelha o intent como FAILED e expira o idTag', async () => {
+      const [x] = await abandonadas(1, 'espelha-failed')
+      const v = cielo.vendas.get(x.cieloPaymentId)!
+      v.status = 3
+      v.returnCode = '51'
+      expect(await cancelarPreAutorizacaoCartao(x.intentId)).toBe(false)
+      expect(cielo.contar('PUT_VOID')).toBe(0)
+      const intent = await intentDe(x.intentId)
+      expect(intent.status).toBe('FAILED')
+      expect((await prisma.authToken.findUniqueOrThrow({ where: { id: intent.authTokenId! } })).status).toBe('EXPIRED')
+    })
+
+    it('MUDANÇA DELIBERADA (era a MEDIÇÃO do loop: 4 PUTs): 4 rodadas com recusa definitiva agora são 1 PUT, intent AUTHORIZED, idTag ACCEPTED', async () => {
       const [x] = await abandonadas(1, 'rec-med')
       cielo.agendar('PUT_VOID', ...Array.from({ length: 4 }, () => ({ processar: false, corpoRespostaCru: { Status: 1, ReturnCode: '40' } })))
       for (let i = 0; i < 4; i++) await varrerPreAutorizacoesCartao()
-      expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(4)
+      expect(cielo.contar('PUT_VOID', { paymentId: x.cieloPaymentId })).toBe(1)
       expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
       expect((await intentDe(x.intentId)).status).toBe('AUTHORIZED')
     })
+
+    it('presos em PARADA/BACKOFF não gastam o lote: 55 intents parados na frente NÃO impedem a rodada de cancelar um intent abandonado mais novo', async () => {
+      const presos = await abandonadas(55, 'presos')
+      for (const p of presos) await pararCancelamento(p.intentId)
+      const [novo] = await abandonadas(1, 'novo-atras')
+      await varrerPreAutorizacoesCartao()
+      expect((await intentDe(novo.intentId)).status).toBe('VOIDED')
+      expect(cielo.contar('PUT_VOID')).toBe(1) // nenhum dos 55 presos foi tocado
+    }, 120_000)
   })
 })

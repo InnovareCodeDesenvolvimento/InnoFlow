@@ -6,7 +6,7 @@ import { env } from '../../src/lib/env'
 import { logger } from '../../src/lib/logger'
 import { varrerPreAutorizacoesCartao } from '../../src/services/pagamentos/varrerPreAutorizacoesCartao'
 import { resetGatewayConfigCacheParaTeste } from '../../src/services/pagamentos/gatewayConfig'
-import { resetPagamentoPortCacheParaTeste } from '../../src/services/pagamentos/pagamentoPortInstance'
+import { getPagamentoPort, resetPagamentoPortCacheParaTeste } from '../../src/services/pagamentos/pagamentoPortInstance'
 import { uniqueSuffix } from './helpers/fixtures'
 import { CieloFalsaHttp } from './helpers/cieloFalsaHttp'
 import { apontarAdaptadorParaCieloFalsa, criarCenarioCartaoHttp, type CenarioCartaoHttp } from './helpers/cenarioCartaoHttp'
@@ -192,14 +192,14 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       cielo.porPedido = 'completo'
     })
 
-    it.fails('timeout depois de a Cielo processar: o adaptador deveria completar a consulta por PaymentId e seguir com a autorização real (202) — hoje fica sem resposta definitiva (503)', async () => {
+    it('(I-1, CORRIGIDO na rodada 2) timeout depois de a Cielo processar: o adaptador completa a consulta por PaymentId e segue com a autorização real (202)', async () => {
       cielo.agendar('POST_SALE', { processar: true, resposta: 'travar' })
       const { res, intent } = await iniciarComFalha()
       expect(res.status, JSON.stringify(res.body)).toBe(202)
       expect(intent.status).toBe('AUTHORIZED')
     })
 
-    it.fails('varredor (caso B): pré-autorização órfã com consulta que devolve só PaymentId deveria ser cancelada — hoje fica viva para sempre (PUT void nunca sai)', async () => {
+    it('(I-1, CORRIGIDO na rodada 2) varredor (caso B): pré-autorização órfã com consulta que devolve só PaymentId é cancelada', async () => {
       cielo.agendar('POST_SALE', { processar: true, resposta: 'derrubar' })
       const { intent } = await iniciarComFalha()
       await cen.envelhecer(intent.id, 30)
@@ -210,32 +210,179 @@ describe('autorização de cartão — nunca um 2º POST /1/sales para o mesmo p
       expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
     })
 
-    it('MEDIÇÃO do estado atual nesse formato: o intent fica CREATED e a venda VIVA na Cielo depois de 3 rodadas do varredor (retenção no cartão sem dono)', async () => {
+    // MUDANÇA DELIBERADA (rodada 2): era a MEDIÇÃO do estado antigo (intent CREATED e venda VIVA na Cielo depois de 3 rodadas). Agora a mesma situação termina em VOIDED.
+    it('(rodada 2) o mesmo cenário depois de 3 rodadas do varredor: venda CANCELADA na Cielo e intent VOIDED, 1 só cancelamento efetivo e consulta ANTES de cada PUT', async () => {
       cielo.agendar('POST_SALE', { processar: true, resposta: 'derrubar' })
       const { intent } = await iniciarComFalha()
       await cen.envelhecer(intent.id, 30)
       for (let i = 0; i < 3; i++) await varrerPreAutorizacoesCartao()
       const venda = cielo.vendaPorPedido(intent.id)!
-      expect(venda.status).toBe(1) // ainda autorizada lá
-      expect(cielo.contar('PUT_VOID')).toBe(0)
-      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('CREATED')
+      expect(venda.status).toBe(10)
+      expect(cielo.efeitos.cancelamentos.get(venda.paymentId)).toBe(1)
+      expect(cielo.contar('POST_SALE', { merchantOrderId: intent.id })).toBe(1)
+      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
+      expect(cielo.escritasSemConsultaPrevia(true)).toEqual([])
+    })
+
+    it('a DATA decide, não o estado: a venda MAIS RECENTE (negada) vence a mais antiga ainda VIVA (autorizada) — grafia ReceveidDate (sic) lida na lista', async () => {
+      const id = `ord-data-${Math.random().toString(36).slice(2, 8)}`
+      const antigaViva = cielo.plantarVenda({ merchantOrderId: id, status: 1, returnCode: '4' })
+      const recenteNegada = cielo.plantarVenda({ merchantOrderId: id, status: 3, returnCode: '51' })
+      cielo.datasPorPedido.set(antigaViva.paymentId, '2026-10-04 09:00:00')
+      cielo.datasPorPedido.set(recenteNegada.paymentId, '2026-10-04 09:30:00')
+      try {
+        const r = await (await getPagamentoPort()).consultarPorPedido(id)
+        expect(r).toMatchObject({ providerPaymentId: recenteNegada.paymentId, status: 'FAILED' })
+      } finally {
+        cielo.datasPorPedido.clear()
+      }
+    })
+
+    it('mais de 5 vendas para o mesmo pedido: só as 5 MAIS RECENTES são detalhadas (não as 5 primeiras da lista) e a mais recente é a escolhida; no máximo 5 GET de detalhe', async () => {
+      const id = `ord-sete-${Math.random().toString(36).slice(2, 8)}`
+      const vendas = Array.from({ length: 7 }, (_, i) => cielo.plantarVenda({ merchantOrderId: id, status: 3, returnCode: '51', paymentId: `sete-${i}-${Math.random().toString(36).slice(2, 6)}` }))
+      vendas.forEach((v, i) => cielo.datasPorPedido.set(v.paymentId, `2026-10-04 10:0${i}:00`)) // a lista vem do mais antigo para o mais novo (a mais nova é a ÚLTIMA)
+      vendas[6].status = 1
+      vendas[6].returnCode = '4'
+      try {
+        const antes = cielo.contar('GET_BY_ID')
+        const r = await (await getPagamentoPort()).consultarPorPedido(id)
+        expect(r).toMatchObject({ providerPaymentId: vendas[6].paymentId, status: 'AUTHORIZED' })
+        expect(cielo.contar('GET_BY_ID') - antes).toBe(5)
+      } finally {
+        cielo.datasPorPedido.clear()
+      }
+    })
+
+    it('venda de OUTRO pedido listada por engano na consulta por pedido NUNCA é a resposta (confere o MerchantOrderId da venda detalhada)', async () => {
+      const outro = cielo.plantarVenda({ merchantOrderId: `outro-pedido-${Math.random().toString(36).slice(2, 8)}`, status: 1, returnCode: '4' })
+      cielo.agendar('GET_BY_ORDER', { corpoRespostaCru: { Payments: [{ PaymentId: outro.paymentId, ReceveidDate: '2026-10-04 10:00:00' }] } })
+      const port = await getPagamentoPort()
+      expect(await port.consultarPorPedido(`ord-sem-venda-${Math.random().toString(36).slice(2, 8)}`)).toBeNull()
+    })
+
+    it('formato ANTIGO (item de Payments já com Status/ReturnCode/Amount) continua tolerado: mesmo cenário, mesmo resultado', async () => {
+      cielo.porPedido = 'completo'
+      cielo.agendar('POST_SALE', { processar: true, resposta: 'derrubar' })
+      const { intent } = await iniciarComFalha()
+      await cen.envelhecer(intent.id, 30)
+      await varrerPreAutorizacoesCartao()
+      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
+    })
+
+    it('a grafia `ReceveidDate` (sic) e `ReceivedDate` escolhem a venda MAIS RECENTE do pedido (não "a última do array"), com alerta de múltiplas vendas', async () => {
+      const id = `ord-multi-${Math.random().toString(36).slice(2, 8)}`
+      const velha = cielo.plantarVenda({ merchantOrderId: id, status: 3, returnCode: '51' }) // negada, mais antiga
+      const nova = cielo.plantarVenda({ merchantOrderId: id, status: 1, returnCode: '4' }) // autorizada, mais recente
+      // a lista devolve a mais RECENTE primeiro (ordem "errada" para quem pega o último do array)
+      cielo.datasPorPedido.set(velha.paymentId, '2026-10-04 10:00:00')
+      cielo.datasPorPedido.set(nova.paymentId, '2026-10-04 10:05:00')
+      cielo.ordemInvertidaNaLista = true
+      try {
+        const aviso = vi.spyOn(logger, 'warn')
+        const port = await getPagamentoPort()
+        const r = await port.consultarPorPedido(id)
+        expect(r).toMatchObject({ providerPaymentId: nova.paymentId, status: 'AUTHORIZED' })
+        expect(aviso.mock.calls.some((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_reconciliation_multiple_payments')).toBe(true)
+        aviso.mockRestore()
+      } finally {
+        cielo.ordemInvertidaNaLista = false
+        cielo.datasPorPedido.clear()
+      }
     })
   })
 
   /**
-   * Status 1 com um ReturnCode FORA de {00, 4} (a Vega estreitou o {00,0,4,6} do Parque): o motorista é tratado como RECUSADO e o intent vira DENIED — mas se a
-   * Cielo de fato autorizou (retém o limite), ninguém cancela: DENIED não é visitado por nenhum varredor. Probabilidade baixa (a documentação só emite 4/00 num Status 1),
-   * custo alto se acontecer (limite do cartão retido sem rastro). Teste de CARACTERIZAÇÃO: fixa o comportamento atual para a decisão ser consciente.
+   * I-2 (rodada 2). Status 1 com ReturnCode FORA das tabelas (ou AUSENTE) deixou de ser recusa: é NÃO DEFINITIVO (503 ao motorista, intent CREATED com o PaymentId, nenhum idTag)
+   * e o varredor reconsulta; ao esgotar (idade > 3x o abandono OU 30 reconsultas) a autorização é tratada como possivelmente VIVA e CANCELADA por precaução. Era a CARACTERIZAÇÃO
+   * "402/DENIED e a venda continua viva" — MUDANÇA DELIBERADA.
    */
-  it('CARACTERIZAÇÃO — Status 1 + ReturnCode "6": 402/DENIED e a autorização continua VIVA na Cielo sem nenhum PUT void (órfã)', async () => {
-    cielo.agendar('POST_SALE', { venda: { status: 1, returnCode: '6' } })
-    const { res, intent } = await iniciarComFalha()
-    expect(res.status).toBe(402)
-    expect(intent.status).toBe('DENIED')
-    expect(intent.cieloPaymentId).toBeTruthy()
-    await cen.envelhecer(intent.id, 60)
-    for (let i = 0; i < 3; i++) await varrerPreAutorizacoesCartao()
-    expect(cielo.vendaPorPedido(intent.id)!.status).toBe(1) // retida na Cielo
-    expect(cielo.contar('PUT_VOID')).toBe(0)
+  describe('I-2 (rodada 2) — Status 1 com ReturnCode desconhecido ou ausente', () => {
+    it('Status 1 + ReturnCode "6": 503, intent CREATED (com PaymentId, ReturnCode e Tid), nenhum idTag, alerta com o PaymentId; reconsulta sem cancelar enquanto não esgota', async () => {
+      const erro = vi.spyOn(logger, 'error')
+      cielo.agendar('POST_SALE', { venda: { status: 1, returnCode: '6' } })
+      const { res, intent } = await iniciarComFalha()
+      expect(res.status).toBe(503)
+      expect(intent).toMatchObject({ status: 'CREATED', returnCode: '6' })
+      expect(intent.cieloPaymentId).toBe(cielo.vendaPorPedido(intent.id)!.paymentId)
+      expect(await prisma.authToken.count({ where: { userId: intent.userId, type: 'VIRTUAL' } })).toBe(0)
+      const alertas = erro.mock.calls.filter((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_authorized_status_unlisted_returncode')
+      expect(alertas.length).toBeGreaterThanOrEqual(1)
+      expect((alertas[0][0] as { paymentId?: string }).paymentId).toBe(intent.cieloPaymentId)
+      erro.mockRestore()
+
+      await cen.envelhecer(intent.id, 6) // acima do abandono (5), abaixo de 3x: reconsulta, NÃO cancela ainda
+      await varrerPreAutorizacoesCartao()
+      expect(cielo.contar('PUT_VOID')).toBe(0)
+      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(1)
+      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('CREATED')
+    })
+
+    it('esgotado pela IDADE (> 3x o abandono): alerta `payment_authorization_stuck` com o PaymentId, a CHECK não prende o intent e a autorização é CANCELADA (VOIDED na Cielo e no banco)', async () => {
+      cielo.agendar('POST_SALE', { venda: { status: 1, returnCode: '6' } })
+      const { intent } = await iniciarComFalha()
+      await cen.envelhecer(intent.id, 60)
+      const erro = vi.spyOn(logger, 'error')
+      await varrerPreAutorizacoesCartao()
+      const stuck = erro.mock.calls.filter((c) => (c[0] as { alert?: string } | undefined)?.alert === 'payment_authorization_stuck')
+      erro.mockRestore()
+      expect(stuck).toHaveLength(1)
+      expect((stuck[0][0] as { paymentId?: string }).paymentId).toBe(intent.cieloPaymentId)
+      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect(cielo.efeitos.cancelamentos.get(intent.cieloPaymentId!)).toBe(1)
+      expect(await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).toMatchObject({ status: 'VOIDED', returnCode: '0' })
+    })
+
+    it('esgotado pelo CONTADOR REDIS (30 reconsultas), com o intent ainda JOVEM: a 30ª reconsulta cancela; antes dela, nada', async () => {
+      cielo.agendar('POST_SALE', { venda: { status: 1, returnCode: '6' } })
+      const { intent } = await iniciarComFalha()
+      await cen.envelhecer(intent.id, 6)
+      await redis.set(`card-preauth:created-sweeps:${intent.id}`, '28', 'EX', 600)
+      await varrerPreAutorizacoesCartao() // 29ª
+      expect(cielo.contar('PUT_VOID')).toBe(0)
+      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('CREATED')
+      await varrerPreAutorizacoesCartao() // 30ª
+      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
+    })
+
+    it('Status 1 SEM ReturnCode na autorização: 503/CREATED; esgotado, o UPDATE para AUTHORIZED NÃO viola a CHECK `payment_intent_return_code_required` (sentinela NAO_INFORMADO) e o intent não fica preso', async () => {
+      cielo.agendar('POST_SALE', { processar: false, corpoRespostaCru: { MerchantOrderId: 'x', Payment: { PaymentId: 'pay-sem-rc-r2', Status: 1, Amount: 1000 } } })
+      const { res, intent } = await iniciarComFalha()
+      expect(res.status).toBe(503)
+      expect(intent).toMatchObject({ status: 'CREATED', cieloPaymentId: 'pay-sem-rc-r2' })
+      // a Cielo, no mundo real, TEM a venda: planta com esse PaymentId e sem ReturnCode
+      cielo.plantarVenda({ merchantOrderId: intent.id, paymentId: 'pay-sem-rc-r2', status: 1, returnCode: null })
+      await cen.envelhecer(intent.id, 60)
+      const erro = vi.spyOn(logger, 'error')
+      await varrerPreAutorizacoesCartao()
+      erro.mockRestore()
+      const depois = await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })
+      expect(depois.status).toBe('VOIDED')
+      expect(depois.status).not.toBe('CREATED')
+      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+    })
+
+    it('55 intents CREATED velhos e NÃO definitivos na frente NÃO geram fome: um intent mais novo (depois deles) é resolvido e CANCELADO na mesma rodada', async () => {
+      const velhos: string[] = []
+      for (let i = 0; i < 55; i++) {
+        const m = await cen.novoMotorista(`fome-${i}`)
+        const pagamentoPendente = cielo.plantarVenda({ merchantOrderId: `ord-pend-${i}-${suffix}`, status: 12, returnCode: '0' }) // Status 12: a Cielo ainda processa — nunca definitivo
+        const it2 = await prisma.paymentIntent.create({
+          data: { purpose: 'SESSION_CARD_CAPTURE', provider: 'CIELO_CARD', userId: m.user.id, paymentMethodId: m.paymentMethod.id, amountRequestedCents: 1000, status: 'CREATED', environment: 'SANDBOX', cieloPaymentId: pagamentoPendente.paymentId, createdAt: new Date(Date.now() - (14 * 60_000 - i * 1000)) },
+        })
+        velhos.push(it2.id)
+      }
+      // o intent MAIS NOVO (6 min, depois dos 55 na ordem createdAt) é uma autorização REAL cuja resposta se perdeu
+      cielo.agendar('POST_SALE', { processar: true, resposta: 'derrubar' })
+      const { intent } = await iniciarComFalha()
+      await prisma.paymentIntent.update({ where: { id: intent.id }, data: { createdAt: new Date(Date.now() - 6 * 60_000) } })
+      await varrerPreAutorizacoesCartao()
+      expect(cielo.vendaPorPedido(intent.id)!.status).toBe(10)
+      expect((await prisma.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } })).status).toBe('VOIDED')
+      // os 55 seguem CREATED (ainda não esgotaram) — foram reconsultados, não travaram a rodada
+      expect(await prisma.paymentIntent.count({ where: { id: { in: velhos }, status: 'CREATED' } })).toBe(55)
+    }, 90_000)
   })
 })

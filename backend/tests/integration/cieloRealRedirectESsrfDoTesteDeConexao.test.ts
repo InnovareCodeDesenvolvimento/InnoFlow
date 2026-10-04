@@ -113,9 +113,9 @@ describe('SSRF / destino das chamadas à Cielo', () => {
   /**
    * ACHADO (Íris): sem `redirect: 'manual'|'error'`, um 30x entrega o `MerchantId`/`MerchantKey` ao destino do redirecionamento. Exige um host de Cielo/proxy/env
    * mal configurado ou comprometido, então a probabilidade é baixa — mas o que vaza é a credencial que cobra cartão. Correção de uma linha: `redirect: 'error'` (ou
-   * 'manual' + tratar como falha) em `CieloHttpClient.request` e nas duas chamadas do SOP. Vira `it` quando corrigido.
+   * 'manual' + tratar como falha) em `CieloHttpClient.request` e nas duas chamadas do SOP. MUDANÇA DELIBERADA (rodada 2): `it.fails` virou `it`, asserção intacta (`redirect: 'error'` no cliente e no SOP).
    */
-  it.fails('(achado) um redirecionamento 302 da Cielo para OUTRA origem NÃO pode levar a MerchantKey junto', async () => {
+  it('(S-2, CORRIGIDO na rodada 2: redirect error) um redirecionamento 302 da Cielo para OUTRA origem NÃO leva a MerchantKey junto', async () => {
     cielo.agendar('GET_BY_ORDER', { resposta: { http: 302, corpo: null } })
     // o servidor falso responde 302 sem Location por padrão; aqui montamos o redirecionamento de verdade com um servidor dedicado:
     const redirecionador = createServer((req, res) => {

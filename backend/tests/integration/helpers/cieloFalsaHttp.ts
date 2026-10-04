@@ -79,6 +79,10 @@ export class CieloFalsaHttp {
     cancelamentos: new Map<string, number>(),
   }
   porPedido: 'completo' | 'so_ids'
+  /** PaymentId -> data a devolver na lista por pedido (`ReceveidDate`/`ReceivedDate`). */
+  readonly datasPorPedido = new Map<string, string>()
+  /** Devolve a lista por pedido do MAIS RECENTE para o mais antigo (quem pega "o último do array" erra). */
+  ordemInvertidaNaLista = false
   url = ''
   private seq = 0
 
@@ -298,8 +302,9 @@ export class CieloFalsaHttp {
       }
       case 'GET_BY_ORDER': {
         const achadas = [...this.vendas.values()].filter((v) => v.merchantOrderId === merchantOrderId)
+        if (this.ordemInvertidaNaLista) achadas.reverse()
         if (this.porPedido === 'so_ids') {
-          respostaPadrao = { http: 200, corpo: { ReasonCode: 0, ReasonMessage: 'Successful', Payments: achadas.map((v) => ({ PaymentId: v.paymentId, ReceveidDate: '2026-10-04 10:00:00' })) } }
+          respostaPadrao = { http: 200, corpo: { ReasonCode: 0, ReasonMessage: 'Successful', Payments: achadas.map((v) => ({ PaymentId: v.paymentId, ReceveidDate: this.datasPorPedido.get(v.paymentId) ?? '2026-10-04 10:00:00' })) } }
         } else {
           respostaPadrao = { http: 200, corpo: { MerchantOrderId: merchantOrderId, Payments: achadas.map((v) => (this.corpoDaVenda(v).Payment as Record<string, unknown>)) } }
         }

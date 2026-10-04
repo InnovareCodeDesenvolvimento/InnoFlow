@@ -31,6 +31,7 @@ export function apontarAdaptadorParaCieloFalsa(urlCielo: string, extras: { timeo
   e.CIELO_MERCHANT_ID = 'merchant-id-iris-real'
   e.CIELO_MERCHANT_KEY = 'merchant-key-iris-real-0001'
   e.CIELO_TIMEOUT_MS = extras.timeoutMs ?? 500
+  e.CIELO_QUERY_TIMEOUT_MS = extras.timeoutMs ?? 500
   e.CIELO_SANDBOX = extras.sandbox ?? true
   process.env.CIELO_API_BASE_URL = urlCielo
   process.env.CIELO_API_QUERY_BASE_URL = urlCielo
@@ -53,7 +54,7 @@ export interface CenarioCartaoHttp {
   /** `POST /api/me/sessions/start` com um "gateway OCPP" que aceita o RemoteStart. Não asserta o status: devolve a resposta crua. */
   iniciar(motorista: Motorista, connectorId: number, opcoes?: { rejeitarRemoteStart?: boolean }): Promise<request.Response>
   /** Start + StartTransaction + StopTransaction (3 kWh = 300 centavos), devolvendo o intent (CAPTURE_PENDING). */
-  sessaoParada(label: string): Promise<{ intentId: string; cieloPaymentId: string; sessionId: string }>
+  sessaoParada(label: string, antesDoStop?: () => Promise<void>): Promise<{ intentId: string; cieloPaymentId: string; sessionId: string }>
   /** Sessão iniciada (intent AUTHORIZED) e abandonada: o RemoteStart foi aceito mas nenhum StartTransaction chegou. */
   autorizadaAbandonada(label: string): Promise<{ intentId: string; cieloPaymentId: string }>
   envelhecer(intentId: string, minutos: number): Promise<void>
@@ -126,7 +127,7 @@ export async function criarCenarioCartaoHttp(app: Express, suffix: string, label
     novoMotorista,
     novoConector,
     iniciar,
-    async sessaoParada(l) {
+    async sessaoParada(l, antesDoStop) {
       const motorista = await novoMotorista(l)
       const connectorId = await novoConector()
       const res = await iniciar(motorista, connectorId)
@@ -134,6 +135,7 @@ export async function criarCenarioCartaoHttp(app: Express, suffix: string, label
       const authToken = await prisma.authToken.findFirstOrThrow({ where: { userId: motorista.user.id, type: 'VIRTUAL' }, orderBy: { createdAt: 'desc' } })
       const meterStart = 500
       const start = await callHandler(handleStartTransaction, ctx, { connectorId, idTag: authToken.idTag, meterStart, timestamp: minutesAgo(10).toISOString() })
+      await antesDoStop?.()
       await callHandler(handleStopTransaction, ctx, { transactionId: start.transactionId, meterStop: meterStart + 3_000, timestamp: minutesAgo(1).toISOString(), reason: 'Local' })
       const intent = await intentDoMotorista(motorista.user.id)
       await removerJobDeCaptura(intent.id) // o job vai para a fila de nome fixo, compartilhada com outras suítes: tira antes que outro worker o pegue

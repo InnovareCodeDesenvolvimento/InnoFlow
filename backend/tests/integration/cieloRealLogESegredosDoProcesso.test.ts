@@ -41,9 +41,9 @@ const SEGREDOS = {
   cardNumberMascarado: '453904******4242',
   eco: 'ECO-DE-PAYLOAD-NA-ERRO-DA-CIELO',
 }
-const TOKEN_CARTAO_200 = 'CARDTOKEN-CADASTRO-200-aaaa-1111'
-const TOKEN_CARTAO_404 = 'CARDTOKEN-CADASTRO-404-bbbb-2222'
-const TOKEN_CARTAO_500 = 'CARDTOKEN-CADASTRO-500-cccc-3333'
+const TOKEN_CARTAO_200 = '0a1b2c3d-1111-4aaa-8bbb-200000000001'
+const TOKEN_CARTAO_404 = '0a1b2c3d-2222-4bbb-8ccc-404000000002'
+const TOKEN_CARTAO_500 = '0a1b2c3d-3333-4ccc-8ddd-500000000003'
 const TOKEN_NO_CAPTURE = 'TOKEN-DE-CARTAO-IRIS-log-real-captura'
 const CONTROLE_POSITIVO = 'CONTROLEPOSITIVO-LOG-REAL-visivel'
 
@@ -359,6 +359,55 @@ describe('log REAL (production + pino-pretty) dos fluxos Cielo — nenhum segred
     }
     expect(saidaFluxos).toContain('SENTINELA-FIM-capturar')
   }, 180_000)
+
+  /**
+   * Rodada 2, item 10 (o INFORMATIVO da rodada 1): o `pino-http` loga `req.headers` de TODA requisição e o `redact` só casava NOMES EXATOS — o segredo do webhook sob um nome fora da lista saía em claro.
+   * Commit da47cc0: mascara por PADRÃO DE NOME (`secret|token|key|auth|cookie|passw|senha|signature|credential`). Valores de ISCA (nunca o segredo real, para não sujar a varredura final).
+   */
+  it('REDACT por padrão de nome (da47cc0): o nome ANTIGO do header e qualquer header com cara de segredo saem MASCARADOS no log do servidor real', async () => {
+    const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
+    const nomes = ['x-innoelektron-webhook-secret', 'WebhookSecret', 'CieloWebhookSecret', 'X-Api-Key', 'X-Auth-Token', 'X-Signature', 'X-Webhook-Password', 'X-Senha', 'X-Credential', 'Proxy-Authorization']
+    const iscas = nomes.map((n, i) => [n, `ISCA-MASCARADA-${i}-${Math.random().toString(36).slice(2, 10)}`] as const)
+    const headers: Record<string, string> = { 'content-type': 'application/json', 'x-controle-positivo': CONTROLE_POSITIVO }
+    for (const [n, v] of iscas) headers[n] = v
+    expect((await fetch(url, { method: 'POST', headers, body: '{}' })).status).toBe(200)
+    const log = await logApiAssentado()
+    for (const [n, v] of iscas) expect(log, `o valor do header ${n} saiu em claro`).not.toContain(v)
+    expect(log).toContain(CONTROLE_POSITIVO) // controle positivo: o log dos headers existe
+  })
+
+  /**
+   * RESIDUAL ABERTO (Íris, rodada 2): a máscara é HEURÍSTICA por palavras em inglês (+ "senha"). Um header cujo nome NÃO tem nenhuma delas e que carrega o segredo continua saindo em
+   * claro — p.ex. nomes em português que o dono pode digitar no campo "Key" do Site Cielo (só letras): `Segredo`, `Chave`, `Codigo`. O ideal é lista PERMITIDA para a rota do webhook (logar só
+   * host/user-agent/content-type) em vez de lista de proibidos. Vira `it` quando o `req` do webhook deixar de logar headers desconhecidos.
+   */
+  it.fails('(aberto) segredo do webhook sob um nome de header SEM palavra sensível (`Segredo`, `Chave`, `Codigo`, `Notificacao`) NÃO pode sair em claro no log', async () => {
+    const url = `${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`
+    const nomes = ['Segredo', 'Chave', 'Codigo', 'Notificacao', 'Webhook']
+    const iscas = nomes.map((n, i) => [n, `ISCA-ABERTA-${i}-${Math.random().toString(36).slice(2, 10)}`] as const)
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    for (const [n, v] of iscas) headers[n] = v
+    await fetch(url, { method: 'POST', headers, body: '{}' })
+    const log = await logApiAssentado()
+    for (const [n, v] of iscas) expect(log, `o valor do header ${n} saiu em claro`).not.toContain(v)
+  })
+
+  it('I-5 no servidor real: JSON malformado, corpo grande e codificação inválida (rota normal e webhook) NÃO geram nenhuma linha de log ERROR nem vazam o corpo', async () => {
+    const contarErros = (s: string) => s.split('\n').filter((l) => /\] ERROR:/.test(l)).length
+    const antes = contarErros(await logApiAssentado())
+    const segredoNoCorpo = 'CORPO-COM-SEGREDO-NAO-PODE-IR-AO-LOG'
+    const resp: number[] = []
+    resp.push((await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: `{"email":"a@b.com","password":"${segredoNoCorpo}` })).status)
+    resp.push((await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'a@b.com', password: 'x'.repeat(200_000) }) })).status)
+    resp.push((await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json; charset=latin1' }, body: '{}' })).status)
+    resp.push((await fetch(`${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: `{"PaymentId":"${segredoNoCorpo}` })).status)
+    resp.push((await fetch(`${base}/api/webhooks/cielo/${SEGREDOS.webhookPath}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lixo: 'x'.repeat(6000) }) })).status)
+    resp.push((await fetch(`${base}/api/webhooks/cielo/token-errado`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })).status)
+    expect(resp).toEqual([400, 413, 415, 200, 413, 404])
+    const log = await logApiAssentado()
+    expect(contarErros(log)).toBe(antes)
+    expect(log).not.toContain(segredoNoCorpo)
+  })
 
   it('VARREDURA FINAL do stdout/stderr de TODOS os processos: nenhum segredo, token, CardToken, Holder, PAN mascarado nem eco da Cielo — e os controles positivos provam que o log existe', async () => {
     const logApi = await logApiAssentado()

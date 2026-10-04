@@ -47,6 +47,19 @@ describe('webhook da Cielo — ordem dos portões e nome do header', () => {
     expect(await eventos()).toBe(antes)
   })
 
+  it('PORTÃO 1 (S-4) — token do caminho de MESMO TAMANHO e conteúdo diferente (em qualquer posição) também é 404, com e sem segredo, ping ou notificação', async () => {
+    const token = getCieloWebhookPathToken()
+    const segredo = await getCieloWebhookHeaderSecret()
+    const trocarEm = (i: number) => token.slice(0, i) + (token[i] === 'a' ? 'b' : 'a') + token.slice(i + 1)
+    for (const errado of [trocarEm(0), trocarEm(token.length - 1), trocarEm(Math.floor(token.length / 2)), 'Z'.repeat(token.length), token + 'x', token.slice(0, -1)]) {
+      expect(errado === token).toBe(false)
+      for (const corpo of [validBody(), {}]) {
+        expect((await request(app).post(url(errado)).set(WEBHOOK_SECRET_HEADER_NAME, segredo).send(corpo)).status).toBe(404)
+      }
+    }
+    expect((await request(app).post(url(token)).send({})).status).toBe(200) // controle: o certo passa
+  })
+
   it('PORTÃO 2 — PING (sem PaymentId e/ou sem ChangeType) com o token certo: 200 SEM segredo, e NADA é gravado', async () => {
     const antes = await eventos()
     const pings: Array<[string, () => request.Test]> = [
@@ -75,9 +88,9 @@ describe('webhook da Cielo — ordem dos portões e nome do header', () => {
   /**
    * ACHADO (Íris, confirma o I-5 do Órion): o `express.json()` global roda ANTES da rota e o `errorHandler` não mapeia o erro do body-parser — corpo com JSON quebrado vira 500
    * (e um log de erro por requisição). Para o webhook isso quebra o PING (a Cielo exige 200 ao salvar a URL; um ping com corpo estranho não pode ser 5xx) e dá a qualquer anônimo, mesmo
-   * com o token do caminho errado, um 5xx em vez de 404. Vira `it` quando o webhook tolerar corpo malformado (como ping) e o erro de parse virar 400.
+   * com o token do caminho errado, um 5xx em vez de 404. MUDANÇA DELIBERADA (rodada 2): o `it.fails` virou `it` com a asserção INTACTA — a Vega deu ao webhook parser próprio (4 KB) que trata JSON inválido como ping.
    */
-  it.fails('(achado I-5) ping com JSON MALFORMADO deveria ser 200, e token errado + JSON malformado deveria ser 404 — hoje é 500', async () => {
+  it('(I-5, CORRIGIDO na rodada 2) ping com JSON MALFORMADO é 200 (depois do token), e token errado + JSON malformado é 404', async () => {
     const ping = await request(app).post(url()).set('content-type', 'application/json').send('{"PaymentId":')
     expect(ping.status).toBe(200)
     const tokenErrado = await request(app).post(url('token-errado')).set('content-type', 'application/json').send('{"PaymentId":')
