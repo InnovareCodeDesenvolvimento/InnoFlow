@@ -1,6 +1,7 @@
 import type { PagamentoPort, ResultadoAutorizacao, ResultadoCancelamento, ResultadoCaptura, ResultadoConsultaCartao, ResultadoConsultaPagamento, ResultadoConsultaPix, ResultadoPix, SessaoTokenizacao } from '../../core/pagamentos/porta'
 import type { CardPaymentStatus, DadosCliente, PedidoAutorizacaoCartao, PedidoPix, PixPaymentStatus } from '../../core/pagamentos/tipos'
 import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
+import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
 
 /**
  * `PagamentoPort` em memória — para Íris/Lyra/outros times de F5.2+
@@ -155,7 +156,7 @@ export class FakeAdapter implements PagamentoPort {
 
   async criarPix(pedido: PedidoPix): Promise<ResultadoPix> {
     const providerPaymentId = this.proximoId()
-    const expiresInSeconds = pedido.expiresInSeconds ?? 86_400
+    const expiresInSeconds = expiracaoPixEfetivaSegundos(pedido.expiresInSeconds) // mesma conta do adaptador real (teto de 24 h da Cielo)
 
     this.pixIntents.set(providerPaymentId, {
       providerPaymentId,

@@ -127,9 +127,13 @@ export class CieloHttpClient {
     return this.request(this.config.apiQueryBaseUrl, `/1/sales?merchantOrderId=${encodeURIComponent(merchantOrderId)}`, { method: 'GET' })
   }
 
-  /** `POST /1/pix/` — cobrança Pix (`Payment.Type: "Pix"`, `Payment.Provider: "Cielo2"`). Fato: sem sandbox real (ver handoff). */
+  /**
+   * Cobrança Pix `Cielo2` = `POST /1/sales/` — o MESMO endpoint do cartão (C1.5, B3; doc oficial "cielo2-gerar-qr-code-pix", lida pela Nova em
+   * 04/10/2026), com `Payment.Type: "Pix"`, `Payment.Provider: "Cielo2"` e `Payment.QrCode.Expiration` (segundos). NÃO existe `POST /1/pix/` (era o
+   * endpoint errado da F5.2). Sem sandbox na Cielo: a prova real é em produção, com valor baixo.
+   */
   postPix(payload: unknown): Promise<unknown> {
-    return this.request(this.config.apiBaseUrl, '/1/pix/', { method: 'POST', body: JSON.stringify(payload) })
+    return this.postSale(payload)
   }
 
   /**

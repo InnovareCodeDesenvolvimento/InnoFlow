@@ -1,5 +1,6 @@
 import type { PedidoAutorizacaoCartao, PedidoPix } from '../../core/pagamentos/tipos'
 import type { RespostaPagamentoCielo } from '../../core/pagamentos/normalizarStatusCielo'
+import { expiracaoPixEfetivaSegundos } from '../../core/pagamentos/expiracaoPix'
 
 /**
  * Mapeamento LITERAL do formato de fio (wire format) da API 3.0 da Cielo —
@@ -10,11 +11,8 @@ import type { RespostaPagamentoCielo } from '../../core/pagamentos/normalizarSta
  *
  * ⚠️ Os payloads de CARTÃO foram conferidos contra a documentação oficial
  * (campos e formato — ver `.claude/agent-memory/nova/cielo-fatos-verificados.md`).
- * O payload de PIX é MELHOR ESFORÇO: a Cielo2 não tem sandbox (fato
- * confirmado), então os nomes de campo abaixo (`Provider`, formato da
- * expiração) não foram batidos contra uma resposta real — confirmar contra a
- * doc/suporte Cielo antes do primeiro teste ponta a ponta (F5.2+, fora do
- * escopo desta tarefa).
+ * O payload de PIX segue a doc oficial "cielo2-gerar-qr-code-pix" (`POST /1/sales`, `Payment.QrCode.Expiration`; C1.5) e a Cielo2 NÃO tem
+ * sandbox (fato confirmado): nenhuma resposta real foi vista — a prova é em produção, com valor baixo.
  */
 
 export interface CieloSalePayload {
@@ -61,13 +59,10 @@ export interface CieloPixPayload {
     Type: 'Pix'
     Amount: number
     Provider: 'Cielo2'
-    // ⚠️ Não confirmado contra sandbox (Cielo2 Pix não tem sandbox) — nome
-    // de campo por melhor esforço a partir da doc pública.
-    QrCodeExpiration: number
+    // C1.5 (B3): o campo é `Payment.QrCode.Expiration` (objeto aninhado), em SEGUNDOS, máximo 86400 (24 h) — não `Payment.QrCodeExpiration`.
+    QrCode: { Expiration: number }
   }
 }
-
-const PIX_EXPIRES_DEFAULT_SECONDS = 86_400
 
 export function montarPayloadPix(pedido: PedidoPix): CieloPixPayload {
   return {
@@ -80,7 +75,8 @@ export function montarPayloadPix(pedido: PedidoPix): CieloPixPayload {
       Type: 'Pix',
       Amount: pedido.amountRequestedCents,
       Provider: 'Cielo2',
-      QrCodeExpiration: pedido.expiresInSeconds ?? PIX_EXPIRES_DEFAULT_SECONDS,
+      // Acima do máximo a Cielo recusaria a cobrança inteira; abaixo de 1 s não faz sentido. Inteiro, como o campo exige.
+      QrCode: { Expiration: expiracaoPixEfetivaSegundos(pedido.expiresInSeconds) },
     },
   }
 }
