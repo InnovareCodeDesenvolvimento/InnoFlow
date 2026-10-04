@@ -25,7 +25,7 @@ import { logger } from '../../src/lib/logger'
 import { calcularReadiness } from '../../src/core/pagamentos/configGateway'
 import { resetGatewayConfigCacheParaTeste } from '../../src/services/pagamentos/gatewayConfig'
 import { resetPagamentoPortCacheParaTeste } from '../../src/services/pagamentos/pagamentoPortInstance'
-import { backoffPollSegundos, chaveConsultaPorLeituraPix, chaveProximaConsultaPix, LOTE_POLL_PIX, tentarCreditarPixPendente, varrerTopupsPixPendentes } from '../../src/services/pagamentos/pollTopupsPix'
+import { backoffPollSegundos, chaveConsultaPorLeituraPix, chaveCursorVarredorPix, chaveProximaConsultaPix, LOTE_POLL_PIX, tentarCreditarPixPendente, varrerTopupsPixPendentes } from '../../src/services/pagamentos/pollTopupsPix'
 import { varrerTopupsPixExpirados } from '../../src/services/pagamentos/varrerTopupsPixExpirados'
 import { CieloFalsaHttp } from './helpers/cieloFalsaHttp'
 import { apontarAdaptadorParaCieloFalsa } from './helpers/cenarioCartaoHttp'
@@ -58,9 +58,7 @@ describe('Pix por polling (varredor + gatilho na leitura) — Cielo falsa por TC
     cielo.zerarRegistro()
     await proxy.up()
     e.TOPUP_PIX_POLL_MIN_AGE_MS = 15_000
-    await prisma.paymentIntent.deleteMany({ where: { purpose: 'WALLET_TOPUP_PIX' } }) // varredor olha o banco inteiro: cada teste parte de zero
-    const chaves = await direct.keys('pix-poll:*')
-    if (chaves.length) await direct.del(...chaves)
+    await limparMeusPix()
   })
   afterAll(async () => {
     Object.assign(env, baseline)
@@ -68,6 +66,7 @@ describe('Pix por polling (varredor + gatilho na leitura) — Cielo falsa por TC
     process.env.CIELO_API_QUERY_BASE_URL = processEnvBaseline.query
     resetGatewayConfigCacheParaTeste()
     resetPagamentoPortCacheParaTeste()
+    await limparMeusPix().catch(() => undefined)
     await proxy.stop()
     await cielo.parar()
     direct.disconnect()
@@ -75,6 +74,18 @@ describe('Pix por polling (varredor + gatilho na leitura) — Cielo falsa por TC
     redis.disconnect()
     await banco.descartar()
   })
+
+  /**
+   * Parte de zero SEM tocar no que é dos outros: o Redis é COMPARTILHADO entre as suítes em paralelo, e um `keys('pix-poll:*')` + `del` apagava as reservas (`pix-poll:next:<id>`/`read:<id>`) e o
+   * CURSOR (`pix-poll:cursor:<banco>`) de outros arquivos no meio do teste deles (flake do teste "Pix NÃO pago" da Vega). Aqui só saem as chaves dos intents DESTE banco (banco próprio) e o cursor
+   * DESTE banco (a chave leva o nome do banco).
+   */
+  async function limparMeusPix() {
+    const meus = await prisma.paymentIntent.findMany({ where: { purpose: 'WALLET_TOPUP_PIX' }, select: { id: true } })
+    const chaves = [chaveCursorVarredorPix(), ...meus.flatMap((i) => [chaveProximaConsultaPix(i.id), chaveConsultaPorLeituraPix(i.id)])]
+    for (let i = 0; i < chaves.length; i += 500) await direct.del(...chaves.slice(i, i + 500))
+    await prisma.paymentIntent.deleteMany({ where: { purpose: 'WALLET_TOPUP_PIX' } }) // varredor olha o banco inteiro: cada teste parte de zero
+  }
 
   async function motoristaComCarteira() {
     const u = await createUser({ role: 'DRIVER', label: `pixr3-${++n}`, suffix })

@@ -1,4 +1,11 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+// BANCO PRÓPRIO (Íris, rodada 3): o expirador (`varrerTopupsPixExpirados`) varre o banco INTEIRO com `take: 50`. No banco COMPARTILHADO, os Pix PENDING que outras suítes deixam para trás
+// (`pix-i6`, `driver-dono`, `i7-pix`...) vencem em 30 min e, depois de ~6 rodadas completas seguidas, passam de 50 e empurram os intents DESTE arquivo para fora do lote — falha só em
+// banco que acumulou rodadas (a CI parte de banco novo e nunca viu). Com banco próprio o lote só enxerga o que este arquivo criou. `vi.hoisted` assíncrono roda antes dos imports estáticos.
+const banco = await vi.hoisted(async () => {
+  const { criarBancoProprio } = await import('./helpers/bancoProprio')
+  return criarBancoProprio('topup_conc')
+})
 import { prisma } from '../../src/lib/prisma'
 import { redis } from '../../src/lib/redis'
 import { creditarTopupPix } from '../../src/services/pagamentos/creditarTopupPix'
@@ -39,6 +46,7 @@ describe('creditarTopupPix — concorrência real e reconsulta-sempre (Íris)', 
   afterAll(async () => {
     await prisma.$disconnect()
     redis.disconnect()
+    await banco.descartar()
   })
 
   async function novoMotorista(label: string) {

@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
+// BANCO PRÓPRIO (Íris, rodada 3): o expirador (`varrerTopupsPixExpirados`) varre o banco INTEIRO com `take: 50`. No banco COMPARTILHADO, os Pix PENDING que outras suítes deixam para trás
+// (`pix-i6`, `driver-dono`, `i7-pix`...) vencem em 30 min e, depois de ~6 rodadas completas seguidas, passam de 50 e empurram os intents DESTE arquivo para fora do lote — falha só em
+// banco que acumulou rodadas (a CI parte de banco novo e nunca viu). Com banco próprio o lote só enxerga o que este arquivo criou. `vi.hoisted` assíncrono roda antes dos imports estáticos.
+const banco = await vi.hoisted(async () => {
+  const { criarBancoProprio } = await import('./helpers/bancoProprio')
+  return criarBancoProprio('topup_pix')
+})
+
 import type { Worker } from 'bullmq'
 import { createApp } from '../../src/api/app'
 import { prisma } from '../../src/lib/prisma'
@@ -48,6 +56,7 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
     await worker.close()
     await prisma.$disconnect()
     redis.disconnect()
+    await banco.descartar()
   })
 
   let fakePort: FakeAdapter
