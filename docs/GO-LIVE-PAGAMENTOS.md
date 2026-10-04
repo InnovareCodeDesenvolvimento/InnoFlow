@@ -6,7 +6,7 @@
 
 ---
 
-## 1. Em que pé estamos — e o que NUNCA foi testado
+## 1. Em que pé estamos — o que foi testado no Parque das Feiras e o que ainda não foi
 
 ### Entregue e validado
 - ✅ **Pix real** (QR Cielo) — testado contra `FakeAdapter` (simulador), webhook tratado como dica
@@ -20,12 +20,18 @@
 - ✅ **Rede de segurança (ALTO-1)** — varredor re-enfileira capturas PENDING > 5 min com alerta
 - ✅ **Detecção de coerência** — servidor recusa se ambiente ≠ URL oficial da Cielo
 
-### NUNCA testado contra a Cielo real
-- ❌ Nenhuma chamada à API real da Cielo ocorreu
-- ❌ Sandbox da Cielo: credenciais ainda não confirmadas
-- ❌ Hosts de produção da Cielo (`api.cieloecommerce.cielo.com.br`): públicos, não confirmados na doc oficial
-- ❌ OAuth do Silent Order Post: suposição (RFC 6749 `client_credentials`), não confirmado
-- ❌ Endpoint `GET /1/card/{token}`: retorno não confirmado (bandeira, final do cartão)
+### Testado no Parque das Feiras (pronto para o InnoFlow)
+- ✅ **Hosts e credencial** — [PROD] (cobrança real em 19/09/2026) `https://apisandbox.cieloecommerce.cielo.com.br` (sandbox) e `https://api.cieloecommerce.cielo.com.br` (produção); MerchantId em cabeçalho, MerchantKey de 40 caracteres
+- ✅ **OAuth do Silent Order Post (passo 1)** — [PROD] + [DOC] `https://authsandbox.braspag.com.br/oauth2/token` (sandbox) e `https://auth.braspag.com.br/oauth2/token` (produção); `Authorization: Basic base64(ClientId:ClientSecret)`, corpo `grant_type=client_credentials`
+- ✅ **Script do SOP** — [PROD] (testado em produção) sandbox: `https://transactionsandbox.pagador.com.br/post/scripts/silentorderpost-1.0.min.js`; produção: `https://transaction.cieloecommerce.cielo.com.br/post/scripts/silentorderpost-1.0.min.js`
+- ✅ **Nome do header do webhook** — [PROD] (02/09/2026) o Site Cielo **recusa caracteres especiais, números e espaço**; aceita só **letras** (ex.: `CieloWebhookSecret` funciona, `X-Webhook-Secret` é recusado)
+
+### NUNCA testado contra a Cielo real (bloqueadores conhecidos)
+- ❌ **Passo 2 do OAuth do SOP (AccessToken)** — [PROD] no Parque; [NÃO EXISTE] no InnoFlow (`B1 — Bloqueador C1.1`)
+- ❌ **Cartão Protegido sem CVV** — [DOC] a Cielo exige `SecurityCode` por referência oficial; [NÃO CONFIRMADO] se ela aceita transação sem CVV (decide D1 do dono) (`R1 — Risco para C4`)
+- ❌ **Endpoint `GET /1/card/{token}`** — [NÃO CONFIRMADO] na doc oficial; o InnoFlow precisa dele mas pode migrar para dados truncados do navegador (`R2 — Risco/C1.3`)
+- ❌ **Pix em `POST /1/sales`** — [DOC] endpoint correto é `POST /1/sales` com `Payment.QrCode.Expiration`; [NÃO EXISTE no InnoFlow] que usa `POST /1/pix/` (`B3 — Bloqueador C1.5`)
+- ❌ **CSP para os hosts do SOP** — [PROD] no Parque faltavam hosts Cielo na CSP, derrubou cartão em produção; [NÃO CONFIGURADO] no InnoFlow (`B4 — Bloqueador C1.2`)
 
 ---
 
@@ -39,12 +45,49 @@
 | **Política de privacidade** | Atualizar com dados da empresa (CNPJ, DPO, telefone suporte) | 🟠 P1 |
 | **Domínio oficial** | Confirmado: `https://innoflow.innovarecode.com.br` | ✅ |
 
-### 5 Perguntas para o comercial da Cielo (NÃO podem ser respondidas pelo código)
-1. **Credenciais de sandbox**: quais são o `MerchantId` e a `MerchantKey` da conta Cielo de teste, e o `client id`/`client secret` do cadastro de cartão (Silent Order Post)?
-2. **Silent Order Post**: qual é a URL oficial do script (`CIELO_SOP_SCRIPT_URL`) e a do login OAuth (`CIELO_SOP_OAUTH_TOKEN_URL`), em sandbox e em produção?
-3. **Cobrança do cartão salvo**: dá para cobrar o `CardToken` salvo SEM pedir o CVV de novo? Qual a validade do token? Existe campo de cartão hospedado pela Cielo (iframe)? O login do SOP é mesmo `client_credentials`?
-4. **Consulta de cartão**: o endpoint `GET /1/card/{token}` devolve bandeira e final do cartão? Em que formato? (o código assume; não foi confirmado)
-5. **Webhook e Pix**: de quais IPs o webhook chega e existe assinatura? Como testar Pix (a documentação indica que a Cielo não tem sandbox de Pix)?
+### 7 Perguntas para a Cielo (revistas após comparação com o Parque — respondidas em parte pelo que o Parque provou)
+
+| # | Pergunta | Por que importa | Status |
+|---|---|---|---|
+| P1 | **Dá para cobrar um `CardToken` do Cartão Protegido sem `SecurityCode`?** Se sim, o que precisa: autorização comercial, `cvvRequired=false` no SOP, `InitiatedTransactionIndicator` (Card On File) e em quais bandeiras? | R1. Decide se a D1 do dono (cadastra uma vez, só toca Iniciar) funciona como desenhada | ⚠️ **Crítico antes de C4** |
+| P2 | Existe endpoint para consultar um `CardToken` (bandeira, final, validade)? `GET /1/card/{token}` é suportado? | R2. O cadastro de cartão hoje depende dele; sem confirmação migra para dados truncados do navegador | C1.3 |
+| P3 | Qual o **prazo para capturar** uma pré-autorização de crédito, por bandeira? | F18. Guarda o prazo de espera do hold do cartão | C4 |
+| P4 | O `CardToken` expira, ou é atualizado quando o cartão é reemitido? | Cartão salvo que morre sem aviso vira recusa na próxima pré-auth | C4 |
+| P5 | Qual a URL **canônica** do script do SOP: `transaction.cieloecommerce.cielo.com.br/…` (a que roda no Parque) ou `www.pagador.com.br/…` (a da doc)? | R7. O script não carrega se URL errada. Default = Parque (provado); env como reserva. Precisa de confirmação. | C1.1 |
+| P6 | Um mesmo CNPJ pode ter **mais de um EC**, cada um com sua URL de notificação e seus headers? | P6. Só importa se o dono quiser reaproveitar a conta do Parque (ver §2 "Conta Cielo") | 4.3 |
+| P7 | A lista de IPs confiáveis vem ligada ou desligada por padrão? | R6. Se ligada e IP de saída do EasyPanel mudar, tudo responde 403 | C2.2 |
+
+---
+
+## 2.1 Conta Cielo do InnoFlow — Decisão do Dono (EC próprio vs. reutilizar o do Parque)
+
+**RECOMENDAÇÃO da Nova:** EC (estabelecimento) **próprio** do InnoFlow. A decisão está **em aberto** esperando input do dono e resposta da P6.
+
+| Aspecto | Se usar EC próprio | Se reutilizar o EC do Parque |
+|---|---|---|
+| **Prazo** | Afiliação + SOP + Cartão Protegido novo = habilitação "até 5 dias úteis" autoatendimento Cielo | Afiliação já existe; SOP já habilitado. Cartão Protegido NÃO está habilitado (Parque não usa), precisa habilitar = mesmo prazo. Ganho pequeno. |
+| **Webhook** | ✅ URL de notificação própria, dedica os 3 headers ao InnoFlow | ❌ **Contra técnico forte.** A URL de notificação é **por EC**. Notificações de Pix e cartão do InnoFlow iriam para endpoint do Parque, ou vice-versa. Os dois dividiriam os 3 headers. Um dos sistemas perderia confirmações. |
+| **Credenciais** | ✅ `MerchantKey` própria, isolada | ❌ **A mesma `MerchantKey`** nos dois sistemas. Um vazamento compromete os dois. Rotacionar numa obriga a rotacionar no outro no mesmo minuto. |
+| **IPs confiáveis** | ✅ Lista própria | ❌ Compartilhada. IP do EasyPanel e IP da loja do Parque na mesma lista. |
+| **Conciliação financeira** | ✅ Extrato separado, receita de recarga só. Chargebacks/devoluções rastreáveis por `MerchantOrderId`. | ❌ Um extrato só. Receita de recarga + venda da loja no mesmo extrato, mesmo CNPJ. Precisa reconciliação manual por `MerchantOrderId`. Se o EC do Parque é de outra empresa, há questões fiscais/contratuais. |
+| **Pix** | ✅ Modo da conta Pix = escolha só para o InnoFlow | ❌ A escolha de um sistema (transferência automática / saldo) vale para o outro. |
+| **Fatura do motorista** | ✅ `SoftDescriptor` diferenciado, ex.: `INNOFLOW` | ❌ Nome no extrato é o do Parque, não do InnoFlow (mesmo CNPJ). `SoftDescriptor` por transação deixa diferenciado só pra quem vê o recibo digital. |
+
+**Checklist caso o dono escolha EC próprio:**
+
+1. Responder P6 (P6 = "um CNPJ pode ter mais de um EC"?) — se SIM, o caminho de dois ECs é viável
+2. **Sandbox da Cielo:**
+   - [ ] Cadastro: `MerchantId` + `MerchantKey` sandbox
+   - [ ] Chamado ao Atendimento Cielo: SOP + Cartão Protegido (tokenização) + par SOP (`ClientId`/`ClientSecret`)
+3. **Produção da Cielo:**
+   - [ ] Credenciais: `MerchantId` + `MerchantKey` produção
+   - [ ] Habilitar Silent Order Post (Microsserviços → SOP)
+   - [ ] Habilitar Cartão Protegido (Microsserviços → Cartão Protegido)
+   - [ ] Par SOP de produção (Braspag, **do mesmo cadastro** do `MerchantId` — pares de cadastros diferentes dão HTTP 500)
+   - [ ] Habilitar Pix (Meu Cadastro → Autorizações → Pix) — escolher modo (transferência automática vs. saldo)
+   - [ ] URL de notificação (E-commerce → Gestão API → Configurações): `https://<seu-domínio>/api/webhooks/cielo/<token>` (o token será o `CIELO_WEBHOOK_PATH_TOKEN` do EasyPanel)
+   - [ ] Usar nomes de header **só com letras** (ex.: `InnoFlowWebhookSecret`, não `inno-elektron-webhook-secret`)
+   - [ ] Habilitar IPs confiáveis (opcional): listar IP de saída do serviço `api` e `worker` do EasyPanel
 
 ---
 
@@ -69,10 +112,10 @@
 | `CIELO_WEBHOOK_PATH_TOKEN` | ❌ Não | Todos 3 | `openssl rand -hex 24` (48 hex) | 🟡 Importante | Roteia a requisição; mínimo 8 chars (alerta se < 32) |
 | `CIELO_WEBHOOK_HEADER_SECRET` | ❌ Não | Todos 3 | `openssl rand -hex 16` (32 hex) | 🔴 Inseguro em log | Tempo constante; mínimo 8 (alerta se < 32); banco cifra |
 | **Cielo — Silent Order Post (cartão salvo)** |
-| `CIELO_SOP_SCRIPT_URL` | ❌ Não | api | A Cielo informa a URL oficial (não adivinhe) | Público (URL) | Sem ela o cadastro de cartão responde 503 |
-| `CIELO_SOP_CLIENT_ID` | ❌ Não | api | Ticket Cielo: OAuth client ID | Público (ID) | Env é reserva; tela prevalece; para `client_credentials` |
-| `CIELO_SOP_CLIENT_SECRET` | ❌ Não | api | Ticket Cielo: OAuth secret | 🔴 Inseguro em log | Banco cifra; a tela o exige junto com `CIELO_SOP_CLIENT_ID` |
-| `CIELO_SOP_OAUTH_TOKEN_URL` | ❌ Não | api | A Cielo informa o endereço oficial (não adivinhe) | Público (URL) | Sem ele o cadastro de cartão responde 503 |
+| `CIELO_SOP_SCRIPT_URL` | ❌ Não (C1.1: terá default) | api | Sandbox: `https://transactionsandbox.pagador.com.br/post/scripts/silentorderpost-1.0.min.js` (F9 [PROD]); Produção: `https://transaction.cieloecommerce.cielo.com.br/post/scripts/silentorderpost-1.0.min.js` | Público (URL) | **Após C1.1** terá default. **Agora:** sem ela o cadastro de cartão responde 503 |
+| `CIELO_SOP_CLIENT_ID` | ❌ Não (banco > env) | api | Ticket Cielo: OAuth client ID | Público (ID) | Env é reserva; tela prevalece; para `client_credentials` |
+| `CIELO_SOP_CLIENT_SECRET` | ❌ Não (banco > env) | api | Ticket Cielo: OAuth secret | 🔴 Inseguro em log | Banco cifra; a tela o exige junto com `CIELO_SOP_CLIENT_ID` |
+| `CIELO_SOP_OAUTH_TOKEN_URL` | ❌ Não (C1.1: terá default) | api | Sandbox: `https://authsandbox.braspag.com.br/oauth2/token` (F7 [PROD]); Produção: `https://auth.braspag.com.br/oauth2/token` | Público (URL) | **Após C1.1** terá default; **passo 2** do OAuth vem depois (C1.1, F8 [PROD]). **Agora:** sem ele o cadastro de cartão responde 503 |
 | `CIELO_TIMEOUT_MS` | ❌ Não | Todos 3 | Milissegundos | Público (número) | Default 8000 (8s); motorista está esperando (HTTP síncrono) |
 | **Pagamento — Guarda Fake/Produção** |
 | `PAYMENT_ALLOW_FAKE_ADAPTER` | ❌ Não | Todos 3 | `false` (padrão, obrigatório) | Público (flag) | 🔴 **NUNCA `true` em produção real**; aprova qualquer cartão, não cobra |
@@ -211,8 +254,8 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
   - [ ] ⚠️ Não testados; usar com cautela e monitorar erros
 
 - [ ] **Credenciais de produção da Cielo:** em mãos
-  - [ ] `merchantId` de produção
-  - [ ] `merchantKey` de produção (32+ chars)
+  - [ ] `merchantId` de produção (GUID de 36 caracteres)
+  - [ ] `merchantKey` de produção (40 caracteres) — [DOC] (F5, referência Pix Cielo2)
   - [ ] `sopClientId` + `sopClientSecret` de produção
   - [ ] Segredos de webhook NOVOS de produção (32+ chars cada): `CIELO_WEBHOOK_PATH_TOKEN`, segredo do header
 
@@ -292,10 +335,10 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
 
 **Como verificar logs do EasyPanel:**
 1. Abrir EasyPanel → App `inno-elekton-api` → aba "Logs"
-2. Procurar por `x-innoelektron-webhook-secret` (o nome do header é exatamente este) em linhas de requisição
+2. Procurar por `x-innoelektron-webhook-secret` (o nome do header atualmente é este; **mudará na fase C1.4** para só letras, tipo `InnoFlowWebhookSecret`, porque o Site Cielo recusa caracteres especiais) em linhas de requisição
 3. Se o valor aparecer como texto (não como `[redacted]`), o segredo vazou
 
-**Se vazou:**
+**Se vazou (agora ou depois da C1.4):**
 1. Gere um novo segredo no terminal:
    ```bash
    openssl rand -hex 24
@@ -306,7 +349,8 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
    - Clicar "Salvar" (step-up com senha)
 3. Atualize na **conta Cielo** (painel deles):
    - Webhook settings
-   - Cole o mesmo segredo no header esperado: `x-innoelektron-webhook-secret`
+   - **Até C1.4:** Cole o mesmo segredo no header `x-innoelektron-webhook-secret`
+   - **Após C1.4:** Use o novo nome (só letras, ex.: `InnoFlowWebhookSecret`)
 4. Teste: gerar novo Pix e verificar nos logs que segredo sai como `[redacted]`
 
 ### Rotação de `PAYMENT_SECRETS_KEY` (cartão + gateway)
