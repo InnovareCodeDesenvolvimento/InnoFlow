@@ -32,7 +32,7 @@ const write = args.includes("--write")
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 /** chave -> id da seção no DOM (a última, FinalCta, não tem id fixo: é a última `section` de `main`). */
-const SLOTS = { tour: "como-funciona", op: "para-quem-opera", feat: "recursos", trust: "seguranca", faq: "perguntas", cta: null }
+const SLOTS = { tour: "como-funciona", adv: "vantagens", feat: "recursos", trust: "seguranca", faq: "perguntas", cta: null }
 const THRESHOLD = 0.02
 const SAFETY = 0.985
 
@@ -100,10 +100,16 @@ function buildSteps(mode, key) {
   for (const s of samples) {
     const v = s[mode][key]
     if (v == null) throw new Error(`seção "${key}" não encontrada em ${s.w}px`)
-    if (!cur || Math.abs(v - cur.measured) / cur.measured > THRESHOLD) {
-      cur = { w: s.w, measured: v, v: Math.floor(v * SAFETY) }
+    // O degrau guarda o MENOR e o MAIOR valor medido e só aceita uma altura nova se a amplitude do degrau continuar
+    // dentro de THRESHOLD (antes comparava só com a 1ª altura: o degrau podia ter -2% e +2% em volta dela, ou seja, 4%
+    // de amplitude + 1,5% de margem, e a altura real passava de reserva*1,04 — o teste E2E "espaços reservados" pegou
+    // isso na seção "Privacidade" a 640 px).
+    if (!cur || v > cur.lo * (1 + THRESHOLD) || v < cur.hi * (1 - THRESHOLD)) {
+      cur = { w: s.w, lo: v, hi: v, v: Math.floor(v * SAFETY) }
       steps.push(cur)
     } else {
+      cur.lo = Math.min(cur.lo, v)
+      cur.hi = Math.max(cur.hi, v)
       cur.v = Math.min(cur.v, Math.floor(v * SAFETY))
     }
   }
