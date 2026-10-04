@@ -113,7 +113,7 @@ Agora crie o carregador dentro do site.
    - **Segredo OCPP (Basic Auth):** gere uma senha forte com **16 a 40
      caracteres**. Exemplo:
      ```
-     GeneretedStr0ng-P@ssw0rd123456
+     <o segredo do carregador, o mesmo cadastrado no admin>
      ```
      O painel vai validar em tempo real. **Guarde esta senha num cofre** — ela
      não é mostrada de novo.
@@ -170,12 +170,12 @@ usará isto para autenticar.
 
 **Valor:** a senha que gerou na Etapa 2.
 ```
-GeneretedStr0ng-P@ssw0rd123456
+<o segredo do carregador, o mesmo cadastrado no admin>
 ```
 
 **Como funciona:** quando o carregador se conecta, ele manda um header HTTP
 ```
-Authorization: Basic base64(CP-INNOELEKTRON-001:GeneretedStr0ng-P@ssw0rd123456)
+Authorization: Basic base64(CP-INNOELEKTRON-001:<o segredo do carregador, o mesmo cadastrado no admin>)
 ```
 
 O servidor valida com bcrypt e aceita ou rejeita.
@@ -215,7 +215,7 @@ do fabricante.
 
 ```bash
 # Teste local (se tiver acesso a um laptop com o simulador)
-OCPP_PASSWORD='GeneretedStr0ng-P@ssw0rd123456' \
+OCPP_PASSWORD='<o segredo do carregador, o mesmo cadastrado no admin>' \
   npx tsx backend/scripts/simulate-charger.ts \
   --url 'ws://seu-dominio:9000/ocpp' \
   --identity 'CP-INNOELEKTRON-001' \
@@ -249,30 +249,15 @@ via `StatusNotification`. Eles aparecem automaticamente no painel.
 2. Você verá os conectores que o carregador reportou (ex.: connectorId 1, 2 para
    um poste com 2 saídas).
 
-3. **Para cada conector, vincule uma tarifação** — mas note: **esta interface
-   ainda está em desenvolvimento** (gap registrado em PROGRESSO.md). Você pode:
-   - Editar direto no banco de dados (opção técnica, não recomendada).
-   - Usar a API (POST `/api/admin/tariff-assignments`).
-   - ❌ **NÃO há formulário visual completo ainda** — isto é uma pendência do projeto.
-
-**Atalho para validação inicial:**
-Se o seu site já tem uma `Tariff` padrão, use a API ou o banco para vincular:
-
-```sql
--- Exemplo direto no Postgres (avançado)
-INSERT INTO "TariffAssignment"
-  ("tariffId", "siteId", "chargePointId", "connectorId", "operatorId")
-VALUES
-  (
-    '<tariffId-uuid>',
-    '<siteId-uuid>',
-    '<chargePointId-uuid>',
-    1,  -- connectorId
-    '<operatorId-uuid>'
-  );
-```
-
-Confirme os UUIDs no painel admin ou banco.
+3. **Vincule a tarifa ao carregador (ou ao site/conector).** Hoje a API existe
+   (`POST /api/admin/tariff-assignments`, com `scope` = CONNECTOR, CHARGE_POINT,
+   SITE ou OPERATOR), mas **a tela para fazer isso ainda NÃO existe** (pendência
+   do projeto, já encaminhada ao time de frontend). Até a tela sair, peça ao Atlas
+   para criar o vínculo pela API. **Não insira direto no banco:** a tabela exige
+   campos que é fácil errar (o `scope` e o identificador certo para cada escopo),
+   e um vínculo errado faz o sistema cobrar com a tarifa errada ou recusar a
+   recarga. **Sem tarifa vinculada o QR do carregador não consegue iniciar a
+   recarga**: confirme este passo antes dos testes.
 
 ### 4.2 Tarifas
 
