@@ -11,33 +11,26 @@ firmware ANTES de abrir para motoristas.
 
 ## Pré-requisitos
 
-### 1. Domínio e conectividade OCPP
+### 1. Domínio e conectividade OCPP (`wss://` — decidido em 04/10/2026)
 
-**O carregador precisa alcançar a URL do gateway OCPP:**
+**O carregador precisa alcançar a URL do gateway OCPP, sempre com TLS:**
 
 ```
-ws://dominio-do-easypanel:9000/ocpp/{ocppIdentity}
-ou
-wss://dominio-do-easypanel:9000/ocpp/{ocppIdentity}
+wss://ocpp.innovarecode.com.br/ocpp/{ocppIdentity}
 ```
 
-onde `ocppIdentity` é o identificador único que você vai cadastrar (ex.:
+onde `ocpp.innovarecode.com.br` é o domínio do gateway (**exemplo** — o nome real é o que o
+dono criou no EasyPanel, seção 4 de `docs/DEPLOY-EASYPANEL.md`), **sem número de porta**
+(`wss` usa 443), e `ocppIdentity` é o identificador único que você vai cadastrar (ex.:
 `CP-INNOELEKTRON-001`).
 
-⚠️ **Porta 9000 — protocolo TLS em aberto (bloqueio Órion):**
-
-Atualmente a resposta sobre se a porta 9000 será exposta crua (`ws://`) ou atrás
-de TLS (`wss://`) **ainda não foi decidida** — see `docs/DEPLOY-EASYPANEL.md`
-linha 158. Isto afeta diretamente a segurança:
-
-- **`ws://` (WebSocket cru):** Basic Auth trafega a senha em texto claro. Nunca
-  use em produção com dados reais sem confirmar que **uma rede privada** (VPN,
-  WireGuard, firewall rigoroso) protege o carregador e o servidor.
-- **`wss://` (WebSocket com TLS):** Basic Auth cifrado. O recomendado.
-
-**Ação obrigatória antes de ligar carregador real:** confirmar com o proprietário
-ou Vulcano qual será o protocolo e a topologia da porta 9000. O procedimento
-abaixo assume que você já sabe o domínio e o protocolo corretos.
+✅ **Decisão do dono (04/10/2026): o OCPP em produção usa `wss://` (TLS).** A porta 9000 crua
+(`ws://`) **não é exposta na internet**: o Basic Auth trafegaria a senha em texto claro. O
+certificado é emitido e renovado sozinho pelo EasyPanel (Let's Encrypt) no domínio do gateway.
+Quem configura o domínio, o HTTPS e a variável `OCPP_TRUST_PROXY_HOPS` é o dono no EasyPanel —
+passo a passo, medição e verificação em `docs/DEPLOY-EASYPANEL.md`, seção 4. **Este guia só
+começa depois que essa seção estiver concluída** (certificado válido, porta 9000 fechada,
+simulador conectando em `wss://`).
 
 ### 2. Credencial OCPP
 
@@ -54,13 +47,55 @@ O carregador autentica com **Basic Auth** — um par `{ocppIdentity, basicAuthSe
   - **Nunca é mostrada de novo** após criação — guarde num cofre/gestor de senhas.
   - Armazenada no banco de forma irreversível (bcrypt hash).
 
-### 3. TLS no servidor (recomendado)
+### 3. TLS: o que o carregador precisa suportar
 
-Se usar `wss://`, o servidor precisa de certificado HTTPS válido. No EasyPanel,
-os certificados são gerados automaticamente pelo LetsEncrypt quando você
-configura um domínio. Nada a fazer aqui; o EasyPanel cuida.
+O servidor já está pronto (item 1). Falta confirmar que o **carregador** consegue falar com ele.
+Confira no manual/fabricante **antes** de ir ao local:
 
----
+| Requisito | Por quê |
+|---|---|
+| **Suporta `wss://`** (WebSocket sobre TLS) no campo de URL do servidor | Sem isso só fala `ws://` — ver "Se o firmware só fala `ws://`" abaixo |
+| **TLS 1.2 ou superior** | Firmware que só fala TLS 1.0/1.1 ou SSL não completa o handshake com a borda moderna do EasyPanel **[a confirmar no EasyPanel: versão mínima de TLS configurada]** |
+| **Certificado público confiável**: o carregador precisa ter, no repositório de certificados dele, a raiz do Let's Encrypt (**ISRG Root X1**, e a X2 se a cadeia for ECDSA) | O certificado do domínio é Let's Encrypt. Firmware antigo/sem atualização de CAs recusa o certificado — erro típico: "certificate verify failed" ou "unknown CA". Verifique com o fabricante |
+| **Sem *certificate pinning*** (fixar o certificado ou a chave de um servidor específico) | O Let's Encrypt renova o certificado a cada ~60–90 dias; um carregador que fixa o certificado antigo para de conectar a cada renovação |
+| **Envia SNI** (nome do servidor no handshake TLS) | O proxy escolhe o certificado pelo nome; sem SNI o carregador recebe o certificado errado e recusa. Quase todo firmware moderno envia |
+| **Relógio correto** (NTP/RTC) | Validação de TLS depende da data: relógio muito fora faz o certificado parecer "expirado/ainda não válido" |
+| **Responde a *ping* WebSocket** | O servidor manda ping a cada 30 s e derruba a conexão sem pong; bibliotecas WebSocket padrão respondem sozinhas |
+| **Subprotocolo `ocpp1.6`** e Basic Auth (`Authorization`) enviados no handshake | É o que o gateway exige (`server.ts`: `protocols: ['ocpp1.6']`) |
+
+**Sintomas → causa provável** (o log do **gateway** só vê o carregador depois que o TLS fecha;
+falha de TLS aparece **no carregador**, não no log do servidor):
+
+- Carregador nunca aparece nos logs do gateway e reclama de certificado → CA não confiável,
+  pinning, SNI ou versão de TLS (tabela acima).
+- Aparece `[ocpp] auth: senha incorreta` / `charge point desconhecido` → o TLS está ok; o
+  problema é credencial/identidade.
+- Conecta e cai em laço a cada ~1 min → algum timeout de ocioso no caminho menor que o ping de
+  30 s do servidor, ou o carregador não responde a ping.
+
+### Se o firmware só fala `ws://` (sem TLS)
+
+**Não resolva abrindo a porta 9000 crua na internet** — a senha do carregador (Basic Auth)
+trafegaria em claro e qualquer um no caminho poderia capturá-la. Alternativas, da melhor para
+a menos boa:
+
+1. **Atualizar o firmware / pedir ao fabricante.** Quase todo carregador OCPP 1.6 vendido hoje
+   suporta *Security Profile 2* (TLS + Basic Auth) — é exatamente o que este guia configura.
+   Pergunte pelo firmware com `wss://`.
+2. **Terminar o TLS num equipamento local, no mesmo site.** Um mini-PC/roteador na rede do
+   eletroposto roda um proxy (ex.: nginx/stunnel) que aceita `ws://` **só da rede local**,
+   onde está o carregador, e repassa para `wss://<domínio>/ocpp/<identidade>` pela internet. A
+   parte sem TLS fica restrita a um cabo/rede privada sob seu controle. Cuidados: a identidade
+   e a senha continuam as do carregador (o proxy repassa o `Authorization`); manter o
+   equipamento atualizado; o IP que o servidor enxerga passa a ser o da saída de internet do
+   site (todos os carregadores do site dividem o mesmo IP — normal, o limite de falhas por IP
+   foi dimensionado para isso).
+3. **Rede privada ponta a ponta** (VPN WireGuard/IPsec, ou APN privado da operadora no caso
+   de carregador com chip): o `ws://` roda **dentro** do túnel e o gateway só é alcançável
+   pelo túnel. Exige uma segunda porta de entrada para o gateway fora do EasyPanel padrão e
+   mudança de infraestrutura — **combinar com o Vulcano antes**, não improvisar.
+
+Fora dessas, **não ligue o carregador à produção**: use o simulador até resolver.
 
 ## Etapa 1: Cadastrar Site no Painel Admin
 
@@ -147,18 +182,21 @@ Agora configure o hardware para conectar ao gateway.
 
 **Valor exato:**
 ```
-ws://seu-dominio.com.br:9000/ocpp/CP-INNOELEKTRON-001
-```
-
-ou, com TLS:
-```
-wss://seu-dominio.com.br:9000/ocpp/CP-INNOELEKTRON-001
+wss://ocpp.innovarecode.com.br/ocpp/CP-INNOELEKTRON-001
 ```
 
 Troque:
-- `seu-dominio.com.br` pelo domínio real do EasyPanel (ex.:
-  `innoflow.innovarecode.com.br`).
+- `ocpp.innovarecode.com.br` pelo **domínio do gateway** criado no EasyPanel (é um domínio
+  **próprio do gateway**, diferente do `innoflow.innovarecode.com.br` do painel — o painel não
+  fala OCPP). Sem `:9000`.
 - `CP-INNOELEKTRON-001` pelo `ocppIdentity` que registrou na Etapa 2.
+
+Se o carregador tiver **campos separados** (protocolo/host/porta/caminho): protocolo `wss`,
+porta `443`, caminho `/ocpp/<ocppIdentity>`. Alguns firmwares pedem só a base
+(`wss://ocpp.innovarecode.com.br/ocpp`) e **acrescentam sozinhos** a identidade — confira no
+manual para não ficar `.../ocpp/CP-X/CP-X`. Se o campo tiver limite de tamanho (comum: 64
+caracteres), a URL acima cabe com identidades de até ~35 caracteres. Em hipótese alguma use
+`ws://` em produção (ver pré-requisito 3).
 
 **O carregador vai extrair a identidade da URL** (o último `/` em diante) — ele
 usará isto para autenticar.
@@ -214,10 +252,10 @@ do fabricante.
 **Para confirmar que tudo está certo** ANTES de conectar em produção:
 
 ```bash
-# Teste local (se tiver acesso a um laptop com o simulador)
+# Teste contra o domínio de produção (de um laptop com o simulador; use o carregador de TESTE)
 OCPP_PASSWORD='<o segredo do carregador, o mesmo cadastrado no admin>' \
   npx tsx backend/scripts/simulate-charger.ts \
-  --url 'ws://seu-dominio:9000/ocpp' \
+  --url 'wss://ocpp.innovarecode.com.br/ocpp' \
   --identity 'CP-INNOELEKTRON-001' \
   --connectors 1
 ```
@@ -641,12 +679,18 @@ verdade (com motoristas reais e dinheiro real).
 
 ### Pré-Implementação
 
-- [ ] **Domínio e TLS confirmados** com proprietário ou Vulcano. Porta 9000 será
-      `ws://` ou `wss://`?
+- [ ] **Domínio e TLS prontos** (decidido: `wss://`): certificado válido no domínio do
+      gateway, `OCPP_TRUST_PROXY_HOPS` medido e ajustado, simulador conectando em `wss://`
+      (`docs/DEPLOY-EASYPANEL.md`, seção 4).
+- [ ] **Firmware confere com a tabela de TLS** (pré-requisito 3): `wss://`, TLS 1.2+, aceita
+      a raiz Let's Encrypt, sem pinning. Se só fala `ws://`, resolva pelas alternativas
+      seguras do pré-requisito 3 — nunca pela porta crua.
 - [ ] **Segredos guardados** em cofre seguro (basicAuthSecret, credenciais de admin,
       certificados).
-- [ ] **Firewall configurado:** porta 9000 acessível de onde o carregador está
-      (confirmar com TI/rede).
+- [ ] **Rede do local:** saída para o domínio do gateway na porta **443/TCP** liberada
+      (confirmar com TI/rede do local; firewall que só libera 80/443 e bloqueia WebSocket
+      de longa duração derruba o carregador). A porta 9000 **não** é usada pelo carregador e
+      deve estar fechada na internet.
 
 ### Configuração de Hardware
 

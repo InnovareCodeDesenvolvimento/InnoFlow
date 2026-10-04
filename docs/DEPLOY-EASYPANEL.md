@@ -33,7 +33,7 @@ context** `backend/` (o Dockerfile está em `backend/Dockerfile`):
 | App | Dockerfile (campo "Arquivo") | Porta interna | Exposta publicamente? |
 |---|---|---|---|
 | `api` | `Dockerfile` | 3000 | Sim (é a API REST/SSE que o frontend consome) |
-| `ocpp-gateway` | `Dockerfile.ocpp` | 9000 | Sim, mas só para os carregadores (WebSocket) — ver nota de proxy abaixo |
+| `ocpp-gateway` | `Dockerfile.ocpp` | 9000 | Sim, mas só para os carregadores, **por domínio próprio com HTTPS (`wss://`, decidido em 04/10/2026)** — a porta 9000 **não** é publicada crua; passo a passo na seção 4 |
 | `worker` | `Dockerfile.worker` | — | Não, não escuta porta HTTP |
 
 ⚠️ **Build Path obrigatório:** os Dockerfiles ficam em `backend/`,
@@ -145,18 +145,22 @@ OCPP_AUTH_RATE_LIMIT_MAX_ATTEMPTS=5     # falhas do par identidade+IP na janela
 OCPP_AUTH_IP_MAX_FAILURES=30            # falhas de um IP (qualquer identidade) na janela
 OCPP_AUTH_IP_MAX_CONCURRENT=100         # tentativas de um IP em andamento AO MESMO TEMPO (frota atrás de NAT reconectando junta)
 OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS=300
-OCPP_TRUST_PROXY_HOPS=0                 # proxies reversos entre o carregador e a porta 9000
+OCPP_TRUST_PROXY_HOPS=0                 # proxies reversos entre o carregador e a porta 9000 (com o domínio wss:// da seção 4: medir, esperado 1)
 ```
 
 `OCPP_TRUST_PROXY_HOPS` **não é** o `TRUST_PROXY_HOPS` da API (o caminho até a porta 9000 é
-outro). Default `0` = usa só o endereço do socket — correto se a porta for exposta direto;
-**atrás de um proxy, sem configurar, todos os carregadores compartilham o IP do proxy** e o
-limite por IP passa a valer para a frota inteira. Para acertar: conecte UM carregador e leia o
-log `[ocpp] auth: ...` (campos `clientIp` e `xForwardedFor`); só então ajuste os hops —
-**hops a mais deixam o cliente forjar o próprio IP**. Bloqueio de uma identidade CONHECIDA gera
-um `warn` com `alert: "ocpp_auth_lockout"` (procure por ele nos logs). Pergunta em aberto
-(Vulcano): a porta 9000 é publicada crua ou atrás de TLS (WSS)? Basic Auth em `ws://` trafega a
-senha em claro; o ideal é WSS obrigatório e a porta crua não exposta.
+outro: não passa pelo nginx do frontend). Default `0` = usa só o endereço do socket — correto
+só se a porta for exposta direto; **atrás de um proxy, sem configurar, todos os carregadores
+compartilham o IP do proxy** e o limite por IP (30 falhas / 100 tentativas simultâneas por
+janela) passa a valer para a frota inteira. **Como acertar (medir, não chutar): seção 4.4.**
+**Hops a mais deixam o cliente forjar o próprio IP.** Bloqueio de uma identidade CONHECIDA gera
+um `warn` com `alert: "ocpp_auth_lockout"` (procure por ele nos logs).
+
+✅ **DECIDIDO (dono, 04/10/2026): o OCPP em produção é `wss://` (TLS)**, terminado no proxy de
+borda do EasyPanel, com domínio próprio para o gateway (seção 4). Basic Auth em `ws://` trafega
+a senha em claro; por isso a porta 9000 **não** é publicada crua na internet. O tráfego
+proxy → container (rede interna do EasyPanel) segue em `ws://`/HTTP puro — é interno, não
+exposto.
 
 ### Gateway de pagamento (Cielo) — banco manda, env é reserva (F5.5, 02/10/2026)
 
@@ -475,16 +479,207 @@ ENTRY_POINT=index_16.ts
 ADMIN_PORT=9999
 ```
 
-## 4. Se colocar um proxy/domínio na frente do `ocpp-gateway`
+(`ws://` aqui é a rede **interna** do EasyPanel, que não passa pela borda — é de propósito e
+não contradiz a decisão de `wss://` para a internet. Para testar o caminho de produção
+completo — TLS, domínio, hops — use o simulador do repositório contra o domínio público,
+seção 4.5.)
 
-OCPP mantém WebSocket persistente com heartbeat (padrão do MVP: 120s). Se o
-EasyPanel ou algo na frente dele faz proxy reverso, confirme:
-- Upgrade de WebSocket habilitado.
-- Timeout de leitura/idle **maior** que o heartbeat (ex. 300s).
-- Isso também vale para as rotas SSE da API (`/api/sessions/:id/stream`) —
-  desligar buffering.
+## 4. Gateway OCPP em produção: `wss://` com domínio próprio (DECIDIDO 04/10/2026)
 
-Detalhes técnicos completos em `docs/PROXY-REVERSO.md`.
+**Decisão do dono:** os carregadores falam `wss://` (TLS). O certificado é emitido e renovado
+pelo EasyPanel (Let's Encrypt) no proxy de borda; o container `ocpp-gateway` continua
+escutando HTTP/WebSocket puro na 9000, **só na rede interna**. O que era a "pergunta em aberto
+da porta 9000 crua ou TLS" (D1 do Órion A1) está **fechado: TLS**.
+
+```
+carregador ──wss://ocpp.innovarecode.com.br/ocpp/<identidade> (443, TLS)──▶ proxy de borda do EasyPanel
+                                                                              │  termina TLS, repassa o Upgrade,
+                                                                              │  acrescenta X-Forwarded-For
+                                                                              ▼  ws:// (rede interna)
+                                                                    App ocpp-gateway :9000
+```
+
+Legenda do que é verificado: **[código]** = conferido lendo o código/dependência em
+04/10/2026; **[a confirmar no EasyPanel]** = só o ambiente real prova — nada abaixo foi
+testado contra o EasyPanel de produção (não há acesso a ele nem Docker nesta máquina).
+
+### 4.1 O que o código faz atrás de um proxy que termina TLS (verificado)
+
+- **[código] O gateway não sabe nem precisa saber de TLS.** `startOcppServer` sobe um
+  `RPCServer` (`ocpp-rpc`) em `listen(port)`, HTTP puro (`backend/src/ocpp/server.ts`). Não há
+  cert/chave no código nem env de TLS.
+- **[código] Upgrade do WebSocket:** o handler `upgrade` do `ocpp-rpc` lê só o último
+  segmento do path como identidade (`/ocpp/CP-X` e `/qualquer/coisa/CP-X` valem; o prefixo
+  `/ocpp` é convenção, não é validado) e exige `Upgrade: websocket`. Requisição HTTP comum
+  na 9000 devolve **404** (com cabeçalho `Server: ocpp-rpc/…`) — o gateway **não tem rota de
+  health HTTP**; qualquer "health check" HTTP do painel falharia.
+- **[código] Basic Auth** vem do cabeçalho `Authorization` do próprio handshake; o proxy só
+  precisa repassá-lo (proxy HTTP padrão repassa). A senha é conferida por bcrypt contra
+  `ChargePoint.basicAuthSecretHash`. Com TLS, deixa de trafegar em claro na internet.
+- **[código] Keep-alive:** o servidor manda ping WebSocket a cada **30 s** (`pingIntervalMs:
+  30_000`) e derruba a conexão se um ping ficar sem pong até o próximo (`ocpp-rpc`
+  `_keepAlive`, `deferPingsOnActivity` desligado). Logo a conexão **nunca fica ociosa mais
+  que ~30 s** no proxy — qualquer timeout de ocioso do proxy ≥ 60 s é seguro. (O Heartbeat
+  OCPP de 60–120 s é outra coisa e não é o que mantém o caminho vivo.) **[a confirmar no
+  EasyPanel]** que não existe timeout de ocioso menor que 60 s na borda.
+- **[código] Tamanho de mensagem / timeouts:** o gateway não configura `maxPayload` (vale o
+  default do `ws`, 100 MiB) nem timeout próprio de handshake (valem os defaults do `http` do
+  Node). `callTimeoutMs: 30_000`. Nada disso depende de TLS; ver "mudanças de código
+  sugeridas" no fim desta seção.
+- **[código] IP do carregador:** `resolveHandshakeIp(remoteAddress, X-Forwarded-For,
+  OCPP_TRUST_PROXY_HOPS)` monta a cadeia `[socket, ...X-Forwarded-For da direita p/ esquerda]`
+  e usa o elemento de índice `hops`. IPv6 vira a chave de sub-rede /56. Com `hops = 0` o
+  `X-Forwarded-For` é **ignorado** e o IP é o do socket — atrás do proxy isso é o IP interno
+  do proxy, **igual para todos os carregadores**. Esse IP alimenta o rate limit de
+  autenticação em Redis: par (identidade + IP), falhas por IP (30/janela) e tentativas
+  simultâneas por IP (100). Com hops errado para menos, **uma frota inteira divide uma cota
+  só** (um carregador com senha errada pode levar os outros a `429`); com hops errado para
+  mais, **o cliente forja o IP** mandando o próprio `X-Forwarded-For`.
+- **[código] O IP não é gravado em lugar nenhum** além de contadores do rate limit (TTL = janela)
+  e dos logs de falha de autenticação; nenhuma outra parte do backend lê `remoteAddress`.
+
+### 4.2 Quantos saltos? (`OCPP_TRUST_PROXY_HOPS`)
+
+- A API usa `TRUST_PROXY_HOPS=2` porque são **dois** proxies até ela: borda do EasyPanel +
+  nginx do frontend (medido em produção, 19/09/2026). **O caminho do gateway é diferente:**
+  o domínio do gateway aponta direto para o App `ocpp-gateway` e **não passa pelo nginx do
+  frontend**. Logo a expectativa é **1 salto** (só a borda do EasyPanel):
+  `X-Forwarded-For: <IP do carregador>` e socket = IP interno da borda → cadeia
+  `[borda, carregador]` → `OCPP_TRUST_PROXY_HOPS=1`.
+- **Isto é uma dedução, não uma medição** — **[a confirmar no EasyPanel]**. O valor certo é o
+  que a medição da seção 4.4 mostrar. Qualquer coisa a mais na frente da borda (Cloudflare com
+  nuvem laranja, outro balanceador, um túnel) soma saltos: por isso o DNS do domínio do
+  gateway deve ser "só DNS" (sem proxy de CDN) — ver 4.3.
+- **Acoplamento perigoso:** com `OCPP_TRUST_PROXY_HOPS ≥ 1`, quem alcançar a **porta 9000
+  direto** (sem passar pela borda) escolhe o próprio IP via `X-Forwarded-For` e foge do limite
+  por IP. Por isso o passo "remover a publicação da porta 9000" (4.3, passo 4) **não é
+  opcional**; confirme-o antes de subir os hops.
+
+### 4.3 Passo a passo no EasyPanel (ações do dono)
+
+1. **DNS.** Crie um registro para o domínio do gateway apontando para o **mesmo servidor/IP**
+   dos outros domínios do projeto (tipo `A`, ou `CNAME` para o host que o EasyPanel indicar).
+   Sugestão: `ocpp.innovarecode.com.br` — curto de propósito, porque alguns firmwares limitam
+   o campo de URL (comum: 64 ou 128 caracteres; a URL final fica em ~50 caracteres com a
+   identidade `CP-INNOELEKTRON-001`). Qualquer nome serve (ex.: `ocpp.innoflow.innovarecode.com.br`
+   para seguir o padrão do painel). Se a zona estiver no Cloudflare: **"DNS only" (nuvem
+   cinza)**, não "Proxied" — a nuvem laranja adiciona um proxy (soma 1 salto, troca o
+   certificado que o carregador enxerga e tem timeout de ocioso próprio).
+2. **Domínio no App `ocpp-gateway`.** App `ocpp-gateway` → aba **Domínios** → adicionar:
+   host `ocpp.innovarecode.com.br`, **HTTPS ligado** (certificado automático Let's Encrypt),
+   caminho `/`, **porta de destino (proxy) `9000`**, protocolo do destino **HTTP** (o container
+   fala HTTP/WS puro; não marque HTTPS no destino). Os nomes exatos dos campos variam com a
+   versão do EasyPanel — **[a confirmar no EasyPanel]**. Aguarde o certificado ficar válido
+   (o DNS precisa estar propagado, senão o Let's Encrypt falha a validação).
+3. **WebSocket.** Proxy de borda moderno repassa `Upgrade: websocket` sem configuração. Se a
+   tela de domínio tiver uma opção explícita de WebSocket/upgrade, deixe **ligada**; senão não
+   há o que fazer. **[a confirmar no EasyPanel]** — a prova é o teste 4.5, não a ausência de
+   opção.
+4. **Remover qualquer publicação crua da 9000.** App `ocpp-gateway` → aba de **Portas / Port
+   mapping** (nome varia): **não pode haver mapeamento `9000 → porta do servidor`**. Se
+   existir (herança do primeiro deploy), remova e reimplante. Confira também o firewall do
+   servidor/provedor: 9000 **fechada** para a internet; só 443 (e 80, para o desafio do Let's
+   Encrypt) abertas. Prova: de uma máquina de fora, `Test-NetConnection <IP-do-servidor>
+   -Port 9000` (PowerShell) ou `nc -zv <IP-do-servidor> 9000` deve **falhar/dar timeout**.
+   (O docker-compose de desenvolvimento publica `9000:9000` — isso é só dev local, nunca
+   produção.)
+5. **Variável do App `ocpp-gateway`:** primeiro deploy com `OCPP_TRUST_PROXY_HOPS=0` (o
+   default — pode deixar a env ausente). Meça (4.4) e só então ajuste para o valor medido
+   (esperado `1`); salvar a env e **reimplantar** o App (env só vale no restart).
+6. **Atualize o que aponta para o gateway:** URL cadastrada nos carregadores
+   (`wss://<domínio>/ocpp/<identidade>`, sem `:9000`); `WS_URL` de simuladores externos
+   (o simulador interno do EasyPanel — seção 3 — pode continuar em `ws://ocpp-gateway:9000`,
+   que é a rede interna e não passa pela borda).
+
+URL final entregue ao carregador/instalador:
+
+```
+wss://ocpp.innovarecode.com.br/ocpp/<ocppIdentity>
+```
+
+(sem porta — o `wss` usa 443; o `<ocppIdentity>` é o cadastrado no painel, até 50 caracteres.)
+
+### 4.4 Como medir os saltos com segurança (antes de confiar em `hops > 0`)
+
+O gateway **só loga `clientIp`/`xForwardedFor` quando a autenticação FALHA** (sucesso loga só
+"charge point conectado"). Então a medição certa é provocar **uma** falha controlada com
+uma identidade **inexistente** (não toca no contador de nenhum carregador real; custa 1 das 30
+falhas do IP na janela de 300 s):
+
+1. Com `OCPP_TRUST_PROXY_HOPS=0` (ou ausente), de uma máquina sua, anote o seu IP público
+   (`curl.exe -s https://ifconfig.me`) e rode **uma** requisição de handshake (uma linha só):
+
+   ```
+   curl.exe -i --http1.1 --max-time 10 -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" -H "Sec-WebSocket-Protocol: ocpp1.6" https://ocpp.innovarecode.com.br/ocpp/PROBE-HOPS-001
+   ```
+
+   Resposta esperada: **`HTTP/1.1 401 Unauthorized`**. `404` com corpo `404 page not found` =
+   o domínio não está chegando no gateway (4.3 passo 2); `502/503` = o gateway não subiu ou a
+   porta de destino está errada; `429` = você já estourou o limite (espere 5 min).
+2. Nos **Logs** do App `ocpp-gateway`, procure a linha
+   `[ocpp] auth: charge point desconhecido ou inativo` com `identity: PROBE-HOPS-001`. Leia:
+   - `clientIp` — com hops 0 deve ser um IP **interno/privado** (o da borda; no caso da API foi
+     `10.11.0.16`);
+   - `xForwardedFor` — deve conter o **seu IP público** (esperado: só ele, 1 entrada).
+3. **Regra de decisão:** `OCPP_TRUST_PROXY_HOPS` = o menor número que faz `clientIp` virar o
+   **seu IP público**. A cadeia é `[clientIp atual, entradas do xForwardedFor da direita p/
+   esquerda]`; o índice do seu IP nessa lista é o valor. Se `xForwardedFor` vier **vazio**, a
+   borda não está repassando o cabeçalho — **não suba os hops** (ficaria sem efeito) e investigue.
+4. Ajuste a env, reimplante e **repita a sondagem**: agora `clientIp` deve ser o seu IP público.
+5. **Teste de forja (obrigatório depois de subir hops):** repita a requisição acrescentando
+   `-H "X-Forwarded-For: 1.2.3.4"`. `clientIp` no log **deve continuar sendo o seu IP**
+   (`xForwardedFor` mostrará `1.2.3.4, <seu IP>` ou só o seu — depende de a borda higienizar).
+   Se `clientIp` virar `1.2.3.4`, os hops estão **a mais** (ou a porta 9000 está exposta crua):
+   volte o valor e revise 4.3 passo 4.
+
+### 4.5 Como verificar fim a fim (simulador)
+
+Com o gateway no ar, o domínio válido e um carregador **de teste** cadastrado no painel (use uma
+identidade própria de teste, não a do carregador físico):
+
+```
+cd backend
+OCPP_PASSWORD='<segredo do carregador de teste>' npx tsx scripts/simulate-charger.ts \
+  --url wss://ocpp.innovarecode.com.br/ocpp --identity <ocppIdentity-de-teste> --connectors 1
+```
+
+(`--url` é a base **sem** a identidade; a senha vai só por `OCPP_PASSWORD`, nunca por argumento.
+No PowerShell: `$env:OCPP_PASSWORD='...'; npx tsx scripts/simulate-charger.ts ...`.)
+
+O que deve aparecer:
+- No simulador: conexão, `BootNotification` aceito e Heartbeats — e **sem** erro de
+  certificado. Se aparecer erro de certificado, o TLS não está válido (DNS/Let's Encrypt, 4.3
+  passo 2).
+- Nos logs do gateway: `[ocpp] charge point conectado` (com `chargePointId`/`ocppIdentity`).
+  Sucesso **não** loga o IP — por isso a medição de 4.4 usa falha provocada.
+- No painel: carregador online (`lastSeenAt`/mapa), como na seção 5.1.
+- Teste negativo: `OCPP_PASSWORD` errada → `[ocpp] auth: senha incorreta` com `clientIp`
+  igual ao **seu** IP público (confirma os hops) e o simulador recebendo `401`. Rode com
+  `--no-auto-reconnect` para não repetir a falha em laço.
+- Teste de que a porta crua morreu: `ws://<IP-do-servidor>:9000/...` **não** conecta (4.3 passo 4).
+
+### 4.6 Se colocar algo mais na frente do gateway (CDN, balanceador)
+
+Cada proxy novo soma 1 em `OCPP_TRUST_PROXY_HOPS` e muda timeouts de ocioso: refaça 4.4 do zero.
+O ping de 30 s do gateway cobre timeouts ≥ 60 s; abaixo disso a conexão cai em laço (parece
+"carregador instável"). Detalhes gerais de proxy em `docs/PROXY-REVERSO.md`. Para as rotas
+SSE da API (`/api/.../events`) o buffering desligado já está no `nginx.conf.template` do
+frontend.
+
+### 4.7 Mudanças de código sugeridas (NÃO feitas — fora do escopo desta tarefa)
+
+Nenhuma é pré-requisito para o `wss://` funcionar. Em ordem de valor:
+
+1. **Logar o IP também no sucesso (uma linha, nível `info`)** em `onClientConnected`/`auth`:
+   `clientIp` + `xForwardedFor`. Hoje só a falha loga o IP, o que obriga a medição por falha
+   provocada (4.4) e impede o dono de conferir os hops em produção com carregador real.
+2. **`wssOptions: { maxPayload: 64 * 1024 }`** no `RPCServer` (`ocpp/server.ts`): o default do
+   `ws` é 100 MiB por mensagem, e o handshake autenticado já é o único portão. Mensagens OCPP
+   1.6 reais cabem folgado em 64 KiB; subir o limite só se um firmware real justificar.
+3. **Aviso de boot** se `NODE_ENV=production` e `OCPP_TRUST_PROXY_HOPS=0`: hoje o default
+   seguro vira "frota inteira numa cota só" atrás do proxy, em silêncio.
+4. (Opcional) `HEALTHCHECK` TCP no `Dockerfile.ocpp` — a rota HTTP devolve 404 por desenho, então
+   o check teria de ser de porta aberta, não de HTTP.
 
 ## 5. Smoke test pós-deploy
 
@@ -501,6 +696,10 @@ Detalhes técnicos completos em `docs/PROXY-REVERSO.md`.
 - [ ] Se subiu o simulador: ele conecta no `ocpp-gateway` e o `StatusNotification`
       aparece refletido no banco (consulta direta ou via `GET
       /api/admin/charge-points/:id`).
+- [ ] **`wss://` de produção (seção 4):** certificado do domínio do gateway válido; o
+      simulador do repositório conecta em `wss://<domínio>/ocpp` (4.5); a sondagem de hops
+      (4.4) mostrou o IP público como `clientIp` e o teste de forja não o alterou; a porta
+      9000 **não** responde de fora.
 
 **Isto fecha a pendência que vem se arrastando desde F0**: é a primeira vez
 que a migration, o seed e o handshake OCPP rodam contra um Postgres/Redis
