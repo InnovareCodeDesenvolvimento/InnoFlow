@@ -10,6 +10,8 @@
  * pino com transport `pino-pretty` como efeito colateral do import — pesado
  * e desnecessário só para testar a lista de campos.
  */
+import { WEBHOOK_SECRET_HEADER_NAME_LOWER } from '../core/pagamentos/webhookHeader'
+
 export const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
@@ -17,8 +19,8 @@ export const REDACT_PATHS = [
   'req.headers.merchantkey',
   // F5.5 — achado ao rodar o webhook contra Postgres real: o `pino-http` loga `req.headers` de TODA requisição e o
   // header do segredo do webhook da Cielo (valor EM CLARO do segredo compartilhado) saía no log a cada notificação.
-  // Nome do header = `WEBHOOK_SECRET_HEADER_NAME` (minúsculo, como o Node entrega).
-  'req.headers["x-innoelektron-webhook-secret"]',
+  // Nome do header = `WEBHOOK_SECRET_HEADER_NAME_LOWER` (minúsculo, como o Node entrega; só letras desde a C1.4, então não precisa de colchetes).
+  `req.headers.${WEBHOOK_SECRET_HEADER_NAME_LOWER}`,
   'CardNumber',
   '*.CardNumber',
   'SecurityCode',

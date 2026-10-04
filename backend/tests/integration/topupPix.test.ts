@@ -68,7 +68,7 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
   }
 
   async function postWebhook(paymentId: string, changeType = 1) {
-    return request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', await getCieloWebhookHeaderSecret()).send({ PaymentId: paymentId, ChangeType: changeType })
+    return request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('InnoFlowWebhookSecret', await getCieloWebhookHeaderSecret()).send({ PaymentId: paymentId, ChangeType: changeType })
   }
 
   async function createTopup(token: string, amountCents: number) {
@@ -288,12 +288,12 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
   // ---------------------------------------------------------------------------
   describe('webhook — segurança', () => {
     it('pathToken errado devolve 404 (rota nem existe para quem não sabe o token)', async () => {
-      const res = await request(app).post('/api/webhooks/cielo/token-completamente-errado').set('x-innoelektron-webhook-secret', await getCieloWebhookHeaderSecret()).send({ PaymentId: 'x', ChangeType: 1 })
+      const res = await request(app).post('/api/webhooks/cielo/token-completamente-errado').set('InnoFlowWebhookSecret', await getCieloWebhookHeaderSecret()).send({ PaymentId: 'x', ChangeType: 1 })
       expect(res.status).toBe(404)
     })
 
     it('header secreto errado (pathToken certo) devolve 401', async () => {
-      const res = await request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', 'segredo-forjado').send({ PaymentId: 'x', ChangeType: 1 })
+      const res = await request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('InnoFlowWebhookSecret', 'segredo-forjado').send({ PaymentId: 'x', ChangeType: 1 })
       expect(res.status).toBe(401)
     })
 
@@ -307,9 +307,40 @@ describe('Recarga de carteira via Pix (F5.2) — Postgres + Redis reais, FakeAda
       expect(res.status).toBe(200)
     })
 
-    it('corpo malformado (sem PaymentId) -> 400', async () => {
-      const res = await request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('x-innoelektron-webhook-secret', await getCieloWebhookHeaderSecret()).send({ ChangeType: 1 })
+    it('PaymentId PRESENTE porém malformado -> 400 (não é ping: ping é só o corpo SEM PaymentId/ChangeType)', async () => {
+      const res = await request(app).post(`/api/webhooks/cielo/${getCieloWebhookPathToken()}`).set('InnoFlowWebhookSecret', await getCieloWebhookHeaderSecret()).send({ PaymentId: { x: 1 }, ChangeType: 1 })
       expect(res.status).toBe(400)
+    })
+
+    // C1.4 (F26/F28): ao salvar a URL no Site Cielo ela faz um POST de teste SEM PaymentId/ChangeType e exige 200.
+    describe('ping de validação da URL', () => {
+      const urlComToken = () => `/api/webhooks/cielo/${getCieloWebhookPathToken()}`
+
+      it('corpo vazio e corpo sem PaymentId respondem 200 (com o token do caminho certo), SEM gravar WebhookEvent', async () => {
+        const antes = await prisma.webhookEvent.count()
+        for (const corpo of [{}, { ChangeType: 1 }, { PaymentId: '', ChangeType: 1 }, { PaymentId: 'x' }]) {
+          const res = await request(app).post(urlComToken()).send(corpo)
+          expect(res.status, JSON.stringify(corpo)).toBe(200)
+          expect(res.body).toEqual({ received: true })
+        }
+        const semCorpo = await request(app).post(urlComToken())
+        expect(semCorpo.status).toBe(200)
+        expect(await prisma.webhookEvent.count()).toBe(antes)
+      })
+
+      it('o ping NÃO afrouxa o portão: token do caminho errado segue 404 (com ou sem corpo) e notificação real sem o header segue 401', async () => {
+        expect((await request(app).post('/api/webhooks/cielo/token-errado-do-ping').send({})).status).toBe(404)
+        expect((await request(app).post('/api/webhooks/cielo/token-errado-do-ping').send({ PaymentId: 'x', ChangeType: 1 })).status).toBe(404)
+        expect((await request(app).post(urlComToken()).send({ PaymentId: 'x', ChangeType: 1 })).status).toBe(401)
+      })
+
+      it('o header só com letras vale em qualquer caixa (HTTP é case-insensitive) — e o nome antigo com hífens NÃO é mais lido', async () => {
+        const segredo = await getCieloWebhookHeaderSecret()
+        const paymentId = `payment-desconhecido-${randomUUID()}`
+        expect((await request(app).post(urlComToken()).set('innoflowwebhooksecret', segredo).send({ PaymentId: paymentId, ChangeType: 1 })).status).toBe(200)
+        expect((await request(app).post(urlComToken()).set('INNOFLOWWEBHOOKSECRET', segredo).send({ PaymentId: paymentId, ChangeType: 1 })).status).toBe(200)
+        expect((await request(app).post(urlComToken()).set('x-innoelektron-webhook-secret', segredo).send({ PaymentId: paymentId, ChangeType: 1 })).status).toBe(401)
+      })
     })
   })
 })

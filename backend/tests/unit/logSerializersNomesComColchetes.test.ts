@@ -17,10 +17,10 @@ describe('CAMPOS_SENSIVEIS cobre todos os paths de REDACT_PATHS', () => {
   })
 
   // BUG: ver `logRealErroSerializadoProcessoFilho.test.ts` (impacto na saída real). Aqui, a causa: o nome extraído de `res.headers["set-cookie"]` é `headers["set-cookie`.
-  it('(BUG corrigido — F5.8) os paths com colchetes (`set-cookie`, `x-innoelektron-webhook-secret`) viram o nome do header em CAMPOS_SENSIVEIS', () => {
+  it('(BUG corrigido — F5.8) os paths com colchetes (`set-cookie`) viram o nome do header em CAMPOS_SENSIVEIS — e o header do webhook (só letras, C1.4) entra pelo path simples', () => {
     const comColchetes = REDACT_PATHS.filter((p) => p.includes('["'))
     expect(comColchetes.length).toBeGreaterThan(0) // se a lista mudar e não houver mais colchetes, este teste deve ser revisto
     expect(CAMPOS_SENSIVEIS.has('set-cookie')).toBe(true)
-    expect(CAMPOS_SENSIVEIS.has('x-innoelektron-webhook-secret')).toBe(true)
+    expect(CAMPOS_SENSIVEIS.has('innoflowwebhooksecret')).toBe(true)
   })
 })

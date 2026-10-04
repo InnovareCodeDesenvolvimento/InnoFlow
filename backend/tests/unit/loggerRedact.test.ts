@@ -87,8 +87,8 @@ describe('redact do logger — campos sensíveis do fluxo de pagamento (Cielo)',
     expect(saida).not.toContain('header-secret-value')
   })
 
-  it('req.headers["x-innoelektron-webhook-secret"] (segredo do webhook da Cielo, logado pelo pino-http em toda requisição) nunca aparece na saída', () => {
-    const saida = capturarSaidaDoLogger({ req: { headers: { 'x-innoelektron-webhook-secret': 'segredo-do-webhook-em-claro', host: 'api.exemplo.com.br' } } })
+  it('req.headers.innoflowwebhooksecret (segredo do webhook da Cielo, logado pelo pino-http em toda requisição) nunca aparece na saída', () => {
+    const saida = capturarSaidaDoLogger({ req: { headers: { innoflowwebhooksecret: 'segredo-do-webhook-em-claro', host: 'api.exemplo.com.br' } } })
     expect(saida).not.toContain('segredo-do-webhook-em-claro')
     expect(saida).toContain('api.exemplo.com.br')
   })

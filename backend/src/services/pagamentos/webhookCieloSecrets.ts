@@ -7,11 +7,8 @@ import { SEGREDO_WEBHOOK_TAMANHO_MINIMO } from '../../core/pagamentos/verificarS
 import { createLogGate } from '../../lib/rateLimitedLog'
 import { getConfigEfetiva } from './gatewayConfig'
 
-/**
- * Nome do header (minúsculo, como o Node entrega) em que a Cielo deve ecoar o segredo — constante do
- * servidor, mostrada na tela do gateway (`webhookHeaderName`) e lida por `webhooksCielo.routes.ts`.
- */
-export const WEBHOOK_SECRET_HEADER_NAME = 'x-innoelektron-webhook-secret'
+// Nome do header: ver `core/pagamentos/webhookHeader.ts` (só letras, exigência do Site Cielo). Re-exportado para quem já importava daqui.
+export { WEBHOOK_SECRET_HEADER_NAME } from '../../core/pagamentos/webhookHeader'
 
 /**
  * Mesmo padrão de `OCPP_NODE_ID` (`ocpp/registry.ts`: `env.OCPP_NODE_ID || randomUUID()`) — resolvido UMA VEZ

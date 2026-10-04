@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   logger.error({ err: new CieloHttpError('Cielo respondeu HTTP 400', 400, { Payment: { CreditCard: { CardNumber: 'SEG-PAN-CIELOHTTPERROR' } } }) }, 'c4 CieloHttpError')
   logger.error({ err: new AggregateError([Object.assign(new Error('a'), { merchantKey: 'SEG-MK-AGREGADO' })], 'agg') }, 'c5 aggregate')
   // Os dois nomes de header que a lista de redact escreve com colchetes.
-  logger.error({ err: Object.assign(new Error('h'), { response: { headers: { 'set-cookie': ['SEG-SET-COOKIE'], 'x-innoelektron-webhook-secret': 'SEG-WEBHOOK-HEADER' } } }) }, 'c6 headers com colchetes')
+  logger.error({ err: Object.assign(new Error('h'), { response: { headers: { 'set-cookie': ['SEG-SET-COOKIE'], 'InnoFlowWebhookSecret': 'SEG-WEBHOOK-HEADER' } } }) }, 'c6 headers com colchetes')
   // Erro de validação do Prisma: a mensagem monta uma "invocação" com os VALORES dos argumentos.
   const prisma = new PrismaClient()
   try {

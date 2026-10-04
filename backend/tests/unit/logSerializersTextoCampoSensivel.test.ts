@@ -51,7 +51,7 @@ describe('limparTextoSensivel — `campoSensivel: "valor"` no texto', () => {
   })
 
   it('`set-cookie` e o header do segredo do webhook dentro de um `err` aninhado saem redigidos (nomeDoCampo com colchetes)', () => {
-    const err = Object.assign(new Error('h'), { response: { headers: { 'set-cookie': ['SEG-COOKIE'], 'X-InnoElektron-Webhook-Secret': 'SEG-WEBHOOK', accept: 'ok' } } })
+    const err = Object.assign(new Error('h'), { response: { headers: { 'set-cookie': ['SEG-COOKIE'], InnoFlowWebhookSecret: 'SEG-WEBHOOK', accept: 'ok' } } })
     const s = JSON.stringify(LOG_SERIALIZERS.err(err))
     expect(s).not.toContain('SEG-COOKIE')
     expect(s).not.toContain('SEG-WEBHOOK')

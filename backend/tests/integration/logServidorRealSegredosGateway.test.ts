@@ -130,7 +130,7 @@ ${saida.slice(-2000)}`)
   const webhook = (headerSecret: string | null, path = PATH_TOKEN) =>
     fetch(`${base}/api/webhooks/cielo/${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-controle-positivo': CONTROLE_POSITIVO, ...(headerSecret ? { 'x-innoelektron-webhook-secret': headerSecret } : {}) },
+      headers: { 'content-type': 'application/json', 'x-controle-positivo': CONTROLE_POSITIVO, ...(headerSecret ? { 'InnoFlowWebhookSecret': headerSecret } : {}) },
       body: JSON.stringify({ PaymentId: 'pagamento-desconhecido-log-real', ChangeType: 1 }),
     })
 

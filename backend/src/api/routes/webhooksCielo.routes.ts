@@ -2,12 +2,12 @@ import { Router } from 'express'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { verificarSegredoWebhookConstante } from '../../core/pagamentos/verificarSegredoWebhook'
+import { ehPingDeValidacaoDaCielo } from '../../core/pagamentos/pingWebhookCielo'
 import { getCieloWebhookHeaderSecret, getCieloWebhookPathToken, WEBHOOK_SECRET_HEADER_NAME } from '../../services/pagamentos/webhookCieloSecrets'
 import { enqueueCreditarTopupPix } from '../../services/pagamentos/enqueueCreditarTopupPix'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { ConfiguracaoGatewayIndisponivelError } from '../../core/pagamentos/erros'
 import { AppError } from '../middleware/errorHandler'
-import { validateBody } from '../middleware/validate'
 import { webhookCieloBodySchema, type WebhookCieloBody } from '../schemas/webhookCielo.schema'
 
 /**
@@ -30,13 +30,21 @@ const router = Router()
 
 router.post(
   '/:pathToken',
-  validateBody(webhookCieloBodySchema),
   asyncHandler(async (req, res) => {
     if (req.params.pathToken !== getCieloWebhookPathToken()) {
       // 404 (não 401): não confirma nem nega que "existe uma rota de webhook
       // aqui" para quem não sabe o token — mesma filosofia anti-enumeração
       // do resto da API.
       throw new AppError('Rota não encontrada.', 404, 'NOT_FOUND')
+    }
+
+    // PING de validação da URL (C1.4, F26): a Cielo testa a URL ao salvá-la, com um POST sem PaymentId/ChangeType, e exige 200. Vem DEPOIS do
+    // token do caminho (quem não o conhece segue recebendo 404) e ANTES da validação do corpo (que daria 400). Nada é lido nem gravado: não há
+    // o que processar. Um PaymentId presente porém malformado NÃO é ping — cai na validação abaixo e dá 400.
+    if (ehPingDeValidacaoDaCielo(req.body)) {
+      logger.info('[webhook][cielo] ping de validação da URL (sem PaymentId/ChangeType) — respondido 200, nada a processar')
+      res.status(200).json({ received: true })
+      return
     }
 
     const headerSecret = req.header(WEBHOOK_SECRET_HEADER_NAME)
@@ -49,11 +57,11 @@ router.post(
       throw err
     }
     if (!verificarSegredoWebhookConstante(headerSecret, segredoEsperado)) {
-      logger.warn({ paymentId: (req.body as WebhookCieloBody).PaymentId }, '[webhook][cielo] segredo do header ausente/inválido — rejeitado')
+      logger.warn('[webhook][cielo] segredo do header ausente/inválido — rejeitado')
       throw new AppError('Não autorizado.', 401, 'UNAUTHORIZED')
     }
 
-    const body = req.body as WebhookCieloBody
+    const body: WebhookCieloBody = webhookCieloBodySchema.parse(req.body)
     logger.info({ paymentId: body.PaymentId, changeType: body.ChangeType }, '[webhook][cielo] notificação recebida')
 
     // PaymentId/evento desconhecido AINDA recebe 200 (só com log) — nunca
