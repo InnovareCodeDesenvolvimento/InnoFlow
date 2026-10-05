@@ -30,6 +30,8 @@ export interface GoogleFalso {
   refreshTokenEmitido: string
   /** O Google passa a recusar o refresh token com `invalid_grant` (conta revogada). */
   revogarAcesso(): void
+  /** Desfaz `revogarAcesso` (cada teste começa com a conta conectada de novo). */
+  reabrirAcesso(): void
   /** O próximo `authorization_code` devolve SEM refresh_token (o Google só o dá no 1º consentimento). */
   semRefreshTokenNaProximaTroca: boolean
   /** Falha injetada (HTTP status) nas próximas `vezes` gravações no Drive. */
@@ -164,6 +166,9 @@ export async function iniciarGoogleFalso(opcoes: { clientId: string; clientSecre
     refreshTokenEmitido,
     revogarAcesso() {
       estado.acessoRevogado = true
+    },
+    reabrirAcesso() {
+      estado.acessoRevogado = false
     },
     get semRefreshTokenNaProximaTroca() {
       return estado.semRefresh
