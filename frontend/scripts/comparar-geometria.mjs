@@ -21,6 +21,9 @@
  *   --orfaos-max N: tolera até N pixels "fora da máscara" SOMENTE quando todo o resto (DOM, retângulos, estilos) é idêntico — ruído de rasterização medido em execuções repetidas do
  *   MESMO estado (blocos de 8x8..16x16 em bordas/sombras, 37–325 px). Fica registrado em `observacao`. Padrão 0 (rígido).
  *   --aceitar-estilo "a|b": propriedades de estilo cuja diferença é ACEITA quando nenhum retângulo e nenhum pixel mudou (mudança latente de CSS, sem efeito no que foi fotografado). Registrada.
+ *   --ids-react: o React 19 (useId) gera ids `_r_N_` (e `radix-_r_N_`) em ordem de montagem: acrescentar um componente que chama useId (ex.: o Dialog do drawer) desloca TODOS os ids seguintes sem mudar DOM
+ *   nem geometria. Com esta opção, uma diferença de atributo que seja SÓ de id `_r_N_` é aceita se o mapeamento A→B for uma bijeção consistente na página (cada id de A vira sempre o mesmo
+ *   id de B e dois ids de A nunca viram o mesmo): as ligações id/for/aria-* continuam íntegras. Registrado em `idsReact`.
  *   --opacity-ok: aceita diferença de `opacity` SÓ em elementos cujo subárvore contém texto casando a regex (ex.: "Desenvolvido por" = selo do desenvolvedor, decisão do Atlas).
  * Sai com código 1 se existir REPORTAR.
  */
@@ -44,6 +47,7 @@ const dirRuidoA = opt("ruido-a")
 const dirRuidoB = opt("ruido-b")
 const orfaosMax = Number(opt("orfaos-max", "0"))
 const estiloLatenteOk = new Set((opt("aceitar-estilo", "") || "").split("|").filter(Boolean))
+const idsReact = args.includes("--ids-react")
 const opacityOk = opt("opacity-ok") ? new RegExp(opt("opacity-ok")) : null
 if (!dirA || !dirB) {
   console.error("uso: --a <pastaA> --b <pastaB> [--json x] [--md y] [--margem 16]")
@@ -83,6 +87,25 @@ function ehTextoOuIcone(no) {
   return no.x !== "" || no.t === "svg" || no.t === "path" || no.t === "input" || no.t === "textarea" || no.t === "select" || no.t === "circle" || no.t === "line" || no.t === "polyline" || no.t === "rect"
 }
 
+const RE_ID_REACT = /_r_[0-9a-z]+_/g
+/** Atributos iguais salvo ids `_r_N_` do React? Se sim, registra o par A→B em `mapa` (a bijeção é conferida no fim da página). */
+function atributosIguaisAteIdsReact(aa, bb, mapa) {
+  const sa = JSON.stringify(aa)
+  const sb = JSON.stringify(bb)
+  const idsA = sa.match(RE_ID_REACT) ?? []
+  const idsB = sb.match(RE_ID_REACT) ?? []
+  if (idsA.length === 0 || idsA.length !== idsB.length) return false
+  if (sa.replace(RE_ID_REACT, "_r_#_") !== sb.replace(RE_ID_REACT, "_r_#_")) return false
+  idsA.forEach((id, i) => {
+    const alvo = idsB[i]
+    if (mapa.ab.has(id) && mapa.ab.get(id) !== alvo) mapa.conflitos.push(`${id} -> ${mapa.ab.get(id)} e ${alvo}`)
+    if (mapa.ba.has(alvo) && mapa.ba.get(alvo) !== id) mapa.conflitos.push(`${mapa.ba.get(alvo)} e ${id} -> ${alvo}`)
+    mapa.ab.set(id, alvo)
+    mapa.ba.set(alvo, id)
+  })
+  return true
+}
+
 function classificar(chave) {
   const motivos = []
   if (!existsSync(path.join(dirB, `${chave}.json.gz`))) return { chave, status: "REPORTAR", motivos: ["página ausente no lado B"] }
@@ -105,6 +128,7 @@ function classificar(chave) {
   const rectDiffs = []
   const naoTexto = new Map()
   const opacidade = []
+  const mapaIds = { ab: new Map(), ba: new Map(), conflitos: [] }
 
   const n = Math.min(A.nos.length, B.nos.length)
   for (let i = 0; i < n; i++) {
@@ -117,7 +141,8 @@ function classificar(chave) {
       continue
     }
     if (a.x !== b.x) estruturais.push(`${rotulo}: texto "${a.x}" -> "${b.x}"`)
-    if (JSON.stringify(a.a) !== JSON.stringify(b.a)) estruturais.push(`${rotulo}: atributos ${JSON.stringify(a.a)} -> ${JSON.stringify(b.a)}`)
+    if (JSON.stringify(a.a) !== JSON.stringify(b.a) && !(idsReact && atributosIguaisAteIdsReact(a.a, b.a, mapaIds)))
+      estruturais.push(`${rotulo}: atributos ${JSON.stringify(a.a)} -> ${JSON.stringify(b.a)}`)
     if (a.r.some((v, k) => Math.abs(v - b.r[k]) > EPS)) rectDiffs.push(`${rotulo} [${a.r}] -> [${b.r}]`)
     for (let k = 0; k < a.g.length; k++) {
       const prop = A.propsGeometria[k]
@@ -164,6 +189,8 @@ function classificar(chave) {
     }
   }
 
+  if (mapaIds.conflitos.length) estruturais.push(`ids do React sem correspondência 1:1: ${mapaIds.conflitos.slice(0, 3).join(" | ")}`)
+  if (mapaIds.ab.size) r.idsReact = mapaIds.ab.size
   if (estruturais.length) motivos.push(`ESTRUTURA/TEXTO/ATRIBUTOS: ${estruturais.length} (ex.: ${estruturais.slice(0, 3).join(" | ")})`)
   if (rectDiffs.length) motivos.push(`GEOMETRIA (retângulo): ${rectDiffs.length} elementos (ex.: ${rectDiffs.slice(0, 3).join(" | ")})`)
   for (const [prop, l] of [...geomProps]) {
