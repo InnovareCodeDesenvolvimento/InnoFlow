@@ -341,7 +341,7 @@ const slides = [
       "Pix e cartão habilitados separadamente; a tela lista o que ainda falta preencher.",
       "Teste de conexão com a operadora.",
     ],
-    nota: "Pagamentos funcionam hoje em modo de demonstração (sandbox/simulado); a homologação com a operadora está nas próximas etapas.",
+    nota: "Pagamentos funcionam hoje em modo de demonstração (simulado); a homologação com a operadora está nas próximas etapas.",
     pendenteRecaptura: "Tela de Gateway de pagamento em redesenho: recapturar com `node apresentacao/gerar.mjs --so-capturas --quais=adm-gateway-pagamento` e gerar o PDF com `--gateway-pronto`.",
     midia: { tipo: "janela", img: "adm-gateway-pagamento", titulo: JANELA },
   },
