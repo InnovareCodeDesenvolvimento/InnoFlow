@@ -4,6 +4,7 @@ import { logger } from '../../lib/logger'
 import { diffEntity } from '../../core/auditoria/diffEntity'
 import { writeAuditLog } from '../auditoria/writeAuditLog'
 import { emitWalletUpdated } from '../../realtime/emit'
+import { notificarSaldoBaixoSeCruzou } from '../notificacoes/gatilhos'
 
 /**
  * Débito atômico da carteira no fim de uma sessão de recarga (`StopTransaction`).
@@ -262,6 +263,11 @@ export async function ajustarCarteiraTransacional(params: AjustarCarteiraTransac
   await emitWalletUpdated(userId, resultado.entry.balanceAfterCents).catch((err) =>
     logger.error({ err, userId }, '[carteira] falha ao publicar wallet.updated após ajuste manual (best-effort)'),
   )
+
+  // L1.6: um DÉBITO manual do ADMIN que faz o saldo cruzar o limiar também avisa (só no cruzamento; leitura da preferência em segundo plano, nunca espera).
+  if (amountCents < 0) {
+    notificarSaldoBaixoSeCruzou({ userId, walletEntryId: resultado.entry.id, saldoAntesCents: resultado.entry.balanceAfterCents - resultado.entry.amountCents, saldoDepoisCents: resultado.entry.balanceAfterCents })
+  }
 
   return resultado
 }

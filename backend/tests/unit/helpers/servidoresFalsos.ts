@@ -11,6 +11,8 @@ export interface EmailRecebido {
   bruto: string
   de: string
   para: string[]
+  /** Mesmo conteúdo, mas com o quoted-printable decodificado como UTF-8 de verdade (acentos legíveis: "saldo está baixo"). Use para procurar texto com acento. */
+  legivel: string
 }
 
 export interface SmtpFalso {
@@ -22,6 +24,11 @@ export interface SmtpFalso {
 /** Decodifica quoted-printable (o nodemailer usa QP em linhas longas/8bit) para os testes poderem procurar texto. */
 function decodificarQp(texto: string): string {
   return texto.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_m, h: string) => String.fromCharCode(parseInt(h, 16)))
+}
+
+/** QP -> bytes -> UTF-8 (a `decodificarQp` acima troca cada byte por um caractere, o que quebra acentos). Sequências `=XX` seguidas formam UM caractere multibyte. */
+function decodificarQpUtf8(texto: string): string {
+  return texto.replace(/=\r?\n/g, '').replace(/(?:=[0-9A-F]{2})+/gi, (m) => Buffer.from(m.slice(1).split('=').map((h) => parseInt(h, 16))).toString('utf8'))
 }
 
 export async function iniciarSmtpFalso(opcoes: { usuario?: string; senha?: string } = {}): Promise<SmtpFalso> {
@@ -39,8 +46,10 @@ export async function iniciarSmtpFalso(opcoes: { usuario?: string; senha?: strin
       const partes: Buffer[] = []
       stream.on('data', (c: Buffer) => partes.push(c))
       stream.on('end', () => {
+        const textoBruto = Buffer.concat(partes).toString('utf8')
         recebidos.push({
-          bruto: decodificarQp(Buffer.concat(partes).toString('utf8')),
+          bruto: decodificarQp(textoBruto),
+          legivel: decodificarQpUtf8(textoBruto),
           de: sessao.envelope.mailFrom ? sessao.envelope.mailFrom.address : '',
           para: sessao.envelope.rcptTo.map((r) => r.address),
         })

@@ -106,6 +106,7 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   session_watchdog_redis_unstable: 'IMPORTANTE',
   session_watchdog_scan_truncated: 'IMPORTANTE',
   communication_config_changed: 'IMPORTANTE', // alguém alterou para onde os avisos vão (se não foi você: sinal de invasão)
+  communication_notification_failed: 'IMPORTANTE', // e-mail ao motorista (recibo, cobrança, senha...) NÃO saiu depois de todas as tentativas: SMTP fora/mal configurado (L1.6)
 
   // --- backup automático do banco (Vega-F) — services/backup/ -------------------------------------------------------------------------
   backup_failed: 'CRITICO', // o backup AGENDADO falhou (ou foi abandonado): o banco está sem cópia nova — perder o banco é o único incidente sem volta
@@ -174,6 +175,7 @@ export const ORIENTACAO_DOS_ALERTAS: Readonly<Record<string, string>> = {
   ocpp_auth_ip_flood: 'IP bloqueado por excesso de falhas de autenticacao OCPP: se for um carregador seu, confira a senha dele; senao, ignore ou bloqueie no firewall.',
   ocpp_foreign_transaction: 'Carregador usou o transactionId de outro: firmware com defeito ou tentativa de fraude; conferir o carregador.',
   payment_refund_pending_overdue: 'Ha devolucao de saldo de conta excluida pendente ha mais de 30 dias: fazer o Pix para a chave informada e registrar a devolucao no painel (Contas excluidas).',
+  communication_notification_failed: 'Um e-mail ao motorista (recibo, cobranca pendente, senha...) nao saiu depois de todas as tentativas: conferir o SMTP em Admin > Comunicacao (botao de teste). O motivo esta no campo motivo; os ids, no log notification_job_failed.',
   backup_failed: 'O backup do banco falhou: abra Admin > Backup (o historico mostra o codigo do erro), corrija e use Fazer backup agora. Enquanto isso o banco esta sem copia nova. Ver docs/DEPLOY-EASYPANEL.md, secao Backups.',
   backup_verify_failed: 'A copia mais recente do backup nao passou na conferencia (adulterada, ilegivel ou chave diferente): faca um backup novo, confira de novo e NAO restaure a copia reprovada. Ver docs/DEPLOY-EASYPANEL.md, secao Backups.',
 }

@@ -25,6 +25,7 @@ import {
   unlockCommandSchema,
   type RemoteStartCommandInput,
 } from '../schemas/command.schema'
+import { notificarRecargaIniciadaPeloSuporte } from '../../services/notificacoes/gatilhos'
 
 const BCRYPT_ROUNDS = 10
 const COMMAND_TIMEOUT_MS = 35_000
@@ -263,6 +264,9 @@ router.post(
       walletBalanceCents: resultado.walletBalanceCents,
       estimatedMaxCostCents: resultado.estimatedMaxCostCents,
     })
+
+    // L1.6: transparência — o motorista é avisado por e-mail de que o SUPORTE pediu uma recarga na conta dele (entityId = correlationId; fire-and-forget, depois da resposta).
+    notificarRecargaIniciadaPeloSuporte({ userId: user.id, correlationId: resultado.correlationId, chargePointId: req.params.id })
 
     // entityType/entityId já vêm certos do fallback (path começa com
     // `/api/admin/charge-points`, `:id` é o próprio charge point) — só

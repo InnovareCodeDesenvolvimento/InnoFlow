@@ -12,6 +12,7 @@ import { startConfirmarEstornosPortalWorker, scheduleConfirmarEstornosPortal } f
 import { startVigiarDevolucoesAtrasadasWorker, scheduleVigiarDevolucoesAtrasadas } from '../worker/jobs/vigiarDevolucoesAtrasadasJob'
 import { startBackupWorker, scheduleBackupTick } from '../worker/jobs/backupJob'
 import { startVigiarPrazoChargebacksWorker, scheduleVigiarPrazoChargebacks } from '../worker/jobs/vigiarPrazoChargebacksJob'
+import { startNotificacoesWorker } from '../worker/jobs/notificacoesJob'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -78,5 +79,9 @@ startBackupWorker()
 scheduleBackupTick().catch((err) =>
   logger.error({ err }, '[worker] falha ao agendar o tick do backup — o worker segue de pe, mas sem backup automatico ate reiniciar'),
 )
+
+// L1.6 (Vega-G, 2026-10-06): e-mails ao motorista (recibo, cobranca falha, saldo baixo, Pix creditado, recarga pelo suporte, senha alterada, conta excluida). Fila `notificacoes`: o
+// fato enfileira DEPOIS do commit; aqui se decide, monta e envia (idempotente por NotificationLog; retry com backoff; alerta ao esgotar). Ver services/notificacoes/.
+startNotificacoesWorker()
 
 logger.info('worker ok')

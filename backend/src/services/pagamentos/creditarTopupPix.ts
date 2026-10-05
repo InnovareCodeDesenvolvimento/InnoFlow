@@ -8,6 +8,7 @@ import { SYSTEM_ACTOR } from '../../core/auditoria/systemActor'
 import { cacheTopupDebtSettledCents } from './topupEphemeralCache'
 import { getPagamentoPort } from './pagamentoPortInstance'
 import { ambienteDoIntentConfere } from './ambienteDoIntent'
+import { notificarRecargaDeSaldoCreditada } from '../notificacoes/gatilhos'
 
 /**
  * Crédito de recarga Pix — o coração da F5.2. Chamado por DOIS caminhos (o
@@ -184,6 +185,8 @@ export async function creditarTopupPix(paymentIntentId: string, pagamentoPortInj
 
   if (resultado) {
     logger.info({ ...resultado }, '[creditarTopupPix] recarga Pix creditada')
+    // L1.6 — comprovante por e-mail, DEPOIS do commit e fire-and-forget (idempotente por intent: webhook duplicado, polling e varredor nunca mandam 2).
+    notificarRecargaDeSaldoCreditada({ userId: resultado.userId, paymentIntentId: resultado.paymentIntentId, creditadoCents: resultado.totalCreditedCents, quitouDividaCents: resultado.debtSettledCents, saldoCents: resultado.balanceAfterCents })
     await cacheTopupDebtSettledCents(paymentIntentId, resultado.debtSettledCents).catch((err) =>
       logger.error({ err, paymentIntentId }, '[creditarTopupPix] falha ao cachear debtSettledCents (não bloqueante)'),
     )

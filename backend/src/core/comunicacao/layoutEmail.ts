@@ -26,8 +26,10 @@ export interface EntradaLayoutEmail {
   cta?: CtaDoEmail
   /** Caixa de destaque ao fim (ex.: "Se não foi você, ignore este e-mail"). Texto puro. */
   aviso?: string
-  /** Linha pequena no rodapé (ex.: por que a pessoa recebeu). Texto puro. */
+  /** Linha pequena no rodapé (ex.: por que a pessoa recebeu; identificação da empresa). Texto puro; `\n` vira quebra de linha. */
   rodape?: string
+  /** Link discreto no rodapé (ex.: "Gerenciar notificações"). Mesma regra do CTA: só http/https. */
+  linkRodape?: CtaDoEmail
 }
 
 export interface EmailMontado {
@@ -80,6 +82,10 @@ export function layoutEmail(e: EntradaLayoutEmail): EmailMontado {
     ? `<div style="margin:8px 0 0 0;padding:14px 16px;background:#eaf4f6;border-left:4px solid ${COR_TEAL};border-radius:4px;font-size:14px;line-height:21px;color:${COR_TEXTO};">${textoParaHtml(e.aviso)}</div>`
     : ''
   const rodape = e.rodape ? `<p style="margin:0 0 6px 0;font-size:12px;line-height:18px;color:#7a8894;">${textoParaHtml(e.rodape)}</p>` : ''
+  const linkRodape = e.linkRodape ? { rotulo: e.linkRodape.rotulo, url: urlDoCta(e.linkRodape.url) } : null
+  const linkRodapeHtml = linkRodape
+    ? `<p style="margin:0 0 6px 0;font-size:12px;line-height:18px;color:#7a8894;"><a href="${escaparHtml(linkRodape.url)}" style="color:${COR_TEAL};text-decoration:underline;">${escaparHtml(linkRodape.rotulo)}</a></p>`
+    : ''
 
   const html =
     `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escaparHtml(e.titulo)}</title></head>` +
@@ -91,7 +97,7 @@ export function layoutEmail(e: EntradaLayoutEmail): EmailMontado {
     `<h1 style="margin:0 0 18px 0;font-size:22px;line-height:28px;color:${COR_PETROLEO};">${escaparHtml(e.titulo)}</h1>` +
     `${paragrafos}${botao}${aviso}` +
     `</td></tr>` +
-    `<tr><td style="padding:16px 28px 22px 28px;border-top:1px solid #e3e9ed;">${rodape}<p style="margin:0;font-size:12px;line-height:18px;color:#7a8894;">InnoFlow — recarga de veículos elétricos.</p></td></tr>` +
+    `<tr><td style="padding:16px 28px 22px 28px;border-top:1px solid #e3e9ed;">${rodape}${linkRodapeHtml}<p style="margin:0;font-size:12px;line-height:18px;color:#7a8894;">InnoFlow — recarga de veículos elétricos.</p></td></tr>` +
     `</table></td></tr></table></body></html>`
 
   const linhas: string[] = ['InnoFlow', '', e.titulo, '', ...e.paragrafos.flatMap((p) => [p, ''])]
@@ -99,6 +105,7 @@ export function layoutEmail(e: EntradaLayoutEmail): EmailMontado {
   if (e.aviso) linhas.push(e.aviso, '')
   if (e.rodape) linhas.push('--', e.rodape)
   else linhas.push('--')
+  if (linkRodape) linhas.push(`${linkRodape.rotulo}: ${linkRodape.url}`)
   linhas.push('InnoFlow — recarga de veículos elétricos.')
 
   return { html, text: linhas.join('\n') }

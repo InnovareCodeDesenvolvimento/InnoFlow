@@ -23,6 +23,7 @@ import meProfileRoutes from './routes/meProfile.routes'
 import meDataExportRoutes from './routes/meDataExport.routes'
 import meAccountRoutes from './routes/meAccount.routes'
 import meConsentsRoutes from './routes/meConsents.routes'
+import meNotificationPreferencesRoutes from './routes/meNotificationPreferences.routes'
 import publicLegalRoutes from './routes/publicLegal.routes'
 import adminAccountDeletionsRoutes from './routes/adminAccountDeletions.routes'
 import adminSitesRoutes from './routes/sites.routes'
@@ -123,6 +124,7 @@ export function createApp(): Express {
   app.use('/api/me/data-export', adminRateLimit, meDataExportRoutes) // DRIVER only (L1.4) — exportação dos dados do titular (3/dia)
   app.use('/api/me/account', adminRateLimit, meAccountRoutes) // DRIVER only (L1.4) — exclusão/anonimização da conta
   app.use('/api/me/consents', adminRateLimit, meConsentsRoutes) // DRIVER only (L1.9) — aceite dos termos
+  app.use('/api/me/notification-preferences', adminRateLimit, meNotificationPreferencesRoutes) // DRIVER only (L1.6) — preferências de e-mail (recibo, saldo baixo, limiar)
   app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start e /wallet/topups é mais apertado, aplicado na própria rota
 
   // Log de auditoria (Nova, 2026-09-17) — montado ANTES de todo router

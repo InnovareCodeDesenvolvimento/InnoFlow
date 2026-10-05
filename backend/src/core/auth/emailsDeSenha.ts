@@ -13,7 +13,7 @@ export interface EmailPronto {
 }
 
 /** Primeiro nome, para a saudação (ou nada, se o cadastro não tem nome utilizável). */
-function saudacao(nome: string | null | undefined): string {
+export function saudacao(nome: string | null | undefined): string {
   const primeiro = (nome ?? '').trim().split(/\s+/)[0] ?? ''
   return primeiro ? `Olá, ${primeiro.slice(0, 40)}.` : 'Olá.'
 }
@@ -50,7 +50,14 @@ export function emailDeAvisoGoogle(e: { nome?: string | null }): EmailPronto {
 }
 
 /** `quando` já formatado em PT-BR (horário de Brasília) por quem chama. `linkEsqueciSenha` pode ser `null` se não houver origem pública configurada. */
-export function emailDeSenhaAlterada(e: { nome?: string | null; quando: string; linkEsqueciSenha: string | null }): EmailPronto {
+export function emailDeSenhaAlterada(e: {
+  nome?: string | null
+  quando: string
+  linkEsqueciSenha: string | null
+  /** L1.6: linhas a mais no rodapé (identificação da empresa) e o link "gerenciar notificações" — ambos opcionais (o aviso da redefinição por e-mail não os passa). */
+  rodapeAdicional?: string
+  linkRodape?: { rotulo: string; url: string }
+}): EmailPronto {
   const { html, text } = layoutEmail({
     titulo: 'Sua senha foi alterada',
     preheader: 'A senha da sua conta InnoFlow foi alterada.',
@@ -61,7 +68,8 @@ export function emailDeSenhaAlterada(e: { nome?: string | null; quando: string; 
     ],
     ...(e.linkEsqueciSenha ? { cta: { rotulo: 'Não fui eu — redefinir a senha', url: e.linkEsqueciSenha } } : {}),
     aviso: 'Se você NÃO fez esta alteração, redefina a senha agora e entre em contato com o suporte do InnoFlow.',
-    rodape: 'Este aviso de segurança é enviado sempre que a senha da conta muda.',
+    rodape: ['Este aviso de segurança é enviado sempre que a senha da conta muda.', e.rodapeAdicional].filter(Boolean).join('\n'),
+    ...(e.linkRodape ? { linkRodape: e.linkRodape } : {}),
   })
   return { subject: 'Sua senha do InnoFlow foi alterada', text, html }
 }

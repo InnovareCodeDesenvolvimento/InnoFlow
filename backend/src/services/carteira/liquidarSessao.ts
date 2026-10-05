@@ -5,6 +5,7 @@ import { withDeadline } from '../../lib/withDeadline'
 import { createQueue, LIQUIDAR_SESSAO_QUEUE_NAME, type LiquidarSessaoJobData } from '../../worker/queues'
 import { debitarSessao } from './walletLedger'
 import { emitWalletUpdated } from '../../realtime/emit'
+import { notificarFalhaDeCobranca, notificarSaldoBaixoSeCruzou } from '../notificacoes/gatilhos'
 
 /** Mesmo prazo do enqueue da captura de cartão (`finalizarSessao`): o Stop do carregador não espera mais que isto pelo Redis. */
 const ENQUEUE_LIQUIDACAO_PRAZO_MS = 5_000
@@ -14,6 +15,22 @@ export interface LiquidarSessaoResultado {
   /** `true` só quando um `WalletEntry` novo foi de fato criado nesta chamada — idempotência/sessão gratuita/já liquidada não contam. */
   debited: boolean
   balanceAfterCents: number
+  /** L1.6: o que o aviso ao motorista precisa — o débito (id e saldo ANTES, para o cruzamento do limiar de saldo baixo) e o que sobrou como dívida. */
+  walletEntryId: string | null
+  balanceBeforeCents: number
+  remainingDebtCents: number
+}
+
+/**
+ * L1.6 — avisos ao motorista depois de uma liquidação CONFIRMADA (chamar só depois do commit): dívida criada => `SESSION_PAYMENT_FAILED`; débito que fez o saldo CRUZAR o limiar => `LOW_BALANCE`.
+ * Fire-and-forget (nunca lança nem espera). Reprocessar a mesma liquidação não duplica: o `entityId` do aviso é o da sessão / do `WalletEntry`.
+ */
+export function notificarAposLiquidacao(sessionId: string, r: LiquidarSessaoResultado): void {
+  if (r.remainingDebtCents > 0) {
+    notificarFalhaDeCobranca({ sessionId, userId: r.userId })
+  } else if (r.walletEntryId) {
+    notificarSaldoBaixoSeCruzou({ userId: r.userId, walletEntryId: r.walletEntryId, saldoAntesCents: r.balanceBeforeCents, saldoDepoisCents: r.balanceAfterCents })
+  }
 }
 
 /**
@@ -61,6 +78,7 @@ export async function liquidarSessao(sessionId: string, tx?: Prisma.TransactionC
       logger.error({ err, sessionId }, '[realtime] falha ao publicar wallet.updated após retry de liquidação (não bloqueante)'),
     )
   }
+  if (resultado) notificarAposLiquidacao(sessionId, resultado) // L1.6 — depois do commit, fire-and-forget
   return resultado
 }
 
@@ -115,7 +133,14 @@ async function liquidarSessaoComTx(tx: Prisma.TransactionClient, sessionId: stri
 
   logger.info({ sessionId, ...resultado }, '[liquidarSessao] sessão liquidada')
 
-  return { userId: session.userId, debited: resultado.walletEntryId !== null, balanceAfterCents: resultado.balanceAfterCents }
+  return {
+    userId: session.userId,
+    debited: resultado.walletEntryId !== null,
+    balanceAfterCents: resultado.balanceAfterCents,
+    walletEntryId: resultado.walletEntryId,
+    balanceBeforeCents: resultado.balanceAfterCents + resultado.debitedCents,
+    remainingDebtCents: resultado.remainingDebtCents,
+  }
 }
 
 /**

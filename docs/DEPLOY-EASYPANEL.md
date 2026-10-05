@@ -888,6 +888,8 @@ ALERT_SMTP_PASS=<senha>
 ALERT_EMAIL_FROM=InnoFlow <alertas@seudominio.com.br>
 ```
 
+**O canal vale por servidor + remetente (desde a L1.6, 06/10/2026).** `ALERT_EMAIL_TO` (ou os destinatários do painel) é **opcional** e só decide se os **alertas ao dono** saem por e-mail. Sem destinatário o canal continua ativo para o e-mail **ao motorista** (redefinição de senha e avisos da seção 6.10) — antes isso não acontecia: o "esqueci minha senha" funcionava e nada saía. Com SMTP e remetente corretos e **nenhum** destinatário de alerta, a tela de Comunicação mostra o canal ativo com o aviso "só para mensagens ao motorista".
+
 Assunto: `[InnoFlow][CRITICO] payment_void_manual_review (production)`. Corpo em texto puro: alerta, severidade, ambiente, serviço, hora, o que aconteceu, **o que fazer** e o contexto seguro. Confira o spam na primeira vez e marque como "não é spam"; para boa entrega, use um remetente do seu próprio domínio com SPF/DKIM configurados no provedor.
 
 ### 6.5 Como validar (faça depois de configurar)
@@ -1022,6 +1024,35 @@ No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_cr
 - **Anti-SSRF:** em produção, host SMTP/URL da Evolution apontando para a rede interna, loopback ou metadados de nuvem são recusados (na gravação e de novo na hora de conectar, no IP já validado — um DNS que muda entre a checagem e a conexão não passa). **Resíduo documentado:** o bloqueio vale para o que o painel configura; as envs `ALERT_*` são confiáveis (definidas por quem faz o deploy) e podem apontar para a rede interna. Redirecionamentos HTTP nunca são seguidos.
 - **Auditoria:** cada salvar gera uma linha em "Auditoria" (`UPDATE` / `NotificationChannelConfig`) com antes/depois dos campos não secretos (segredo só como "alterado", destinatários só como contagem) e dispara o alerta `communication_config_changed` (IMPORTANTE) **pela configuração antiga** — se alguém trocar os destinatários, o aviso ainda chega ao dono de antes. Se não foi você: troque a senha do admin e a `PAYMENT_SECRETS_KEY`.
 - **Migration:** `20261005140000_notification_channel_config` (tabela nova `NotificationChannelConfig`, singleton, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).
+
+### 6.10 E-mails ao motorista (L1.6, 06/10/2026)
+
+Além do alerta ao dono, o sistema manda e-mail **ao motorista**, pelo MESMO SMTP do painel (seção 6.4). Oito eventos, canal só e-mail (web push fica para a F7):
+
+| Evento | Quando | Desligável? |
+|---|---|---|
+| `SESSION_COMPLETED` | sessão fechada com valor > 0 e SEM dívida: resumo + link do recibo | **sim** — "recibo" (`sessionReceiptEmail`) |
+| `SESSION_CLOSED_BY_SERVER` | o carregador não confirmou o fim e o servidor encerrou (F5.9); sai sempre que isso acontece, mesmo com custo zero | **sim** — junto do recibo |
+| `SESSION_PAYMENT_FAILED` | a cobrança virou dívida (carteira sem saldo; captura do cartão negada ou parcial) | **não** (cobrança) |
+| `LOW_BALANCE` | SÓ no cruzamento do limiar: saldo antes ≥ limiar e depois < limiar (débito de sessão ou ajuste manual do ADMIN) | **sim** — `lowBalanceEnabled`; limiar `lowBalanceThresholdCents` 500–50000, padrão R$ 20,00 |
+| `TOPUP_CREDITED` | Pix creditado na carteira | não (comprovante de dinheiro que entrou; o contrato não tem chave) |
+| `REMOTE_START_BY_SUPPORT` | o ADMIN pediu recarga na conta do motorista (L1.5) | não (transparência; sem chave) |
+| `PASSWORD_CHANGED` | troca de senha **pela própria pessoa logada** (`POST /api/auth/password`) | **não** (segurança) |
+| `ACCOUNT_DELETED` | exclusão de conta (L1.4) | **não** |
+
+**Como funciona (resumo):** o fato (fechar sessão, creditar Pix, trocar senha...) enfileira um job na fila BullMQ **`notificacoes`** *depois* do commit, em segundo plano e com prazo de 3 s — falha de Redis/SMTP **nunca** derruba nem atrasa transação de dinheiro. O **worker** decide (preferência), monta o e-mail e envia. **O worker precisa estar no ar e com as mesmas variáveis de SMTP**: sem ele os avisos ficam na fila. A idempotência é a tabela `NotificationLog` (unique `userId+tipo+canal+fato`) + um lock no Redis por fato: o mesmo fato nunca vira dois e-mails, nem com o job reprocessado. Falhou o envio → o job reentra com backoff exponencial (6 tentativas: 30 s, 1, 2, 4, 8 min). Esgotou → a linha vira `FAILED` (com um **código** de motivo, nunca a mensagem do SMTP) e sai o alerta **`communication_notification_failed`** (IMPORTANTE) — abra Admin > Comunicação e use o teste de e-mail.
+
+**Variáveis:** nenhuma nova obrigatória. O link do e-mail usa `PUBLIC_APP_URL` (sem ela, em produção, o e-mail sai **sem botão/links** — nunca com link inventado; defina-a, é a mesma da redefinição de senha) e o rodapé usa `LEGAL_COMPANY_NAME`, `LEGAL_COMPANY_CNPJ`, `LEGAL_SUPPORT_EMAIL`, `LEGAL_SUPPORT_PHONE` (campo vazio = bloco omitido; nenhum CNPJ é inventado). A retenção do log é `RETENTION_NOTIFICATION_LOG_DAYS` (seção 7.2).
+
+**Privacidade:** o e-mail do `ACCOUNT_DELETED` (a conta já foi anonimizada) existe só no payload do job — apagado ao concluir e ao esgotar as tentativas. O `NotificationLog` não guarda corpo, endereço nem mensagem de erro. Os logs registram só ids, tipo e código. Sem pixel de rastreio nem número de cartão.
+
+**Limites conhecidos (honestos):**
+- **Redis fora no instante do fato PERDE o aviso** (não há rascunho em banco para um varredor refazer: o contexto de alguns tipos não está no banco). O fato em si (cobrança, dívida, saldo) fica íntegro e visível no app.
+- Se o processo morrer entre o SMTP aceitar a mensagem e o `UPDATE ... SENT` (milissegundos), o retry reenvia: é o preço de não perder aviso de cobrança/segurança.
+- **Entregabilidade NÃO foi provada em provedor real.** Sem SPF/DKIM/DMARC do domínio do remetente (`ALERT_EMAIL_FROM`) os e-mails caem em spam — configure no provedor antes de divulgar. Teste com um Gmail e um Outlook de verdade.
+- A troca de senha por **"esqueci minha senha"** continua usando o aviso próprio da L1.3 (fila local, sem retry); só a troca autenticada passa pela fila `notificacoes`.
+
+**Como validar:** (1) Admin > Comunicação > teste de e-mail; (2) com o worker no ar, troque a senha de um motorista de teste em `/app/perfil` e confira o aviso; (3) `SELECT type, status, "statusReason", attempts FROM "NotificationLog" ORDER BY "createdAt" DESC LIMIT 20;` — `SENT` = saiu; `PENDING` com `statusReason` = tentando de novo; `FAILED` = esgotou (alerta emitido); `SKIPPED` + `PREFERENCE_OFF` = a pessoa desligou aquele aviso. **Problemas comuns:** `statusReason = EMAIL_NOT_CONFIGURED` (canal sem servidor/remetente), `SMTP_CONNECTION_FAILED` (host/porta/firewall), `SMTP_AUTH_FAILED` (login/senha de app), `SMTP_REJECTED` (remetente/destinatário recusado).
 
 ---
 

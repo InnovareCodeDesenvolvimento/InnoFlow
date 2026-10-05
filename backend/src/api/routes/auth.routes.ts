@@ -22,6 +22,7 @@ import { prismaVinculoGoogleRepository, vincularGoogleAContaLogada } from '../..
 import { incrWithTtl } from '../../lib/redisCounter'
 import { redis } from '../../lib/redis'
 import { withDeadline } from '../../lib/withDeadline'
+import { notificarSenhaAlterada } from '../../services/notificacoes/gatilhos'
 
 /**
  * Log de auditoria de LOGIN — fora do middleware genérico (`auditTrail()`,
@@ -383,6 +384,9 @@ router.post(
 
     const token = issueToken(updated)
     res.json({ token, user: toUserDTO({ ...updated, operatorName: user.operator?.name, hasPassword: true }) })
+
+    // L1.6 (DL5: segurança, sempre enviado): "sua senha foi alterada" depois da troca confirmada — fila `notificacoes` (retry, NotificationLog), fire-and-forget: falha de Redis/SMTP não afeta a resposta.
+    notificarSenhaAlterada({ userId: updated.id, trocadaEm: updated.sessionsValidAfter ?? new Date() })
 
     if (AUDITABLE_LOGIN_ROLES.has(updated.role)) {
       void writeAuditLog({

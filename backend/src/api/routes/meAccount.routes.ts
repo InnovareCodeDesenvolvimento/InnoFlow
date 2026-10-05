@@ -7,6 +7,7 @@ import { accountDeletionSchema, type AccountDeletionInput } from '../schemas/acc
 import { confirmarIdentidadeDoTitular } from '../../services/lgpd/confirmarIdentidadeDoTitular'
 import { excluirContaDoMotorista } from '../../services/lgpd/excluirConta'
 import { StepUpRateLimitedError } from '../../services/auth/stepUpSenha'
+import { notificarContaExcluida } from '../../services/notificacoes/gatilhos'
 
 /**
  * `POST /api/me/account/deletion` (L1.4, LGPD art. 18 VI) — exclusão/anonimização da conta do MOTORISTA. DRIVER only; o dono é SEMPRE `req.user!.userId` (`.strict()` no schema recusa até
@@ -33,8 +34,11 @@ router.post(
     }
 
     const resultado = await excluirContaDoMotorista({ userId, refundPixKey })
-    // `resultado.notificar` (e-mail/nome ANTES de anonimizar) é o insumo do aviso `ACCOUNT_DELETED` (L1.6) — o enfileiramento é de quem implementa as notificações.
     res.status(200).json({ status: resultado.status })
+
+    // L1.6 (DL5: sempre enviado): `resultado.notificar` (e-mail/nome capturados ANTES de anonimizar) vai SÓ no payload do job — some ao concluir (ver `worker/queues.ts`). `null` = 2ª chamada
+    // concorrente (já havia sido excluída): nenhum 2º aviso. entityId = id do pedido de exclusão. Fire-and-forget, depois da resposta.
+    if (resultado.notificar) notificarContaExcluida({ userId, requestId: resultado.requestId, email: resultado.notificar.email, nome: resultado.notificar.nome })
   }),
 )
 
