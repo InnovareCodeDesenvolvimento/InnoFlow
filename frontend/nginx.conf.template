@@ -131,9 +131,15 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "no-referrer" always;
-        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), usb=(), bluetooth=(), serial=(), payment=()" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header Content-Security-Policy "default-src 'none'; script-src 'self' https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; frame-src https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br" always;
+        # CSP em ENFORCE (a que vale): domínios inteiros da Cielo, porque o host do POST do cartão em SANDBOX nunca foi observado (ver o bloco "CSP DESTA PÁGINA" acima).
+        # F-E / auditoria do Órion (S-3, S-8): `base-uri 'none'` (a página não usa <base>) e SEM `font-src` (cai no `default-src 'none'`: ela usa só fonte do sistema).
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; frame-src https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action https://*.pagador.com.br https://*.cieloecommerce.cielo.com.br" always;
+        # I-1 (Órion): a versão ESTREITA em REPORT-ONLY, ao lado do enforce. NÃO bloqueia nada: no teste de sandbox, o console do navegador mostra `[Report Only] Refused to ...` para cada
+        # host/recurso que a política estreita barraria — é a EVIDÊNCIA que falta para trocar o curinga por hosts exatos (sem curinga, sem 'unsafe-inline' em estilo). Só depois de
+        # observar sandbox E produção sem nenhum `[Report Only] Refused` é que o enforce pode ser trocado por esta.
+        add_header Content-Security-Policy-Report-Only "default-src 'none'; script-src 'self' https://transactionsandbox.pagador.com.br https://transaction.cieloecommerce.cielo.com.br; style-src 'self'; img-src 'self' data:; connect-src 'self' https://transactionsandbox.pagador.com.br https://www.pagador.com.br; frame-src https://transactionsandbox.pagador.com.br https://www.pagador.com.br; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action https://transactionsandbox.pagador.com.br https://www.pagador.com.br" always;
         try_files $uri =404;
     }
 

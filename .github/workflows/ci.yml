@@ -154,6 +154,31 @@ jobs:
           if grep -rl "mockServiceWorker" dist; then echo "::error::referencia a mockServiceWorker no dist/ (precache do PWA?)"; exit 1; fi
           test -f dist/sw.js && test -f dist/pagamento-cartao.html && test -f dist/index.html
           echo "ok: dist limpo"
+      - name: Guarda — bundle do cartão isolado (SAQ A-EP)
+        working-directory: frontend
+        run: |
+          set -eu
+          cd dist
+          CARTAO=$(ls assets/pagamento-cartao-*.js assets/pagamento-cartao-*.css)
+          test -n "$CARTAO"
+          # (1) nenhuma lib do app principal nem armazenamento do navegador/cabeçalho de auth no bundle do documento que vê PAN/CVV
+          if grep -liE "axios|zustand|tanstack|react-router|radix|sonner|localStorage|sessionStorage|Authorization" $CARTAO; then
+            echo "::error::bundle do cartão isolado contém lib do app principal / storage / Authorization"; exit 1
+          fi
+          # (2) o caminho MOCK do SOP (tokenizeCardMock, 'mocktok.', hosts fictícios) não pode estar no build de produção
+          if grep -liE "mocktok|mock\.local|mock\.invalid|fake\.local" $CARTAO; then
+            echo "::error::caminho mock do SOP presente no bundle de produção do cartão"; exit 1
+          fi
+          # (3) ORDEM dos builds: o documento do cartão existe em dist/ (2ª build, `emptyOutDir:false`) mas NUNCA entra no precache do service worker da build principal
+          test -f pagamento-cartao.html
+          if grep -E 'url:"pagamento-cartao\.html"|"url":"pagamento-cartao\.html"' sw.js; then
+            echo "::error::pagamento-cartao.html entrou no precache do PWA (a ordem 'build principal, depois build do cartão' foi quebrada)"; exit 1
+          fi
+          # (4) o HTML do cartão só referencia o bundle próprio (nenhum script/estilo de terceiro, nenhum chunk do app)
+          if grep -oE '(src|href)="[^"]+"' pagamento-cartao.html | grep -vE '"/assets/pagamento-cartao-'; then
+            echo "::error::pagamento-cartao.html referencia recurso fora do bundle próprio"; exit 1
+          fi
+          echo "ok: bundle do cartão isolado"
       - name: Unit tests (Vitest)
         run: npm test
       # Informativo, não bloqueia (ver o passo equivalente no backend).
