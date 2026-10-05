@@ -176,7 +176,7 @@ Toda venda do InnoFlow com `MerchantOrderId = IF-…` gera um alerta falso no si
 | **Pagamento — Sandbox restrito (ALTO-2)** |
 | `PAYMENT_SANDBOX_TESTER_EMAILS` | ❌ Não | api | CSV de e-mails (ex: `dono@emp.com,teste@emp.com`) | 🟡 Importante (dados pessoais) | Em `NODE_ENV=production` com ambiente=sandbox: APENAS esses e-mails conseguem usar |
 | **Autenticação — JWT e Google** |
-| `JWT_SECRET` | ✅ Sim | Todos 3 | `openssl rand -base64 48` (48 base64) | 🔴 Inseguro | Mínimo 16, recomendado ≥ 32 chars; **nunca reusar dev** |
+| `JWT_SECRET` | ✅ Sim | Todos 3 | `openssl rand -base64 48` (48 base64) | 🔴 Inseguro | Em produção o boot FALHA com menos de 32 caracteres (N-12); use ≥ 32; **nunca reusar dev** |
 | `JWT_EXPIRES_IN` | ❌ Não | Todos 3 | Duração, ex `12h` | Público (string) | Default 12h; trocar a chave derruba sessões abertas |
 | `GOOGLE_CLIENT_ID` | ❌ Não (login Google) | api | OAuth 2.0 client ID (Google Cloud Console) | Público (ID) | Ex: `123456789.apps.googleusercontent.com`; sem ela, login Google desligado |
 | **Relatórios e SSE** |
