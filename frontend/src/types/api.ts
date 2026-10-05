@@ -44,14 +44,23 @@ export interface AuthResponse {
  * - `newPassword`: 10 a 72 bytes (limite do bcrypt).
  *
  * Erros (trate por `code`): 400 `VALIDATION_ERROR` (ex. senha curta), 400
- * `CURRENT_PASSWORD_REQUIRED`, 403 `INVALID_CURRENT_PASSWORD` (**403 de propósito, não 401**:
+ * `CURRENT_PASSWORD_REQUIRED`, 400 `PASSWORD_UNCHANGED` (nova = atual), 403 `INVALID_CURRENT_PASSWORD` (**403 de propósito, não 401**:
  * o interceptor global trata 401 como sessão expirada e deslogaria quem só errou a senha
- * atual), 429 `RATE_LIMITED_PASSWORD` (limite por usuário, não por IP).
+ * atual), 429 `RATE_LIMITED_PASSWORD` (limite por usuário, não por IP). Ver `ChangePasswordErrorCode`.
+ *
+ * L1.2: esta é a rota que a tela de perfil (PWA) e o diálogo "Alterar senha" (admin) chamam — já existe, não há rota nova de troca de senha.
  */
 export interface ChangePasswordRequest {
   currentPassword?: string
   newPassword: string
 }
+export type ChangePasswordErrorCode =
+  | "VALIDATION_ERROR"
+  | "CURRENT_PASSWORD_REQUIRED"
+  | "PASSWORD_UNCHANGED"
+  | "INVALID_CURRENT_PASSWORD"
+  | "RATE_LIMITED_PASSWORD"
+  | "UNAUTHORIZED"
 
 /**
  * `GET /api/public/config` (sem auth) — configuração pública que o cliente
@@ -794,6 +803,10 @@ export interface PaymentListRow {
 export interface PaymentsReportQuery extends ReportPeriodParams, PaginationParams {
   provider?: PaymentProvider
   status?: PaymentIntentStatus
+  /** planejado (L1.8): achar a venda de um chargeback pelos identificadores da adquirente (já gravados no intent). Ainda não aceitos pelo backend. */
+  tid?: string
+  authorizationCode?: string
+  proofOfSale?: string
 }
 
 export interface PaymentsReportResponse {
@@ -813,9 +826,20 @@ export interface PaymentsReportResponse {
 
 // ---- POST /api/admin/charge-points/:id/commands/remote-start --------------
 
+/**
+ * L1.5 (06/10/2026) — **MUDANÇA DELIBERADA**: `reason` passou a ser OBRIGATÓRIO (texto livre do suporte, 10 a 200 caracteres depois do trim, sem
+ * caracteres de controle) e vai para a auditoria (`actionDetail`) junto com o motorista-alvo e o `correlationId`. Sem `reason` (ou fora dos limites) = 400
+ * `VALIDATION_ERROR` com `details[].path = "reason"`. Nenhum cliente de produção chamava esta rota (só a API); a tela admin é nova.
+ *
+ * DL4 (decisão do dono, 05/10/2026): no lote 1 só **ADMIN** inicia recarga remota. OPERATOR recebe 403 `FORBIDDEN` (hoje um operador conseguiria debitar a
+ * carteira de QUALQUER motorista da rede). Reabrir para OPERATOR depende do aviso por e-mail ao motorista (L1.6). A regra mora numa função única no backend.
+ * Continua só carteira (WALLET).
+ */
 export interface RemoteStartRequest {
   connectorId: number
   userId: string
+  /** 10 a 200 caracteres (após trim). Obrigatório. */
+  reason: string
 }
 
 /** 202 — fire-and-forget, mesmo padrão dos outros comandos remotos (ver PROGRESSO.md §F3b). */
@@ -837,6 +861,25 @@ export type RemoteStartErrorCode =
   | "INSUFFICIENT_BALANCE"
   | "CONNECTOR_BUSY"
   | "CHARGE_POINT_OFFLINE"
+  /** L1.5/DL4 — 403: só ADMIN inicia recarga remota no lote 1. */
+  | "FORBIDDEN"
+  /** L1.5 — 400: `reason` ausente ou fora de 10–200 caracteres (ver `details`). */
+  | "VALIDATION_ERROR"
+
+/**
+ * L1.5 — `GET /api/admin/commands/:correlationId` (ADMIN, DL4; OPERATOR = 403 `FORBIDDEN`). Consulta o resultado do comando disparado por
+ * `POST /api/admin/charge-points/:id/commands/remote-start` (mesmo cache de resultado do `GET /api/me/commands/:id`, Redis, TTL de 2 min).
+ *
+ * - `PENDING` = o comando está em andamento (o registro nasce PENDING no disparo, antes do 202).
+ * - `ACCEPTED` / `REJECTED` ("o carregador recusou") / `TIMEOUT` (sem resposta em 35 s).
+ * - 404 `COMMAND_NOT_FOUND` = id desconhecido, EXPIRADO (passou de 2 min) ou fora do escopo do chamador — as três situações são indistinguíveis de propósito
+ *   (não confirma que um correlationId existe). Quem faz polling de 2 s por até 60 s nunca esbarra no TTL; 404 durante o polling = mostre "resultado indisponível".
+ * - Só comandos de `remote-start` gravam nesse registro hoje; `reset`/`unlock`/`change-availability`/`trigger-message` continuam 202 "cegos" (404 aqui).
+ */
+export interface AdminCommandStatusResponse {
+  status: MeCommandStatus
+}
+export type AdminCommandStatusErrorCode = "COMMAND_NOT_FOUND" | "FORBIDDEN"
 
 // ---- POST /api/admin/sessions/:id/stop -------------------------------------
 
@@ -1250,7 +1293,11 @@ export interface MePaymentMethodDTO {
  * recusas em excesso (suspeita de teste de cartões roubados). Pix e carteira NÃO são afetados. `eligible=false` -> a tela explica o motivo em vez de oferecer
  * "Adicionar cartão"/"Pagar com cartão"; o servidor também recusa (403 `CARD_REQUIRES_VERIFIED_IDENTITY` / 429 `CARD_TEMPORARILY_BLOCKED`).
  */
-export type CardEligibilityReason = "GOOGLE_LOGIN_REQUIRED" | "TEMPORARILY_BLOCKED"
+export type CardEligibilityReason =
+  | "GOOGLE_LOGIN_REQUIRED"
+  | "TEMPORARILY_BLOCKED"
+  /** planejado (L1.8, DL7): o ADMIN registrou um chargeback deste motorista -> modo cartão bloqueado (Pix e carteira seguem). Ainda NÃO é enviado pelo backend. */
+  | "CHARGEBACK_BLOCKED"
 export interface CardEligibility {
   eligible: boolean
   reason: CardEligibilityReason | null
@@ -1720,4 +1767,318 @@ export type PaymentGatewayConfigErrorCode =
 export interface PaymentMethodDisabledDetail {
   method: "CARD" | "PIX"
   reason: "GATEWAY_DISABLED" | "SANDBOX_RESTRICTED"
+}
+
+// ============================================================================
+// LOTE 1 DA F6 (Vega-B, 06/10/2026) — contrato literal de L1.2 a L1.9.
+//
+// Fonte: docs/PLANO-FUNCIONALIDADES.md §2, com as decisões do dono DL1-DL8 JÁ ACEITAS (05/10/2026).
+// Legenda de estado de cada bloco:
+//   "IMPLEMENTADO (L1.x)"  = a rota existe no backend e este tipo é o contrato real.
+//   "planejado (L1.x)"     = a rota AINDA NÃO existe; o formato é o combinado e pode ser consumido por mocks, mas nenhum cliente deve
+//                            depender dele em produção até o backend marcar como implementado aqui.
+// Regras que valem para TODAS as rotas /api/me/*: nenhum `userId` vem de body/query/param (sempre o do token); o corpo é `.strict()` (campo desconhecido = 400).
+// Erro = `ApiErrorBody` (`{ error, code, details? }`) — sempre trate por `code`, nunca pelo texto.
+// ============================================================================
+
+// ---- L1.2 — Perfil do motorista: GET/PATCH /api/me/profile (DRIVER) — IMPLEMENTADO (L1.2) ------------------------------------------------------------
+
+/**
+ * `GET /api/me/profile` -> 200 `MeProfile`. `cpfMasked` = `***.456.789-**` (o CPF inteiro só sai na exportação LGPD, L1.4); `null` se não informado.
+ * `identityVerified` = a mesma regra do I-7 (login com Google vinculado) que libera o cartão. `googleLinked` = há Google vinculado à conta.
+ * `hasPassword=false` = conta só-Google (a tela mostra "Definir senha", sem campo de senha atual — ver `ChangePasswordRequest`).
+ */
+export interface MeProfile {
+  id: string
+  name: string
+  email: string
+  phone: string | null
+  cpfMasked: string | null
+  hasPassword: boolean
+  googleLinked: boolean
+  identityVerified: boolean
+  /** ISO. */
+  createdAt: string
+}
+
+/**
+ * `PATCH /api/me/profile` -> 200 `MeProfile` (o DTO já atualizado). Corpo `.strict()`, ao menos UM campo. O **e-mail NÃO é editável** neste lote (a troca exige
+ * verificação no endereço novo — F7). Campos:
+ * - `name`: 1 a 120 caracteres (após trim).
+ * - `phone`: 8 a 30 caracteres entre dígitos, espaço, `+`, `(`, `)` e `-`; `null` apaga.
+ * - `cpf`: com ou sem pontuação (o servidor guarda só os 11 dígitos); precisa passar no dígito verificador; `null` apaga.
+ * Erros: 400 `VALIDATION_ERROR` (por campo, em `details[].path`), 409 `CPF_IN_USE` (CPF já é de outra conta), 429 `RATE_LIMITED_PROFILE`, 401, 403 (não é DRIVER).
+ * A mudança é auditada (só os NOMES dos campos alterados — nunca os valores: são dado pessoal).
+ */
+export interface UpdateMeProfileRequest {
+  name?: string
+  phone?: string | null
+  cpf?: string | null
+}
+export type MeProfileErrorCode = "VALIDATION_ERROR" | "CPF_IN_USE" | "RATE_LIMITED_PROFILE" | "UNAUTHORIZED" | "FORBIDDEN"
+
+// ---- L1.3 — Esqueci / redefinição de senha — planejado (L1.3) ----------------------------------------------------------------------------------------
+
+/**
+ * `POST /api/auth/password/forgot` (sem auth) -> **SEMPRE 202 `{ ok: true }`** — exista ou não a conta, ativa ou não, de qualquer papel (não vira oráculo de
+ * e-mails nem de papéis). O envio é assíncrono (fila), nunca inline. DL1: o e-mail com o link só é enviado para DRIVER e OPERATOR; **ADMIN NÃO recebe**
+ * (troca de senha de ADMIN só pelo script `user:set-password`) — mesmo assim a resposta é a mesma 202. Conta só-Google recebe um aviso "sua conta entra com
+ * o Google" SEM token. Erros: 400 `VALIDATION_ERROR` (e-mail malformado), 429 `RATE_LIMITED_AUTH` (por IP; o limite por e-mail é silencioso).
+ */
+export interface ForgotPasswordRequest {
+  email: string
+}
+export interface ForgotPasswordResponse {
+  ok: true
+}
+
+/**
+ * `POST /api/auth/password/reset` (sem auth) -> 204 sem corpo. O token vem no CORPO (o link do e-mail o carrega no FRAGMENTO:
+ * `https://<app>/redefinir-senha#t=<token>` — a tela lê `location.hash` e apaga o fragmento; nunca na querystring). `newPassword`: 10 a 72 bytes.
+ * Efeito: troca a senha e derruba TODAS as sessões (inclusive SSE); **não há auto-login** — depois do 204 a tela manda para `/login`.
+ * Erros: 400 `VALIDATION_ERROR`, 400 `RESET_TOKEN_INVALID` (UM código só para token expirado/usado/inexistente/conta que não pode redefinir), 429 `RATE_LIMITED_AUTH`.
+ */
+export interface ResetPasswordRequest {
+  token: string
+  newPassword: string
+}
+export type ResetPasswordErrorCode = "VALIDATION_ERROR" | "RESET_TOKEN_INVALID" | "RATE_LIMITED_AUTH"
+
+// ---- L1.4 — LGPD: exportação e exclusão de conta — planejado (L1.4) ----------------------------------------------------------------------------------
+
+/**
+ * `GET /api/me/data-export` -> 200 `application/json` com `Content-Disposition: attachment; filename="innoflow-meus-dados-AAAAMMDD.json"`. Síncrono.
+ * 3 exportações por dia por usuário (429 `RATE_LIMITED_EXPORT`). Gera auditoria `EXPORT`. NUNCA contém token/ciphertext de cartão, `passwordHash` nem `googleSub`.
+ * Os blocos abaixo são o mínimo prometido; o backend pode acrescentar campos (a tela só oferece o download, não renderiza o conteúdo).
+ */
+export interface MeDataExport {
+  /** ISO. */
+  exportedAt: string
+  /** Aqui (e só aqui) o CPF sai INTEIRO — é dado do próprio titular. */
+  profile: { id: string; name: string; email: string; phone: string | null; cpf: string | null; createdAt: string }
+  consents: Array<{ kind: string; version: string; acceptedAt: string }>
+  sessions: unknown[]
+  walletEntries: unknown[]
+  topups: unknown[]
+  /** Bandeira/final/validade/titular — nunca token. */
+  paymentMethods: Array<{ brand: string; last4: string; expiry: string; holderName: string | null }>
+  /** `idTag` mascarado. */
+  authTokens: Array<{ idTagMasked: string; type: AuthTokenType; status: AuthTokenStatus }>
+  notifications: unknown[]
+}
+
+/**
+ * `POST /api/me/account/deletion` -> 200 `MeAccountDeletionResponse`. ANONIMIZAÇÃO (não DELETE): a pessoa some, o registro financeiro fica sob um id
+ * pseudônimo. Reautenticação OBRIGATÓRIA: conta com senha manda `currentPassword`; conta só-Google manda `googleCredential` (ID token, mesmo formato de
+ * `GoogleAuthRequest.credential`). `confirmation` é o literal `"EXCLUIR"`.
+ * - DL2: **saldo positivo NÃO bloqueia** — a conta é excluída e o saldo vira devolução MANUAL por Pix (o ADMIN registra `TOPUP_REFUND`). Com saldo > 0 o
+ *   corpo precisa de `refundPixKey` (senão 400 `REFUND_PIX_KEY_REQUIRED`) e a resposta é `DELETED_PENDING_REFUND`; sem saldo, `DELETED`.
+ * - DL3: **dívida aberta BLOQUEIA** até quitar -> 409 `OPEN_DEBT`.
+ * Erros: 400 `VALIDATION_ERROR`, 400 `CURRENT_PASSWORD_REQUIRED`, 400 `REFUND_PIX_KEY_REQUIRED`, 403 `INVALID_CURRENT_PASSWORD`, 401 `INVALID_GOOGLE_TOKEN`,
+ * 409 `ACTIVE_SESSION` (inclui sessão `STOP_UNCONFIRMED`), 409 `PAYMENT_IN_PROGRESS` (cartão autorizado/captura pendente/Pix pendente), 409 `OPEN_DEBT`,
+ * 429 `RATE_LIMITED_ACCOUNT_DELETION`. Depois de `DELETED*` o token atual deixa de valer (a tela volta ao login).
+ */
+export interface MeAccountDeletionRequest {
+  confirmation: "EXCLUIR"
+  currentPassword?: string
+  googleCredential?: string
+  /** Chave Pix para a devolução do saldo (só é lida se houver saldo positivo). Guardada cifrada; apagada quando o ADMIN registrar o reembolso. */
+  refundPixKey?: string
+}
+export interface MeAccountDeletionResponse {
+  status: "DELETED" | "DELETED_PENDING_REFUND"
+}
+export type MeAccountDeletionErrorCode =
+  | "VALIDATION_ERROR"
+  | "CURRENT_PASSWORD_REQUIRED"
+  | "REFUND_PIX_KEY_REQUIRED"
+  | "INVALID_CURRENT_PASSWORD"
+  | "INVALID_GOOGLE_TOKEN"
+  | "ACTIVE_SESSION"
+  | "PAYMENT_IN_PROGRESS"
+  | "OPEN_DEBT"
+  | "RATE_LIMITED_ACCOUNT_DELETION"
+
+/** Estado da devolução do saldo de uma conta excluída (DL2). */
+export type AccountDeletionRefundStatus = "NOT_REQUIRED" | "PENDING_REFUND" | "REFUNDED"
+
+/**
+ * `GET /api/admin/account-deletions?status=PENDING_REFUND&page&pageSize` (ADMIN-only) -> `PaginatedResponse<AdminAccountDeletionRow>`. `refundPixKey` é a chave que
+ * o motorista informou (decifrada só para o ADMIN fazer o Pix); some (`null`) depois de `REFUNDED`.
+ */
+export interface AdminAccountDeletionRow {
+  id: string
+  /** Id pseudônimo (o usuário já foi anonimizado). */
+  userId: string
+  /** ISO. */
+  requestedAt: string
+  balanceCentsAtRequest: number
+  refundStatus: AccountDeletionRefundStatus
+  refundPixKey: string | null
+  refundedAt: string | null
+  refundedByUserId: string | null
+}
+export interface AdminAccountDeletionsQuery extends PaginationParams {
+  status?: AccountDeletionRefundStatus
+}
+
+/**
+ * `POST /api/admin/account-deletions/:id/refund` (ADMIN-only, step-up por senha) -> 200 `AdminAccountDeletionRow`. O ADMIN fez o Pix por fora e registra aqui:
+ * lança `WalletEntry TOPUP_REFUND` e apaga a chave Pix guardada. Erros: 400 `VALIDATION_ERROR`, 403 `INVALID_CURRENT_PASSWORD`, 404 `NOT_FOUND`,
+ * 409 `ALREADY_REFUNDED`, 409 `AMOUNT_EXCEEDS_BALANCE` (`amountCents` > saldo no pedido).
+ */
+export interface AdminAccountDeletionRefundRequest {
+  amountCents: number
+  /** Comprovante/identificador do Pix feito por fora (texto livre, 1 a 120). */
+  proofReference: string
+  currentPassword: string
+}
+
+// ---- L1.6 — Notificações ao motorista (e-mail) — planejado (L1.6) ------------------------------------------------------------------------------------
+
+export const NOTIFICATION_TYPES = [
+  "SESSION_COMPLETED",
+  "SESSION_PAYMENT_FAILED",
+  "SESSION_CLOSED_BY_SERVER",
+  "LOW_BALANCE",
+  "TOPUP_CREDITED",
+  "REMOTE_START_BY_SUPPORT",
+  "PASSWORD_CHANGED",
+  "ACCOUNT_DELETED",
+] as const
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number]
+
+/**
+ * DL5: e-mails de SEGURANÇA e de COBRANÇA são SEMPRE enviados e não têm chave de desligar (`PASSWORD_CHANGED`, `SESSION_PAYMENT_FAILED`, `ACCOUNT_DELETED`) — a tela
+ * os mostra como "sempre ativos", sem interruptor. Recibo e saldo baixo são opcionais e vêm LIGADOS por padrão, com limiar de R$ 20,00 (2000 centavos).
+ */
+export const ALWAYS_ON_NOTIFICATION_TYPES = ["PASSWORD_CHANGED", "SESSION_PAYMENT_FAILED", "ACCOUNT_DELETED"] as const satisfies readonly NotificationType[]
+export const LOW_BALANCE_THRESHOLD_MIN_CENTS = 500
+export const LOW_BALANCE_THRESHOLD_MAX_CENTS = 50000
+export const LOW_BALANCE_THRESHOLD_DEFAULT_CENTS = 2000
+
+/** `GET /api/me/notification-preferences` -> 200. Defaults: `{ sessionReceiptEmail: true, lowBalanceEnabled: true, lowBalanceThresholdCents: 2000 }`. */
+export interface MeNotificationPreferences {
+  sessionReceiptEmail: boolean
+  lowBalanceEnabled: boolean
+  /** 500 a 50000 (R$ 5,00 a R$ 500,00). */
+  lowBalanceThresholdCents: number
+}
+/**
+ * `PATCH /api/me/notification-preferences` -> 200 `MeNotificationPreferences`. `.strict()`, ao menos um campo. Erros: 400 `VALIDATION_ERROR` (limiar fora de 500-50000
+ * ou campo desconhecido — inclusive qualquer tentativa de desligar segurança/cobrança), 429.
+ */
+export type UpdateMeNotificationPreferencesRequest = Partial<MeNotificationPreferences>
+
+// ---- L1.8 — Estorno e chargeback (fluxo manual assistido) — planejado (L1.8) -------------------------------------------------------------------------
+
+/**
+ * DL8: neste lote NÃO há chamada de estorno por API da Cielo. Estorno de sessão paga com carteira = crédito interno imediato; paga com cartão = (a) crédito na
+ * carteira, ou (b) devolução feita pelo dono NO PORTAL DA CIELO e registrada aqui (`CARD_VIA_PORTAL`, fica `PENDING_CONFIRMATION` até a confirmação).
+ */
+export type RefundDestination = "WALLET" | "CARD_VIA_PORTAL"
+export type RefundStatus = "CONFIRMED" | "PENDING_CONFIRMATION"
+
+/**
+ * `POST /api/admin/sessions/:id/refunds` (ADMIN-only, step-up por senha) -> 201 `CreateSessionRefundResponse`. Erros: 400 `VALIDATION_ERROR`,
+ * 403 `INVALID_CURRENT_PASSWORD`, 404 `SESSION_NOT_FOUND`, 409 `AMOUNT_EXCEEDS_REFUNDABLE` (soma dos estornos > valor cobrado — também sob requisições
+ * concorrentes), 409 `SESSION_NOT_BILLED`.
+ */
+export interface CreateSessionRefundRequest {
+  amountCents: number
+  reason: string
+  destination: RefundDestination
+  /** Referência da devolução no portal da Cielo (só em `CARD_VIA_PORTAL`). */
+  portalReference?: string
+  currentPassword: string
+}
+export interface CreateSessionRefundResponse {
+  refundId: string
+  status: RefundStatus
+}
+export type SessionRefundErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CURRENT_PASSWORD"
+  | "SESSION_NOT_FOUND"
+  | "AMOUNT_EXCEEDS_REFUNDABLE"
+  | "SESSION_NOT_BILLED"
+
+export type ChargebackOutcome = "WON" | "LOST" | "ACCEPTED"
+
+/**
+ * `POST /api/admin/payments/:intentId/chargebacks` (ADMIN-only) -> 201 `CreateChargebackResponse`. REGISTRAR o chargeback já BLOQUEIA o modo cartão do motorista
+ * (`CardEligibilityReason = "CHARGEBACK_BLOCKED"`; Pix e carteira seguem) e tira um snapshot do dossiê. A conciliação não muda (estorno/chargeback são informativos).
+ * Erros: 400 `VALIDATION_ERROR`, 404 `PAYMENT_NOT_FOUND`, 409 `CHARGEBACK_ALREADY_REGISTERED`.
+ */
+export interface CreateChargebackRequest {
+  amountCents: number
+  /** ISO — quando a Cielo avisou o dono. */
+  notifiedAt: string
+  caseReference: string
+  reasonCode?: string
+  /** ISO. */
+  responseDeadline?: string
+}
+export interface CreateChargebackResponse {
+  chargebackId: string
+  dossierId: string
+}
+
+/**
+ * DL7: chargeback PERDIDO (`LOST`/`ACCEPTED`) = a plataforma ABSORVE e o motorista fica sem o modo cartão. Dívida só por ação MANUAL do ADMIN:
+ * `debtPolicy` omitido ou `"ABSORB"` = não cria dívida; `"CREATE_DEBT"` = o ADMIN decide, no caso concreto, cobrar o motorista. `WON` = devolve o modo cartão.
+ * `PATCH /api/admin/chargebacks/:id` (ADMIN-only, step-up) -> 200 `ChargebackDTO`. Erros: 400, 403 `INVALID_CURRENT_PASSWORD`, 404 `NOT_FOUND`,
+ * 409 `CHARGEBACK_ALREADY_RESOLVED`.
+ */
+export interface UpdateChargebackRequest {
+  outcome: ChargebackOutcome
+  debtPolicy?: "CREATE_DEBT" | "ABSORB"
+  currentPassword: string
+}
+export interface ChargebackDTO {
+  id: string
+  paymentIntentId: string
+  amountCents: number
+  caseReference: string
+  outcome: ChargebackOutcome | null
+  notifiedAt: string
+  responseDeadline: string | null
+  dossierId: string
+}
+/** `GET /api/admin/chargebacks/:id/dossier` (ADMIN-only) -> JSON do snapshot (formato aberto; a Lyra só oferece o download). */
+export type ChargebackDossier = Record<string, unknown>
+
+// ---- L1.9 — Termos de uso, privacidade, aceite e contato — planejado (L1.9) --------------------------------------------------------------------------
+
+/** `GET /api/public/legal` (sem auth) -> 200. Os dados da empresa dependem do dono (CNPJ, e-mail de suporte, encarregado/DPO) — podem vir `null` até ele mandar. */
+export interface PublicLegalConfig {
+  termsVersion: string
+  privacyVersion: string
+  company: {
+    name: string | null
+    cnpj: string | null
+    supportEmail: string | null
+    supportPhone: string | null
+    dpoEmail: string | null
+  }
+}
+
+/**
+ * `POST /api/auth/register` e `POST /api/auth/google` passarão a exigir `acceptedTermsVersion` (= `PublicLegalConfig.termsVersion` vigente). Versão diferente =
+ * 409 `TERMS_VERSION_OUTDATED` (a tela recarrega `GET /api/public/legal` e pede o aceite de novo); ausente = 400 `VALIDATION_ERROR`. Hoje o campo ainda NÃO é
+ * exigido nem lido (planejado L1.9) — a Lyra pode já enviá-lo.
+ */
+export type TermsErrorCode = "TERMS_VERSION_OUTDATED"
+
+/** `GET /api/me/consents` (DRIVER) -> 200. `upToDate=false` = abrir o modal de reaceite no próximo login. */
+export interface MeConsentStatus {
+  termsVersion: string | null
+  privacyVersion: string | null
+  acceptedAt: string | null
+  upToDate: boolean
+}
+/** `POST /api/me/consents` (DRIVER) -> 201 `MeConsentStatus`. Versão que não é a vigente = 409 `TERMS_VERSION_OUTDATED`. */
+export interface MeAcceptConsentsRequest {
+  termsVersion: string
+  privacyVersion: string
 }
