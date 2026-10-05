@@ -767,3 +767,88 @@ Procure por `alert:` nos logs — devem estar limpos (nenhum erro) nos primeiros
 - [ ] Logs limpios (0 erros de deserialização do enum novo)
 - [ ] Motorista consegue iniciar/parar recarga normalmente (nada quebrou)
 - [ ] Alertas aparecem no padrão esperado (nenhum susto)
+
+---
+
+## 7. Partições e retenção (N-11)
+
+`MeterSample` (por `ts`) e `OcppMessage` (por `occurredAt`) são particionadas por mês. A migration inicial criou só 2026-09..2027-02 e uma partição **DEFAULT**. Passado o último mês, o `INSERT` **não falha** (a DEFAULT aceita) — mas as linhas se acumulam lá sem a poda por partição e, quando alguém tenta criar o mês depois, o `CREATE` **falha** enquanto houver linhas dele na DEFAULT. Por isso existe manutenção automática.
+
+### 7.1 O que roda sozinho
+
+- **Migration `20261005120000_partition_maintenance`:** cria a função SQL `ensure_partitions_ahead(tabela, meses)` e já deixa partições **até 2027-10** (12 meses à frente) nas duas tabelas.
+- **Job `manter-particoes` no worker** (`worker/jobs/manterParticoesJob.ts`): roda **no boot do worker** e a cada `PARTITION_MAINTENANCE_INTERVAL_MS` (24 h). Cria o que faltar até `PARTITION_AHEAD_MONTHS` (6) meses à frente, **idempotente**, com lock consultivo no banco (duas réplicas não colidem). Se encontrar linhas na DEFAULT dentro do mês novo, **move** essas linhas para a partição antes de anexá-la. Depois, se ligada, aplica a retenção.
+- Usa `ATTACH PARTITION` (lock `SHARE UPDATE EXCLUSIVE`, que **não bloqueia** o `INSERT` do OCPP) e `lock_timeout` de 10 s: se alguma transação longa segurar a tabela, a rodada desiste e a próxima tenta de novo.
+
+### 7.2 Variáveis (worker; as demais apps ignoram)
+
+| Variável | Padrão | Significado |
+|---|---|---|
+| `PARTITION_AHEAD_MONTHS` | `6` | Meses de partição a manter à frente (mín. 3). |
+| `PARTITION_MAINTENANCE_INTERVAL_MS` | `86400000` | Cadência do job (mín. 60 s). |
+| `RETENTION_ENABLED` | **`false`** | Liga a purga. Desligada, **nada** é apagado. |
+| `RETENTION_DRY_RUN` | `false` | Com `RETENTION_ENABLED=true`: só loga o que seria removido. |
+| `RETENTION_OCPP_MESSAGE_DAYS` | `365` | Prazo do log OCPP (mín. 30). |
+| `RETENTION_METER_SAMPLE_DAYS` | `365` | Prazo das leituras de medidor (mín. 30). |
+| `RETENTION_WEBHOOK_EVENT_DAYS` | `180` | Prazo das notificações de webhook já processadas (mín. 30). |
+
+### 7.3 Política de retenção (decidida pelo dono em 05/10/2026, DL6)
+
+| Dado | Prazo | Como é removido |
+|---|---|---|
+| `OcppMessage`, `MeterSample` | **12 meses** | `DETACH` + `DROP` de partição **inteira**, só quando o mês inteiro já passou do prazo (prazo efetivo = 12 meses + até 1 mês). Nunca `DELETE` linha a linha; nunca a DEFAULT. |
+| `WebhookEvent` (não particionada) | **180 dias** | `DELETE` em lotes de 1000, só eventos **já processados**; os não processados ficam (e há alerta). |
+| `AuditLog` | **5 anos** | **Sem purga automática.** Não é particionada e começou em 09/2026: nada vence antes de 09/2031. O trigger só permite `DELETE` de linha > 24 meses. Antes de 2031 é preciso decidir/migrar para partição mensal (para o expurgo ser por partição inteira). |
+| `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession`, financeiro | **sem purga** | Append-only por trigger (UPDATE/DELETE/TRUNCATE). Expurgar exige decisão contábil/LGPD e intervenção manual de superusuário — fora do job, de propósito. |
+
+**Proteção:** uma partição **não é apagada** se alguma sessão que toca aquele mês (±2 dias) ainda estiver **aberta** (não `STOPPED`, inclusive `STOP_UNCONFIRMED`/`FAULTED`), tiver **`Debt` em aberto** ou **`PaymentIntent` em andamento** (`CREATED`, `AUTHORIZED`, `CAPTURE_PENDING`, `PENDING`). Vira o alerta `retention_partition_blocked` e a próxima rodada tenta de novo. **Chargeback não protege:** o dossiê é um *snapshot* tirado ao registrar a disputa (L1.8) e não depende destas tabelas depois de salvo — **ligue `RETENTION_ENABLED` só depois que a L1.8 estiver em produção.**
+
+### 7.4 Como ligar a retenção com segurança
+
+1. Confirme que há **backup recente e restauração testada** (o `DROP` é irreversível).
+2. Defina `RETENTION_ENABLED=true` **e** `RETENTION_DRY_RUN=true` no worker; reinicie.
+3. No log do worker procure `retention_scan` e `retention_dry_run` (partição, intervalo, linhas estimadas, bytes). Confira que só aparecem meses com mais de 12 meses.
+4. Troque `RETENTION_DRY_RUN=false` e reinicie. Cada remoção sai como `retention_partition_dropped`.
+5. Para desligar de novo: `RETENTION_ENABLED=false`.
+
+### 7.5 Como validar (SQL no Postgres)
+
+```sql
+-- Partições existentes e bordas (a última deve estar >= 2 meses à frente)
+SELECT c.relname, pg_get_expr(c.relpartbound, c.oid)
+  FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+ WHERE i.inhparent = '"MeterSample"'::regclass ORDER BY 1;   -- idem "OcppMessage"
+-- A DEFAULT deve estar vazia
+SELECT (SELECT count(*) FROM "MeterSample_default") AS meter, (SELECT count(*) FROM "OcppMessage_default") AS ocpp;
+```
+
+No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_created`, `retention_disabled` (retenção desligada).
+
+### 7.6 Alertas (campo `alert` do log)
+
+| Alerta | Significado / ação |
+|---|---|
+| `partition_horizon_low` | Menos de 2 meses de partições à frente: a criação automática falhou/não roda. Ver `partition_maintenance_failed` e o worker. |
+| `partition_default_has_rows` | Há linhas na DEFAULT (mês sem partição, ou relógio de carregador fora do intervalo). O log traz o período; a próxima rodada move o que couber. |
+| `partition_maintenance_failed`, `partition_maintenance_boot_failed`, `retention_failed` | Erro inesperado — ver o campo `err`. |
+| `partition_maintenance_lock_timeout`, `retention_lock_timeout` | Outra transação segurava a tabela; repete na próxima rodada. |
+| `retention_partition_blocked` | Partição velha não apagada: há sessão aberta/dívida/pagamento dependendo dela (a lista de sessões vem no log). |
+| `retention_webhook_unprocessed_kept` | Webhook antigo **não processado** mantido: investigar por que não foi processado. |
+
+### 7.7 Riscos e observações
+
+- **`DROP` é irreversível.** A única rede é o backup; por isso a retenção nasce desligada e com dry-run.
+- **LGPD:** `OcppMessage.payload` guarda o `idTag` e `MeterSample` o consumo por sessão (dado pessoal indireto); a retenção de 12 meses também é a limitação de armazenamento. Pedido de apagamento de titular (rota de apagar conta) **não está coberto** por este job.
+- **Fuso:** as bordas das partições seguem o `TimeZone` do banco quando a migration inicial rodou (verificado: em `America/Cayenne` ficaram `-03`). A criação continua exatamente de onde a última partição termina, então funciona em qualquer fuso.
+- **Testado em Postgres 18** (testes de integração com banco real); não rodado em PG 16 nesta entrega — a função só usa recursos antigos (`regexp_match`, `ATTACH PARTITION`, `make_interval`), mas a CI (PG 16) é quem confirma.
+- **Rollback da migration:** ver o bloco comentado no fim de `20261005120000_partition_maintenance/migration.sql` (partições criadas são vazias e inofensivas).
+
+### 6.9 Configuração pelo painel: segurança e operação
+
+- **Quem pode:** só ADMIN. A senha atual é exigida em todo salvar (step-up, o mesmo do gateway; Redis do step-up fora do ar = salvar recusado com 503, nada gravado). Tentativas de senha erradas são limitadas e contam no mesmo balde do gateway.
+- **Segredos:** a senha SMTP e a apikey da Evolution são cifradas (AES-256-GCM, `v1:<kid>:...`) com a `PAYMENT_SECRETS_KEY`; **nunca** voltam à tela (só "configurada" e os 4 últimos caracteres da apikey), nunca vão para log, resposta de erro nem auditoria. **Sem a `PAYMENT_SECRETS_KEY` no servidor não dá para salvar senha/apikey** (a tela mostra o aviso e o salvar responde 503).
+- **Rotação da chave:** o script `npm run payments:recifrar-segredos` (seção "Rotação da PAYMENT_SECRETS_KEY") agora também re-cifra a senha SMTP e a apikey. Se a chave for trocada/perdida sem rotação, o canal fica desligado e a tela mostra `secretsDecryptable: false` — salve a senha/apikey de novo.
+- **Trocar o destino exige reenviar o segredo:** mudar o servidor/usuário SMTP ou a URL/instância da Evolution sem informar a senha/apikey de novo é recusado — assim um acesso indevido não consegue apontar o servidor para um endereço do atacante e capturar a senha salva. Vale também para o botão "Testar" com valores ainda não salvos.
+- **Anti-SSRF:** em produção, host SMTP/URL da Evolution apontando para a rede interna, loopback ou metadados de nuvem são recusados (na gravação e de novo na hora de conectar, no IP já validado — um DNS que muda entre a checagem e a conexão não passa). **Resíduo documentado:** o bloqueio vale para o que o painel configura; as envs `ALERT_*` são confiáveis (definidas por quem faz o deploy) e podem apontar para a rede interna. Redirecionamentos HTTP nunca são seguidos.
+- **Auditoria:** cada salvar gera uma linha em "Auditoria" (`UPDATE` / `NotificationChannelConfig`) com antes/depois dos campos não secretos (segredo só como "alterado", destinatários só como contagem) e dispara o alerta `communication_config_changed` (IMPORTANTE) **pela configuração antiga** — se alguém trocar os destinatários, o aviso ainda chega ao dono de antes. Se não foi você: troque a senha do admin e a `PAYMENT_SECRETS_KEY`.
+- **Migration:** `20261005140000_notification_channel_config` (tabela nova `NotificationChannelConfig`, singleton, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).

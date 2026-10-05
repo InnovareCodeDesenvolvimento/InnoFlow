@@ -85,3 +85,12 @@ export const VIGIAR_SESSOES_QUEUE_NAME = 'vigiar-sessoes'
 
 /** Sem dado próprio — mesmo espírito de `VarrerPreAutorizacoesCartaoJobData`. */
 export type VigiarSessoesJobData = Record<string, never>
+
+/**
+ * Manutenção de partições + retenção (N-11, Cronos 2026-10-05) — job REPEATABLE (`upsertJobScheduler`, agendado em `entrypoints/worker.ts`), sem dado
+ * próprio: cada disparo garante as partições futuras de MeterSample/OcppMessage e, só se RETENTION_ENABLED, aplica a retenção. Ver `services/manutencao/`.
+ */
+export const MANTER_PARTICOES_QUEUE_NAME = 'manter-particoes'
+
+/** Sem dado próprio — mesmo espírito de `VigiarSessoesJobData`. */
+export type ManterParticoesJobData = Record<string, never>

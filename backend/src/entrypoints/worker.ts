@@ -7,6 +7,7 @@ import { startPollTopupsPixWorker, schedulePollTopupsPixScan } from '../worker/j
 import { startCapturarSessaoCartaoWorker } from '../worker/jobs/capturarSessaoCartaoJob'
 import { startVarrerPreAutorizacoesCartaoWorker, scheduleVarrerPreAutorizacoesCartaoScan } from '../worker/jobs/varrerPreAutorizacoesCartaoJob'
 import { startVigiarSessoesWorker, scheduleVigiarSessoesScan } from '../worker/jobs/vigiarSessoesJob'
+import { startManterParticoesWorker, scheduleManterParticoes, manterParticoesNoBoot } from '../worker/jobs/manterParticoesJob'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -39,5 +40,13 @@ startVigiarSessoesWorker()
 scheduleVigiarSessoesScan().catch((err) =>
   logger.error({ err }, '[worker] falha ao agendar o watchdog de sessões — o worker segue de pé, mas sem vigilância automática até reiniciar'),
 )
+
+// N-11 (Cronos, 2026-10-05): partições mensais de MeterSample/OcppMessage (cria o que faltar, alerta horizonte curto/linhas na DEFAULT) + retenção
+// (DESLIGADA por padrão — RETENTION_ENABLED). Roda já no boot e depois a cada PARTITION_MAINTENANCE_INTERVAL_MS. Ver services/manutencao/.
+startManterParticoesWorker()
+scheduleManterParticoes().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar a manutenção de partições — o worker segue de pé, mas sem manutenção periódica até reiniciar'),
+)
+void manterParticoesNoBoot()
 
 logger.info('worker ok')

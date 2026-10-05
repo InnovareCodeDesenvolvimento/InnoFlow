@@ -314,6 +314,18 @@ const envSchema = z.object({
   // confirmação (STOP_UNCONFIRMED), descontando da carteira o saldo comprometido (`provisionalCostCents`)? false = D7b: bloqueia até confirmar.
   SESSION_ALLOW_START_WHILE_UNCONFIRMED: envBoolean(true),
 
+  // N-11 (05/10/2026) — manutenção de partições (MeterSample/OcppMessage) e retenção. Ver `services/manutencao/` e a seção "Partições e retenção" de docs/DEPLOY-EASYPANEL.md.
+  // Meses de partição a manter À FRENTE (o job cria o que faltar) e cadência do job (também roda 1x no boot do worker; idempotente, com lock consultivo).
+  PARTITION_AHEAD_MONTHS: z.coerce.number().int().min(3).max(60).default(6),
+  PARTITION_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).default(86_400_000),
+  // RETENÇÃO: DESLIGADA por padrão — ligada, purga por DETACH+DROP de partições INTEIRAS além do prazo (nunca AuditLog/financeiro). DRY_RUN só loga o que removeria (só vale com ENABLED=true).
+  // Prazos em dias (piso de 30) — DL6, decisão do dono (05/10/2026): MeterSample/OcppMessage 12 meses (365 d), WebhookEvent 180 d. Efetivo = prazo + até 1 mês (a partição só cai quando o mês INTEIRO passou do prazo).
+  RETENTION_ENABLED: envBoolean(false),
+  RETENTION_DRY_RUN: envBoolean(false),
+  RETENTION_OCPP_MESSAGE_DAYS: z.coerce.number().int().min(30).default(365),
+  RETENTION_METER_SAMPLE_DAYS: z.coerce.number().int().min(30).default(365),
+  RETENTION_WEBHOOK_EVENT_DAYS: z.coerce.number().int().min(30).default(180),
+
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem
   // trocou de rede); por IP e total REJEITAM o novo. Ver `core/realtime/streamLimiter.ts`.
