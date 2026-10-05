@@ -83,13 +83,16 @@ describe('endurecimento — comportamentos que mudam (rota real, banco real, Red
     })
   })
 
+  // L1.5: o registro agora carrega também o escopo (charge point/operador onde o comando foi disparado) — ids de teste fixos, só o dono importa aqui.
+  const ESCOPO = (userId: string) => ({ userId, chargePointId: 'cp-teste', operatorId: 'op-teste' })
+
   describe('GET /api/me/commands/:correlationId só devolve o resultado ao DONO (Órion)', () => {
     it('o dono lê o resultado; OUTRO motorista e um correlationId inexistente recebem PENDING — indistinguíveis (não confirma que o id existe)', async () => {
       const dono = await createUser({ role: 'DRIVER', label: 'cmd-dono', suffix })
       const intruso = await createUser({ role: 'DRIVER', label: 'cmd-intruso', suffix })
       const correlationId = randomUUID()
       chavesRedis.push(`ocpp:cmdresult:${correlationId}`)
-      await recordCommandResult(correlationId, 'ACCEPTED', dono.id)
+      await recordCommandResult(correlationId, 'ACCEPTED', ESCOPO(dono.id))
       const get = (id: string, token: string) => request(app).get(`/api/me/commands/${id}`).set('Authorization', `Bearer ${token}`)
 
       const doDono = await get(correlationId, dono.token)
@@ -106,7 +109,7 @@ describe('endurecimento — comportamentos que mudam (rota real, banco real, Red
       for (const status of ['REJECTED', 'TIMEOUT'] as const) {
         const id = randomUUID()
         chavesRedis.push(`ocpp:cmdresult:${id}`)
-        await recordCommandResult(id, status, dono.id)
+        await recordCommandResult(id, status, ESCOPO(dono.id))
         expect((await get(id, dono.token)).body).toEqual({ status })
         expect((await get(id, intruso.token)).body).toEqual({ status: 'PENDING' })
       }
@@ -117,12 +120,12 @@ describe('endurecimento — comportamentos que mudam (rota real, banco real, Red
       const tenant = await createTenant({ suffix, label: 'cmd-op', withCharger: false })
       const id = randomUUID()
       chavesRedis.push(`ocpp:cmdresult:${id}`)
-      await recordCommandResult(id, 'ACCEPTED', dono.id)
+      await recordCommandResult(id, 'ACCEPTED', ESCOPO(dono.id))
 
       const ttl = await redis.pttl(`ocpp:cmdresult:${id}`)
       expect(ttl).toBeGreaterThan(0)
       expect(ttl).toBeLessThanOrEqual(120_000)
-      expect(await redis.get(`ocpp:cmdresult:${id}`)).toBe(`${dono.id}|ACCEPTED`) // vinculado ao dono no valor gravado
+      expect(await redis.get(`ocpp:cmdresult:${id}`)).toBe(`${dono.id}|ACCEPTED|cp-teste|op-teste`) // vinculado ao dono E ao escopo (charge point/operador) no valor gravado
 
       expect((await request(app).get(`/api/me/commands/${id}`).set('Authorization', `Bearer ${tenant.staff.token}`)).status).toBe(403)
     })

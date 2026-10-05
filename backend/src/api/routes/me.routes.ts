@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { redis } from '../../lib/redis'
 import { logger } from '../../lib/logger'
-import { recordCommandResult, getCommandResult } from '../../ocpp/commandResultCache'
+import { recordCommandResult, getCommandResult, type CommandOwner } from '../../ocpp/commandResultCache'
 import { iniciarSessaoRemota } from '../../services/sessao/iniciarSessaoRemota'
 import { pedirParadaSessao } from '../../services/sessao/pedirParadaSessao'
 import { listarEstadosSessaoAberta, isSessaoAberta } from '../../core/sessao/estadosSessao'
@@ -488,6 +488,7 @@ router.post(
     // F5.9: ponto ÚNICO de RemoteStop (`pedirParadaSessao`). Um `Rejected`/erro de transporte NÃO fecha mais a sessão com dinheiro (era o
     // `reconciliarSessaoOrfa`, defeito M5/M6): ela vira STOP_UNCONFIRMED e o StopTransaction do carregador — ou o watchdog, depois da
     // janela — decide. Timeout só registra.
+    const commandOwner: CommandOwner = { userId, chargePointId: session.chargePointId, operatorId: session.operatorId }
     pedirParadaSessao({ sessionId: session.id, solicitante: 'DRIVER' })
       .then((resultado) => {
         logger.info({ sessionId: session.id, correlationId, resultado }, '[api][me] stop de sessão concluído')
@@ -495,9 +496,9 @@ router.post(
           // Não houve comando NOVO por este pedido, e deixar o correlationId PENDING para sempre era o defeito: EM_COOLDOWN = outro pedido de parada
           // (guarda/watchdog/admin) acabou de sair e já cobre este; NAO_ABERTA/CONDICAO_MUDOU = a sessão fechou no meio. Nos dois casos o objetivo
           // do toque ("parar") está atendido ou em curso — resultado coerente: ACCEPTED. O PWA relê a sessão (estado real) de qualquer forma.
-          return recordCommandResult(correlationId, 'ACCEPTED', userId)
+          return recordCommandResult(correlationId, 'ACCEPTED', commandOwner)
         }
-        return recordCommandResult(correlationId, resultado.comando === 'ACCEPTED' ? 'ACCEPTED' : resultado.comando === 'TIMEOUT' ? 'TIMEOUT' : 'REJECTED', userId)
+        return recordCommandResult(correlationId, resultado.comando === 'ACCEPTED' ? 'ACCEPTED' : resultado.comando === 'TIMEOUT' ? 'TIMEOUT' : 'REJECTED', commandOwner)
       })
       .catch((err) => logger.error({ err, sessionId: session.id, correlationId }, '[api][me] stop de sessão falhou'))
 

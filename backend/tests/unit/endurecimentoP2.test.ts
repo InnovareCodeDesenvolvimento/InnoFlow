@@ -306,23 +306,24 @@ describe('loginThrottle — reserva ANTES de avaliar (rajada paralela)', () => {
 })
 
 describe('resultado de comando vinculado ao usuário (Órion)', () => {
+  const ESCOPO = (userId: string) => ({ userId, chargePointId: 'cp-1', operatorId: 'op-1' }) // L1.5: o registro também carrega o escopo
   it('o dono lê o próprio resultado', () => {
-    expect(decodeCommandResult(encodeCommandResult('user-a', 'ACCEPTED'), 'user-a')).toBe('ACCEPTED')
-    expect(decodeCommandResult(encodeCommandResult('user-a', 'TIMEOUT'), 'user-a')).toBe('TIMEOUT')
+    expect(decodeCommandResult(encodeCommandResult(ESCOPO('user-a'), 'ACCEPTED'), 'user-a')).toBe('ACCEPTED')
+    expect(decodeCommandResult(encodeCommandResult(ESCOPO('user-a'), 'TIMEOUT'), 'user-a')).toBe('TIMEOUT')
   })
 
   it('OUTRO usuário com o mesmo correlationId recebe null (=PENDING, indistinguível de "não existe")', () => {
-    expect(decodeCommandResult(encodeCommandResult('user-a', 'ACCEPTED'), 'user-b')).toBeNull()
+    expect(decodeCommandResult(encodeCommandResult(ESCOPO('user-a'), 'ACCEPTED'), 'user-b')).toBeNull()
   })
 
   it('valor antigo (sem dono), malformado ou inexistente -> null', () => {
-    expect(decodeCommandResult('ACCEPTED', 'user-a')).toBeNull() // formato antigo: sem "userId|"
+    expect(decodeCommandResult('ACCEPTED', 'user-a')).toBeNull() // sem "userId|": malformado
     expect(decodeCommandResult('user-a|LIXO', 'user-a')).toBeNull()
     expect(decodeCommandResult(null, 'user-a')).toBeNull()
     expect(decodeCommandResult('', 'user-a')).toBeNull()
   })
 
   it('prefixo de userId não engana (user-a não lê o resultado de user-ab)', () => {
-    expect(decodeCommandResult(encodeCommandResult('user-ab', 'ACCEPTED'), 'user-a')).toBeNull()
+    expect(decodeCommandResult(encodeCommandResult(ESCOPO('user-ab'), 'ACCEPTED'), 'user-a')).toBeNull()
   })
 })

@@ -9,7 +9,7 @@ import { resolveActiveTariff } from '../../ocpp/tariffResolution'
 import { avaliarInicioSessao } from '../../core/carteira/avaliarInicioSessao'
 import { carregarSessoesNaoConfirmadas } from '../carteira/saldoComprometido'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
-import { recordCommandResult, isAcceptedCommandResult } from '../../ocpp/commandResultCache'
+import { recordCommandPending, recordCommandResult, isAcceptedCommandResult, type CommandOwner } from '../../ocpp/commandResultCache'
 import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
@@ -288,6 +288,11 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   const correlationId = randomUUID()
   logger.info({ chargePointId: chargePoint.id, connectorId, userId, idTag, correlationId, paymentMode: mode }, '[sessao] remote-start disparado')
 
+  // L1.5: DONO + ESCOPO do comando (motorista afetado e onde foi disparado) — a consulta do motorista e a do staff conferem isto. Tudo resolvido no servidor.
+  const commandOwner: CommandOwner = { userId, chargePointId: chargePoint.id, operatorId: chargePoint.operatorId }
+  // "Em andamento" gravado ANTES do envio (fire-and-forget; a mesma conexão Redis garante a ordem em relação ao resultado, gravado depois).
+  recordCommandPending(correlationId, commandOwner).catch((err) => logger.warn({ err, correlationId }, '[sessao] falha ao gravar o estado PENDING do comando em Redis (não bloqueante)'))
+
   sendCommand(chargePoint.id, 'RemoteStartTransaction', { connectorId, idTag }, { timeoutMs: COMMAND_TIMEOUT_MS })
     .then((result) => {
       logger.info({ chargePointId: chargePoint.id, correlationId, result }, '[sessao] remote-start concluído')
@@ -295,7 +300,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       if (!accepted) {
         void cancelarPreAutorizacaoSeCard(mode, cardPaymentIntentId)
       }
-      return recordCommandResult(correlationId, accepted ? 'ACCEPTED' : 'REJECTED', userId)
+      return recordCommandResult(correlationId, accepted ? 'ACCEPTED' : 'REJECTED', commandOwner)
     })
     .catch((err) => {
       logger.error({ err, chargePointId: chargePoint.id, correlationId }, '[sessao] remote-start falhou')
@@ -308,7 +313,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
       if (!timedOut) {
         void cancelarPreAutorizacaoSeCard(mode, cardPaymentIntentId)
       }
-      return recordCommandResult(correlationId, timedOut ? 'TIMEOUT' : 'REJECTED', userId)
+      return recordCommandResult(correlationId, timedOut ? 'TIMEOUT' : 'REJECTED', commandOwner)
     })
     .catch((err) => logger.error({ err, correlationId }, '[sessao] falha ao gravar resultado do comando em Redis (não bloqueante)'))
 

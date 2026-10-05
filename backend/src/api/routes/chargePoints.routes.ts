@@ -11,6 +11,7 @@ import { asyncHandler } from '../middleware/asyncHandler'
 import { authenticate } from '../middleware/auth'
 import { auditCtx } from '../middleware/auditTrail'
 import { operatorScopeWhere, requireOperatorOrAdmin } from '../middleware/tenantScope'
+import { requireRecargaRemotaPolicy } from '../middleware/recargaRemotaPolicy'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createChargePointSchema, updateChargePointSchema, type CreateChargePointInput, type UpdateChargePointInput } from '../schemas/chargePoint.schema'
@@ -240,6 +241,7 @@ router.post(
 
 router.post(
   '/:id/commands/remote-start',
+  requireRecargaRemotaPolicy, // DL4: só ADMIN no lote 1 — ANTES da validação (um 403 não revela o formato do corpo). Regra em core/sessao/politicaRecargaRemota.ts
   validateBody(remoteStartCommandSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as RemoteStartCommandInput
@@ -268,7 +270,8 @@ router.post(
     // não resultado — mesma regra do `dispatchCommand` acima).
     auditCtx(res).describe({
       action: 'REMOTE_COMMAND',
-      actionDetail: `RemoteStartTransaction (userId=${user.id})`,
+      // L1.5: quem (ator da linha), para quem (userId), POR QUÊ (reason, já aparado/validado) e `correlationId` ficam todos na mesma linha de auditoria.
+      actionDetail: `RemoteStartTransaction (userId=${user.id}, reason=${body.reason})`,
       correlationId: resultado.correlationId,
     })
   }),
