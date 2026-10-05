@@ -10,8 +10,17 @@
  *   node scripts/medir-tamanhos.mjs --json e2e-visual/tamanhos-baseline.json   # grava o JSON
  *   node scripts/medir-tamanhos.mjs --comparar e2e-visual/tamanhos-baseline.json # diferença contra a baseline (sai com 1 se estourar orçamento)
  *
- * Orçamentos (docs/DESIGN-SYSTEM-UNIFICACAO.md §3.11), aplicados no --comparar:
- *   CSS global gzip ≤ baseline + 2.500 B · precache bruto ≤ baseline + 40 KB · modulepreload do index.html sem chunk novo.
+ * Orçamentos (política de 05/10/2026, aprovada pelo dono; substitui o "+40 KB no total do precache" da §3.11 de docs/DESIGN-SYSTEM-UNIFICACAO.md, que nasceu para uma
+ * unificação visual e não para um produto que ganhou 20+ telas lazy). Aplicados no --comparar contra `e2e-visual/tamanhos-baseline.json`:
+ *   1. CSS global gzip ≤ baseline + 1.500 B (bloqueia TODAS as rotas: continua apertado).
+ *   2. modulepreload do index.html: nenhum chunk fora da baseline (por nome sem hash) e nunca mais chunks que a baseline.
+ *   3. PRECACHE POR CHUNK (nome sem hash; JS e CSS de assets/, gzip nível 9):
+ *        chunk CRÍTICO (está no modulepreload do index.html ou é `vendor-*`/`ui-kit`/`app-hooks`/`index`: carrega em quase toda rota): ≤ ceil(baseline × 1,03 + 512 B);
+ *        chunk de ROTA/lazy (qualquer outro que já existia): ≤ ceil(baseline × 1,10 + 1.024 B);
+ *        chunk NOVO (sem baseline): só se NÃO for crítico e ≤ 40 KB gzip.
+ *      Estouro de UM chunk reprova com o nome dele (quem inchou a rota fica óbvio); o crescimento natural de uma tela não derruba a checagem das outras.
+ *   4. Teto GERAL do precache: bruto e gzip ≤ baseline × 1,15 (rede de segurança contra "mil chunks pequenos").
+ * A baseline é RE-ANCORADA a cada rodada que o dono aprovar (grave com --json e registre em e2e-visual/BASELINE.md); o histórico da A0 (04/10/2026) fica no campo `a0` do JSON.
  */
 import { gzipSync } from "node:zlib"
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -94,20 +103,69 @@ const comparar = opt("comparar")
 if (comparar) {
   const base = JSON.parse(readFileSync(path.resolve(root, comparar), "utf8"))
   const falhas = []
+  const semHash = (n) => n.replace(/-[\w-]{8}\.(js|css)$/, "-.$1")
+  const KB = 1024
   const cssAgora = soma(resultado.cssGlobal, "gzip")
   const cssBase = soma(base.cssGlobal, "gzip")
-  console.log(`\nCSS global gzip: ${cssBase} -> ${cssAgora} (${cssAgora - cssBase >= 0 ? "+" : ""}${cssAgora - cssBase} B; orçamento +2500 B)`)
-  if (cssAgora - cssBase > 2500) falhas.push("CSS global gzip acima do orçamento (+2.500 B)")
+  console.log(`\nCSS global gzip: ${cssBase} -> ${cssAgora} (${cssAgora - cssBase >= 0 ? "+" : ""}${cssAgora - cssBase} B; orçamento +1500 B)`)
+  if (cssAgora - cssBase > 1500) falhas.push("CSS global gzip acima do orçamento (+1.500 B)")
+
+  // 2. modulepreload
+  const antesMp = new Set(base.modulepreloadIndexHtml.map((x) => semHash(x.arquivo)))
+  const novosMp = resultado.modulepreloadIndexHtml.map((x) => semHash(x.arquivo)).filter((n) => !antesMp.has(n))
+  console.log(`modulepreload do index.html: ${base.modulepreloadIndexHtml.length} -> ${modulepreload.length}${novosMp.length ? `  NOVOS: ${novosMp.join(", ")}` : ""}`)
+  if (novosMp.length) falhas.push(`modulepreload ganhou chunk(s): ${novosMp.join(", ")}`)
+  if (modulepreload.length > base.modulepreloadIndexHtml.length) falhas.push(`modulepreload passou de ${base.modulepreloadIndexHtml.length} para ${modulepreload.length} chunks`)
+
+  // 3. precache por chunk
+  const porChunk = (itens) => {
+    const m = new Map()
+    for (const x of itens) {
+      if (!/^assets\/.*\.(js|css)$/.test(x.arquivo)) continue
+      const k = semHash(x.arquivo)
+      const a = m.get(k) ?? { raw: 0, gzip: 0 }
+      a.raw += x.raw
+      a.gzip += x.gzip
+      m.set(k, a)
+    }
+    return m
+  }
+  const cBase = porChunk(base.precache.itens)
+  const cAgora = porChunk(resultado.precache.itens)
+  const critico = (k) => antesMp.has(k) || /^assets\/(vendor-|ui-kit|app-hooks|index-)/.test(k)
+  const linhas = []
+  for (const [k, v] of cAgora) {
+    const b = cBase.get(k)
+    let limite
+    let classe
+    if (!b) {
+      classe = "NOVO"
+      limite = critico(k) ? 0 : 40 * KB
+    } else if (critico(k)) {
+      classe = "crítico"
+      limite = Math.ceil(b.gzip * 1.03 + 512)
+    } else {
+      classe = "rota"
+      limite = Math.ceil(b.gzip * 1.1 + 1024)
+    }
+    const estourou = v.gzip > limite
+    if (estourou) falhas.push(`chunk ${k} (${classe}): ${b ? b.gzip : 0} -> ${v.gzip} B gzip, limite ${limite}`)
+    linhas.push({ k, classe, base: b?.gzip ?? 0, agora: v.gzip, limite, estourou })
+  }
+  const sumiram = [...cBase.keys()].filter((k) => !cAgora.has(k))
+  console.log(`\nPrecache por chunk (gzip): ${linhas.length} chunks; ${linhas.filter((l) => l.classe === "NOVO").length} novos, ${sumiram.length} sumiram, ${linhas.filter((l) => l.estourou).length} acima do limite`)
+  for (const l of linhas.filter((x) => x.estourou || x.classe === "NOVO" || x.agora - x.base > 0.05 * Math.max(x.base, 1) + 512).sort((a, b) => b.agora - b.base - (a.agora - a.base)).slice(0, 25))
+    console.log(`  ${l.estourou ? "ESTOUROU" : "        "} ${l.classe.padEnd(7)} ${String(l.base).padStart(7)} -> ${String(l.agora).padStart(7)} B (limite ${l.limite})  ${l.k}`)
+
+  // 4. teto geral
   const preAgora = resultado.precache.raw
   const preBase = base.precache.raw
-  console.log(`Precache bruto: ${preBase} -> ${preAgora} (${preAgora - preBase >= 0 ? "+" : ""}${preAgora - preBase} B; orçamento +40960 B)`)
-  if (preAgora - preBase > 40 * 1024) falhas.push("Precache acima do orçamento (+40 KB)")
-  // Os nomes têm hash: compara pelo "nome sem hash" (assets/landing-AbC123.js -> assets/landing-.js).
-  const semHash = (n) => n.replace(/-[\w-]{8}\./, "-.")
-  const antes = new Set(base.modulepreloadIndexHtml.map((x) => semHash(x.arquivo)))
-  const novos = resultado.modulepreloadIndexHtml.map((x) => semHash(x.arquivo)).filter((n) => !antes.has(n))
-  console.log(`modulepreload do index.html: ${base.modulepreloadIndexHtml.length} -> ${modulepreload.length}${novos.length ? `  NOVOS: ${novos.join(", ")}` : ""}`)
-  if (novos.length) falhas.push(`modulepreload ganhou chunk(s): ${novos.join(", ")}`)
+  const gzAgora = resultado.precache.gzip
+  const gzBase = base.precache.gzip
+  console.log(`Precache bruto: ${preBase} -> ${preAgora} (${((preAgora / preBase - 1) * 100).toFixed(1)}%; teto +15%) · gzip: ${gzBase} -> ${gzAgora} (${((gzAgora / gzBase - 1) * 100).toFixed(1)}%; teto +15%)`)
+  if (preAgora > preBase * 1.15) falhas.push(`Precache bruto acima de +15% (${preBase} -> ${preAgora})`)
+  if (gzAgora > gzBase * 1.15) falhas.push(`Precache gzip acima de +15% (${gzBase} -> ${gzAgora})`)
+
   if (falhas.length) {
     console.error("\nORÇAMENTO ESTOURADO:\n- " + falhas.join("\n- "))
     process.exit(1)

@@ -1,23 +1,23 @@
 {
-  "geradoEm": "2026-10-04T18:32:28.075Z",
+  "geradoEm": "2026-10-05T22:17:33.205Z",
   "metodo": "gzip nível 9 (node:zlib) sobre os arquivos de dist/",
   "cssGlobal": [
     {
-      "arquivo": "assets/index-FaINUUnR.css",
-      "raw": 65042,
-      "gzip": 11944
+      "arquivo": "assets/index-BEYPe1Vt.css",
+      "raw": 76084,
+      "gzip": 14296
     }
   ],
   "cssTodos": [
     {
-      "arquivo": "assets/index-FaINUUnR.css",
-      "raw": 65042,
-      "gzip": 11944
+      "arquivo": "assets/index-BEYPe1Vt.css",
+      "raw": 76084,
+      "gzip": 14296
     },
     {
-      "arquivo": "assets/landing--M5hjYrt.css",
-      "raw": 19062,
-      "gzip": 4201
+      "arquivo": "assets/landing-IJMx8eya.css",
+      "raw": 19882,
+      "gzip": 4357
     },
     {
       "arquivo": "assets/StationsMap-CcXJxNtP.css",
@@ -25,21 +25,26 @@
       "gzip": 6313
     },
     {
-      "arquivo": "assets/pagamento-cartao-B8j8Uu1R.css",
-      "raw": 2793,
-      "gzip": 1095
+      "arquivo": "assets/tour-BaO26yJ4.css",
+      "raw": 6866,
+      "gzip": 2061
+    },
+    {
+      "arquivo": "assets/pagamento-cartao-BZI6-OiJ.css",
+      "raw": 5176,
+      "gzip": 1747
     }
   ],
   "jsTotal": {
-    "arquivos": 64,
-    "raw": 1473596,
-    "gzip": 471054
+    "arquivos": 107,
+    "raw": 1879524,
+    "gzip": 616597
   },
   "jsEntrada": [
     {
-      "arquivo": "assets/index-DCaAIxX4.js",
-      "raw": 11398,
-      "gzip": 3454
+      "arquivo": "assets/index-DRJnSheH.js",
+      "raw": 19414,
+      "gzip": 5785
     },
     {
       "arquivo": "registerSW.js",
@@ -49,14 +54,14 @@
   ],
   "modulepreloadIndexHtml": [
     {
-      "arquivo": "assets/appInfo-CxbOWtiP.js",
+      "arquivo": "assets/appInfo-Bq1FOQKL.js",
       "raw": 131,
       "gzip": 128
     },
     {
-      "arquivo": "assets/landing-BiRyf-Me.js",
-      "raw": 40401,
-      "gzip": 16036
+      "arquivo": "assets/landing-COCieSi-.js",
+      "raw": 40889,
+      "gzip": 16114
     },
     {
       "arquivo": "assets/rolldown-runtime-hePW80VL.js",
@@ -64,276 +69,456 @@
       "gzip": 428
     },
     {
-      "arquivo": "assets/vendor-core-Bclds9ka.js",
-      "raw": 296731,
-      "gzip": 91977
+      "arquivo": "assets/vendor-core-DaVX0mhA.js",
+      "raw": 3245,
+      "gzip": 1278
     },
     {
-      "arquivo": "assets/vendor-core-Cif3A50v.js",
-      "raw": 3048,
-      "gzip": 1184
+      "arquivo": "assets/vendor-core-p252TBCs.js",
+      "raw": 296785,
+      "gzip": 91997
     },
     {
-      "arquivo": "assets/vendor-icons-DIKEyEBI.js",
-      "raw": 30025,
-      "gzip": 9969
+      "arquivo": "assets/vendor-icons-BlMZBV4D.js",
+      "raw": 35301,
+      "gzip": 11557
     }
   ],
   "jsPorChunk": [
     {
-      "arquivo": "assets/vendor-core-Bclds9ka.js",
-      "raw": 296731,
-      "gzip": 91977
+      "arquivo": "assets/vendor-core-p252TBCs.js",
+      "raw": 296785,
+      "gzip": 91997
     },
     {
-      "arquivo": "assets/pagamento-cartao-DYhIAhwF.js",
-      "raw": 230361,
-      "gzip": 71304
+      "arquivo": "assets/pagamento-cartao-CmkudJVN.js",
+      "raw": 235524,
+      "gzip": 75165
     },
     {
-      "arquivo": "assets/ui-kit-BzXvLWTp.js",
-      "raw": 168480,
-      "gzip": 53107
+      "arquivo": "assets/ui-kit-D_YtzdM5.js",
+      "raw": 177249,
+      "gzip": 55483
     },
     {
-      "arquivo": "assets/StationsMap-U5M3xsuq.js",
-      "raw": 152059,
-      "gzip": 44328
+      "arquivo": "assets/StationsMap-zx2G4GcM.js",
+      "raw": 152058,
+      "gzip": 44326
     },
     {
-      "arquivo": "assets/vendor-forms-hLwd2MyB.js",
+      "arquivo": "assets/app-hooks-Y_5fGbT4.js",
+      "raw": 134964,
+      "gzip": 43959
+    },
+    {
+      "arquivo": "assets/vendor-forms-D_Z80eig.js",
       "raw": 119379,
-      "gzip": 35595
+      "gzip": 35596
     },
     {
-      "arquivo": "assets/app-hooks-CZsCkku2.js",
-      "raw": 79665,
-      "gzip": 27172
+      "arquivo": "assets/Backups-wCnKFzSj.js",
+      "raw": 59332,
+      "gzip": 16480
     },
     {
-      "arquivo": "assets/GatewayPagamento-C1bkg-Te.js",
-      "raw": 44222,
-      "gzip": 12291
+      "arquivo": "assets/landing-COCieSi-.js",
+      "raw": 40889,
+      "gzip": 16114
     },
     {
-      "arquivo": "assets/landing-BiRyf-Me.js",
-      "raw": 40401,
-      "gzip": 16036
+      "arquivo": "assets/GatewayPagamento-DBRu0UCd.js",
+      "raw": 36519,
+      "gzip": 11078
     },
     {
-      "arquivo": "assets/landing-below-DM9HAymo.js",
-      "raw": 33764,
-      "gzip": 8627
+      "arquivo": "assets/vendor-icons-BlMZBV4D.js",
+      "raw": 35301,
+      "gzip": 11557
     },
     {
-      "arquivo": "assets/vendor-icons-DIKEyEBI.js",
-      "raw": 30025,
-      "gzip": 9969
+      "arquivo": "assets/landing-below-C1A5YXFx.js",
+      "raw": 33738,
+      "gzip": 8621
     },
     {
-      "arquivo": "assets/Carteiras-2wTuQ_0Z.js",
-      "raw": 16366,
-      "gzip": 5331
+      "arquivo": "assets/Perfil-Dxickl2C.js",
+      "raw": 29152,
+      "gzip": 9243
     },
     {
-      "arquivo": "assets/TariffAssignmentManager-D5pWsDpC.js",
-      "raw": 16198,
-      "gzip": 5636
+      "arquivo": "assets/useCommunicationEditor-C4sM_9P1.js",
+      "raw": 27848,
+      "gzip": 9526
     },
     {
-      "arquivo": "assets/Layout-CbwHlbSG.js",
-      "raw": 15018,
-      "gzip": 4560
+      "arquivo": "assets/ChargePoints-U5lqWD53.js",
+      "raw": 27559,
+      "gzip": 8249
     },
     {
-      "arquivo": "assets/CarteiraAdicionar-RnYZ-UDk.js",
-      "raw": 14199,
-      "gzip": 4633
+      "arquivo": "assets/Legal-DdAG-uLJ.js",
+      "raw": 22005,
+      "gzip": 8149
     },
     {
-      "arquivo": "assets/ChargePoints-DdCJiiXI.js",
-      "raw": 13261,
-      "gzip": 4339
+      "arquivo": "assets/Sessoes-BLiRkfa2.js",
+      "raw": 21676,
+      "gzip": 6627
     },
     {
-      "arquivo": "assets/ChargePointLanding-DeeYQ_9B.js",
-      "raw": 13078,
-      "gzip": 4319
+      "arquivo": "assets/index-DRJnSheH.js",
+      "raw": 19414,
+      "gzip": 5785
     },
     {
-      "arquivo": "assets/Dashboard-C0INDj0H.js",
-      "raw": 12055,
-      "gzip": 3268
+      "arquivo": "assets/Layout-DeZdAURe.js",
+      "raw": 17696,
+      "gzip": 5494
     },
     {
-      "arquivo": "assets/Mapa-B6J-Kqq1.js",
-      "raw": 11896,
-      "gzip": 4157
+      "arquivo": "assets/GeralTab-Ba1jrBqg.js",
+      "raw": 17509,
+      "gzip": 6237
     },
     {
-      "arquivo": "assets/index-DCaAIxX4.js",
-      "raw": 11398,
-      "gzip": 3454
+      "arquivo": "assets/Dashboard-Cbf-NozR.js",
+      "raw": 17124,
+      "gzip": 4920
     },
     {
-      "arquivo": "assets/Sessoes-DmhBDN9z.js",
-      "raw": 10115,
-      "gzip": 3292
+      "arquivo": "assets/EmailTab-cVb8xFpU.js",
+      "raw": 16950,
+      "gzip": 5402
     },
     {
-      "arquivo": "assets/Tariffs-C3wBsl5S.js",
-      "raw": 9891,
-      "gzip": 3460
+      "arquivo": "assets/OnboardingTour-BZDaJI8D.js",
+      "raw": 16571,
+      "gzip": 6366
     },
     {
-      "arquivo": "assets/SessaoDetalhe-xFdpdlzX.js",
-      "raw": 9580,
-      "gzip": 3019
+      "arquivo": "assets/TariffAssignmentManager-De_y8Qqd.js",
+      "raw": 16199,
+      "gzip": 5641
     },
     {
-      "arquivo": "assets/Auditoria-5gxlM0BT.js",
-      "raw": 8114,
-      "gzip": 2847
+      "arquivo": "assets/Carteiras-CnGiVzBY.js",
+      "raw": 16105,
+      "gzip": 5261
     },
     {
-      "arquivo": "assets/Home-ZCU7C9G8.js",
-      "raw": 7813,
-      "gzip": 2282
+      "arquivo": "assets/CarteiraAdicionar-BWr_VKX_.js",
+      "raw": 14588,
+      "gzip": 4687
     },
     {
-      "arquivo": "assets/Sessao-odAlwJXu.js",
-      "raw": 7535,
-      "gzip": 2678
+      "arquivo": "assets/Chargebacks-B3fpvtj3.js",
+      "raw": 13813,
+      "gzip": 4471
     },
     {
-      "arquivo": "assets/Connectors-mS-IgW6p.js",
-      "raw": 7327,
-      "gzip": 2771
+      "arquivo": "assets/ChargePointLanding-BDDTz3ZL.js",
+      "raw": 12688,
+      "gzip": 4222
     },
     {
-      "arquivo": "assets/Sites-Bh1UTCAI.js",
-      "raw": 6707,
-      "gzip": 2498
+      "arquivo": "assets/Mapa-D195SHYm.js",
+      "raw": 11224,
+      "gzip": 4058
     },
     {
-      "arquivo": "assets/Layout-DHUnYEaB.js",
-      "raw": 6184,
-      "gzip": 1920
+      "arquivo": "assets/reversals-DPbDKDb3.js",
+      "raw": 10917,
+      "gzip": 4365
     },
     {
-      "arquivo": "assets/GoogleAuthSection-DGGf_5VG.js",
-      "raw": 5972,
-      "gzip": 2561
+      "arquivo": "assets/Pagamentos-C6l_IC_P.js",
+      "raw": 10468,
+      "gzip": 3776
     },
     {
-      "arquivo": "assets/AuthTokens-BCKB4aq_.js",
-      "raw": 5380,
-      "gzip": 2228
+      "arquivo": "assets/Tariffs-USHA3MDO.js",
+      "raw": 9938,
+      "gzip": 3477
     },
     {
-      "arquivo": "assets/Cartoes-N7b5BnO1.js",
-      "raw": 5283,
-      "gzip": 2191
+      "arquivo": "assets/SessaoDetalhe-BRK8AHIK.js",
+      "raw": 9828,
+      "gzip": 3162
     },
     {
-      "arquivo": "assets/Login-CSyOj0P6.js",
-      "raw": 5069,
-      "gzip": 2096
+      "arquivo": "assets/Sessao-CCMncu8O.js",
+      "raw": 8690,
+      "gzip": 2951
     },
     {
-      "arquivo": "assets/Financeiro-CSVgunlG.js",
-      "raw": 4583,
-      "gzip": 1868
+      "arquivo": "assets/DevolucoesContasExcluidas-DJheO_14.js",
+      "raw": 8426,
+      "gzip": 3244
     },
     {
-      "arquivo": "assets/Carteira-D7kVXf-X.js",
-      "raw": 4491,
-      "gzip": 1628
+      "arquivo": "assets/Auditoria-BkfL487u.js",
+      "raw": 8169,
+      "gzip": 2875
     },
     {
-      "arquivo": "assets/ChargePointTariffsDialog-W_kua79f.js",
-      "raw": 4068,
-      "gzip": 1709
+      "arquivo": "assets/Connectors-DW8hYkG-.js",
+      "raw": 7370,
+      "gzip": 2787
     },
     {
-      "arquivo": "assets/MovimentoDiario-qEFb0LHT.js",
-      "raw": 3779,
-      "gzip": 1467
+      "arquivo": "assets/GoogleAuthSection-DUWMxAZX.js",
+      "raw": 7248,
+      "gzip": 3095
     },
     {
-      "arquivo": "assets/Faturamento-C7GXDFJm.js",
-      "raw": 3760,
+      "arquivo": "assets/Home-c7CebX4t.js",
+      "raw": 7150,
+      "gzip": 2256
+    },
+    {
+      "arquivo": "assets/Sites-DctCQSqX.js",
+      "raw": 6749,
+      "gzip": 2509
+    },
+    {
+      "arquivo": "assets/Layout-fBFqgCH-.js",
+      "raw": 6380,
+      "gzip": 2074
+    },
+    {
+      "arquivo": "assets/Mascot-vBoToFMn.js",
+      "raw": 5612,
+      "gzip": 4142
+    },
+    {
+      "arquivo": "assets/ChannelTestPanel-BFllnfec.js",
+      "raw": 5489,
+      "gzip": 2100
+    },
+    {
+      "arquivo": "assets/Layout-C6FpNOnz.js",
+      "raw": 5480,
+      "gzip": 2257
+    },
+    {
+      "arquivo": "assets/AuthTokens-CrHxNLi1.js",
+      "raw": 5425,
+      "gzip": 2238
+    },
+    {
+      "arquivo": "assets/Cartoes-CR5rHWWF.js",
+      "raw": 5047,
+      "gzip": 2168
+    },
+    {
+      "arquivo": "assets/ResetPassword-DAMbtaMQ.js",
+      "raw": 4919,
+      "gzip": 2074
+    },
+    {
+      "arquivo": "assets/AlertasTab-U35cRZQ3.js",
+      "raw": 4836,
+      "gzip": 1981
+    },
+    {
+      "arquivo": "assets/Carteira-CwNe4T-U.js",
+      "raw": 4786,
+      "gzip": 1844
+    },
+    {
+      "arquivo": "assets/ForgotPassword-CEi3s7gr.js",
+      "raw": 4755,
+      "gzip": 1924
+    },
+    {
+      "arquivo": "assets/Financeiro-XJsGDXJa.js",
+      "raw": 4544,
+      "gzip": 1861
+    },
+    {
+      "arquivo": "assets/WhatsappTab-mHPPi49F.js",
+      "raw": 4463,
+      "gzip": 2047
+    },
+    {
+      "arquivo": "assets/ChargePointTariffsDialog-BDdbqEsZ.js",
+      "raw": 4070,
+      "gzip": 1712
+    },
+    {
+      "arquivo": "assets/AuthShell-CveCNTpd.js",
+      "raw": 3904,
+      "gzip": 1454
+    },
+    {
+      "arquivo": "assets/MovimentoDiario-BzFjaFRq.js",
+      "raw": 3807,
+      "gzip": 1493
+    },
+    {
+      "arquivo": "assets/Faturamento-hD9c4Wnu.js",
+      "raw": 3747,
       "gzip": 1604
     },
     {
-      "arquivo": "assets/Layout-Dk7VWZ-c.js",
-      "raw": 3661,
-      "gzip": 1553
+      "arquivo": "assets/UpdatedAgo-B7t16ibr.js",
+      "raw": 3274,
+      "gzip": 1367
     },
     {
-      "arquivo": "assets/Register--rR-zm5f.js",
-      "raw": 3544,
-      "gzip": 1544
+      "arquivo": "assets/vendor-core-DaVX0mhA.js",
+      "raw": 3245,
+      "gzip": 1278
     },
     {
-      "arquivo": "assets/Pagamentos-Dqr1cii8.js",
-      "raw": 3243,
-      "gzip": 1470
+      "arquivo": "assets/Login-BAkFn08V.js",
+      "raw": 3161,
+      "gzip": 1481
     },
     {
-      "arquivo": "assets/UpdatedAgo-DHUX2D1v.js",
-      "raw": 3168,
-      "gzip": 1340
+      "arquivo": "assets/Register-CV_R8HSg.js",
+      "raw": 3013,
+      "gzip": 1490
     },
     {
-      "arquivo": "assets/vendor-core-Cif3A50v.js",
-      "raw": 3048,
+      "arquivo": "assets/CardEligibilityNotice-Bac_ivY5.js",
+      "raw": 2953,
+      "gzip": 1144
+    },
+    {
+      "arquivo": "assets/Configuracoes-xXf4wxuL.js",
+      "raw": 2745,
+      "gzip": 1364
+    },
+    {
+      "arquivo": "assets/SecretField-CRUTGi98.js",
+      "raw": 2562,
+      "gzip": 1003
+    },
+    {
+      "arquivo": "assets/Sessoes-DMTVdWX6.js",
+      "raw": 2524,
+      "gzip": 1239
+    },
+    {
+      "arquivo": "assets/ConsentReacceptDialog-_LPUWng6.js",
+      "raw": 2502,
+      "gzip": 1316
+    },
+    {
+      "arquivo": "assets/PublicSiteCard-39dOcW31.js",
+      "raw": 2466,
+      "gzip": 1123
+    },
+    {
+      "arquivo": "assets/TermsAcceptance-D3VZBoJD.js",
+      "raw": 2376,
       "gzip": 1184
     },
     {
-      "arquivo": "assets/CardEligibilityNotice-BqcyAtCH.js",
-      "raw": 2665,
-      "gzip": 1094
+      "arquivo": "assets/ConfirmSaveDialog-CdeSov0d.js",
+      "raw": 2352,
+      "gzip": 1172
     },
     {
-      "arquivo": "assets/PublicSiteCard-BDhaOYrK.js",
-      "raw": 2482,
-      "gzip": 1134
+      "arquivo": "assets/TourProvider-BhRuxkgK.js",
+      "raw": 2045,
+      "gzip": 1074
     },
     {
-      "arquivo": "assets/Sessoes-AiGkQC_S.js",
-      "raw": 2423,
-      "gzip": 1217
+      "arquivo": "assets/RealtimeConnection-D4MjbQJ1.js",
+      "raw": 1934,
+      "gzip": 843
     },
     {
-      "arquivo": "assets/RealtimeConnection-BQg7FDrb.js",
-      "raw": 1932,
-      "gzip": 840
-    },
-    {
-      "arquivo": "assets/OperatorFilterSelect-CTzC3wx-.js",
-      "raw": 1894,
-      "gzip": 799
-    },
-    {
-      "arquivo": "assets/RevenueBarChart-CBnL4QfO.js",
+      "arquivo": "assets/RevenueBarChart-8yqAXwsS.js",
       "raw": 1872,
-      "gzip": 899
+      "gzip": 900
     },
     {
-      "arquivo": "assets/Eletropostos-DOdUeulW.js",
-      "raw": 1722,
-      "gzip": 893
+      "arquivo": "assets/RadioCardGroup-BS8JOaz7.js",
+      "raw": 1687,
+      "gzip": 806
     },
     {
-      "arquivo": "assets/ExportCsvButton-YeAg7cNe.js",
+      "arquivo": "assets/Eletropostos-CR0qzII7.js",
+      "raw": 1683,
+      "gzip": 885
+    },
+    {
+      "arquivo": "assets/RouteErrorView-B0cdXB5O.js",
+      "raw": 1624,
+      "gzip": 818
+    },
+    {
+      "arquivo": "assets/OperatorFilterSelect-94gGOabJ.js",
+      "raw": 1618,
+      "gzip": 687
+    },
+    {
+      "arquivo": "assets/NotFound-DMJPPP_5.js",
+      "raw": 1553,
+      "gzip": 777
+    },
+    {
+      "arquivo": "assets/SecretControl-C2Dhqo0v.js",
+      "raw": 1472,
+      "gzip": 659
+    },
+    {
+      "arquivo": "assets/ExportCsvButton-D3hnV2Xv.js",
       "raw": 1263,
-      "gzip": 803
+      "gzip": 807
     },
     {
-      "arquivo": "assets/PageHeader-DD1nxC1Z.js",
-      "raw": 920,
-      "gzip": 479
+      "arquivo": "assets/DossierButton-BQfEihLu.js",
+      "raw": 1185,
+      "gzip": 755
+    },
+    {
+      "arquivo": "assets/onboardingStorage-B5V6V9rj.js",
+      "raw": 1099,
+      "gzip": 503
+    },
+    {
+      "arquivo": "assets/StepUpConfirmDialog-xVlj1aZq.js",
+      "raw": 980,
+      "gzip": 626
+    },
+    {
+      "arquivo": "assets/tabs-Bk7LMa2z.js",
+      "raw": 894,
+      "gzip": 523
+    },
+    {
+      "arquivo": "assets/PageBand-IBskGcDz.js",
+      "raw": 856,
+      "gzip": 469
+    },
+    {
+      "arquivo": "assets/auth.schema-BaXN4VyN.js",
+      "raw": 846,
+      "gzip": 495
+    },
+    {
+      "arquivo": "assets/PageHeader-s73HY0qb.js",
+      "raw": 843,
+      "gzip": 443
+    },
+    {
+      "arquivo": "assets/CopyButton-BP6tDHk7.js",
+      "raw": 834,
+      "gzip": 536
+    },
+    {
+      "arquivo": "assets/BrandBackdrop-CW3u8bCy.js",
+      "raw": 804,
+      "gzip": 439
+    },
+    {
+      "arquivo": "assets/api-CQrCf0hN.js",
+      "raw": 762,
+      "gzip": 440
     },
     {
       "arquivo": "assets/rolldown-runtime-hePW80VL.js",
@@ -341,19 +526,19 @@
       "gzip": 428
     },
     {
-      "arquivo": "assets/SessionPaymentMethodBadge-CZrlcHZW.js",
+      "arquivo": "assets/SessionPaymentMethodBadge-oFzQUxZ3.js",
       "raw": 709,
-      "gzip": 375
+      "gzip": 374
     },
     {
-      "arquivo": "assets/api-BuHe78W4.js",
-      "raw": 650,
-      "gzip": 382
+      "arquivo": "assets/AppBand-P_uWXMhz.js",
+      "raw": 660,
+      "gzip": 416
     },
     {
-      "arquivo": "assets/auth.schema-C81bkGB3.js",
-      "raw": 630,
-      "gzip": 369
+      "arquivo": "assets/DriverSearchField-CdkwS_Gd.js",
+      "raw": 643,
+      "gzip": 436
     },
     {
       "arquivo": "assets/money-DQi7UFBv.js",
@@ -361,255 +546,455 @@
       "gzip": 325
     },
     {
-      "arquivo": "assets/WalletEntryIcon-CNhBGueH.js",
+      "arquivo": "assets/Logo-tGypmF4C.js",
+      "raw": 547,
+      "gzip": 378
+    },
+    {
+      "arquivo": "assets/ProfileAvatar-B8ECeoBz.js",
+      "raw": 542,
+      "gzip": 380
+    },
+    {
+      "arquivo": "assets/WalletEntryIcon-DafGNcFr.js",
       "raw": 521,
-      "gzip": 373
+      "gzip": 375
     },
     {
-      "arquivo": "assets/SiteFilterSelect-oXsoxGET.js",
+      "arquivo": "assets/SiteFilterSelect-D2nuFC3y.js",
       "raw": 507,
-      "gzip": 359
+      "gzip": 360
     },
     {
-      "arquivo": "assets/auth-BnaQZaZx.js",
-      "raw": 449,
-      "gzip": 232
+      "arquivo": "assets/AuthAlert-CPLb75jo.js",
+      "raw": 467,
+      "gzip": 321
     },
     {
-      "arquivo": "assets/ConnectorStatusBadge-DITNKJVm.js",
-      "raw": 376,
-      "gzip": 286
+      "arquivo": "assets/RecipientsField-Ci7VpTsz.js",
+      "raw": 407,
+      "gzip": 277
     },
     {
-      "arquivo": "assets/prefetchPublicConfig-HyrQdhpn.js",
-      "raw": 184,
+      "arquivo": "assets/ConnectorStatusBadge-CXU7nI-v.js",
+      "raw": 377,
+      "gzip": 287
+    },
+    {
+      "arquivo": "assets/secretsKey-q2GieHhE.js",
+      "raw": 345,
+      "gzip": 226
+    },
+    {
+      "arquivo": "assets/AdminStates-B7rXvCEa.js",
+      "raw": 314,
+      "gzip": 212
+    },
+    {
+      "arquivo": "assets/dirtyContext-DNlvU9UM.js",
+      "raw": 264,
+      "gzip": 210
+    },
+    {
+      "arquivo": "assets/tourContext-CdbJ-ueX.js",
+      "raw": 254,
+      "gzip": 210
+    },
+    {
+      "arquivo": "assets/sessionDeepLink-DV9TjVA_.js",
+      "raw": 196,
+      "gzip": 176
+    },
+    {
+      "arquivo": "assets/prefetchPublicConfig-D1ZrYtJR.js",
+      "raw": 186,
       "gzip": 175
     },
     {
-      "arquivo": "assets/appInfo-CxbOWtiP.js",
+      "arquivo": "assets/appInfo-Bq1FOQKL.js",
       "raw": 131,
       "gzip": 128
     },
     {
-      "arquivo": "assets/logo-icon-sm-DsXic3Us.js",
-      "raw": 57,
-      "gzip": 77
-    },
-    {
-      "arquivo": "assets/logo-icon-gBhOqstT.js",
-      "raw": 54,
-      "gzip": 74
+      "arquivo": "assets/legalPaths-CKIVXHl6.js",
+      "raw": 67,
+      "gzip": 73
     }
   ],
   "precache": {
-    "entradas": 71,
-    "raw": 1537209,
-    "gzip": 675341,
+    "entradas": 115,
+    "raw": 1941685,
+    "gzip": 807451,
     "itens": [
       {
         "arquivo": "apple-touch-icon.png",
-        "raw": 23987,
-        "gzip": 24015
+        "raw": 10252,
+        "gzip": 10101
       },
       {
-        "arquivo": "assets/Auditoria-5gxlM0BT.js",
-        "raw": 8114,
-        "gzip": 2847
+        "arquivo": "assets/AdminStates-B7rXvCEa.js",
+        "raw": 314,
+        "gzip": 212
       },
       {
-        "arquivo": "assets/AuthTokens-BCKB4aq_.js",
-        "raw": 5380,
-        "gzip": 2228
+        "arquivo": "assets/AlertasTab-U35cRZQ3.js",
+        "raw": 4836,
+        "gzip": 1981
       },
       {
-        "arquivo": "assets/CardEligibilityNotice-BqcyAtCH.js",
-        "raw": 2665,
-        "gzip": 1094
+        "arquivo": "assets/AppBand-P_uWXMhz.js",
+        "raw": 660,
+        "gzip": 416
       },
       {
-        "arquivo": "assets/Carteira-D7kVXf-X.js",
-        "raw": 4491,
-        "gzip": 1628
+        "arquivo": "assets/Auditoria-BkfL487u.js",
+        "raw": 8169,
+        "gzip": 2875
       },
       {
-        "arquivo": "assets/CarteiraAdicionar-RnYZ-UDk.js",
-        "raw": 14199,
-        "gzip": 4633
+        "arquivo": "assets/AuthAlert-CPLb75jo.js",
+        "raw": 467,
+        "gzip": 321
       },
       {
-        "arquivo": "assets/Carteiras-2wTuQ_0Z.js",
-        "raw": 16366,
-        "gzip": 5331
+        "arquivo": "assets/AuthShell-CveCNTpd.js",
+        "raw": 3904,
+        "gzip": 1454
       },
       {
-        "arquivo": "assets/Cartoes-N7b5BnO1.js",
-        "raw": 5283,
-        "gzip": 2191
+        "arquivo": "assets/AuthTokens-CrHxNLi1.js",
+        "raw": 5425,
+        "gzip": 2238
       },
       {
-        "arquivo": "assets/ChargePointLanding-DeeYQ_9B.js",
-        "raw": 13078,
-        "gzip": 4319
+        "arquivo": "assets/Backups-wCnKFzSj.js",
+        "raw": 59332,
+        "gzip": 16480
       },
       {
-        "arquivo": "assets/ChargePointTariffsDialog-W_kua79f.js",
-        "raw": 4068,
-        "gzip": 1709
+        "arquivo": "assets/BrandBackdrop-CW3u8bCy.js",
+        "raw": 804,
+        "gzip": 439
       },
       {
-        "arquivo": "assets/ChargePoints-DdCJiiXI.js",
-        "raw": 13261,
-        "gzip": 4339
+        "arquivo": "assets/CardEligibilityNotice-Bac_ivY5.js",
+        "raw": 2953,
+        "gzip": 1144
       },
       {
-        "arquivo": "assets/ConnectorStatusBadge-DITNKJVm.js",
-        "raw": 376,
-        "gzip": 286
+        "arquivo": "assets/Carteira-CwNe4T-U.js",
+        "raw": 4786,
+        "gzip": 1844
       },
       {
-        "arquivo": "assets/Connectors-mS-IgW6p.js",
-        "raw": 7327,
-        "gzip": 2771
+        "arquivo": "assets/CarteiraAdicionar-BWr_VKX_.js",
+        "raw": 14588,
+        "gzip": 4687
       },
       {
-        "arquivo": "assets/Dashboard-C0INDj0H.js",
-        "raw": 12055,
-        "gzip": 3268
+        "arquivo": "assets/Carteiras-CnGiVzBY.js",
+        "raw": 16105,
+        "gzip": 5261
       },
       {
-        "arquivo": "assets/Eletropostos-DOdUeulW.js",
-        "raw": 1722,
-        "gzip": 893
+        "arquivo": "assets/Cartoes-CR5rHWWF.js",
+        "raw": 5047,
+        "gzip": 2168
       },
       {
-        "arquivo": "assets/ExportCsvButton-YeAg7cNe.js",
+        "arquivo": "assets/ChannelTestPanel-BFllnfec.js",
+        "raw": 5489,
+        "gzip": 2100
+      },
+      {
+        "arquivo": "assets/ChargePointLanding-BDDTz3ZL.js",
+        "raw": 12688,
+        "gzip": 4222
+      },
+      {
+        "arquivo": "assets/ChargePointTariffsDialog-BDdbqEsZ.js",
+        "raw": 4070,
+        "gzip": 1712
+      },
+      {
+        "arquivo": "assets/ChargePoints-U5lqWD53.js",
+        "raw": 27559,
+        "gzip": 8249
+      },
+      {
+        "arquivo": "assets/Chargebacks-B3fpvtj3.js",
+        "raw": 13813,
+        "gzip": 4471
+      },
+      {
+        "arquivo": "assets/Configuracoes-xXf4wxuL.js",
+        "raw": 2745,
+        "gzip": 1364
+      },
+      {
+        "arquivo": "assets/ConfirmSaveDialog-CdeSov0d.js",
+        "raw": 2352,
+        "gzip": 1172
+      },
+      {
+        "arquivo": "assets/ConnectorStatusBadge-CXU7nI-v.js",
+        "raw": 377,
+        "gzip": 287
+      },
+      {
+        "arquivo": "assets/Connectors-DW8hYkG-.js",
+        "raw": 7370,
+        "gzip": 2787
+      },
+      {
+        "arquivo": "assets/ConsentReacceptDialog-_LPUWng6.js",
+        "raw": 2502,
+        "gzip": 1316
+      },
+      {
+        "arquivo": "assets/CopyButton-BP6tDHk7.js",
+        "raw": 834,
+        "gzip": 536
+      },
+      {
+        "arquivo": "assets/Dashboard-Cbf-NozR.js",
+        "raw": 17124,
+        "gzip": 4920
+      },
+      {
+        "arquivo": "assets/DevolucoesContasExcluidas-DJheO_14.js",
+        "raw": 8426,
+        "gzip": 3244
+      },
+      {
+        "arquivo": "assets/DossierButton-BQfEihLu.js",
+        "raw": 1185,
+        "gzip": 755
+      },
+      {
+        "arquivo": "assets/DriverSearchField-CdkwS_Gd.js",
+        "raw": 643,
+        "gzip": 436
+      },
+      {
+        "arquivo": "assets/Eletropostos-CR0qzII7.js",
+        "raw": 1683,
+        "gzip": 885
+      },
+      {
+        "arquivo": "assets/EmailTab-cVb8xFpU.js",
+        "raw": 16950,
+        "gzip": 5402
+      },
+      {
+        "arquivo": "assets/ExportCsvButton-D3hnV2Xv.js",
         "raw": 1263,
-        "gzip": 803
+        "gzip": 807
       },
       {
-        "arquivo": "assets/Faturamento-C7GXDFJm.js",
-        "raw": 3760,
+        "arquivo": "assets/Faturamento-hD9c4Wnu.js",
+        "raw": 3747,
         "gzip": 1604
       },
       {
-        "arquivo": "assets/Financeiro-CSVgunlG.js",
-        "raw": 4583,
-        "gzip": 1868
+        "arquivo": "assets/Financeiro-XJsGDXJa.js",
+        "raw": 4544,
+        "gzip": 1861
       },
       {
-        "arquivo": "assets/GatewayPagamento-C1bkg-Te.js",
-        "raw": 44222,
-        "gzip": 12291
+        "arquivo": "assets/ForgotPassword-CEi3s7gr.js",
+        "raw": 4755,
+        "gzip": 1924
       },
       {
-        "arquivo": "assets/GoogleAuthSection-DGGf_5VG.js",
-        "raw": 5972,
-        "gzip": 2561
+        "arquivo": "assets/GatewayPagamento-DBRu0UCd.js",
+        "raw": 36519,
+        "gzip": 11078
       },
       {
-        "arquivo": "assets/Home-ZCU7C9G8.js",
-        "raw": 7813,
-        "gzip": 2282
+        "arquivo": "assets/GeralTab-Ba1jrBqg.js",
+        "raw": 17509,
+        "gzip": 6237
       },
       {
-        "arquivo": "assets/Layout-CbwHlbSG.js",
-        "raw": 15018,
-        "gzip": 4560
+        "arquivo": "assets/GoogleAuthSection-DUWMxAZX.js",
+        "raw": 7248,
+        "gzip": 3095
       },
       {
-        "arquivo": "assets/Layout-DHUnYEaB.js",
-        "raw": 6184,
-        "gzip": 1920
+        "arquivo": "assets/Home-c7CebX4t.js",
+        "raw": 7150,
+        "gzip": 2256
       },
       {
-        "arquivo": "assets/Layout-Dk7VWZ-c.js",
-        "raw": 3661,
-        "gzip": 1553
+        "arquivo": "assets/Layout-C6FpNOnz.js",
+        "raw": 5480,
+        "gzip": 2257
       },
       {
-        "arquivo": "assets/Login-CSyOj0P6.js",
-        "raw": 5069,
-        "gzip": 2096
+        "arquivo": "assets/Layout-DeZdAURe.js",
+        "raw": 17696,
+        "gzip": 5494
       },
       {
-        "arquivo": "assets/Mapa-B6J-Kqq1.js",
-        "raw": 11896,
-        "gzip": 4157
+        "arquivo": "assets/Layout-fBFqgCH-.js",
+        "raw": 6380,
+        "gzip": 2074
       },
       {
-        "arquivo": "assets/MovimentoDiario-qEFb0LHT.js",
-        "raw": 3779,
-        "gzip": 1467
+        "arquivo": "assets/Legal-DdAG-uLJ.js",
+        "raw": 22005,
+        "gzip": 8149
       },
       {
-        "arquivo": "assets/OperatorFilterSelect-CTzC3wx-.js",
-        "raw": 1894,
-        "gzip": 799
+        "arquivo": "assets/Login-BAkFn08V.js",
+        "raw": 3161,
+        "gzip": 1481
       },
       {
-        "arquivo": "assets/Pagamentos-Dqr1cii8.js",
-        "raw": 3243,
-        "gzip": 1470
+        "arquivo": "assets/Logo-tGypmF4C.js",
+        "raw": 547,
+        "gzip": 378
       },
       {
-        "arquivo": "assets/PageHeader-DD1nxC1Z.js",
-        "raw": 920,
-        "gzip": 479
+        "arquivo": "assets/Mapa-D195SHYm.js",
+        "raw": 11224,
+        "gzip": 4058
       },
       {
-        "arquivo": "assets/PublicSiteCard-BDhaOYrK.js",
-        "raw": 2482,
-        "gzip": 1134
+        "arquivo": "assets/Mascot-vBoToFMn.js",
+        "raw": 5612,
+        "gzip": 4142
       },
       {
-        "arquivo": "assets/RealtimeConnection-BQg7FDrb.js",
-        "raw": 1932,
-        "gzip": 840
+        "arquivo": "assets/MovimentoDiario-BzFjaFRq.js",
+        "raw": 3807,
+        "gzip": 1493
       },
       {
-        "arquivo": "assets/Register--rR-zm5f.js",
-        "raw": 3544,
-        "gzip": 1544
+        "arquivo": "assets/NotFound-DMJPPP_5.js",
+        "raw": 1553,
+        "gzip": 777
       },
       {
-        "arquivo": "assets/RevenueBarChart-CBnL4QfO.js",
+        "arquivo": "assets/OnboardingTour-BZDaJI8D.js",
+        "raw": 16571,
+        "gzip": 6366
+      },
+      {
+        "arquivo": "assets/OperatorFilterSelect-94gGOabJ.js",
+        "raw": 1618,
+        "gzip": 687
+      },
+      {
+        "arquivo": "assets/Pagamentos-C6l_IC_P.js",
+        "raw": 10468,
+        "gzip": 3776
+      },
+      {
+        "arquivo": "assets/PageBand-IBskGcDz.js",
+        "raw": 856,
+        "gzip": 469
+      },
+      {
+        "arquivo": "assets/PageHeader-s73HY0qb.js",
+        "raw": 843,
+        "gzip": 443
+      },
+      {
+        "arquivo": "assets/Perfil-Dxickl2C.js",
+        "raw": 29152,
+        "gzip": 9243
+      },
+      {
+        "arquivo": "assets/ProfileAvatar-B8ECeoBz.js",
+        "raw": 542,
+        "gzip": 380
+      },
+      {
+        "arquivo": "assets/PublicSiteCard-39dOcW31.js",
+        "raw": 2466,
+        "gzip": 1123
+      },
+      {
+        "arquivo": "assets/RadioCardGroup-BS8JOaz7.js",
+        "raw": 1687,
+        "gzip": 806
+      },
+      {
+        "arquivo": "assets/RealtimeConnection-D4MjbQJ1.js",
+        "raw": 1934,
+        "gzip": 843
+      },
+      {
+        "arquivo": "assets/RecipientsField-Ci7VpTsz.js",
+        "raw": 407,
+        "gzip": 277
+      },
+      {
+        "arquivo": "assets/Register-CV_R8HSg.js",
+        "raw": 3013,
+        "gzip": 1490
+      },
+      {
+        "arquivo": "assets/ResetPassword-DAMbtaMQ.js",
+        "raw": 4919,
+        "gzip": 2074
+      },
+      {
+        "arquivo": "assets/RevenueBarChart-8yqAXwsS.js",
         "raw": 1872,
-        "gzip": 899
+        "gzip": 900
       },
       {
-        "arquivo": "assets/Sessao-odAlwJXu.js",
-        "raw": 7535,
-        "gzip": 2678
+        "arquivo": "assets/RouteErrorView-B0cdXB5O.js",
+        "raw": 1624,
+        "gzip": 818
       },
       {
-        "arquivo": "assets/SessaoDetalhe-xFdpdlzX.js",
-        "raw": 9580,
-        "gzip": 3019
+        "arquivo": "assets/SecretControl-C2Dhqo0v.js",
+        "raw": 1472,
+        "gzip": 659
       },
       {
-        "arquivo": "assets/SessionPaymentMethodBadge-CZrlcHZW.js",
+        "arquivo": "assets/SecretField-CRUTGi98.js",
+        "raw": 2562,
+        "gzip": 1003
+      },
+      {
+        "arquivo": "assets/Sessao-CCMncu8O.js",
+        "raw": 8690,
+        "gzip": 2951
+      },
+      {
+        "arquivo": "assets/SessaoDetalhe-BRK8AHIK.js",
+        "raw": 9828,
+        "gzip": 3162
+      },
+      {
+        "arquivo": "assets/SessionPaymentMethodBadge-oFzQUxZ3.js",
         "raw": 709,
-        "gzip": 375
+        "gzip": 374
       },
       {
-        "arquivo": "assets/Sessoes-AiGkQC_S.js",
-        "raw": 2423,
-        "gzip": 1217
+        "arquivo": "assets/Sessoes-BLiRkfa2.js",
+        "raw": 21676,
+        "gzip": 6627
       },
       {
-        "arquivo": "assets/Sessoes-DmhBDN9z.js",
-        "raw": 10115,
-        "gzip": 3292
+        "arquivo": "assets/Sessoes-DMTVdWX6.js",
+        "raw": 2524,
+        "gzip": 1239
       },
       {
-        "arquivo": "assets/SiteFilterSelect-oXsoxGET.js",
+        "arquivo": "assets/SiteFilterSelect-D2nuFC3y.js",
         "raw": 507,
-        "gzip": 359
+        "gzip": 360
       },
       {
-        "arquivo": "assets/Sites-Bh1UTCAI.js",
-        "raw": 6707,
-        "gzip": 2498
+        "arquivo": "assets/Sites-DctCQSqX.js",
+        "raw": 6749,
+        "gzip": 2509
       },
       {
         "arquivo": "assets/StationsMap-CcXJxNtP.css",
@@ -617,74 +1002,89 @@
         "gzip": 6313
       },
       {
-        "arquivo": "assets/StationsMap-U5M3xsuq.js",
-        "raw": 152059,
-        "gzip": 44328
+        "arquivo": "assets/StationsMap-zx2G4GcM.js",
+        "raw": 152058,
+        "gzip": 44326
       },
       {
-        "arquivo": "assets/TariffAssignmentManager-D5pWsDpC.js",
-        "raw": 16198,
-        "gzip": 5636
+        "arquivo": "assets/StepUpConfirmDialog-xVlj1aZq.js",
+        "raw": 980,
+        "gzip": 626
       },
       {
-        "arquivo": "assets/Tariffs-C3wBsl5S.js",
-        "raw": 9891,
-        "gzip": 3460
+        "arquivo": "assets/TariffAssignmentManager-De_y8Qqd.js",
+        "raw": 16199,
+        "gzip": 5641
       },
       {
-        "arquivo": "assets/UpdatedAgo-DHUX2D1v.js",
-        "raw": 3168,
-        "gzip": 1340
+        "arquivo": "assets/Tariffs-USHA3MDO.js",
+        "raw": 9938,
+        "gzip": 3477
       },
       {
-        "arquivo": "assets/WalletEntryIcon-CNhBGueH.js",
+        "arquivo": "assets/TermsAcceptance-D3VZBoJD.js",
+        "raw": 2376,
+        "gzip": 1184
+      },
+      {
+        "arquivo": "assets/TourProvider-BhRuxkgK.js",
+        "raw": 2045,
+        "gzip": 1074
+      },
+      {
+        "arquivo": "assets/UpdatedAgo-B7t16ibr.js",
+        "raw": 3274,
+        "gzip": 1367
+      },
+      {
+        "arquivo": "assets/WalletEntryIcon-DafGNcFr.js",
         "raw": 521,
-        "gzip": 373
+        "gzip": 375
       },
       {
-        "arquivo": "assets/api-BuHe78W4.js",
-        "raw": 650,
-        "gzip": 382
+        "arquivo": "assets/WhatsappTab-mHPPi49F.js",
+        "raw": 4463,
+        "gzip": 2047
       },
       {
-        "arquivo": "assets/app-hooks-CZsCkku2.js",
-        "raw": 79665,
-        "gzip": 27172
+        "arquivo": "assets/api-CQrCf0hN.js",
+        "raw": 762,
+        "gzip": 440
       },
       {
-        "arquivo": "assets/appInfo-CxbOWtiP.js",
+        "arquivo": "assets/app-hooks-Y_5fGbT4.js",
+        "raw": 134964,
+        "gzip": 43959
+      },
+      {
+        "arquivo": "assets/appInfo-Bq1FOQKL.js",
         "raw": 131,
         "gzip": 128
       },
       {
-        "arquivo": "assets/auth-BnaQZaZx.js",
-        "raw": 449,
-        "gzip": 232
+        "arquivo": "assets/auth.schema-BaXN4VyN.js",
+        "raw": 846,
+        "gzip": 495
       },
       {
-        "arquivo": "assets/auth.schema-C81bkGB3.js",
-        "raw": 630,
-        "gzip": 369
+        "arquivo": "assets/dirtyContext-DNlvU9UM.js",
+        "raw": 264,
+        "gzip": 210
       },
       {
-        "arquivo": "assets/index-DCaAIxX4.js",
-        "raw": 11398,
-        "gzip": 3454
+        "arquivo": "assets/index-BEYPe1Vt.css",
+        "raw": 76084,
+        "gzip": 14296
       },
       {
-        "arquivo": "assets/index-FaINUUnR.css",
-        "raw": 65042,
-        "gzip": 11944
+        "arquivo": "assets/index-DRJnSheH.js",
+        "raw": 19414,
+        "gzip": 5785
       },
       {
-        "arquivo": "assets/logo-icon-gBhOqstT.js",
-        "raw": 54,
-        "gzip": 74
-      },
-      {
-        "arquivo": "assets/logo-icon-sm-DsXic3Us.js",
-        "raw": 57,
-        "gzip": 77
+        "arquivo": "assets/legalPaths-CKIVXHl6.js",
+        "raw": 67,
+        "gzip": 73
       },
       {
         "arquivo": "assets/money-DQi7UFBv.js",
@@ -692,9 +1092,19 @@
         "gzip": 325
       },
       {
-        "arquivo": "assets/prefetchPublicConfig-HyrQdhpn.js",
-        "raw": 184,
+        "arquivo": "assets/onboardingStorage-B5V6V9rj.js",
+        "raw": 1099,
+        "gzip": 503
+      },
+      {
+        "arquivo": "assets/prefetchPublicConfig-D1ZrYtJR.js",
+        "raw": 186,
         "gzip": 175
+      },
+      {
+        "arquivo": "assets/reversals-DPbDKDb3.js",
+        "raw": 10917,
+        "gzip": 4365
       },
       {
         "arquivo": "assets/rolldown-runtime-hePW80VL.js",
@@ -702,29 +1112,59 @@
         "gzip": 428
       },
       {
-        "arquivo": "assets/ui-kit-BzXvLWTp.js",
-        "raw": 168480,
-        "gzip": 53107
+        "arquivo": "assets/secretsKey-q2GieHhE.js",
+        "raw": 345,
+        "gzip": 226
       },
       {
-        "arquivo": "assets/vendor-core-Bclds9ka.js",
-        "raw": 296731,
-        "gzip": 91977
+        "arquivo": "assets/sessionDeepLink-DV9TjVA_.js",
+        "raw": 196,
+        "gzip": 176
       },
       {
-        "arquivo": "assets/vendor-core-Cif3A50v.js",
-        "raw": 3048,
-        "gzip": 1184
+        "arquivo": "assets/tabs-Bk7LMa2z.js",
+        "raw": 894,
+        "gzip": 523
       },
       {
-        "arquivo": "assets/vendor-forms-hLwd2MyB.js",
+        "arquivo": "assets/tour-BaO26yJ4.css",
+        "raw": 6866,
+        "gzip": 2061
+      },
+      {
+        "arquivo": "assets/tourContext-CdbJ-ueX.js",
+        "raw": 254,
+        "gzip": 210
+      },
+      {
+        "arquivo": "assets/ui-kit-D_YtzdM5.js",
+        "raw": 177249,
+        "gzip": 55483
+      },
+      {
+        "arquivo": "assets/useCommunicationEditor-C4sM_9P1.js",
+        "raw": 27848,
+        "gzip": 9526
+      },
+      {
+        "arquivo": "assets/vendor-core-DaVX0mhA.js",
+        "raw": 3245,
+        "gzip": 1278
+      },
+      {
+        "arquivo": "assets/vendor-core-p252TBCs.js",
+        "raw": 296785,
+        "gzip": 91997
+      },
+      {
+        "arquivo": "assets/vendor-forms-D_Z80eig.js",
         "raw": 119379,
-        "gzip": 35595
+        "gzip": 35596
       },
       {
-        "arquivo": "assets/vendor-icons-DIKEyEBI.js",
-        "raw": 30025,
-        "gzip": 9969
+        "arquivo": "assets/vendor-icons-BlMZBV4D.js",
+        "raw": 35301,
+        "gzip": 11557
       },
       {
         "arquivo": "favicon.png",
@@ -734,7 +1174,7 @@
       {
         "arquivo": "index.html",
         "raw": 5721,
-        "gzip": 2009
+        "gzip": 2010
       },
       {
         "arquivo": "manifest.webmanifest",
@@ -763,8 +1203,32 @@
       }
     ],
     "swJs": {
-      "raw": 5017,
-      "gzip": 1981
+      "raw": 7395,
+      "gzip": 2671
     }
+  },
+  "ancora": "2026-10-05, frontend de 49f3e90 (pós lote 1 e rodada de textos 2e4e731)",
+  "politica": "ver cabeçalho de scripts/medir-tamanhos.mjs e §17 de e2e-visual/BASELINE.md",
+  "a0": {
+    "geradoEm": "2026-10-04T18:32:28.075Z",
+    "cssGlobalGzip": 11944,
+    "jsTotal": {
+      "arquivos": 64,
+      "raw": 1473596,
+      "gzip": 471054
+    },
+    "precache": {
+      "entradas": 71,
+      "raw": 1537209,
+      "gzip": 675341
+    },
+    "modulepreload": [
+      "assets/appInfo-CxbOWtiP.js",
+      "assets/landing-BiRyf-Me.js",
+      "assets/rolldown-runtime-hePW80VL.js",
+      "assets/vendor-core-Bclds9ka.js",
+      "assets/vendor-core-Cif3A50v.js",
+      "assets/vendor-icons-DIKEyEBI.js"
+    ]
   }
 }
