@@ -1118,3 +1118,7 @@ Plano: docs/PLANO-FUNCIONALIDADES.md (Nova, 46efc03). Todas = recomendação da 
 - **P2 e P3: sem resposta do dono ainda.** Os agentes seguem o default recomendado (reversível): P2 zerar `startIp/startUserAgent` das sessões do titular na exclusão; P3 chargeback perdido bloqueia o cartão, com desbloqueio manual pelo ADMIN caso a caso.
 - **P2 ACEITA (05/10/2026):** a exclusão de conta zera `startIp`/`startUserAgent` das sessões do titular.
 - **P3 ACEITA (05/10/2026):** chargeback perdido bloqueia o cartão do motorista; o ADMIN pode desbloquear manualmente, caso a caso (coluna/ação de desbloqueio em `PaymentReversal`, expand puro — a implementar pelo Vega-E/Cronos se ainda não existir).
+
+### Retenção da auditoria — decisão do dono (05/10/2026): 24 MESES com purga automática real
+- Substitui o "auditoria 5 anos" da DL6: o texto da política de privacidade (aprovado) diz "apagados por expurgo automático por idade (24 meses)", e o trigger do AuditLog só permite DELETE de linhas com mais de 24 meses. Decisão: implementar a purga automática de AuditLog > 24 meses no job de retenção (mesmas guardas: RETENTION_ENABLED, dry-run, piso). WalletEntry/financeiro NÃO são purgados.
+- Rótulo "Offline" na lista de carregadores do Admin: sem relação com o manual do carregador; pendente de decisão (recomendado: incluir). O manual do carregador (marca/modelo, wss/TLS, campo de URL do servidor OCPP, TriggerMessage) o dono apresentará ao fim das entregas.
