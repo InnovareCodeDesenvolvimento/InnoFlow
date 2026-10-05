@@ -7,6 +7,7 @@ import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } fro
 import { encryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { CartaoTokenInvalidoError } from '../../core/pagamentos/erros'
 import { toMePaymentMethodDto } from '../../services/pagamentos/paymentMethodDto'
+import { travarCartoesDoUsuario } from '../../services/pagamentos/travaCartoesDoUsuario'
 import { AppError } from '../middleware/errorHandler'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { validateBody } from '../middleware/validate'
@@ -99,9 +100,8 @@ router.post(
     // O cartão nasce com o ambiente EFETIVO (explícito: a coluna tem DEFAULT SANDBOX e esquecer isto em produção rotularia token real como teste).
     const environment = await getAmbienteEfetivoParaBancoOu503()
 
-    // Checagem RÁPIDA antes de gastar uma chamada de rede na Cielo — a
-    // checagem de VERDADE (que fecha a maior parte da janela de corrida)
-    // roda de novo dentro da transação, logo antes do INSERT.
+    // Checagem RÁPIDA antes de gastar uma chamada de rede na Cielo — a checagem de VERDADE roda de novo dentro da transação, SOB o lock
+    // consultivo do motorista (N-9: `travarCartoesDoUsuario`), logo antes do INSERT. Esta aqui só economiza a chamada à Cielo.
     const activeCountAntes = await prisma.paymentMethod.count({ where: { userId, active: true, environment } })
     if (activeCountAntes >= MAX_PAYMENT_METHODS_PER_USER) {
       throw new AppError('Você já tem o número máximo de cartões cadastrados.', 409, 'TOO_MANY_PAYMENT_METHODS')
@@ -143,6 +143,8 @@ router.post(
     const expiryYear = dadosCartao.expiryYear ?? expiryYearEnviado ?? null
 
     const created = await prisma.$transaction(async (tx) => {
+      // N-9: serializa os cadastros do MESMO motorista — sem isto, N requisições paralelas liam a mesma contagem e todas inseriam (teto furado).
+      await travarCartoesDoUsuario(tx, userId)
       const activeCountAgora = await tx.paymentMethod.count({ where: { userId, active: true, environment } })
       if (activeCountAgora >= MAX_PAYMENT_METHODS_PER_USER) {
         throw new AppError('Você já tem o número máximo de cartões cadastrados.', 409, 'TOO_MANY_PAYMENT_METHODS')
@@ -206,6 +208,7 @@ router.patch(
     const environment = await getAmbienteEfetivoParaBancoOu503()
 
     const updated = await prisma.$transaction(async (tx) => {
+      await travarCartoesDoUsuario(tx, userId) // N-9: mesmo lock do cadastro — "um padrão por motorista/ambiente" também é regra de aplicação
       const method = await tx.paymentMethod.findFirst({ where: { id, userId, active: true, environment } })
       if (!method) return null
       if (!method.isDefault) {
@@ -233,6 +236,7 @@ router.delete(
     const environment = await getAmbienteEfetivoParaBancoOu503()
 
     const found = await prisma.$transaction(async (tx) => {
+      await travarCartoesDoUsuario(tx, userId) // N-9: mesmo lock do cadastro (a promoção do próximo padrão não corre com um cadastro/PATCH)
       const method = await tx.paymentMethod.findFirst({ where: { id, userId, active: true, environment } })
       if (!method) return null
       await tx.paymentMethod.update({ where: { id: method.id }, data: { active: false, isDefault: false } })
