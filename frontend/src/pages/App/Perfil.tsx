@@ -93,7 +93,7 @@ export function Perfil() {
             <NotificationsSection />
             <PrivacySection profile={profile} />
             {tour.available && (
-              <ProfileSection icon={Route} title="Ajuda" description="Reveja o passo a passo do aplicativo, com o mascote da InnoFlow.">
+              <ProfileSection icon={Route} title="Ajuda" description="Reveja o passo a passo do aplicativo, com o Inno, o mascote da InnoFlow.">
                 <Button type="button" variant="outline" size="touch" className="h-11 sm:h-11" onClick={tour.restart}>
                   Rever tour
                 </Button>
