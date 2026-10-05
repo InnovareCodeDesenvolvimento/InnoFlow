@@ -1,3 +1,4 @@
+import axios from "axios"
 import { getApiErrorCode, getApiErrorMessage, getApiErrorStatus } from "@/services/api"
 
 /**
@@ -25,7 +26,21 @@ export function authRateLimitMessage(status: number | undefined, code: string | 
   return null
 }
 
-/** Erro do axios → texto da tela de acesso: limite de tentativas tem texto próprio; o resto usa a mensagem do backend (ou o `fallback`). */
+export const NETWORK_ERROR_MESSAGE = "Sem conexão com o servidor. Confira sua internet e tente de novo."
+export const SERVER_UNSTABLE_MESSAGE = "O serviço está instável agora. Tente novamente em instantes."
+
+/**
+ * Erro do axios → texto da tela de acesso. Ordem: limite de tentativas (texto próprio) → falta de resposta
+ * (rede caiu, timeout, CORS: NÃO é senha errada) → 5xx (instabilidade nossa) → mensagem do backend (401/400/409…) ou o `fallback`
+ * (que só vale para erro que não é de HTTP). Só o 401 `INVALID_CREDENTIALS` chega a dizer "E-mail ou senha inválidos".
+ */
 export function authErrorMessage(err: unknown, fallback: string): string {
-  return authRateLimitMessage(getApiErrorStatus(err), getApiErrorCode(err)) ?? getApiErrorMessage(err, fallback)
+  const status = getApiErrorStatus(err)
+  const rate = authRateLimitMessage(status, getApiErrorCode(err))
+  if (rate) return rate
+  if (axios.isAxiosError(err)) {
+    if (status === undefined) return NETWORK_ERROR_MESSAGE
+    if (status >= 500) return SERVER_UNSTABLE_MESSAGE
+  }
+  return getApiErrorMessage(err, fallback)
 }

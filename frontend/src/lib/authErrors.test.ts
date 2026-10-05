@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { AxiosError, type AxiosResponse } from "axios"
-import { authErrorMessage, authRateLimitMessage, RATE_LIMITED_ACCOUNT_MESSAGE, RATE_LIMITED_AUTH_MESSAGE } from "./authErrors"
+import { authErrorMessage, NETWORK_ERROR_MESSAGE, SERVER_UNSTABLE_MESSAGE, authRateLimitMessage, RATE_LIMITED_ACCOUNT_MESSAGE, RATE_LIMITED_AUTH_MESSAGE } from "./authErrors"
 import { googleErrorMessageForCode } from "./googleAuth"
 
 function axiosError(status: number | null, code?: string, error = "texto do backend"): AxiosError {
@@ -47,8 +47,22 @@ describe("authErrorMessage", () => {
     expect(authErrorMessage(axiosError(401, "INVALID_CREDENTIALS", "E-mail ou senha inválidos."), "fallback")).toBe("E-mail ou senha inválidos.")
   })
 
-  it("sem resposta (rede) usa o fallback", () => {
-    expect(authErrorMessage(axiosError(null), "fallback")).toBe("fallback")
+  // MUDANÇA DELIBERADA (L1.1): sem resposta do servidor (rede/timeout/CORS) deixou de cair no fallback "E-mail ou senha inválidos" — não é senha errada.
+  it("sem resposta (rede) diz que não há conexão, nunca \"senha inválida\"", () => {
+    expect(authErrorMessage(axiosError(null), "E-mail ou senha inválidos.")).toBe(NETWORK_ERROR_MESSAGE)
+  })
+
+  it("5xx diz que o serviço está instável e ignora o texto do backend", () => {
+    expect(authErrorMessage(axiosError(500, "INTERNAL", "stack trace"), "fallback")).toBe(SERVER_UNSTABLE_MESSAGE)
+    expect(authErrorMessage(axiosError(503, undefined), "fallback")).toBe(SERVER_UNSTABLE_MESSAGE)
+  })
+
+  it("4xx de negócio (400/409) segue com a mensagem do backend", () => {
+    expect(authErrorMessage(axiosError(409, "EMAIL_IN_USE", "E-mail já cadastrado."), "fallback")).toBe("E-mail já cadastrado.")
+  })
+
+  it("erro que não é de HTTP usa o fallback da tela", () => {
+    expect(authErrorMessage(new Error("boom"), "fallback")).toBe("fallback")
   })
 })
 
