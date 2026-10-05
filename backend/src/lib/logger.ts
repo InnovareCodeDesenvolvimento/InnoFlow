@@ -2,6 +2,7 @@ import pino from 'pino'
 import { env } from './env'
 import { REDACT_PATHS } from './logRedactPaths'
 import { LOG_SERIALIZERS } from './logSerializers'
+import { despacharAlertaDoLog, iniciarAlertas } from './alertas/hookLogger'
 
 /**
  * Logger compartilhado pelos 3 entrypoints. `pino-pretty` roda em TODO
@@ -18,6 +19,14 @@ export const logger = pino({
   level: env.LOG_LEVEL,
   // F5.7 (B5): o `err` passa por uma varredura em PROFUNDIDADE por campo sensível (o `redact` abaixo só casa 1 nível) — ver `logSerializers.ts`.
   serializers: LOG_SERIALIZERS,
+  // N-7 (avisos ao dono): ponto ÚNICO de despacho dos alertas. Todo log com o campo `alert` passa por aqui, SEM tocar nos call sites; só envia se
+  // algum canal (e-mail/WhatsApp) estiver configurado, e nunca bloqueia nem lança — ver `lib/alertas/hookLogger.ts`. A linha do stdout não muda.
+  hooks: {
+    logMethod(inputArgs, method, level) {
+      despacharAlertaDoLog(inputArgs, level)
+      return method.apply(this, inputArgs)
+    },
+  },
   // `pino-http` (app.ts) usa esta MESMA instância como logger base — o
   // `redact` daqui vale para os objetos req/res que ele serializa
   // automaticamente em toda requisição, não só para chamadas manuais de
@@ -70,3 +79,7 @@ export const logger = pino({
     },
   },
 })
+
+// Monta o notificador do processo (lê as envs ALERT_*, abre canais) FORA do import: `alertas/instancia` importa este módulo. Sem canal configurado
+// não faz nada. Falha ao carregar nunca derruba o processo (o `.catch` está em `iniciarAlertas`).
+setImmediate(iniciarAlertas)

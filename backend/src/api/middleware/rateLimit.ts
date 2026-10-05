@@ -146,3 +146,15 @@ export const paymentGatewayWriteRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LI
  * inutilizável, e o que ele consome de Cielo fica limitado por este balde e registrado na auditoria.
  */
 export const paymentGatewayTestRateLimit = buildLimiter(60 * 1000, 6, 'RATE_LIMITED_PAYMENT_GATEWAY', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `PUT /api/admin/communication-settings` (N-7) — troca o servidor de e-mail/WhatsApp e os destinatários dos avisos ao dono: ato raro e sensível, 10/min por ADMIN
+ * (por USUÁRIO, como o do gateway). Além do step-up de senha, que tem throttle próprio.
+ */
+export const communicationSettingsWriteRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/admin/communication-settings/test-email|test-whatsapp` — cada chamada abre uma conexão de saída de verdade (SMTP/HTTP) e ENVIA uma mensagem; balde PRÓPRIO e curto:
+ * 5/min por ADMIN (anti-abuso do servidor de e-mail do dono como relé, e anti-varredura de portas por quem tiver um token).
+ */
+export const communicationSettingsTestRateLimit = buildLimiter(60 * 1000, 5, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))

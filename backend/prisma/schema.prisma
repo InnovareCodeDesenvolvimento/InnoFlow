@@ -1154,6 +1154,43 @@ model PaymentGatewayConfig {
 }
 
 // ------------------------------------------------------------
+// Comunicação: e-mail (SMTP) e WhatsApp (Evolution API) — avisos de alerta ao dono (N-7) e e-mail transacional
+// ------------------------------------------------------------
+//
+// Tabela SINGLETON (id = 1, CHECK na migration), mesmo desenho de PaymentGatewayConfig: configuração pelo painel ADMIN manda, as envs `ALERT_*` são a
+// reserva (ver `services/comunicacao/configComunicacao.ts`). SEGREDOS (senha SMTP, apikey da Evolution) cifrados com a MESMA chave/formato dos segredos de
+// pagamento (`PAYMENT_SECRETS_KEY`, `v1:<kid>:<base64>`) — nunca em claro no banco, nunca em log/auditoria/resposta.
+// `emailEnabled`/`whatsappEnabled` NULOS = "este canal não foi configurado pelo painel" (vale a env); true/false = o painel manda (inclusive desligando).
+model NotificationChannelConfig {
+  id Int @id @default(1)
+
+  emailEnabled           Boolean?
+  smtpHost               String?
+  smtpPort               Int?
+  smtpSecure             Boolean  @default(false)
+  smtpUser               String?
+  smtpPasswordCiphertext String? // cifrado
+  emailFromName          String?
+  emailFromAddress       String?
+  alertEmailRecipients   String[] @default([])
+  emailMinSeverity       String   @default("IMPORTANTE") // INFO | IMPORTANTE | CRITICO
+
+  whatsappEnabled           Boolean?
+  evolutionBaseUrl          String?
+  evolutionInstance         String?
+  evolutionApiKeyCiphertext String? // cifrado
+  evolutionApiVersion       Int      @default(2) // 1 | 2
+  alertWhatsappRecipients   String[] @default([])
+  whatsappMinSeverity       String   @default("CRITICO")
+
+  // Janela de dedupe dos avisos (minutos); nulo = vale a env ALERT_DEDUPE_MINUTES / padrão (30).
+  alertDedupeMinutes Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// ------------------------------------------------------------
 // Auditoria (ADMIN-only)
 // ------------------------------------------------------------
 //

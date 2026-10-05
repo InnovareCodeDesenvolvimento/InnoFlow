@@ -286,6 +286,7 @@ antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e dep
    mudou desde a leitura e deixa uma linha na auditoria (ator `system`, ação `PAYMENT_CONFIG_CHANGE`,
    `actionDetail: secrets_reencrypted`). Código de saída **0** = concluído; **1** = há ilegíveis (ou valores
    alterados durante execução — rode de novo, o ilegível nunca é apagado); **2** = erro (chave ausente, argumento inválido).
+   Desde o N-7 o script também cobre a **senha SMTP** e a **apikey da Evolution** da tela de comunicação (alvos `NotificationChannelConfig.*`).
 5. Com **0 ilegíveis** e tudo na chave atual, **remova** `PAYMENT_SECRETS_KEY_PREVIOUS` e reinicie. Só então a chave antiga pode ser descartada.
 
 Se `PAYMENT_SECRETS_KEY_PREVIOUS` estiver inválida (não decodifica para 32 bytes), ela é ignorada e o log traz
@@ -767,6 +768,148 @@ Procure por `alert:` nos logs — devem estar limpos (nenhum erro) nos primeiros
 - [ ] Logs limpios (0 erros de deserialização do enum novo)
 - [ ] Motorista consegue iniciar/parar recarga normalmente (nada quebrou)
 - [ ] Alertas aparecem no padrão esperado (nenhum susto)
+
+## 6. Alertas ao dono (e-mail e WhatsApp) — N-7
+
+Até 05/10/2026 todo alerta do sistema era só uma linha com o campo `alert` no stdout do EasyPanel: ninguém era avisado. Agora **todo log com o campo `alert`** (os `logger.warn/error({ alert: '...' })` do código, sem exceção) passa por um notificador que manda **e-mail** e/ou **WhatsApp** para o dono. Funciona nos 3 serviços (api, ocpp-gateway, worker) e **vem desligado**: sem configuração não acontece nada e nada quebra.
+
+**Onde configurar: pelo PAINEL ADMIN (caminho principal).** Servidor de e-mail (SMTP), Evolution API, destinatários, severidade mínima por canal e janela de dedupe ficam no banco (tabela `NotificationChannelConfig`), com a senha SMTP e a apikey cifradas (a mesma chave `PAYMENT_SECRETS_KEY` do gateway de pagamento), botão "Testar" para cada canal, senha atual exigida para salvar e auditoria de cada alteração — o mesmo padrão da tela do gateway Cielo (contrato da API em `docs/CONTRATO-COMUNICACAO-ADMIN.md`). **As variáveis `ALERT_*` abaixo são a RESERVA:** valem para o canal que ainda não foi configurado pelo painel (e para quando o banco estiver fora do ar); o que foi salvo no painel manda — inclusive desligar um canal que a env ligaria. Veja a seção 6.9.
+
+### 6.1 Como funciona (resumo)
+
+- **Ponto único:** o `hooks.logMethod` do pino em `backend/src/lib/logger.ts` enxerga todo log antes de ele ir para o stdout; só age se o objeto logado tiver `alert` (string). Nenhum ponto de chamada foi alterado, e a linha do stdout continua igual.
+- **Severidade** (tabela em `backend/src/core/alertas/severidade.ts`; um teste falha se alguém criar um `alert` novo sem classificar):
+  - **CRITICO** — dinheiro de cliente pode estar preso/cobrado errado, ou o pagamento inteiro está fora do ar. Exige ação em horas. Sai por **e-mail e WhatsApp**.
+  - **IMPORTANTE** — alguém precisa olhar no mesmo dia (ataque já contido, dado inconsistente, configuração incoerente). Sai por **e-mail**. Alerta ainda não classificado vale IMPORTANTE.
+  - **INFO** — o sistema já tratou sozinho (reconsulta/backoff). **Só fica no log.**
+- **Dedupe entre os 3 processos (Redis):** o mesmo alerta com o mesmo contexto (ex.: o mesmo `paymentIntentId`) avisa **no máximo 1 vez a cada `ALERT_DEDUPE_MINUTES`** (padrão 30); o aviso seguinte diz "Ocorreu mais N vezes desde o último aviso".
+- **Teto por hora (anti-tempestade):** no máximo `ALERT_MAX_PER_HOUR` avisos por hora (padrão 20; CRITICO e IMPORTANTE contam separado, então uma enxurrada de IMPORTANTE nunca engole um CRITICO). Ao estourar sai **um** aviso "tempestade de alertas" e o resto daquela hora fica em silêncio (continua nos logs). Um alerta que cair no teto fica em silêncio até a janela de dedupe dele passar.
+- **Redis fora do ar:** o dedupe e o teto passam a valer só na memória de cada processo (pode chegar um aviso repetido; nunca falta aviso). O processo não cai.
+- **Nunca atrapalha o sistema:** o envio é assíncrono (fila limitada de 50, 2 envios em paralelo, prazo de 5 s por conexão/chamada); uma falha do e-mail/WhatsApp vira só um log com o campo `notifier` (nunca `alert`, para não gerar laço) e não afeta requisição, OCPP nem job.
+- **Conteúdo seguro:** o aviso só leva o nome do alerta, hora, serviço, a frase do log (sem e-mail/cartão/token) e uma **lista fixa de campos** (ids, códigos, contagens, centavos). Nunca token, segredo, cartão, CPF, e-mail de motorista, headers nem corpo de requisição. Campo que não está na lista é descartado.
+- **Limite conhecido:** o nível de log precisa deixar passar o alerta. Com `LOG_LEVEL=error` os alertas emitidos em `warn` **não chegam** (o pino descarta o nível antes do hook) — o serviço avisa isso no boot (`[alertas] LOG_LEVEL=...`). Mantenha `LOG_LEVEL=info` (padrão) ou `warn`.
+- **Quem morre não avisa:** se o processo inteiro cair (falta de memória, crash), não há log nem aviso. Para isso use o monitor externo da seção 6.6.
+
+### 6.2 Variáveis de ambiente — RESERVA (as 3 apps — api, ocpp-gateway e worker — devem receber as MESMAS)
+
+Use-as se preferir configurar por env, ou como rede de segurança. Se o painel já tem o canal configurado, estas variáveis daquele canal são ignoradas.
+
+Todas opcionais. Em branco = ausente. Valor inválido nunca derruba o boot: o canal fica desligado e o motivo (sem segredo) aparece no log de boot como `[alertas] ...`.
+
+| Variável | Padrão | Segredo? | O que faz |
+|---|---|---|---|
+| `ALERT_MIN_SEVERITY` | `IMPORTANTE` | Não | Piso para QUALQUER canal (`INFO`, `IMPORTANTE` ou `CRITICO`). Padrão IMPORTANTE: INFO é ruído que o sistema já resolveu sozinho; subir para `CRITICO` silencia os e-mails de IMPORTANTE. |
+| `ALERT_DEDUPE_MINUTES` | `30` | Não | Janela de dedupe por alerta+contexto. |
+| `ALERT_MAX_PER_HOUR` | `20` | Não | Teto de avisos por hora (por severidade). |
+| `ALERT_ENV_LABEL` | `NODE_ENV` | Não | Rótulo do ambiente no assunto (ex.: `producao`). |
+| `ALERT_SERVICE_NAME` | (detectado) | Não | Só para forçar o nome do serviço no aviso (normalmente detectado: `api`, `ocpp`, `worker`). |
+| **E-mail (SMTP)** | | | |
+| `ALERT_EMAIL_TO` | — | Não | Destinatários, separados por vírgula. |
+| `ALERT_SMTP_HOST` | — | Não | Servidor SMTP. Sem `ALERT_EMAIL_TO` + `ALERT_SMTP_HOST` o canal fica desligado. |
+| `ALERT_SMTP_PORT` | `587` (`465` se `SECURE=true`) | Não | |
+| `ALERT_SMTP_SECURE` | `false` | Não | `true` = TLS direto (porta 465). `false` = STARTTLS (porta 587); **em produção o envio é recusado se o servidor não oferecer TLS** (a senha nunca vai em claro). |
+| `ALERT_SMTP_USER` / `ALERT_SMTP_PASS` | — | **Sim (PASS)** | Login SMTP. |
+| `ALERT_EMAIL_FROM` | `ALERT_SMTP_USER` (se for e-mail) | Não | Remetente, ex.: `InnoFlow <alertas@seudominio.com.br>`. |
+| `ALERT_EMAIL_MIN_SEVERITY` | `IMPORTANTE` | Não | Mínimo só do e-mail. |
+| **WhatsApp — Evolution API (provedor escolhido pelo dono)** | | | |
+| `ALERT_WHATSAPP_PROVIDER` | `evolution` (inferido) | Não | `evolution` ou `generic`. |
+| `ALERT_EVOLUTION_BASE_URL` | — | Não | URL da sua Evolution API, ex.: `https://evolution.seudominio.com.br`. **https obrigatório em produção.** |
+| `ALERT_EVOLUTION_INSTANCE` | — | Não | Nome da instância (a conectada ao WhatsApp que vai enviar). |
+| `ALERT_EVOLUTION_APIKEY` | — | **Sim** | Chave da API (a global `AUTHENTICATION_API_KEY` da Evolution ou o token da instância). Vai no header `apikey`. |
+| `ALERT_EVOLUTION_API_VERSION` | `2` | Não | `2` (`{number,text}`) ou `1` (`{number,textMessage:{text}}`). |
+| `ALERT_WHATSAPP_TO` | — | Não (é dado pessoal) | Números **só dígitos com DDI**, separados por vírgula, ex.: `5511999999999,5521988887777`. |
+| `ALERT_WHATSAPP_MIN_SEVERITY` | `CRITICO` | Não | Mínimo só do WhatsApp. |
+| **WhatsApp — adaptador HTTP genérico (alternativa, se um dia trocar de provedor)** | | | |
+| `ALERT_WHATSAPP_WEBHOOK_URL` | — | Não | `https` em produção. Usa `ALERT_WHATSAPP_PROVIDER=generic`. |
+| `ALERT_WHATSAPP_WEBHOOK_TOKEN` | — | **Sim** | Enviado como `Authorization: Bearer <token>`. |
+| **Infraestrutura da configuração pelo painel (só quem faz o deploy define; NÃO há campo no painel)** | | | |
+| `COMMUNICATION_ALLOW_PRIVATE_HOSTS` | `false` | Não | Em produção o painel recusa host SMTP/URL da Evolution que apontem para a rede interna (anti-SSRF). Ligue (`true`) SÓ se a Evolution roda no mesmo projeto do EasyPanel e você a acessa por um nome interno (`http://evolution:8080`): libera redes privadas e nomes internos (e `http` para eles). Loopback e metadados de nuvem (169.254.x.x) continuam SEMPRE bloqueados. |
+| `COMMUNICATION_DISABLE_DB_CONFIG` | `false` | Não | `true` = os avisos usam SÓ as envs, sem ler o painel (interruptor de emergência; a tela do painel continua funcionando). Já vem `true` nos testes. |
+
+Marque como "secreto" no EasyPanel: `ALERT_SMTP_PASS`, `ALERT_EVOLUTION_APIKEY`, `ALERT_WHATSAPP_WEBHOOK_TOKEN`. Nenhum deles vai para log, aviso nem mensagem de erro.
+
+### 6.3 WhatsApp pela Evolution API
+
+O notificador faz, para cada número de `ALERT_WHATSAPP_TO`:
+
+```
+POST {ALERT_EVOLUTION_BASE_URL}/message/sendText/{ALERT_EVOLUTION_INSTANCE}
+apikey: <ALERT_EVOLUTION_APIKEY>
+Content-Type: application/json
+
+{ "number": "5511999999999", "text": "*[InnoFlow][CRITICO] payment_void_manual_review* (production/worker)\n..." }
+```
+
+(v1: `{ "number": "...", "textMessage": { "text": "..." } }`, escolhido por `ALERT_EVOLUTION_API_VERSION=1`.) Sem seguir redirect (a `apikey` não pode ir para outro host), prazo de 5 s, https obrigatório em produção. Se um número falhar e outro entregar, o aviso conta como entregue.
+
+**O que foi e o que NÃO foi verificado:** rota, corpo (`number` + `text` na v2; `number` + `textMessage.text` na 1.x), exigência do header `apikey` e a resposta 201 foram conferidos no **código-fonte oficial da Evolution** (repositório `EvolutionAPI/evolution-api`: `sendMessage.router.ts`, `sendMessage.dto.ts`, `auth.guard.ts`; a 1.x no tag 1.6.0). **Não foi testado contra uma instância viva.** A documentação publicada (doc.evolution-api.com) não estava acessível na hora da implementação. Valide com o `npm run alerts:test` (6.5) antes de confiar.
+
+Pontos de atenção na Evolution: a instância precisa estar **conectada** (estado `open`) — instância desconectada recusa o envio; em celular brasileiro antigo o número pode precisar (ou não) do 9º dígito conforme o cadastro no WhatsApp (se não chegar, teste com e sem o 9); o WhatsApp pode limitar mensagens automáticas de um número novo — use um número já em uso e peça ao(s) destinatário(s) para salvar o remetente.
+
+**Outros provedores (Z-API, Twilio, Meta Cloud API, InnoChat):** não há adaptador específico e **não verifiquei o formato de nenhum deles** — "adaptar". O caminho barato é o adaptador genérico (`ALERT_WHATSAPP_PROVIDER=generic`): ele faz `POST` na sua URL com `Authorization: Bearer <token>` e o corpo `{ "to": "5511999999999", "text": "...", "severity": "CRITICO", "alert": "payment_void_manual_review", "service": "worker", "at": "2026-10-05T12:00:00.000Z" }`; uma ponte pequena (um fluxo n8n/Make ou um endpoint do InnoChat) converte isso para a API do provedor. Para um adaptador direto, implemente a interface `CanalDeAlerta` em `backend/src/lib/alertas/canais.ts` (um `enviar(evento)`) e registre em `criarCanalWhatsapp`.
+
+### 6.4 E-mail (SMTP)
+
+Qualquer SMTP serve (o do seu domínio, um serviço transacional, ou Gmail com **senha de app** — a senha normal do Gmail não funciona). Exemplo (porta 587, STARTTLS):
+
+```
+ALERT_EMAIL_TO=dono@seudominio.com.br
+ALERT_SMTP_HOST=smtp.seudominio.com.br
+ALERT_SMTP_PORT=587
+ALERT_SMTP_USER=alertas@seudominio.com.br
+ALERT_SMTP_PASS=<senha>
+ALERT_EMAIL_FROM=InnoFlow <alertas@seudominio.com.br>
+```
+
+Assunto: `[InnoFlow][CRITICO] payment_void_manual_review (production)`. Corpo em texto puro: alerta, severidade, ambiente, serviço, hora, o que aconteceu, **o que fazer** e o contexto seguro. Confira o spam na primeira vez e marque como "não é spam"; para boa entrega, use um remetente do seu próprio domínio com SPF/DKIM configurados no provedor.
+
+### 6.5 Como validar (faça depois de configurar)
+
+No terminal (Console) do serviço **api** no EasyPanel:
+
+```
+npm run alerts:test
+```
+
+Ele dispara um alerta de teste (`alerts_test`, severidade INFO) **forçando** o envio por todos os canais configurados (ignora severidade mínima, dedupe e teto) e imprime, sem segredo, o resultado de cada canal: `ENVIADO` ou `FALHOU — <motivo curto>` (ex.: `smtp EAUTH 535`, `http 401`, `sem resposta em 5000ms`, `redirect 301 recusado`). Código de saída: `0` tudo enviado; `1` algum canal falhou; `2` nenhum canal configurado. "ENVIADO" significa que o SMTP/Evolution **aceitou** a mensagem — confirme na caixa de entrada e no WhatsApp.
+
+O `alerts:test` usa a configuração EFETIVA (painel > env), a mesma dos avisos reais, e imprime de onde ela veio (`PAINEL (banco)` ou `variaveis de ambiente`). Pelo painel, o botão "Testar" de cada canal faz o mesmo para um destinatário só. Com a configuração pelo painel os três serviços leem a MESMA configuração do banco (mudança salva vale na API na hora e no worker/gateway em até ~35 s); com env, cada serviço precisa receber as mesmas variáveis. No log de boot do primeiro alerta de cada serviço aparece a linha `[alertas] avisos ao dono: email[database](...) + whatsapp/evolution[env](...)` (a origem de cada canal entre colchetes); ela reaparece quando a configuração muda. Se disser `nenhum`, o serviço não tem canal ativo (procure `[alertas] ...` de aviso logo antes).
+
+### 6.6 Monitor externo do `/health` (sem código)
+
+O notificador só fala quando o processo está vivo. Para "o sistema inteiro caiu", use um monitor externo gratuito (UptimeRobot, Better Stack, Hetrixtools etc.) com alerta por e-mail/WhatsApp/Telegram, intervalo de 1 a 5 minutos:
+
+1. **API:** `GET https://<domínio-da-api>/health` — responde `200 {"status":"ok"}` só se Postgres **e** Redis respondem; `503` quando algum falha. Alerta em qualquer status diferente de 200. (Se a API não tem domínio próprio e só é alcançada pelo frontend, monitore `GET https://<domínio-do-frontend>/api/public/config` esperando 200: prova que o nginx alcança a API, mas não testa o banco.)
+2. **Frontend:** `GET https://<domínio-do-frontend>/health` responde `200 ok` — **atenção:** é uma resposta fixa do nginx; prova que o frontend está de pé, não a API.
+3. **Gateway OCPP e worker não têm rota HTTP de saúde.** Sinal indireto: se os carregadores ficam "offline" no mapa/painel ao mesmo tempo, o gateway caiu; o worker parado aparece como Pix pago sem crédito automático e capturas pendentes. Opcional: monitor de **porta** TCP no domínio `wss` do gateway (só prova que o proxy responde).
+
+### 6.7 Quais alertas são críticos e o que fazer
+
+Todos os alertas, com severidade e significado: `docs/GO-LIVE-PAGAMENTOS.md` §6 ("Alertas de Log") e `backend/src/core/alertas/severidade.ts` (fonte da severidade usada pelo aviso). Os **CRITICOS** — o aviso já traz a frase "O que fazer":
+
+| Alerta | O que fazer |
+|---|---|
+| `payment_void_manual_review` | Conferir a venda no Site Cielo e cancelar/estornar a pré-autorização à mão (dinheiro do cliente preso no cartão). |
+| `payment_void_skipped_already_captured` | A Cielo diz que a venda já foi capturada: conferir cobrança duplicada e estornar o excedente. |
+| `payment_capture_retry_exhausted` | A captura não fechou após muitas tentativas: conferir no Site Cielo e capturar/cancelar à mão. |
+| `payment_authorization_stuck` | Autorização presa: conferir no Site Cielo; se autorizada e sem sessão, cancelar. |
+| `payment_pix_credit_divergence` | Pix pago com valor/pedido divergente e NÃO creditado: conferir na Cielo e creditar à mão se legítimo. |
+| `session_cost_calculation_failed` | Sessão encerrada sem calcular o custo: revisar a sessão (tarifa/leituras) e cobrar ou isentar à mão. |
+| `session_stop_not_obeyed` | O carregador não obedeceu o stop e segue entregando energia: desligar o carregador/disjuntor e investigar. |
+| `payment_gateway_credential_rejected`, `payment_gateway_ip_not_allowed`, `payment_gateway_account_restriction` | A Cielo recusou credencial/IP/conta: todo pagamento falha até corrigir (tela do gateway; pedir liberação de IP ao suporte da Cielo). |
+| `payment_gateway_environment_url_mismatch`, `payment_gateway_config_decrypt_failed`, `payment_gateway_secrets_undecryptable`, `payment_gateway_config_load_failed`, `payment_gateway_not_configured` | Pagamento fora do ar por configuração/chave de cifragem/banco: ver `GO-LIVE-PAGAMENTOS.md` §6. |
+| `payment_fake_adapter_in_production` | **Desligar já:** `PAYMENT_ALLOW_FAKE_ADAPTER` ligado em produção aprova qualquer cartão sem cobrar. |
+
+**IMPORTANTES** (e-mail): entre outros, `ocpp_auth_ip_flood`, `ocpp_message_flood`, `ocpp_foreign_transaction`, `payment_card_testing_suspected`, `google_link_repeated_failures`, `payment_config_changed` (alguém alterou a config do gateway: se não foi você, troque a senha do admin e a chave de cifragem) e os demais da tabela.
+
+Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITICO), edite a tabela em `severidade.ts` (vale após o deploy). Para receber só o essencial, use `ALERT_MIN_SEVERITY=CRITICO`.
+
+### 6.8 Problemas comuns
+
+- **Nada chega e o boot não mostra `[alertas] avisos ao dono ATIVOS`:** faltam variáveis neste serviço, ou há valor inválido (procure `[alertas] ...` no log de boot).
+- **`[alertas] falha ao enviar o aviso ao dono` (campo `notifier: canal_falhou`):** o `motivo` diz a causa (`smtp EAUTH` = login recusado; `smtp ESOCKET`/`ETIMEDOUT` = host/porta/firewall; `http 401/403` = chave; `http 404` = instância/URL; `sem resposta em 5000ms`). Rode `npm run alerts:test` para reproduzir.
+- **Chegou "tempestade de alertas":** mais de `ALERT_MAX_PER_HOUR` avisos numa hora. Abra os logs: costuma ser o gateway Cielo fora do ar, um ataque ou erro em laço.
+- **Muito e-mail de IMPORTANTE:** suba `ALERT_MIN_SEVERITY=CRITICO` ou `ALERT_DEDUPE_MINUTES=120`.
 
 ---
 

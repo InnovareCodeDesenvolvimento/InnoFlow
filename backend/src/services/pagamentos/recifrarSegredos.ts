@@ -7,7 +7,8 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
  * Re-cifra os segredos de pagamento com a chave ATUAL (`PAYMENT_SECRETS_KEY`) — o miolo da ROTAÇÃO de chave (F5.7). Usado SÓ pelo script administrativo
  * `backend/scripts/recifrarSegredosDePagamento.ts` (fora do HTTP: ninguém aciona isto por rota). Runbook em `docs/DEPLOY-EASYPANEL.md`.
  *
- * Alvos: `PaymentMethod.cieloCardTokenCiphertext` (todas as linhas, ativas ou não) e as três colunas `*Ciphertext` de `PaymentGatewayConfig`.
+ * Alvos: `PaymentMethod.cieloCardTokenCiphertext` (todas as linhas, ativas ou não), as três colunas `*Ciphertext` de `PaymentGatewayConfig` e as duas de `NotificationChannelConfig`
+ * (senha SMTP e apikey da Evolution — N-7: a MESMA chave cifra os segredos de comunicação; sem isto a rotação deixaria esses dois para trás, ilegíveis).
  *
  * Regras:
  *  - DRY-RUN por padrão (`apply: false` não grava NADA, só conta); `apply: true` grava.
@@ -20,6 +21,8 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
  */
 
 export type AlvoRecifragem = 'PaymentMethod.cieloCardTokenCiphertext' | 'PaymentGatewayConfig.merchantKeyCiphertext' | 'PaymentGatewayConfig.sopClientSecretCiphertext' | 'PaymentGatewayConfig.webhookHeaderSecretCiphertext'
+  | 'NotificationChannelConfig.smtpPasswordCiphertext'
+  | 'NotificationChannelConfig.evolutionApiKeyCiphertext'
 
 export interface RelatorioAlvo {
   alvo: AlvoRecifragem
@@ -133,6 +136,29 @@ export async function recifrarSegredosDePagamento(params: { apply: boolean; pris
       if (apply) {
         // `updatedAt` explícito = o MESMO valor: re-cifrar não é uma "alteração de configuração" (a tela e o cache da API não devem ver isto como mudança do admin).
         const { count } = await prisma.paymentGatewayConfig.updateMany({ where: { id: 1, [coluna]: valor }, data: { [coluna]: r.novo!, updatedAt: config.updatedAt } })
+        if (count === 1) alvo.recifrados += 1
+        else alvo.alteradosDuranteExecucao += 1
+      }
+    }
+  }
+
+  // --- NotificationChannelConfig (singleton id=1): senha SMTP e apikey da Evolution — cifradas com a MESMA chave (N-7) ---------------------------------------------
+  const comunicacao = await prisma.notificationChannelConfig.findUnique({ where: { id: 1 } })
+  const colunasComunicacao = ['smtpPasswordCiphertext', 'evolutionApiKeyCiphertext'] as const
+  for (const coluna of colunasComunicacao) {
+    const alvo = novoAlvo(`NotificationChannelConfig.${coluna}`)
+    alvos.push(alvo)
+    const valor = comunicacao?.[coluna]
+    if (!comunicacao || !valor) continue
+    alvo.total += 1
+    const r = avaliar(valor)
+    if (r.situacao === 'JA_NA_ATUAL') alvo.jaNaChaveAtual += 1
+    else if (r.situacao === 'ILEGIVEL') alvo.ilegiveis += 1
+    else {
+      alvo.aRecifrar += 1
+      if (apply) {
+        // `updatedAt` explícito = o MESMO valor: re-cifrar não é uma alteração de configuração.
+        const { count } = await prisma.notificationChannelConfig.updateMany({ where: { id: 1, [coluna]: valor }, data: { [coluna]: r.novo!, updatedAt: comunicacao.updatedAt } })
         if (count === 1) alvo.recifrados += 1
         else alvo.alteradosDuranteExecucao += 1
       }
