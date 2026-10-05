@@ -1,10 +1,13 @@
 import { lazy, Suspense, useState } from "react"
 import { useLocation } from "react-router-dom"
 import { List, Map as MapIcon, MapPin, Search } from "lucide-react"
+import { MascotFace } from "@/components/brand/Mascot"
+import { AppBand } from "@/components/pwa/AppBand"
 import { Button } from "@/components/ui/Button"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Input } from "@/components/ui/Input"
+import { Segmented } from "@/components/ui/Segmented"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { LocationPrompt } from "@/components/estacoes/LocationPrompt"
 import { StationDetailSheet } from "@/components/estacoes/StationDetailSheet"
@@ -87,10 +90,11 @@ export function Mapa() {
         </div>
       )}
 
-      {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os eletropostos.")} onRetry={() => refetch()} />}
+      {isError && <ErrorState tone="page" art={<MascotFace size={64} />} message={getApiErrorMessage(error, "Não foi possível carregar os eletropostos.")} onRetry={() => refetch()} />}
 
       {!isLoading && !isError && sites.length === 0 && (
         <EmptyState
+          tone="quiet"
           icon={MapPin}
           title={searching ? "Nada encontrado" : scope === "nearby" ? "Nenhum eletroposto por perto" : "Nenhum eletroposto cadastrado"}
           description={
@@ -142,7 +146,7 @@ export function Mapa() {
           Tudo ocupado
         </li>
         <li className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-full bg-ink-softer" aria-hidden="true" />
+          <span className="h-3 w-3 rounded-full bg-state-off" aria-hidden="true" />
           Fora do ar
         </li>
       </ul>
@@ -150,19 +154,15 @@ export function Mapa() {
   )
 
   return (
-    <div className="mx-auto max-w-md space-y-4 px-4 py-5 lg:max-w-6xl">
-      <div>
+    <div>
+      <AppBand wide className="pb-6">
         <h1 className="flex items-center gap-2 text-xl font-black tracking-tight text-ink">
-          <MapPin className="h-5 w-5 text-primary" aria-hidden="true" />
+          <MapPin className="h-5 w-5 text-lime" aria-hidden="true" />
           Eletropostos
         </h1>
         <p className="mt-1 text-sm text-ink-softer">Disponibilidade de agora, perto de você.</p>
-      </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,26rem)_1fr] lg:items-start lg:gap-6">
-        <div className="min-w-0 space-y-4">
-          <LocationPrompt status={geo.status} hasPosition={hasPosition} onRequest={geo.request} compact={hasPosition} />
-
+        <div className="mt-4">
           <Input
             type="search"
             aria-label="Buscar por cidade ou endereço"
@@ -172,54 +172,37 @@ export function Mapa() {
             onChange={(e) => setQuery(e.target.value)}
             leftIcon={<Search className="h-4 w-4" aria-hidden="true" />}
           />
+        </div>
+      </AppBand>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-surface p-1" role="group" aria-label="Ordenar por">
-              {SORT_OPTIONS.map((opt) => {
-                const disabled = opt.value === "distance" && !hasPosition
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    disabled={disabled}
-                    aria-pressed={sort === opt.value}
-                    title={disabled ? "Ative a localização para ordenar por distância" : undefined}
-                    onClick={() => setSortChoice(opt.value)}
-                    className={cn(
-                      "min-h-11 rounded-lg px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                      sort === opt.value ? "bg-primary text-primary-foreground" : "text-ink-softer hover:bg-muted hover:text-ink",
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                )
-              })}
-            </div>
+      <div className="mx-auto max-w-md space-y-4 px-4 py-5 lg:max-w-6xl">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,26rem)_1fr] lg:items-start lg:gap-6">
+          <div className="min-w-0 space-y-4">
+            <LocationPrompt status={geo.status} hasPosition={hasPosition} onRequest={geo.request} compact={hasPosition} />
 
-            {/* Alternador lista/mapa só no mobile — no desktop os dois aparecem lado a lado. */}
-            <div className="ml-auto flex gap-1 rounded-xl border border-border bg-surface p-1 lg:hidden" role="group" aria-label="Modo de exibição">
-              {(
-                [
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                label="Ordenar por"
+                value={sort}
+                onChange={setSortChoice}
+                options={SORT_OPTIONS.map((opt) => {
+                  const disabled = opt.value === "distance" && !hasPosition
+                  return { ...opt, disabled, title: disabled ? "Ative a localização para ordenar por distância" : undefined }
+                })}
+              />
+
+              {/* Alternador lista/mapa só no mobile — no desktop os dois aparecem lado a lado. */}
+              <Segmented
+                label="Modo de exibição"
+                value={view}
+                onChange={setView}
+                className="ml-auto lg:hidden"
+                options={[
                   { value: "list", label: "Lista", icon: List },
                   { value: "map", label: "Mapa", icon: MapIcon },
-                ] as const
-              ).map(({ value, label, icon: Icon }) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={view === value}
-                  onClick={() => setView(value)}
-                  className={cn(
-                    "flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors",
-                    view === value ? "bg-primary text-primary-foreground" : "text-ink-softer hover:bg-muted hover:text-ink",
-                  )}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {label}
-                </button>
-              ))}
+                ]}
+              />
             </div>
-          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-ink-softer">
             <span>
@@ -251,7 +234,7 @@ export function Mapa() {
               {selected ? (
                 <PublicSiteCard site={selected} distanceKm={selected.distanceKm} selected onSelect={() => setDetailId(selected.id)} />
               ) : (
-                <p className="rounded-2xl border border-dashed border-border-strong px-4 py-5 text-center text-xs text-ink-softer">
+                <p className="rounded-2xl bg-muted px-4 py-5 text-center text-xs text-ink-softer">
                   Toque num pino do mapa para ver o eletroposto. O número dentro do pino é quantos conectores estão livres agora.
                 </p>
               )}
@@ -259,7 +242,8 @@ export function Mapa() {
           )}
         </div>
 
-        {isDesktop && <div className="lg:sticky lg:top-20">{mapBlock}</div>}
+          {isDesktop && <div className="lg:sticky lg:top-20">{mapBlock}</div>}
+        </div>
       </div>
 
       <StationDetailSheet site={detail} distanceKm={detail?.distanceKm} dataUpdatedAt={dataUpdatedAt} onClose={() => setDetailId(null)} />

@@ -1124,6 +1124,8 @@ export const handlers = [
   http.get("/api/me/sessions", ({ request }) => {
     const scope = requireDriver(request)
     if ("error" in scope) return scope.error
+    // Só para o E2E do estado de erro de tela inteira do PWA (`ErrorState tone="page"`).
+    if (localStorage.getItem("mock:me-sessions-error") === "1") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
     const url = new URL(request.url)
     const { page, pageSize } = parsePagination(url, 15)
     return HttpResponse.json(listMockSessions(scope.user.userId, page, pageSize))

@@ -83,11 +83,11 @@ export function StationDetailSheet({
   return (
     <DialogPrimitive.Root open={!!site} onOpenChange={(open) => !open && onClose()}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 animate-fade-in bg-ink/50 backdrop-blur-[2px]" />
+        <DialogPrimitive.Overlay className="dialog-scrim fixed inset-0 z-50 animate-fade-in" />
         {site && links && (
           <DialogPrimitive.Content
             aria-describedby="station-sheet-desc"
-            className="animate-sheet-up fixed inset-x-0 bottom-0 z-50 mx-auto max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-lg focus-visible:outline-none"
+            className="animate-sheet-up fixed inset-x-0 bottom-0 z-50 mx-auto max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-[var(--radius-feature)] bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-lg focus-visible:outline-none"
           >
             <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-border-strong" aria-hidden="true" />
             <div className="flex items-start gap-3">
@@ -127,7 +127,7 @@ export function StationDetailSheet({
                 href={links.google}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={buttonVariants({ className: "btn-glow-primary min-h-12" })}
+                className={buttonVariants({ variant: "lime", className: "min-h-12" })}
               >
                 <Navigation className="h-4 w-4" aria-hidden="true" />
                 Como chegar

@@ -71,9 +71,9 @@ export function TopupAmountPicker({
               />
               <span
                 className={cn(
-                  "pressable flex min-h-12 items-center justify-center rounded-xl border text-base font-bold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2",
+                  "flex min-h-12 items-center justify-center rounded-[var(--field-radius)] border text-base font-bold transition-[transform,background-color,border-color] duration-150 active:scale-[0.97] peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2",
                   selectedChipCents === cents
-                    ? "border-primary bg-primary/10 text-primary-700 shadow-tinted-primary"
+                    ? "border-primary bg-primary/10 text-primary-700 shadow-tinted"
                     : "border-border bg-surface text-ink-softer hover:bg-muted",
                 )}
               >
@@ -83,18 +83,19 @@ export function TopupAmountPicker({
           ))}
         </div>
 
-        <Input
-          label="Ou digite outro valor (R$)"
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder="35,00"
-          className="mt-3"
-          value={amountInput}
-          onChange={(e) => handleCustomAmountChange(e.target.value)}
-          leftIcon={<span className="text-sm font-semibold">R$</span>}
-          error={errors.amount}
-          hint={!errors.amount ? "De R$ 10,00 a R$ 500,00." : undefined}
-        />
+        <div className="mt-4">
+          <Input
+            label="Ou digite outro valor (R$)"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="35,00"
+            value={amountInput}
+            onChange={(e) => handleCustomAmountChange(e.target.value)}
+            leftIcon={<span className="text-sm font-semibold">R$</span>}
+            error={errors.amount}
+            hint={!errors.amount ? "De R$ 10,00 a R$ 500,00." : undefined}
+          />
+        </div>
       </fieldset>
 
       {debtMessage && (
@@ -124,7 +125,7 @@ export function TopupAmountPicker({
         </p>
       )}
 
-      <Button type="submit" size="lg" className="w-full" loading={loading} disabled={loading}>
+      <Button type="submit" variant="lime" size="lg" className="w-full" loading={loading} disabled={loading}>
         {!loading && <QrCode className="h-4 w-4" aria-hidden="true" />}
         Gerar código Pix
       </Button>

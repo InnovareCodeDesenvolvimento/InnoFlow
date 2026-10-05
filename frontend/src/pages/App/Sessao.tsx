@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { AlertTriangle, CreditCard, Loader2, WifiOff, Zap } from "lucide-react"
+import { AlertTriangle, CreditCard, Loader2, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { Card, CardContent } from "@/components/ui/Card"
+import { MascotFace } from "@/components/brand/Mascot"
+import { AppBand } from "@/components/pwa/AppBand"
 import { SessionTimer } from "@/components/sessao/SessionTimer"
 import { SessionPaymentMethodBadge } from "@/components/sessao/SessionPaymentMethodBadge"
 import { useActiveSession, useCommandStatus, useStopSession } from "@/hooks/useMeSessions"
@@ -124,45 +125,55 @@ export function Sessao() {
   }
 
   // ---- Conectando -----------------------------------------------------------
+  // Momento de marca: a espera de uma resposta de hardware acontece na moldura escura (radar lima), os avisos de cartão/demora no miolo claro.
   if (awaitingStart) {
     return (
-      <div className="mx-auto flex max-w-md flex-col items-center px-4 py-16 text-center">
-        <span className="relative flex h-16 w-16 items-center justify-center">
-          <span className="animate-radar-ping absolute inset-0 rounded-full bg-primary/20" aria-hidden="true" />
-          <span className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
-          </span>
-        </span>
-        <h1 className="mt-5 text-lg font-black text-ink">Conectando ao carregador…</h1>
-        <p className="mt-1 text-sm text-ink-softer">
-          {commandStatus === "ACCEPTED" ? "Comando aceito — aguardando o carregador iniciar a recarga." : "Enviando o comando de início."}
-        </p>
-        {startState?.paymentMode === "CARD" && startState.authorizedCents != null && (
-          <p className="mt-4 flex items-center gap-2 rounded-xl bg-primary-50 px-4 py-3 text-left text-xs font-semibold text-primary-700">
-            <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Pré-autorizamos {formatCents(startState.authorizedCents)} no cartão {startState.cardBrand ?? ""}
-            {startState.cardLast4 ? ` •••• ${startState.cardLast4}` : ""} — você só paga pelo que consumir.
-          </p>
-        )}
-        {startWarning && (
-          <p className="mt-4 flex items-center gap-2 rounded-xl bg-warning-50 px-4 py-3 text-left text-xs font-semibold text-warning-700">
-            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Isso está demorando mais que o esperado. Continue aguardando ou verifique o carregador.
-          </p>
-        )}
+      <div>
+        <AppBand className="pb-10 pt-10">
+          <div className="flex flex-col items-center text-center">
+            <span className="relative flex h-16 w-16 items-center justify-center">
+              <span className="animate-radar-ping absolute inset-0 rounded-full bg-lime/25" aria-hidden="true" />
+              <span className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+                <Loader2 className="h-8 w-8 animate-spin text-lime" aria-hidden="true" />
+              </span>
+            </span>
+            <h1 className="mt-5 text-lg font-black text-ink">Conectando ao carregador…</h1>
+            <p className="mt-1 text-sm text-ink-softer">
+              {commandStatus === "ACCEPTED" ? "Comando aceito — aguardando o carregador iniciar a recarga." : "Enviando o comando de início."}
+            </p>
+          </div>
+        </AppBand>
+        <div className="mx-auto max-w-md space-y-3 px-4 pt-5">
+          {startState?.paymentMode === "CARD" && startState.authorizedCents != null && (
+            <p className="flex items-center gap-2 rounded-2xl bg-primary-50 px-4 py-3 text-left text-xs font-semibold text-primary-700">
+              <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Pré-autorizamos {formatCents(startState.authorizedCents)} no cartão {startState.cardBrand ?? ""}
+              {startState.cardLast4 ? ` •••• ${startState.cardLast4}` : ""} — você só paga pelo que consumir.
+            </p>
+          )}
+          {startWarning && (
+            <p className="flex items-center gap-2 rounded-2xl bg-warning-50 px-4 py-3 text-left text-xs font-semibold text-warning-700">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Isso está demorando mais que o esperado. Continue aguardando ou verifique o carregador.
+            </p>
+          )}
+        </div>
       </div>
     )
   }
 
   // ---- Sem sessão ativa -------------------------------------------------------
+  // Estado vazio de PRIMEIRO USO (D3): o mascote acompanha o convite a escanear o QR.
   if (!session) {
     return (
-      <div className="mx-auto flex max-w-md flex-col items-center px-4 py-16 text-center">
-        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-ink-subtle">
-          <Zap className="h-7 w-7" aria-hidden="true" />
-        </span>
-        <h1 className="mt-5 text-lg font-black text-ink">Nenhuma recarga em andamento</h1>
-        <p className="mt-1 text-sm text-ink-softer">Escaneie o QR code de um carregador para iniciar.</p>
+      <div className="mx-auto max-w-md px-4 py-5">
+        <div className="surface-dark flex flex-col items-center gap-3 rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-12 text-center shadow-tinted-card ring-1 ring-white/10">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+            <MascotFace size={64} />
+          </span>
+          <h1 className="text-lg font-black text-ink">Nenhuma recarga em andamento</h1>
+          <p className="text-sm text-ink-softer">Escaneie o QR code de um carregador para iniciar.</p>
+        </div>
       </div>
     )
   }
@@ -172,47 +183,51 @@ export function Sessao() {
   const energyKwh = (session.energyDeliveredWh / 1000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })
 
   return (
-    <div className="mx-auto max-w-md px-4 py-5">
-      {activeQuery.isError && (
-        <div
-          role="status"
-          className="mb-4 flex items-center gap-2 rounded-xl bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-700"
-        >
-          <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
-          Sem conexão — sua recarga continua.
+    <div>
+      <AppBand className="pb-7">
+        {activeQuery.isError && (
+          <div role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-700">
+            <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Sem conexão — sua recarga continua.
+          </div>
+        )}
+
+        {/* F5.9: `FAULTED` é "ativa" (o motorista pode encerrar), mas o carregador reportou falha — sem aviso a tela de "carregando" mentiria. */}
+        {session.status === "FAULTED" && (
+          <div role="status" className="mb-4 flex items-start gap-2 rounded-2xl bg-danger-50 px-4 py-3 text-sm font-semibold text-danger-700">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            {DRIVER_CLOSURE_COPY.faulted}
+          </div>
+        )}
+
+        {/* h1: a tela da recarga ao vivo não tinha título de página (leitor de tela). Mesmo visual de antes. */}
+        <h1 className="text-xs font-bold uppercase tracking-wide text-ink-softer">{session.site.name}</h1>
+        <p className="text-sm text-ink-softer">
+          {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
+        </p>
+        <div className="mt-1.5">
+          <SessionPaymentMethodBadge paymentMode={session.paymentMode} payment={session.payment} />
         </div>
-      )}
 
-      {/* F5.9: `FAULTED` é "ativa" (o motorista pode encerrar), mas o carregador reportou falha — sem aviso a tela de "carregando" mentiria. */}
-      {session.status === "FAULTED" && (
-        <div role="status" className="mb-4 flex items-start gap-2 rounded-xl bg-danger-50 px-4 py-3 text-sm font-semibold text-danger-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          {DRIVER_CLOSURE_COPY.faulted}
-        </div>
-      )}
-
-      <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">{session.site.name}</p>
-      <p className="text-sm text-ink-softer">
-        {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
-      </p>
-      <div className="mt-1.5">
-        <SessionPaymentMethodBadge paymentMode={session.paymentMode} payment={session.payment} />
-      </div>
-
-      <Card className={`card-premium animate-fade-in-up mt-4 ${!stopRequested ? "animate-live-glow" : ""}`}>
-        <CardContent className="p-5 text-center">
-          {stopRequested && (
-            <p className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wide text-warning-700">
+        {/* O painel ao vivo é O momento de marca da tela: kWh em branco 800; o lima fica só no indicador "ao vivo" (e some quando a parada foi pedida). */}
+        <div className={`glass-strong animate-fade-in-up mt-4 rounded-3xl p-5 text-center ${!stopRequested ? "animate-live-glow" : ""}`}>
+          {stopRequested ? (
+            <p className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wide text-warning-100">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               Parando a recarga…
             </p>
+          ) : (
+            <p className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-lime">
+              <span className="h-2 w-2 rounded-full bg-lime" aria-hidden="true" />
+              Ao vivo
+            </p>
           )}
 
-          <p className="text-6xl font-black leading-none tracking-tight text-gradient-brand">
+          <p className="text-6xl font-black leading-none tracking-tight text-white">
             {energyKwh}
             <span className="ml-1.5 text-xl font-bold text-ink-softer">kWh</span>
           </p>
-          <p className="mt-3 text-lg font-bold text-primary-700">{formatCents(session.estimatedCostCents)}</p>
+          <p className="mt-3 text-lg font-bold text-white">{formatCents(session.estimatedCostCents)}</p>
 
           {belowMinimum && (
             <p className="mx-auto mt-3 inline-flex items-center gap-1.5 rounded-full bg-warning-50 px-3 py-1 text-xs font-semibold text-warning-700">
@@ -226,29 +241,31 @@ export function Sessao() {
           </p>
 
           <div className="mt-5 grid grid-cols-2 gap-3 text-left">
-            <div className="rounded-xl bg-muted px-3 py-2.5">
+            <div className="rounded-2xl bg-white/10 px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Potência</p>
               <p className="text-sm font-bold text-ink">{session.lastPowerW !== null ? `${(session.lastPowerW / 1000).toFixed(1)} kW` : "—"}</p>
             </div>
-            <div className="rounded-xl bg-muted px-3 py-2.5">
+            <div className="rounded-2xl bg-white/10 px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Bateria</p>
               <p className="text-sm font-bold text-ink">{session.lastSoc !== null ? `${session.lastSoc}%` : "—"}</p>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </AppBand>
 
-      <Button
-        type="button"
-        variant="destructive"
-        size="lg"
-        className="mt-5 w-full"
-        loading={stopRequested}
-        disabled={stopRequested}
-        onClick={() => setConfirmStopOpen(true)}
-      >
-        Parar recarga
-      </Button>
+      <div className="mx-auto max-w-md px-4 pt-5">
+        <Button
+          type="button"
+          variant="destructive"
+          size="lg"
+          className="w-full"
+          loading={stopRequested}
+          disabled={stopRequested}
+          onClick={() => setConfirmStopOpen(true)}
+        >
+          Parar recarga
+        </Button>
+      </div>
 
       <ConfirmDialog
         open={confirmStopOpen}

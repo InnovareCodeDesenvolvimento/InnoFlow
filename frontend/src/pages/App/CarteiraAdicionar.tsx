@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, QrCode, RotateCcw, XCircle } from "lucide-react"
+import { ArrowLeft, QrCode, RotateCcw } from "lucide-react"
+import { MascotFace } from "@/components/brand/Mascot"
+import { AppBand } from "@/components/pwa/AppBand"
 import { Button } from "@/components/ui/Button"
+import { IconBadge } from "@/components/ui/IconBadge"
 import { buttonVariants } from "@/components/ui/buttonVariants"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
@@ -70,24 +73,29 @@ export function CarteiraAdicionar() {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 py-5">
-      <Link to="/app/carteira" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-softer hover:text-ink">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        Carteira
-      </Link>
-
-      {!topupId && (
-        <>
+    <div>
+      {topupId ? (
+        // Pix gerado/confirmado: o momento de marca é o próprio cartão do passo (QR, sucesso, erro) — a faixa escura aqui empilharia dois blocos escuros.
+        <div className="mx-auto max-w-md px-4 pt-3">
+          <Link to="/app/carteira" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-ink-softer hover:text-ink">
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Carteira
+          </Link>
+        </div>
+      ) : (
+        <AppBand back={{ to: "/app/carteira", label: "Carteira" }} className="pb-8">
           <div className="animate-fade-in-up flex items-start gap-3">
-            <span className="shadow-tinted-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary" aria-hidden="true">
-              <QrCode className="h-5 w-5" />
-            </span>
+            <IconBadge icon={QrCode} size="lg" tone="onDark" />
             <div>
               <h1 className="text-lg font-black tracking-tight text-ink">Adicionar saldo</h1>
               <p className="text-sm text-ink-softer">Escolha o valor e pague com Pix — o saldo cai na hora.</p>
             </div>
           </div>
+        </AppBand>
+      )}
 
+      <div className="mx-auto max-w-md px-4 pb-5">
+        {!topupId && (
           <div className="mt-5">
             {walletQuery.isLoading && (
               <div className="space-y-3" aria-hidden="true">
@@ -97,16 +105,25 @@ export function CarteiraAdicionar() {
             )}
 
             {walletQuery.isError && (
-              <ErrorState message={getApiErrorMessage(walletQuery.error, "Não foi possível carregar sua carteira.")} onRetry={() => walletQuery.refetch()} />
+              <ErrorState
+                tone="page"
+                art={<MascotFace size={64} />}
+                message={getApiErrorMessage(walletQuery.error, "Não foi possível carregar sua carteira.")}
+                onRetry={() => walletQuery.refetch()}
+              />
             )}
 
             {!walletQuery.isLoading && !walletQuery.isError && pixUnavailable && (
-              <div role="alert" data-testid="pix-unavailable" className="flex flex-col items-center rounded-2xl bg-muted px-4 py-10 text-center">
-                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-warning-100 text-warning-700" aria-hidden="true">
-                  <AlertTriangle className="h-7 w-7" />
+              <div
+                role="alert"
+                data-testid="pix-unavailable"
+                className="surface-dark flex flex-col items-center rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-10 text-center shadow-tinted-card ring-1 ring-white/10"
+              >
+                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+                  <MascotFace size={64} />
                 </span>
                 <p className="mt-4 text-base font-black text-ink">{PIX_GATEWAY_DISABLED_MESSAGE}</p>
-                <Link to="/app/carteira" className={buttonVariants({ variant: "outline", className: "mt-5 w-full" })}>
+                <Link to="/app/carteira" className={buttonVariants({ variant: "glass", className: "mt-5 w-full" })}>
                   Voltar à carteira
                 </Link>
               </div>
@@ -121,51 +138,57 @@ export function CarteiraAdicionar() {
               />
             )}
           </div>
-        </>
-      )}
+        )}
 
-      {topupId && topupQuery.isLoading && (
-        <div className="space-y-3 py-8" aria-hidden="true">
-          <Skeleton className="mx-auto h-6 w-40 rounded-full" />
-          <Skeleton className="h-64 rounded-2xl" />
-        </div>
-      )}
+        {topupId && topupQuery.isLoading && (
+          <div className="space-y-3 py-8" aria-hidden="true">
+            <Skeleton className="mx-auto h-6 w-40 rounded-full" />
+            <Skeleton className="h-64 rounded-2xl" />
+          </div>
+        )}
 
-      {topupId && topupQuery.isError && (
-        <ErrorState className="mt-4" message={getApiErrorMessage(topupQuery.error, "Não foi possível consultar o Pix.")} onRetry={() => topupQuery.refetch()} />
-      )}
+        {topupId && topupQuery.isError && (
+          <ErrorState
+            className="mt-4"
+            tone="page"
+            art={<MascotFace size={64} />}
+            message={getApiErrorMessage(topupQuery.error, "Não foi possível consultar o Pix.")}
+            onRetry={() => topupQuery.refetch()}
+          />
+        )}
 
-      {topup?.status === "PENDING" && <TopupPendingCard topup={topup} />}
+        {topup?.status === "PENDING" && <TopupPendingCard topup={topup} />}
 
-      {topup?.status === "PAID" && <TopupSuccessCard topup={topup} walletBalanceCents={walletQuery.data?.balanceCents} />}
+        {topup?.status === "PAID" && <TopupSuccessCard topup={topup} walletBalanceCents={walletQuery.data?.balanceCents} />}
 
-      {topup?.status === "EXPIRED" && (
-        <div className="mx-auto flex max-w-md flex-col items-center px-4 py-12 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-ink-subtle">
-            <AlertTriangle className="h-8 w-8" aria-hidden="true" />
-          </span>
-          <h1 className="mt-4 text-lg font-black text-ink">O Pix expirou</h1>
-          <p className="mt-1 text-sm text-ink-softer">Você não pagou dentro dos 30 minutos. Gere um novo código para tentar de novo.</p>
-          <Button type="button" size="lg" className="mt-5 w-full" onClick={handleRetry}>
-            <RotateCcw className="h-4 w-4" aria-hidden="true" />
-            Gerar novo Pix
-          </Button>
-        </div>
-      )}
+        {topup?.status === "EXPIRED" && (
+          <div className="surface-dark mt-5 flex flex-col items-center rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-10 text-center shadow-tinted-card ring-1 ring-white/10">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+              <MascotFace size={64} />
+            </span>
+            <h1 className="mt-4 text-lg font-black text-ink">O Pix expirou</h1>
+            <p className="mt-1 text-sm text-ink-softer">Você não pagou dentro dos 30 minutos. Gere um novo código para tentar de novo.</p>
+            <Button type="button" variant="lime" size="lg" className="mt-5 w-full" onClick={handleRetry}>
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              Gerar novo Pix
+            </Button>
+          </div>
+        )}
 
-      {topup?.status === "FAILED" && (
-        <div className="mx-auto flex max-w-md flex-col items-center px-4 py-12 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-danger-100 text-danger-700">
-            <XCircle className="h-8 w-8" aria-hidden="true" />
-          </span>
-          <h1 className="mt-4 text-lg font-black text-ink">O pagamento falhou</h1>
-          <p className="mt-1 text-sm text-ink-softer">Não foi possível confirmar este Pix. Nenhum valor foi cobrado — tente gerar um novo código.</p>
-          <Button type="button" size="lg" className="mt-5 w-full" onClick={handleRetry}>
-            <RotateCcw className="h-4 w-4" aria-hidden="true" />
-            Tentar novamente
-          </Button>
-        </div>
-      )}
+        {topup?.status === "FAILED" && (
+          <div className="surface-dark mt-5 flex flex-col items-center rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-10 text-center shadow-tinted-card ring-1 ring-white/10">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+              <MascotFace size={64} />
+            </span>
+            <h1 className="mt-4 text-lg font-black text-ink">O pagamento falhou</h1>
+            <p className="mt-1 text-sm text-ink-softer">Não foi possível confirmar este Pix. Nenhum valor foi cobrado — tente gerar um novo código.</p>
+            <Button type="button" variant="lime" size="lg" className="mt-5 w-full" onClick={handleRetry}>
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

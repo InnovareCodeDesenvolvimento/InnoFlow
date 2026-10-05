@@ -1,5 +1,6 @@
 import { LocateFixed, Loader2, LocateOff } from "lucide-react"
 import { Button } from "@/components/ui/Button"
+import { IconBadge } from "@/components/ui/IconBadge"
 import type { GeoStatus } from "@/store/geoStore"
 
 /** Mensagens claras em PT-BR pra cada estado que NÃO é sucesso — nunca bloqueia a tela por causa de permissão. */
@@ -83,12 +84,17 @@ export function LocationPrompt({
 
   // idle (ou granted sem posição, que não deveria acontecer): o convite.
   return (
-    <div className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-4">
-      <p className="text-sm font-bold text-ink">Veja o eletroposto mais próximo</p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-softer">
-        Sua posição exata fica só neste aparelho. Para buscar, enviamos apenas uma região aproximada (cerca de 11 km).
-      </p>
-      <Button type="button" className="btn-glow-primary mt-3 min-h-11 w-full" onClick={onRequest}>
+    <div className="card-elevated p-4">
+      <div className="flex items-start gap-3">
+        <IconBadge icon={LocateFixed} size="lg" />
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-ink">Veja o eletroposto mais próximo</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-softer">
+            Sua posição exata fica só neste aparelho. Para buscar, enviamos apenas uma região aproximada (cerca de 11 km).
+          </p>
+        </div>
+      </div>
+      <Button type="button" variant="lime" className="mt-3 min-h-11 w-full" onClick={onRequest}>
         <LocateFixed className="h-4 w-4" aria-hidden="true" />
         Usar minha localização
       </Button>

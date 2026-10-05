@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Download, Share, X } from "lucide-react"
 import { Button } from "@/components/ui/Button"
+import { IconBadge } from "@/components/ui/IconBadge"
 import { useInstallPromptStore, promptInstall } from "@/store/installPromptStore"
 import { isIos, isInStandaloneMode } from "@/lib/platform"
 
@@ -49,17 +50,15 @@ export function InstallPromptCard() {
   }
 
   return (
-    <div className="animate-fade-in-up rounded-2xl border border-primary/20 bg-primary-50 p-4">
+    <div className="card-elevated animate-fade-in-up p-4">
       <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary-700">
-          {showAndroidPrompt ? <Download className="h-5 w-5" aria-hidden="true" /> : <Share className="h-5 w-5" aria-hidden="true" />}
-        </span>
+        <IconBadge icon={showAndroidPrompt ? Download : Share} size="lg" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-bold text-ink">Instale o InnoFlow no seu celular</p>
           {showAndroidPrompt ? (
             <>
               <p className="mt-0.5 text-xs text-ink-softer">Acesso rápido na próxima recarga, direto da tela inicial.</p>
-              <Button type="button" size="sm" className="mt-3" loading={installing} onClick={handleInstall}>
+              <Button type="button" variant="lime" size="sm" className="mt-3" loading={installing} onClick={handleInstall}>
                 <Download className="h-3.5 w-3.5" aria-hidden="true" />
                 Instalar app
               </Button>
@@ -75,7 +74,7 @@ export function InstallPromptCard() {
           <button
             type="button"
             onClick={dismissIosCoach}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-ink-softer hover:bg-primary/10 hover:text-ink"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--field-radius)] text-ink-softer hover:bg-muted hover:text-ink"
             aria-label="Dispensar sugestão de instalação"
           >
             <X className="h-4 w-4" aria-hidden="true" />

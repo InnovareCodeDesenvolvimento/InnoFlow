@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom"
 import { ChevronRight, MapPin, Zap } from "lucide-react"
+import { IconBadge } from "@/components/ui/IconBadge"
 import { LocationPrompt } from "@/components/estacoes/LocationPrompt"
 import { UpdatedAgo } from "@/components/estacoes/UpdatedAgo"
 import { Skeleton } from "@/components/ui/Skeleton"
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils"
 const DOT: Record<StationState, string> = {
   free: "bg-accent-600",
   busy: "bg-warning-700",
-  offline: "bg-ink-softer",
+  offline: "bg-state-off",
 }
 
 /**
@@ -55,10 +56,10 @@ export function NearbyStationsSection() {
         </div>
       )}
 
-      {hasPosition && isError && <p className="rounded-2xl border border-dashed border-border-strong px-4 py-5 text-center text-xs text-ink-softer">Não foi possível carregar os eletropostos agora.</p>}
+      {hasPosition && isError && <p className="rounded-2xl bg-muted px-4 py-5 text-center text-xs text-ink-softer">Não foi possível carregar os eletropostos agora.</p>}
 
       {hasPosition && !isLoading && !isError && nearest.length === 0 && (
-        <p className="rounded-2xl border border-dashed border-border-strong px-4 py-5 text-center text-xs text-ink-softer">
+        <p className="rounded-2xl bg-muted px-4 py-5 text-center text-xs text-ink-softer">
           Nenhum eletroposto num raio de cerca de 30 km.{" "}
           <Link to="/app/mapa" className="font-semibold text-primary hover:underline">
             Ver todos
@@ -78,11 +79,9 @@ export function NearbyStationsSection() {
                     state={{ stationId: site.id }}
                     data-station-id={site.id}
                     data-state={state}
-                    className="pressable flex min-h-14 items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-3.5 shadow-card transition-colors hover:border-primary/30"
+                    className="card-elevated pressable flex min-h-14 items-center gap-3 p-3.5 transition-colors hover:ring-primary/30"
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Zap className="h-5 w-5" aria-hidden="true" />
-                    </span>
+                    <IconBadge icon={Zap} size="lg" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-bold text-ink">{site.name}</p>
                       <p className="flex items-center gap-1.5 text-xs text-ink-softer">

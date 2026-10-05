@@ -46,7 +46,7 @@ const FIT_NEAREST = 6
 const PIN_COLOR: Record<StationState, string> = {
   free: "bg-accent-600",
   busy: "bg-warning-700",
-  offline: "bg-ink-softer",
+  offline: "bg-state-off",
 }
 
 function pinIcon(site: SiteWithDistance, selected: boolean): L.DivIcon {

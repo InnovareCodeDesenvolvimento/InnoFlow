@@ -1,7 +1,9 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
-import { ArrowLeft, CreditCard, MoreVertical, Plus, Star, TriangleAlert } from "lucide-react"
+import { CreditCard, MoreVertical, Plus, Star, TriangleAlert } from "lucide-react"
+import { MascotFace } from "@/components/brand/Mascot"
+import { AppBand } from "@/components/pwa/AppBand"
 import { Button } from "@/components/ui/Button"
+import { IconBadge } from "@/components/ui/IconBadge"
 import { Badge } from "@/components/ui/Badge"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
@@ -66,119 +68,120 @@ export function Cartoes() {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 py-5">
-      <Link to="/app/carteira" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-softer hover:text-ink">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        Carteira
-      </Link>
+    <div>
+      <AppBand back={{ to: "/app/carteira", label: "Carteira" }} className="pb-7">
+        <h1 className="text-lg font-black tracking-tight text-ink">Meus cartões</h1>
+        <p className="text-sm text-ink-softer">Cadastre uma vez e só toque em "Iniciar" nas próximas recargas.</p>
+      </AppBand>
 
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-black tracking-tight text-ink">Meus cartões</h1>
-          <p className="text-sm text-ink-softer">Cadastre uma vez e só toque em "Iniciar" nas próximas recargas.</p>
-        </div>
-      </div>
-
-      {/* Sem identidade verificada ou bloqueado: NÃO se oferece "Adicionar cartão" - o card explica o motivo (Pix e carteira seguem normais). */}
-      {issue ? (
-        <CardEligibilityNotice issue={issue} className="mt-4" onLinked={addCardFlow.clearEligibilityIssue} />
-      ) : (
-        <Button type="button" className="mt-4 w-full" loading={addCardFlow.isBusy} onClick={() => addCardFlow.start()}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Adicionar cartão
-        </Button>
-      )}
-      {addCardFlow.unavailable && (
-        <p role="alert" data-testid="add-card-unavailable" className="mt-3 flex items-start gap-2 rounded-xl bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          {CARD_GATEWAY_DISABLED_ADD_MESSAGE}
-        </p>
-      )}
-
-      <div className="mt-6">
-        {isLoading && (
-          <div className="space-y-2.5" aria-hidden="true">
-            <Skeleton className="h-20 rounded-2xl" />
-            <Skeleton className="h-20 rounded-2xl" />
-          </div>
+      <div className="mx-auto max-w-md px-4 pb-5">
+        {/* Sem identidade verificada ou bloqueado: NÃO se oferece "Adicionar cartão" - o card explica o motivo (Pix e carteira seguem normais). */}
+        {issue ? (
+          <CardEligibilityNotice issue={issue} className="mt-5" onLinked={addCardFlow.clearEligibilityIssue} />
+        ) : (
+          <Button type="button" variant="lime" size="lg" className="mt-5 w-full" loading={addCardFlow.isBusy} onClick={() => addCardFlow.start()}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Adicionar cartão
+          </Button>
+        )}
+        {addCardFlow.unavailable && (
+          <p role="alert" data-testid="add-card-unavailable" className="mt-3 flex items-start gap-2 rounded-2xl bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            {CARD_GATEWAY_DISABLED_ADD_MESSAGE}
+          </p>
         )}
 
-        {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar seus cartões.")} onRetry={() => refetch()} />}
+        <div className="mt-6">
+          {isLoading && (
+            <div className="space-y-2.5" aria-hidden="true">
+              <Skeleton className="h-20 rounded-2xl" />
+              <Skeleton className="h-20 rounded-2xl" />
+            </div>
+          )}
 
-        {!isLoading && !isError && data && data.items.length === 0 && (
-          <EmptyState
-            icon={CreditCard}
-            title="Nenhum cartão cadastrado"
-            description={cardsDisabled ? "Quando o cartão estiver disponível, ele aparece aqui. Por enquanto, use o Pix ou a carteira." : "Adicione um cartão para pagar as recargas sem digitar os dados toda vez."}
-          />
-        )}
+          {isError && (
+            <ErrorState
+              tone="page"
+              art={<MascotFace size={64} />}
+              message={getApiErrorMessage(error, "Não foi possível carregar seus cartões.")}
+              onRetry={() => refetch()}
+            />
+          )}
 
-        {!isLoading && !isError && data && data.items.length > 0 && (
-          <ul className="space-y-2.5">
-            {data.items.map((method, index) => {
-              const exp = expiry(method)
-              return (
-                <li
-                  key={method.id}
-                  data-disabled={cardsDisabled || undefined}
-                  className={`stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface p-4 shadow-card`}
-                >
-                  <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ${cardsDisabled ? "opacity-50 grayscale" : ""}`} aria-hidden="true">
-                    <CreditCard className="h-5 w-5" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className={`flex items-center gap-2 text-sm font-bold ${cardsDisabled ? "text-ink-softer" : "text-ink"}`}>
-                      {brandLabel(method.brand)} {method.last4 && <span className="font-normal text-ink-softer">•••• {method.last4}</span>}
-                    </p>
-                    <p className="text-xs text-ink-softer">
-                      {method.holderName ? `${method.holderName}${exp ? " · " : ""}` : ""}
-                      {exp ? `validade ${exp}` : ""}
-                    </p>
-                    {issue && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <Badge variant="neutral">Indisponível</Badge>
-                        <span className="text-xs font-medium text-ink-soft" data-testid="card-disabled-reason">
-                          {disabledCardReason(issue)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {method.isDefault && !cardsDisabled && (
-                    <Badge variant="primary" className="shrink-0">
-                      <Star className="h-3 w-3" aria-hidden="true" />
-                      Padrão
-                    </Badge>
-                  )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-softer hover:bg-muted hover:text-ink"
-                        aria-label={`Mais opções — cartão ${brandLabel(method.brand)} final ${method.last4 ?? ""}`}
-                      >
-                        <MoreVertical className="h-4 w-4" aria-hidden="true" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {!method.isDefault && !cardsDisabled && (
-                        <DropdownMenuItem onSelect={() => handleSetDefault(method)}>
-                          <Star className="h-4 w-4" aria-hidden="true" />
-                          Tornar padrão
-                        </DropdownMenuItem>
+          {!isLoading && !isError && data && data.items.length === 0 && (
+            <EmptyState
+              tone="brand"
+              art={<MascotFace size={64} />}
+              title="Nenhum cartão cadastrado"
+              description={cardsDisabled ? "Quando o cartão estiver disponível, ele aparece aqui. Por enquanto, use o Pix ou a carteira." : "Adicione um cartão para pagar as recargas sem digitar os dados toda vez."}
+            />
+          )}
+
+          {!isLoading && !isError && data && data.items.length > 0 && (
+            <ul className="space-y-2.5">
+              {data.items.map((method, index) => {
+                const exp = expiry(method)
+                return (
+                  <li
+                    key={method.id}
+                    data-disabled={cardsDisabled || undefined}
+                    className={`card-elevated stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 p-4`}
+                  >
+                    <IconBadge icon={CreditCard} size="lg" className={cardsDisabled ? "opacity-50 grayscale" : undefined} />
+                    <div className="min-w-0 flex-1">
+                      <p className={`flex items-center gap-2 text-sm font-bold ${cardsDisabled ? "text-ink-softer" : "text-ink"}`}>
+                        {brandLabel(method.brand)} {method.last4 && <span className="whitespace-nowrap font-normal text-ink-softer">•••• {method.last4}</span>}
+                      </p>
+                      <p className="text-xs text-ink-softer">
+                        {method.holderName ? `${method.holderName}${exp ? " · " : ""}` : ""}
+                        {exp ? `validade ${exp}` : ""}
+                      </p>
+                      {issue && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <Badge variant="neutral">Indisponível</Badge>
+                          <span className="text-xs font-medium text-ink-soft" data-testid="card-disabled-reason">
+                            {disabledCardReason(issue)}
+                          </span>
+                        </div>
                       )}
-                      <DropdownMenuItem
-                        className="text-danger-700 data-[highlighted]:bg-danger-50 data-[highlighted]:text-danger-700"
-                        onSelect={() => setRemoving(method)}
-                      >
-                        Remover
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+                    </div>
+                    {method.isDefault && !cardsDisabled && (
+                      <Badge variant="primary" className="shrink-0">
+                        <Star className="h-3 w-3" aria-hidden="true" />
+                        Padrão
+                      </Badge>
+                    )}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--field-radius)] text-ink-softer hover:bg-muted hover:text-ink"
+                          aria-label={`Mais opções — cartão ${brandLabel(method.brand)} final ${method.last4 ?? ""}`}
+                        >
+                          <MoreVertical className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {!method.isDefault && !cardsDisabled && (
+                          <DropdownMenuItem onSelect={() => handleSetDefault(method)}>
+                            <Star className="h-4 w-4" aria-hidden="true" />
+                            Tornar padrão
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          className="text-danger-700 data-[highlighted]:bg-danger-50 data-[highlighted]:text-danger-700"
+                          onSelect={() => setRemoving(method)}
+                        >
+                          Remover
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
       </div>
 
       <ConfirmDialog

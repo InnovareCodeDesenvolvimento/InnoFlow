@@ -1,4 +1,5 @@
 import { Clock, ShieldCheck } from "lucide-react"
+import { IconBadge } from "@/components/ui/IconBadge"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { authService } from "@/services/auth"
@@ -25,7 +26,7 @@ export function CardEligibilityNotice({ issue, className, onLinked }: { issue: C
   if (issue.reason === "TEMPORARILY_BLOCKED") {
     return (
       <div role="status" data-testid="card-eligibility-notice" data-reason="TEMPORARILY_BLOCKED" className={`flex items-start gap-3 rounded-2xl bg-warning-50 p-4 ring-1 ring-warning-600/30 ${className ?? ""}`}>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-warning-100 text-warning-700" aria-hidden="true">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-warning-100 text-warning-700" aria-hidden="true">
           <Clock className="h-5 w-5" />
         </span>
         <div className="min-w-0">
@@ -48,11 +49,9 @@ export function CardEligibilityNotice({ issue, className, onLinked }: { issue: C
   const googleAvailable = shouldShowGoogleButton(config)
 
   return (
-    <div role="status" data-testid="card-eligibility-notice" data-reason="GOOGLE_LOGIN_REQUIRED" className={`rounded-2xl bg-primary/5 p-4 ring-1 ring-primary/25 ${className ?? ""}`}>
+    <div role="status" data-testid="card-eligibility-notice" data-reason="GOOGLE_LOGIN_REQUIRED" className={`card-elevated p-4 ${className ?? ""}`}>
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary-700" aria-hidden="true">
-          <ShieldCheck className="h-5 w-5" />
-        </span>
+        <IconBadge icon={ShieldCheck} size="lg" tinted />
         <div className="min-w-0">
           <p className="text-sm font-bold text-ink">{GOOGLE_REQUIRED_TITLE}</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-soft">{GOOGLE_REQUIRED_TEXT}</p>
