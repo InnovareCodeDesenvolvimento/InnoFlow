@@ -298,7 +298,7 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
   logger.info({ chargePointId: chargePoint.id, connectorId, userId, idTag, correlationId, paymentMode: mode }, '[sessao] remote-start disparado')
 
   // L1.5: DONO + ESCOPO do comando (motorista afetado e onde foi disparado) — a consulta do motorista e a do staff conferem isto. Tudo resolvido no servidor.
-  const commandOwner: CommandOwner = { userId, chargePointId: chargePoint.id, operatorId: chargePoint.operatorId }
+  const commandOwner: CommandOwner = { userId, chargePointId: chargePoint.id, operatorId: chargePoint.operatorId, idTag } // idTag: a consulta do staff acha a sessão nascida deste comando por ele
   // "Em andamento" gravado ANTES do envio (fire-and-forget; a mesma conexão Redis garante a ordem em relação ao resultado, gravado depois).
   recordCommandPending(correlationId, commandOwner).catch((err) => logger.warn({ err, correlationId }, '[sessao] falha ao gravar o estado PENDING do comando em Redis (não bloqueante)'))
 

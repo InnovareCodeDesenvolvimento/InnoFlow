@@ -81,6 +81,9 @@ export function createApp(): Express {
         logger.warn({ origin }, '[cors] origem bloqueada — fora da allowlist de CORS_ALLOWED_ORIGINS')
         callback(new AppError('Origem não permitida.', 403, 'CORS_FORBIDDEN'))
       },
+      // Só ISTO muda para o navegador: por padrão, em requisição entre domínios o JS só lê os cabeçalhos "seguros" (Content-Type etc.). `Retry-After` (429 do rate limit e do lockout) fica
+      // ilegível sem isto e o front não consegue mostrar "tente de novo em N s". Não afrouxa nada: não muda origem, métodos, cabeçalhos permitidos nem credenciais.
+      exposedHeaders: ['Retry-After'],
     }),
   )
   app.use(compression())
