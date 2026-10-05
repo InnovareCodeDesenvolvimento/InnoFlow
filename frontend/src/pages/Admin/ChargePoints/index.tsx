@@ -31,6 +31,9 @@ export default function ChargePointsPage() {
   const { data, isLoading, isError, error, refetch } = useChargePoints({ page, pageSize: PAGE_SIZE })
   const deleteChargePoint = useDeleteChargePoint()
   const assignmentsQuery = useAllTariffAssignments()
+  // A tabela só aparece com a cobertura de tarifa resolvida: o aviso "N carregadores sem tarifa" chega depois dos vínculos e, entrando acima da tabela já pintada,
+  // empurrava tudo ~80 px (CLS 0,026). Enquanto os vínculos carregam o esqueleto segura o lugar; se a consulta falhar ela deixa de estar "carregando" e a tabela vem sem aviso.
+  const waiting = isLoading || assignmentsQuery.isLoading
 
   // "Sem tarifa" só é afirmado com a lista COMPLETA de vínculos em mãos (carregada, sem erro e sem truncar) — nunca por palpite.
   const coverageOf = (cp: ChargePoint) =>
@@ -74,10 +77,10 @@ export default function ChargePointsPage() {
         }
       />
 
-      {isLoading && <TableSkeleton cols={6} />}
+      {waiting && !isError && <TableSkeleton cols={6} />}
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os pontos de recarga.")} onRetry={() => refetch()} />}
 
-      {!isLoading && !isError && data && data.items.length === 0 && (
+      {!waiting && !isError && data && data.items.length === 0 && (
         <AdminFirstUseState
           icon={Zap}
           title="Nenhum ponto de recarga cadastrado"
@@ -91,7 +94,7 @@ export default function ChargePointsPage() {
         />
       )}
 
-      {!isLoading && !isError && withoutTariff.length > 0 && (
+      {!waiting && !isError && withoutTariff.length > 0 && (
         <div role="status" className="flex items-start gap-3 rounded-xl border border-warning-600/40 bg-warning-50 p-4 text-warning-700" data-testid="cp-without-tariff-alert">
           <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
           <p className="min-w-0 text-sm">
@@ -103,7 +106,7 @@ export default function ChargePointsPage() {
         </div>
       )}
 
-      {!isLoading && !isError && data && data.items.length > 0 && (
+      {!waiting && !isError && data && data.items.length > 0 && (
         <>
           <Table>
             <TableHeader>

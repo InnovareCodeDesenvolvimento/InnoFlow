@@ -81,11 +81,22 @@ export default function DashboardPage() {
         <SiteFilterSelect value={siteId} onChange={setSiteId} operatorId={effectiveOperatorId} />
       </div>
 
+      {/* Esqueleto com a FORMA do conteúdo (KPIs, gráficos, tabelas): com só a linha de KPIs o "Ao vivo", mais abaixo, descia ~600 px quando os dados chegavam (CLS 0,14 a 1440). */}
       {isLoading && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 rounded-card" />
-          ))}
+        <div className="space-y-6" aria-hidden="true">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-[8.4rem] rounded-card" />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Skeleton className="h-[17.2rem] rounded-card lg:col-span-2" />
+            <Skeleton className="h-[17.2rem] rounded-card" />
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Skeleton className="h-[20rem] rounded-card" />
+            <Skeleton className="h-[20rem] rounded-card" />
+          </div>
         </div>
       )}
 
