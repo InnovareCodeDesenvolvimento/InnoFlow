@@ -46,6 +46,13 @@ export const mockUsers: MockUser[] = [
   // (`sandboxRestricted:true`) e troca de ambiente bloqueada por pagamentos em andamento (409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`).
   { id: "user_admin_gateway_ilegivel_segredos", name: "Sílvia Segredos", email: "gateway-ilegivel-segredos@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_sandbox_publico", name: "Sandra Sandbox", email: "gateway-sandbox-publico@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  // Admins de CENÁRIO da tela Comunicação (N-7) — o estado do mock vive por usuário (`mocks/communicationData.ts`); cada conta nasce num cenário determinístico para o E2E.
+  { id: "user_admin_comunicacao_pronta", name: "Cláudia Comunicação", email: "comunicacao-pronta@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_vazia", name: "Vera Vazia", email: "comunicacao-vazia@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_sem_chave", name: "Sérgio Sem-Chave", email: "comunicacao-sem-chave@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_ilegivel", name: "Iara Ilegível", email: "comunicacao-ilegivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_indisponivel", name: "Ítalo Indisponível", email: "comunicacao-indisponivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_rede_privada", name: "Rui Rede-Privada", email: "comunicacao-rede-privada@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_em_andamento", name: "Emílio Andamento", email: "gateway-em-andamento@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
   // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).

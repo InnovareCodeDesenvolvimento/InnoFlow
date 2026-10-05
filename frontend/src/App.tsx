@@ -38,6 +38,7 @@ const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
 const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
+const AdminComunicacao = lazy(() => import("@/pages/Admin/Comunicacao"))
 
 // Catálogo do design system (`/__ds`): SÓ em dev. `import.meta.env.DEV` é substituído por `false` no build, a expressão colapsa para `null` e o
 // `import()` sai do bundle (e do precache do PWA) — conferido com grep no `dist/`. Ver `src/dev/DesignSystemCatalog.tsx`.
@@ -177,6 +178,15 @@ export default function App() {
                 element={
                   <RequireAuth roles={["ADMIN"]}>
                     <AdminGatewayPagamento />
+                  </RequireAuth>
+                }
+              />
+              {/* Avisos ao dono (e-mail SMTP + WhatsApp Evolution): configuração da PLATAFORMA, só ADMIN (N-7); o servidor confere de novo (403). */}
+              <Route
+                path="comunicacao"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminComunicacao />
                   </RequireAuth>
                 }
               />

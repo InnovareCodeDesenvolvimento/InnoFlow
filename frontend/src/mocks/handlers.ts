@@ -60,6 +60,7 @@ import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
 import { commandStatus, parseScenario, remoteStartPolicyDenied, startRemote } from "./remoteStartData"
 import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
+import { getCommunicationSettings, testCommunicationChannel, updateCommunicationSettings } from "./communicationData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -1088,6 +1089,44 @@ export const handlers = [
     if ("error" in scope) return scope.error
     const outcome = testGatewayConnection(scope.user.userId, localStorage.getItem("mock:gateway-test"))
     return HttpResponse.json(outcome.body, { status: outcome.status })
+  }),
+
+  // ---- Comunicação / avisos ao dono: e-mail SMTP + WhatsApp Evolution (ADMIN only, N-7) ----------------
+  // Espelho de `docs/CONTRATO-COMUNICACAO-ADMIN.md` (regras, personas e gatilhos em `communicationData.ts`). Segredos NUNCA são devolvidos nem guardados.
+  http.get("/api/admin/communication-settings", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getCommunicationSettings(scope.user.userId)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.put("/api/admin/communication-settings", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateCommunicationSettings(scope.user.userId, body)
+    if (!result.ok) {
+      return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    }
+    return HttpResponse.json(result.dto)
+  }),
+
+  // Testes: SEM step-up (só enviam uma mensagem); `localStorage["mock:comunicacao-teste"]` escolhe o resultado (ver `testCommunicationChannel`).
+  http.post("/api/admin/communication-settings/test-email", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => ({}))
+    const outcome = testCommunicationChannel(scope.user.userId, "email", body, localStorage.getItem("mock:comunicacao-teste"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  http.post("/api/admin/communication-settings/test-whatsapp", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => ({}))
+    const outcome = testCommunicationChannel(scope.user.userId, "whatsapp", body, localStorage.getItem("mock:comunicacao-teste"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------

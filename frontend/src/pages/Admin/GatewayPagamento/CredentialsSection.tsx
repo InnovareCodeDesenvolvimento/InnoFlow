@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/Input"
 import type { DraftErrors, GatewayDraft } from "@/lib/paymentGateway"
 import type { PaymentGatewayConfigDTO } from "@/types/api"
-import { SecretField } from "./SecretField"
+import { SecretField } from "@/components/admin/SecretField"
 
 /**
  * Credenciais da conta Cielo. IDs (texto normal) mostram o valor atual; os

@@ -29,6 +29,7 @@ export function SecretField({
   hint,
   actions,
   testId,
+  setNote,
 }: {
   /** Nome legível do segredo ("MerchantKey"). */
   name: string
@@ -43,6 +44,8 @@ export function SecretField({
   /** Botões extras ao lado do input (ex.: gerar/copiar). */
   actions?: ReactNode
   testId: string
+  /** Texto curto ao lado do chip quando o segredo existe (ex.: dica "…a1b2" da apikey). Só leitura, nunca o valor. */
+  setNote?: string | null
 }) {
   const inputId = useId()
   const replacing = value !== undefined
@@ -71,6 +74,11 @@ export function SecretField({
               <CircleDashed className="h-3 w-3" aria-hidden="true" />
               Não configurada
             </Badge>
+          )}
+          {isSet && setNote && (
+            <span className="font-mono text-xs text-ink-softer" data-testid={`${testId}-note`}>
+              {setNote}
+            </span>
           )}
         </div>
         {replacing ? (
