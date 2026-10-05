@@ -19,7 +19,7 @@ import { createApp } from '../../src/api/app'
 import { prisma } from '../../src/lib/prisma'
 import { redis } from '../../src/lib/redis'
 import { getPaymentsReconciliation } from '../../src/api/services/paymentsService'
-import { createUser, uniqueSuffix, waitFor } from './helpers/fixtures'
+import { uniqueSuffix, waitFor } from './helpers/fixtures'
 import { SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
 import { criarAdminComSenha, criarCenarioEstorno, type CenarioEstorno } from './helpers/estornoFixture'
 
