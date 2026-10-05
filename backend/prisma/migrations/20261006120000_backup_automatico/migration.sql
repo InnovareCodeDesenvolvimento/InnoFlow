@@ -11,6 +11,7 @@ CREATE TABLE "BackupConfig" (
     "id" INTEGER NOT NULL DEFAULT 1,
 
     "enabled" BOOLEAN NOT NULL DEFAULT false,
+    "enabledAt" TIMESTAMPTZ(3),
     "hourLocal" INTEGER NOT NULL DEFAULT 3,
     "frequencyDays" INTEGER NOT NULL DEFAULT 1,
     "retentionCount" INTEGER NOT NULL DEFAULT 7,
