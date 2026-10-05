@@ -1,4 +1,5 @@
 import axios from "axios"
+import { SECRETS_KEY_FIELD_MESSAGE, SECRETS_KEY_UNAVAILABLE_TEXT } from "@/lib/secretsKey"
 import type {
   CommunicationSettingsDTO,
   NotificationSeverity,
@@ -362,7 +363,7 @@ function validateRecipients(list: string[], isValid: (v: string) => boolean, mes
 /** Texto do erro "digite o segredo de novo" (também usado no teste com valores não salvos). */
 export const SMTP_SECRET_AGAIN_MESSAGE = "Você mudou o servidor ou o usuário: digite a senha SMTP de novo (ela só vale para o destino em que foi salva)."
 export const EVOLUTION_SECRET_AGAIN_MESSAGE = "Você mudou a URL ou a instância: digite a apikey de novo (ela só vale para o destino em que foi salva)."
-export const NO_SECRETS_KEY_MESSAGE = "O servidor não tem a chave de cifragem (PAYMENT_SECRETS_KEY): não dá para guardar este segredo."
+export const NO_SECRETS_KEY_MESSAGE = SECRETS_KEY_FIELD_MESSAGE
 
 /**
  * Erros de campo do rascunho, por `grupo.campo`. Só avalia o que o admin MEXEU (um valor salvo e válido nunca vira erro por si só). O erro de "digite o segredo de
@@ -410,7 +411,7 @@ export function validateDraft(dto: CommunicationSettingsDTO, draft: Communicatio
   if (dto.email.passwordSet && smtpDestinationChanged(dto, e) && !hasText(e.password) && !draft.clear.smtpPassword) errors["email.password"] = SMTP_SECRET_AGAIN_MESSAGE
   if (dto.whatsapp.apiKeySet && evolutionDestinationChanged(dto, w) && !hasText(w.apiKey) && !draft.clear.evolutionApiKey) errors["whatsapp.apiKey"] = EVOLUTION_SECRET_AGAIN_MESSAGE
 
-  // Sem chave de cifragem no servidor não há como guardar segredo (503 SECRETS_KEY_MISSING): avisa antes do envio.
+  // Sem chave de segredos utilizável no servidor não há como guardar segredo (503 SECRETS_KEY_MISSING): avisa antes do envio.
   if (!dto.secretsKeyConfigured) {
     if (hasText(e.password)) errors["email.password"] = NO_SECRETS_KEY_MESSAGE
     if (hasText(w.apiKey)) errors["whatsapp.apiKey"] = NO_SECRETS_KEY_MESSAGE
@@ -712,8 +713,7 @@ export interface CommunicationError {
 export const MSG_RATE_LIMITED_COMMUNICATION = "Muitas alterações ou testes em pouco tempo. Aguarde um minuto e tente de novo."
 export const MSG_RATE_LIMITED_PASSWORD = "Muitas tentativas de senha. Aguarde alguns minutos e tente de novo."
 export const MSG_STEPUP_UNAVAILABLE = "Não foi possível confirmar sua senha agora. Nada foi salvo. Tente de novo em instantes."
-export const MSG_SECRETS_KEY_MISSING =
-  "O servidor não tem a chave de cifragem dos segredos (PAYMENT_SECRETS_KEY), então não consegue guardar senha nem apikey — nada foi salvo. Peça para quem cuida do servidor criá-la no EasyPanel e reiniciar a API. Alterações que não envolvem segredos podem ser salvas normalmente."
+export const MSG_SECRETS_KEY_MISSING = `${SECRETS_KEY_UNAVAILABLE_TEXT} Nada foi salvo: o servidor não consegue guardar senha nem apikey agora. Alterações que não envolvem segredos podem ser salvas normalmente.`
 export const MSG_UNAVAILABLE = "O servidor não conseguiu ler a configuração de comunicação (o banco pode estar fora do ar ou a chave dos segredos foi trocada). Nada foi alterado."
 export const MSG_SESSION_EXPIRED = "Sua sessão expirou. Entre de novo para continuar — nada foi alterado."
 export const MSG_WRONG_PASSWORD = "Senha incorreta."

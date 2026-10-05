@@ -11,7 +11,7 @@ import { expect, test, type Page } from "@playwright/test"
  *  admin@                      → env, nada configurado
  *  gateway-pronto@             → database, sandbox, tudo pronto, Pix habilitado
  *  gateway-producao@           → database, produção, Pix e cartão habilitados
- *  gateway-sem-chave@          → env, servidor sem PAYMENT_SECRETS_KEY, Pix habilitado sem estar pronto
+ *  gateway-sem-chave@          → env, chave de segredos do servidor inválida (override PAYMENT_SECRETS_KEY), Pix habilitado sem estar pronto
  *
  * Segredos digitados usam marcadores únicos (SEGREDO-...) para provar que
  * NENHUM deles vaza para o DOM, o resumo, o console ou o localStorage.
@@ -337,7 +337,7 @@ test.describe("ADMIN — já em produção", () => {
   })
 })
 
-test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", () => {
+test.describe("ADMIN — chave de segredos do servidor inválida / webhook sem token", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
   test("explica o que é só do servidor; 503 ao enviar segredo; 409 ao ir para produção listando o que falta", async ({ page }) => {
@@ -354,8 +354,10 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     await expect(missing).toContainText("Preencha nesta tela")
     await expect(missing).toContainText("Só no servidor (EasyPanel)")
     await expect(missing).not.toContainText("CIELO_WEBHOOK_PATH_TOKEN") // o backend não pede mais webhook para o Pix
-    await expect(missing).toContainText("PAYMENT_SECRETS_KEY")
-    await expect(missing).toContainText("openssl rand -base64 32")
+    await expect(missing).toContainText("Chave de segredos do servidor")
+    await expect(missing).toContainText("administrador do servidor")
+    await expect(missing).not.toContainText("openssl") // ninguém gera nem cria chave: ela é derivada do JWT_SECRET
+    await expect(missing).not.toContainText("variável PAYMENT_SECRETS_KEY")
     // Pix está habilitado mesmo sem estar pronto: DESLIGAR é permitido (não fica preso)
     const pix = page.getByRole("switch", { name: "Habilitar Pix" })
     await expect(pix).toHaveAttribute("aria-checked", "true")
@@ -372,8 +374,9 @@ test.describe("ADMIN — servidor sem PAYMENT_SECRETS_KEY / webhook sem token", 
     const error = page.getByTestId("save-error")
     await expect(error).toBeVisible()
     await expect(error).toHaveAttribute("data-code", "PAYMENT_SECRETS_KEY_MISSING")
-    await expect(error).toContainText("PAYMENT_SECRETS_KEY")
-    await expect(error).toContainText("openssl rand -base64 32")
+    await expect(error).toContainText("A chave de segredos do servidor está inválida ou indisponível")
+    await expect(error).toContainText("administrador do servidor")
+    await expect(error).not.toContainText("openssl")
     expect(puts).toHaveLength(1)
     // o rascunho continua (o admin não perde o que digitou) e o valor não vazou para lugar nenhum além do próprio campo
     await expect(secretInput(page, "merchantKey")).toHaveValue("SEGREDO-SEM-CHAVE-77")
@@ -516,7 +519,7 @@ test.describe("erros novos do servidor: 429 / 503 / 500 preservam o rascunho; GE
     await confirmSave(page)
     await expect(error).toHaveAttribute("data-code", "PAYMENT_GATEWAY_UNAVAILABLE")
     await expect(error).toContainText("não conseguiu ler a configuração")
-    await expect(error).toContainText("PAYMENT_SECRETS_KEY foi trocada")
+    await expect(error).toContainText("JWT_SECRET do servidor foi trocado")
     await expect(error).toContainText("Nada foi alterado")
     await expect(error.locator("[data-testid=save-error-missing]")).toHaveCount(0) // não vira lista de pendências
     await expect(merchantId).toHaveValue("ERRO-503")
@@ -540,7 +543,7 @@ test.describe("erros novos do servidor: 429 / 503 / 500 preservam o rascunho; GE
     await login(page, "gateway-ilegivel@innoelektron.com")
     await page.getByRole("navigation", { name: NAV }).getByRole("link", { name: "Gateway de pagamento" }).click()
     await expect(page.getByText(/não conseguiu ler a configuração do gateway/)).toBeVisible()
-    await expect(page.getByText(/PAYMENT_SECRETS_KEY foi trocada/)).toBeVisible()
+    await expect(page.getByText(/JWT_SECRET do servidor foi trocado/)).toBeVisible()
     await expect(page.getByRole("button", { name: /Tentar novamente/ })).toBeVisible()
   })
 })
@@ -812,7 +815,7 @@ for (const viewport of [
       await expect(alert).toBeVisible()
       await expect(alert).toHaveAttribute("role", "alert")
       await expect(alert).toContainText("O servidor não consegue decifrar os segredos salvos")
-      await expect(alert).toContainText("PAYMENT_SECRETS_KEY")
+      await expect(alert).toContainText("JWT_SECRET")
       await expect(alert).toContainText("indisponível (503)")
       await expect(alert).toContainText("Reenvie os 3 segredos — MerchantKey, Client Secret do cadastro de cartão e segredo do webhook")
       // sem sandbox restrito aqui

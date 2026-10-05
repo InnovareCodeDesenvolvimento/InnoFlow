@@ -17,13 +17,13 @@ export function SourceEnvBanner() {
   )
 }
 
-/** `secretsKeyConfigured === false`: o servidor não tem como cifrar — senha SMTP e apikey não podem ser guardadas (503 `SECRETS_KEY_MISSING`). Perigo, não aviso. */
+/** `secretsKeyConfigured === false`: a chave dos segredos do servidor (derivada do `JWT_SECRET`; override opcional `PAYMENT_SECRETS_KEY`) está inválida/indisponível — senha SMTP e apikey não podem ser guardadas (503 `SECRETS_KEY_MISSING`). Perigo, não aviso. */
 export function SecretsKeyMissingAlert() {
   return (
     <Alert tone="danger" role="alert" icon={KeyRound} data-testid="secrets-key-missing-alert">
       <p>
-        <span className="font-bold">Servidor sem chave de cifragem.</span> A variável <InlineCode>PAYMENT_SECRETS_KEY</InlineCode> não está configurada, então não é possível guardar senha SMTP nem apikey.
-        Você ainda pode salvar o que não envolve segredo. Peça para quem cuida do servidor criá-la no EasyPanel e reiniciar a API.
+        <span className="font-bold">Chave de segredos do servidor indisponível.</span> A chave que cifra os segredos (derivada do <InlineCode>JWT_SECRET</InlineCode>) está inválida ou indisponível, então não é possível guardar
+        senha SMTP nem apikey. Você ainda pode salvar o que não envolve segredo. Peça ao administrador do servidor para conferir a configuração (<InlineCode>JWT_SECRET</InlineCode> e, se existir, <InlineCode>PAYMENT_SECRETS_KEY</InlineCode>).
       </p>
     </Alert>
   )
@@ -34,8 +34,8 @@ export function UnreadableSecretsAlert() {
   return (
     <Alert tone="danger" role="alert" icon={ShieldAlert} data-testid="secrets-unreadable-alert">
       <p>
-        <span className="font-bold">Segredos salvos ilegíveis.</span> O servidor não consegue decifrar a senha SMTP ou a apikey salvas (a chave de cifragem foi trocada ou o dado está corrompido). O canal afetado fica
-        desligado até você digitar o segredo de novo e salvar.
+        <span className="font-bold">Segredos salvos ilegíveis.</span> O servidor não consegue decifrar a senha SMTP ou a apikey salvas (o <InlineCode>JWT_SECRET</InlineCode> do servidor foi trocado ou o dado está corrompido). O canal afetado fica
+        desligado até você digitar o segredo de novo e salvar. Se o <InlineCode>JWT_SECRET</InlineCode> original existe em algum lugar, restaurá-lo resolve sem redigitar nada.
       </p>
     </Alert>
   )

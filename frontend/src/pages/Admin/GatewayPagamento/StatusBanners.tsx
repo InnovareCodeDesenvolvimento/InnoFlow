@@ -17,8 +17,8 @@ export function UnreadableSecretsAlert() {
   return (
     <Alert tone="danger" role="alert" icon={ShieldAlert} data-testid="secrets-unreadable-alert">
       <p>
-        <span className="font-bold">Segredos salvos ilegíveis.</span> O servidor não consegue decifrar os segredos salvos — a PAYMENT_SECRETS_KEY foi trocada ou o dado está corrompido. O gateway está
-        indisponível (503). Reenvie os 3 segredos — MerchantKey, Client Secret do cadastro de cartão e segredo do webhook — para restabelecer.
+        <span className="font-bold">Segredos salvos ilegíveis.</span> O servidor não consegue decifrar os segredos salvos — o <InlineCode>JWT_SECRET</InlineCode> do servidor foi trocado (a chave dos segredos é derivada dele) ou o dado está corrompido. O gateway está
+        indisponível (503). Reenvie os 3 segredos — MerchantKey, Client Secret do cadastro de cartão e segredo do webhook — para restabelecer, ou peça ao administrador do servidor para restaurar o JWT_SECRET original.
       </p>
     </Alert>
   )

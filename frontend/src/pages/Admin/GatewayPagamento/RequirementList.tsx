@@ -1,6 +1,6 @@
 import { Server, SquarePen } from "lucide-react"
 import { InlineCode } from "@/components/ui/InlineCode"
-import { PAYMENT_SECRETS_KEY_COMMAND, requirementInfo, splitRequirements } from "@/lib/paymentGateway"
+import { requirementInfo, splitRequirements } from "@/lib/paymentGateway"
 
 /**
  * Lista do que falta, em português, separada por ONDE se resolve: o que o
@@ -55,6 +55,7 @@ export function RequirementList({ codes, testId }: { codes: readonly string[]; t
                         — variável <InlineCode>{info.envVar}</InlineCode>
                       </>
                     )}
+                    {info.note && <span className="text-ink-softer"> — {info.note}</span>}
                   </span>
                 </li>
               )
@@ -62,13 +63,6 @@ export function RequirementList({ codes, testId }: { codes: readonly string[]; t
           </ul>
           <p className="mt-2 text-xs text-ink-softer">
             Estes itens são variáveis de ambiente da API: esta tela não os edita. Quem cuida do servidor define no EasyPanel e reinicia a API.
-            {server.includes("PAYMENT_SECRETS_KEY") && (
-              <>
-                {" "}
-                Para <InlineCode>PAYMENT_SECRETS_KEY</InlineCode>, gere o valor com{" "}
-                <InlineCode>{PAYMENT_SECRETS_KEY_COMMAND}</InlineCode>.
-              </>
-            )}
           </p>
         </div>
       )}

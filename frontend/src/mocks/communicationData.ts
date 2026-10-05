@@ -34,7 +34,7 @@ const MOCK_ADMIN_PASSWORD = "senha1234"
  *  - `admin@innoelektron.com`                      -> origem `env`: e-mail vindo do ambiente (ligado e funcionando), WhatsApp não configurado;
  *  - `comunicacao-pronta@innoelektron.com`         -> `database`: e-mail e WhatsApp ligados e funcionando, janela de 45 min salva;
  *  - `comunicacao-vazia@innoelektron.com`          -> `env`, NADA configurado nos dois canais;
- *  - `comunicacao-sem-chave@innoelektron.com`      -> `env`, nada configurado e servidor SEM `PAYMENT_SECRETS_KEY` (503 `SECRETS_KEY_MISSING` ao enviar segredo);
+ *  - `comunicacao-sem-chave@innoelektron.com`      -> `env`, nada configurado e chave de segredos do servidor INVÁLIDA/indisponível (override `PAYMENT_SECRETS_KEY` inválido; `secretsKeyConfigured: false`) (503 `SECRETS_KEY_MISSING` ao enviar segredo);
  *  - `comunicacao-ilegivel@innoelektron.com`       -> `database`, segredos salvos que NÃO decifram (`secretsDecryptable: false`; e-mail ligado e inativo; avisos);
  *  - `comunicacao-indisponivel@innoelektron.com`   -> o GET devolve 503 `COMMUNICATION_SETTINGS_UNAVAILABLE`;
  *  - `comunicacao-rede-privada@innoelektron.com`   -> como a "pronta", com `privateHostsAllowed: true` (destinos internos liberados pelo deploy).
@@ -448,9 +448,9 @@ export function updateCommunicationSettings(userId: string, body: unknown): Comm
   }
   if (incomplete.length > 0) return fail(409, "CHANNEL_INCOMPLETE", "Canal incompleto.", incomplete)
 
-  // ---- 503 sem chave de cifragem para guardar segredo ----
+  // ---- 503 com a chave de segredos do servidor inválida/indisponível ----
   if ((emailIn?.password !== undefined || whatsappIn?.apiKey !== undefined) && !scenario.secretsKey) {
-    return fail(503, "SECRETS_KEY_MISSING", "O servidor não está configurado para guardar segredos.")
+    return fail(503, "SECRETS_KEY_MISSING", "A chave de segredos do servidor está inválida ou indisponível.")
   }
 
   // Reenviar (ou apagar) todos os segredos salvos restabelece a leitura.

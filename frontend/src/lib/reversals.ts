@@ -1,5 +1,6 @@
 import axios from "axios"
 import { parseReaisToCents } from "@/lib/money"
+import { SECRETS_KEY_UNAVAILABLE_TEXT } from "@/lib/secretsKey"
 import { formatCents } from "@/lib/utils"
 import type { ChargebackStatus, PaymentListRow, RefundDestination, RefundStatus } from "@/types/api"
 
@@ -374,7 +375,7 @@ const DELETION_MESSAGES: Record<string, string> = {
   REFUND_NOT_REQUIRED: "Este pedido não tem saldo a devolver.",
   AMOUNT_EXCEEDS_BALANCE: "O valor passa do saldo registrado no pedido. A devolução é do saldo integral.",
   PARTIAL_REFUND_NOT_ALLOWED: "A devolução precisa ser do saldo integral: o resto ficaria na carteira de uma conta sem dono.",
-  PAYMENT_SECRETS_KEY_MISSING: "O servidor não tem a chave de cifragem (PAYMENT_SECRETS_KEY) configurada. Nada foi registrado — peça para quem cuida do servidor corrigir.",
+  PAYMENT_SECRETS_KEY_MISSING: `${SECRETS_KEY_UNAVAILABLE_TEXT} Nada foi registrado.`,
 }
 
 export type ReversalDomain = "refund" | "chargeback" | "deletion"

@@ -73,19 +73,23 @@ describe("mapa de requisitos", () => {
     }
   })
 
-  it("os 4 'só do servidor' do contrato apontam para a variável do EasyPanel; os demais se resolvem na tela", () => {
+  it("os 'só do servidor' do contrato apontam para a variável do EasyPanel (exceto a chave de segredos, que não manda criar variável); os demais se resolvem na tela", () => {
     const serverOnly: PaymentGatewayRequirement[] = ["SOP_SCRIPT_URL", "SOP_OAUTH_TOKEN_URL", "WEBHOOK_PATH_TOKEN", "PAYMENT_SECRETS_KEY"]
     for (const code of ALL_REQUIREMENTS) {
       const info = REQUIREMENT_INFO[code]
       if (serverOnly.includes(code)) {
         expect(info.where).toBe("server")
-        expect(info.envVar).toBeTruthy()
+        if (code === "PAYMENT_SECRETS_KEY") expect(info.envVar).toBeUndefined()
+        else expect(info.envVar).toBeTruthy()
       } else {
         expect(info.where).toBe("screen")
         expect(info.section).toBeTruthy()
       }
     }
-    expect(REQUIREMENT_INFO.PAYMENT_SECRETS_KEY.envVar).toBe("PAYMENT_SECRETS_KEY")
+    // Rótulo humano coerente com o novo modelo: a chave é derivada do JWT_SECRET, ninguém cria variável.
+    expect(REQUIREMENT_INFO.PAYMENT_SECRETS_KEY.label).toBe("Chave de segredos do servidor")
+    expect(REQUIREMENT_INFO.PAYMENT_SECRETS_KEY.note).toMatch(/administrador do servidor.*JWT_SECRET/)
+    expect(REQUIREMENT_INFO.PAYMENT_SECRETS_KEY.note).not.toMatch(/openssl|criar|crie/i)
     expect(REQUIREMENT_INFO.WEBHOOK_PATH_TOKEN.envVar).toBe("CIELO_WEBHOOK_PATH_TOKEN")
   })
 
@@ -268,10 +272,12 @@ describe("extractRequirements / parseGatewaySaveError", () => {
     expect(parsed.requirements).toEqual(["MERCHANT_KEY", "WEBHOOK_PATH_TOKEN"])
   })
 
-  it("PAYMENT_SECRETS_KEY_MISSING (503): explica a variável e o comando openssl", () => {
+  it("PAYMENT_SECRETS_KEY_MISSING (503): chave de segredos inválida/indisponível, manda conferir a configuração e NÃO manda criar variável nem gerar chave", () => {
     const parsed = parseGatewaySaveError(axiosError(503, { error: "x", code: "PAYMENT_SECRETS_KEY_MISSING" }))
-    expect(parsed.message).toContain("PAYMENT_SECRETS_KEY")
-    expect(parsed.message).toContain("openssl rand -base64 32")
+    expect(parsed.message).toContain("A chave de segredos do servidor está inválida ou indisponível")
+    expect(parsed.message).toContain("administrador do servidor")
+    expect(parsed.message).toContain("JWT_SECRET")
+    expect(parsed.message).not.toMatch(/openssl|criá-la/)
   })
 
   it("PRODUCTION_CONFIRMATION_REQUIRED, VALIDATION_ERROR, FORBIDDEN e genérico têm texto próprio", () => {
@@ -388,7 +394,7 @@ describe("erros novos do servidor (F5.5): 401 / 429 / 503 / 500", () => {
   it("503 PAYMENT_GATEWAY_UNAVAILABLE explica leitura da configuração e que nada mudou — e não confunde com PAYMENT_SECRETS_KEY_MISSING", () => {
     const parsed = parseGatewaySaveError(axiosError(503, { error: "x", code: "PAYMENT_GATEWAY_UNAVAILABLE" }))
     expect(parsed.message).toMatch(/não conseguiu ler a configuração/)
-    expect(parsed.message).toMatch(/PAYMENT_SECRETS_KEY foi trocada/)
+    expect(parsed.message).toMatch(/JWT_SECRET do servidor foi trocado/)
     expect(parsed.message).toMatch(/Nada foi alterado/)
     expect(parsed.requirements).toEqual([]) // não é pendência para o admin resolver na tela
     expect(parsed.draftKept).toBe(true)

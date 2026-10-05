@@ -138,7 +138,7 @@ export default function DevolucoesContasExcluidasPage() {
                       </div>
                     ) : row.refundPixKeyUnreadable ? (
                       <p className="text-sm font-medium text-danger-700">
-                        Chave ilegível: a chave de cifragem do servidor mudou. Fale com o titular por outro canal para obter a chave.
+                        Chave ilegível: a chave de segredos do servidor mudou (o JWT_SECRET foi trocado). Fale com o titular por outro canal para obter a chave.
                       </p>
                     ) : (
                       <p className="text-sm text-ink-softer">{row.refundStatus === "REFUNDED" ? "Apagada após a devolução." : "Não informada."}</p>

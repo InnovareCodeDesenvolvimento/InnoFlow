@@ -180,7 +180,7 @@ describe("parseReversalError — por `code`, nunca o texto do servidor", () => {
     expect(parseReversalError(axiosError(409, { code: "REFUND_NOT_CONFIRMABLE" }), "refund").message).toMatch(/não pode mais ser confirmada/)
     expect(parseReversalError(axiosError(409, { code: "CHARGEBACK_NOT_LOST" }), "chargeback").message).toMatch(/perdido ou aceito/)
     expect(parseReversalError(axiosError(409, { code: "PARTIAL_REFUND_NOT_ALLOWED" }), "deletion").message).toMatch(/saldo integral/)
-    expect(parseReversalError(axiosError(503, { code: "PAYMENT_SECRETS_KEY_MISSING" }), "deletion").message).toMatch(/PAYMENT_SECRETS_KEY/)
+    expect(parseReversalError(axiosError(503, { code: "PAYMENT_SECRETS_KEY_MISSING" }), "deletion").message).toMatch(/chave de segredos do servidor está inválida ou indisponível.*administrador do servidor/)
   })
   it("nunca ecoa o texto do servidor (pode trazer dado do corpo)", () => {
     const parsed = parseReversalError(axiosError(409, { code: "ALGO_NOVO", error: "senha1234 e Tiago Travado" }), "refund")

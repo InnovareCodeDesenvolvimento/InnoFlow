@@ -1639,7 +1639,7 @@ export type PaymentGatewayRequirement =
   | "SOP_OAUTH_TOKEN_URL" // idem
   | "WEBHOOK_PATH_TOKEN" // idem (compõe `webhookUrl`)
   | "WEBHOOK_HEADER_SECRET"
-  | "PAYMENT_SECRETS_KEY" // idem — sem ela o servidor não consegue cifrar/guardar os segredos acima
+  | "PAYMENT_SECRETS_KEY" // NOME mantido: = chave de segredos do servidor (derivada do JWT_SECRET; override opcional PAYMENT_SECRETS_KEY). Só falta se estiver inválida/indisponível
 
 export interface PaymentMethodReadiness {
   /** `true` = todos os pré-requisitos presentes (independe de estar habilitado pelo admin). */
@@ -1712,7 +1712,7 @@ export interface PaymentGatewayConfigDTO {
   readiness: { card: PaymentMethodReadiness; pix: PaymentMethodReadiness }
   /**
    * `true` = todos os segredos salvos no banco foram lidos e decifrados agora; `false` = ao menos um NÃO decifra
-   * (chave `PAYMENT_SECRETS_KEY` trocada/perdida ou dado corrompido) e o gateway está em 503 — a tela deve alertar
+   * (`JWT_SECRET` trocado — a chave dos segredos é derivada dele — ou override `PAYMENT_SECRETS_KEY` trocado, ou dado corrompido) e o gateway está em 503 — a tela deve alertar
    * mesmo que os chips digam "Configurada". `null` = não há segredo salvo no banco (`source: "env"` ou nada gravado).
    */
   secretsDecryptable: boolean | null
@@ -1757,7 +1757,7 @@ export type PaymentGatewayConfigErrorCode =
   | "VALIDATION_ERROR" // 400
   | "PRODUCTION_CONFIRMATION_REQUIRED" // 400 — mudou para production sem `confirmProduction: true`
   | "GATEWAY_NOT_READY" // 409 — `environment: production` (ou habilitar um meio) com pré-requisito faltando; `details` é um ARRAY DE STRINGS com os `PaymentGatewayRequirement` (ordem estável) — diferente dos outros `details` da API, que são objetos
-  | "PAYMENT_SECRETS_KEY_MISSING" // 503 — servidor sem chave de cifragem: não aceita gravar segredos (só quando o body TEM segredo; salvar só `merchantId` passa)
+  | "PAYMENT_SECRETS_KEY_MISSING" // 503 — chave de segredos do servidor inválida/indisponível (só com override PAYMENT_SECRETS_KEY inválido): não aceita gravar segredos (só quando o body TEM segredo; salvar só `merchantId` passa)
   | "FORBIDDEN" // 403 — só ADMIN
   | "UNAUTHORIZED" // 401 — sem sessão válida
   | "RATE_LIMITED" // 429 — limite geral da API admin
@@ -1932,7 +1932,7 @@ export type MeAccountDeletionErrorCode =
   | "PAYMENT_IN_PROGRESS"
   | "OPEN_DEBT"
   | "RATE_LIMITED_ACCOUNT_DELETION"
-  // Acrescentados com o backend real (nada renomeado): 503 sem a chave de cifragem do cofre (a chave Pix não pode ser guardada), 503 do throttle da senha fora do ar
+  // Acrescentados com o backend real (nada renomeado): 503 com a chave de segredos do servidor inválida/indisponível (a chave Pix não pode ser guardada), 503 do throttle da senha fora do ar
   // (fail-closed, nada é tentado), 503 Google sem Client ID no servidor, 403 conta sem como se reautenticar / não é DRIVER, 401 sessão inválida.
   | "PAYMENT_SECRETS_KEY_MISSING"
   | "STEPUP_UNAVAILABLE"
@@ -1968,7 +1968,7 @@ export interface AdminAccountDeletionRow {
   ageDays: number
   /** Aditivo: `true` quando passou do prazo recomendado de 30 dias e ainda é `PENDING_REFUND`. */
   overdue: boolean
-  /** Aditivo: só presente (`true`) quando a chave guardada NÃO pôde ser decifrada (`PAYMENT_SECRETS_KEY` trocada/ausente) — `refundPixKey` vem `null`; falar com o titular por outro canal. */
+  /** Aditivo: só presente (`true`) quando a chave guardada NÃO pôde ser decifrada (`JWT_SECRET` trocado ou override `PAYMENT_SECRETS_KEY` trocado/ausente) — `refundPixKey` vem `null`; falar com o titular por outro canal. */
   refundPixKeyUnreadable?: true
 }
 export interface AdminAccountDeletionsQuery extends PaginationParams {
@@ -1989,7 +1989,7 @@ export interface AdminAccountDeletionRefundRequest {
 /**
  * Erros de `GET/POST /api/admin/account-deletions*` (entregue, L1.4). A devolução é INTEGRAL: valor menor = 409 `PARTIAL_REFUND_NOT_ALLOWED`; maior = 409 `AMOUNT_EXCEEDS_BALANCE`;
  * pedido sem saldo = 409 `REFUND_NOT_REQUIRED`; já devolvido = 409 `ALREADY_REFUNDED`. Senha: 403 `INVALID_CURRENT_PASSWORD`, 429 `RATE_LIMITED_ACCOUNT_DELETION` (+ `Retry-After`),
- * 503 `STEPUP_UNAVAILABLE` (nada gravado). `PAYMENT_SECRETS_KEY_MISSING` (503) = o servidor não tem a chave de cifragem.
+ * 503 `STEPUP_UNAVAILABLE` (nada gravado). `PAYMENT_SECRETS_KEY_MISSING` (503) = a chave de segredos do servidor está inválida/indisponível (só com override `PAYMENT_SECRETS_KEY` inválido).
  */
 export type AdminAccountDeletionErrorCode =
   | "VALIDATION_ERROR"
@@ -2325,7 +2325,7 @@ export interface CommunicationSettingsDTO {
     /** Teto de avisos por hora (env `ALERT_MAX_PER_HOUR`, só leitura aqui). */
     maxPerHour: number
   }
-  /** `PAYMENT_SECRETS_KEY` configurada no servidor. `false` => não dá para salvar senha/apikey (PUT responde 503 `SECRETS_KEY_MISSING`). */
+  /** Chave de segredos do servidor utilizável (derivada do `JWT_SECRET`; override opcional `PAYMENT_SECRETS_KEY` válido). `false` => não dá para salvar senha/apikey (PUT responde 503 `SECRETS_KEY_MISSING`). */
   secretsKeyConfigured: boolean
   /** `true` = segredos salvos decifram; `false` = algum NÃO decifra (chave trocada/perdida: canal desligado até salvar o segredo de novo); `null` = não há segredo salvo no banco. */
   secretsDecryptable: boolean | null
@@ -2570,7 +2570,7 @@ export type CommunicationSettingsErrorCode =
   | 'RATE_LIMITED_PAYMENT_GATEWAY' // 429 — tentativas ERRADAS de senha demais (mesmo código/balde do gateway), header Retry-After
   | 'RATE_LIMITED_COMMUNICATION_SETTINGS' // 429 — limite por minuto do PUT/testes
   | 'STEPUP_UNAVAILABLE' // 503 — Redis do step-up fora (fail-closed): nada foi gravado
-  | 'SECRETS_KEY_MISSING' // 503 — servidor sem PAYMENT_SECRETS_KEY: não dá para guardar senha/apikey
+  | 'SECRETS_KEY_MISSING' // 503 — chave de segredos do servidor inválida/indisponível: não dá para guardar senha/apikey
   | 'COMMUNICATION_SETTINGS_UNAVAILABLE' // 503 — não deu para ler a config no banco (só GET/testes)
   | 'DESTINATION_NOT_ALLOWED' // 400 — details: [{ field: 'email.host' | 'whatsapp.baseUrl', reason: 'LOOPBACK' | 'REDE_PRIVADA' | 'NOME_INTERNO' | 'ENDERECO_DE_METADADOS' | 'ENDERECO_NAO_ROTEAVEL' | 'HOST_INVALIDO' | 'HTTPS_REQUIRED' | 'INVALID_URL' }]
   | 'SECRET_REQUIRED_FOR_NEW_DESTINATION' // 400 — trocar host/usuário SMTP ou URL/instância da Evolution exige reenviar a senha/apikey (details: [{ field: 'email.password' | 'whatsapp.apiKey' | 'config.password' | 'config.apiKey' }])
@@ -2594,8 +2594,8 @@ export type BackupErrorCode =
   | 'OAUTH_DISCONNECTED' // Google: acesso revogado — reconectar
   | 'DUMP' // pg_dump/pg_restore falhou (cliente ausente na imagem, versão antiga...)
   | 'DUMP_TIMEOUT' // pg_dump passou do prazo
-  | 'KEY' // chave do backup ausente/ilegível/diferente da do arquivo
-  | 'SECRETS_KEY' // PAYMENT_SECRETS_KEY ausente/mudou: segredos do destino não decifram
+  | 'KEY' // chave do backup ausente, diferente da do arquivo ou com a cópia guardada no servidor ilegível (JWT_SECRET trocado) -> gerar a chave de novo
+  | 'SECRETS_KEY' // JWT_SECRET trocado (ou override PAYMENT_SECRETS_KEY mudou): segredos do destino não decifram -> cadastrar o destino de novo
   | 'TOO_BIG' // arquivo > 5 GiB (envio simples do S3)
   | 'NO_BACKUP' // conferência: destino vazio
   | 'VERIFY' // conferência reprovou (vazio, adulterado, sem marca, índice vazio)
@@ -2649,9 +2649,9 @@ export interface BackupConfigDTO {
     createdAt: string | null
     shownAt: string | null
   }
-  /** O servidor tem a PAYMENT_SECRETS_KEY (sem ela não dá para guardar credenciais nem a chave). */
+  /** A chave de segredos do servidor está utilizável (derivada do JWT_SECRET; sem ela não dá para guardar credenciais nem a chave). */
   secretsKeyConfigured: boolean
-  /** Os segredos salvos decifram agora (false = a PAYMENT_SECRETS_KEY mudou: recadastrar). */
+  /** Os segredos salvos decifram agora (false = o JWT_SECRET mudou: recadastrar). */
   secretsReadable: boolean
   problemsToEnable: BackupProblemToEnable[]
   updatedAt: string

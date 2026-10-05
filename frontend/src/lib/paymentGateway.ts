@@ -1,4 +1,5 @@
 import axios from "axios"
+import { SECRETS_KEY_LABEL, SECRETS_KEY_UNAVAILABLE_TEXT } from "@/lib/secretsKey"
 import type {
   PaymentGatewayConfigDTO,
   PaymentGatewayEnvironment,
@@ -57,6 +58,8 @@ export interface RequirementInfo {
   where: RequirementWhere
   /** Variável do servidor (só `where: "server"`). */
   envVar?: string
+  /** Orientação curta para itens do servidor SEM variável própria a criar (ex.: a chave de segredos, derivada do JWT_SECRET). */
+  note?: string
   /** Onde, nesta tela, se resolve (só `where: "screen"`). */
   section?: string
 }
@@ -70,11 +73,14 @@ export const REQUIREMENT_INFO: Record<PaymentGatewayRequirement, RequirementInfo
   SOP_OAUTH_TOKEN_URL: { label: "Endereço de autenticação do cadastro de cartão", where: "server", envVar: "CIELO_SOP_OAUTH_TOKEN_URL" },
   WEBHOOK_PATH_TOKEN: { label: "Token do endereço do webhook", where: "server", envVar: "CIELO_WEBHOOK_PATH_TOKEN" },
   WEBHOOK_HEADER_SECRET: { label: "Segredo do header do webhook", where: "screen", section: "Webhook" },
-  PAYMENT_SECRETS_KEY: { label: "Chave de cifragem dos segredos", where: "server", envVar: "PAYMENT_SECRETS_KEY" },
+  // O NOME do requisito foi mantido pelo backend (05/10), mas hoje só aparece se a chave de segredos do servidor está INVÁLIDA/INDISPONÍVEL: ela é derivada do JWT_SECRET (override opcional
+  // PAYMENT_SECRETS_KEY). Não há variável para criar: o rótulo é humano e a nota manda falar com quem cuida do servidor.
+  PAYMENT_SECRETS_KEY: {
+    label: SECRETS_KEY_LABEL,
+    where: "server",
+    note: "inválida ou indisponível. Peça ao administrador do servidor para conferir a configuração (JWT_SECRET e, se existir, PAYMENT_SECRETS_KEY).",
+  },
 }
-
-/** Comando para gerar o valor de `PAYMENT_SECRETS_KEY` no servidor. */
-export const PAYMENT_SECRETS_KEY_COMMAND = "openssl rand -base64 32"
 
 const KNOWN_REQUIREMENTS = new Set<string>(Object.keys(REQUIREMENT_INFO))
 
@@ -337,7 +343,7 @@ export interface GatewaySaveError {
 /** Texto único para "nada foi alterado" em erros transitórios do servidor (429/503/500). */
 export const GATEWAY_RATE_LIMITED_MESSAGE = "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo."
 export const GATEWAY_UNAVAILABLE_MESSAGE =
-  "O servidor não conseguiu ler a configuração do gateway — o banco pode estar fora do ar ou a PAYMENT_SECRETS_KEY foi trocada. Nada foi alterado."
+  "O servidor não conseguiu ler a configuração do gateway — o banco pode estar fora do ar ou o JWT_SECRET do servidor foi trocado (a chave dos segredos salvos é derivada dele). Nada foi alterado."
 export const GATEWAY_INTERNAL_ERROR_MESSAGE = "Não foi possível salvar e nada foi alterado. Tente novamente."
 export const GATEWAY_WRONG_PASSWORD_MESSAGE = "Senha incorreta."
 export const GATEWAY_SESSION_EXPIRED_MESSAGE = "Sua sessão expirou. Entre de novo para continuar — nada foi alterado."
@@ -423,7 +429,7 @@ export function parseGatewaySaveError(err: unknown): GatewaySaveError {
     case "PAYMENT_SECRETS_KEY_MISSING":
       return {
         code,
-        message: `O servidor não tem a variável PAYMENT_SECRETS_KEY, então não consegue guardar segredos com segurança — nada foi salvo. Peça para quem cuida do servidor criá-la no EasyPanel (gere o valor com "${PAYMENT_SECRETS_KEY_COMMAND}") e reiniciar a API. Alterações que não envolvem segredos podem ser salvas normalmente.`,
+        message: `${SECRETS_KEY_UNAVAILABLE_TEXT} Nada foi salvo: o servidor não consegue guardar segredos agora. Alterações que não envolvem segredos podem ser salvas normalmente.`,
         requirements: ["PAYMENT_SECRETS_KEY"],
         draftKept: true,
       }

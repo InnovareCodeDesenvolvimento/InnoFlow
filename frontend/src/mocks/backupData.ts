@@ -38,7 +38,7 @@ const DAY = 24 * HOUR
  *  - `backup-atrasado@innoelektron.com`              -> ligado, ATRASADO (último sucesso há ~80 h), últimas tentativas falharam por `CREDENTIAL`;
  *  - `backup-nunca@innoelektron.com`                 -> ligado e NUNCA saiu uma cópia (`neverRan`);
  *  - `backup-andamento@innoelektron.com`             -> um backup RODANDO agora (termina sozinho depois de 3 consultas do estado geral);
- *  - `backup-sem-chave@innoelektron.com`             -> servidor SEM `PAYMENT_SECRETS_KEY` e sem `PUBLIC_API_BASE_URL` (`redirectUri: null`);
+ *  - `backup-sem-chave@innoelektron.com`             -> chave de segredos do servidor INVÁLIDA/indisponível (override `PAYMENT_SECRETS_KEY` inválido) e sem `PUBLIC_API_BASE_URL` (`redirectUri: null`);
  *  - `backup-ilegivel@innoelektron.com`              -> S3 salvo cujos segredos NÃO decifram (`secretsReadable: false`);
  *  - `backup-indisponivel@innoelektron.com`          -> o GET da config devolve 503.
  *
@@ -564,7 +564,7 @@ export function updateBackupConfig(actor: Actor, raw: unknown): { ok: true; dto:
     if (failure) return failure
   }
   const hasSecretInput = s3In.accessKey !== undefined || s3In.secretKey !== undefined || driveIn.clientSecret !== undefined
-  if (hasSecretInput && !s.secretsKey) return fail(503, "SECRETS_KEY_MISSING", "O servidor não tem a PAYMENT_SECRETS_KEY.")
+  if (hasSecretInput && !s.secretsKey) return fail(503, "SECRETS_KEY_MISSING", "A chave de segredos do servidor está inválida ou indisponível.")
   if (typeof s3In.endpoint === "string") {
     const next = hostOf(s3In.endpoint.trim())
     const saved = hostOf(c.s3.endpoint)
@@ -631,7 +631,7 @@ export function generateBackupKey(actor: Actor, raw: unknown): { ok: true; dto: 
   if (typeof raw.currentPassword !== "string" || raw.currentPassword.length === 0) return validationFail("currentPassword", "Informe a senha atual.")
   const blocked = stepUp(s, raw.currentPassword)
   if (blocked) return blocked
-  if (!s.secretsKey) return fail(503, "SECRETS_KEY_MISSING", "O servidor não tem a PAYMENT_SECRETS_KEY.")
+  if (!s.secretsKey) return fail(503, "SECRETS_KEY_MISSING", "A chave de segredos do servidor está inválida ou indisponível.")
 
   const exists = s.config.key.exists
   if (exists && raw.replace !== true) return fail(409, "BACKUP_KEY_EXISTS", "Já existe uma chave de backup.")

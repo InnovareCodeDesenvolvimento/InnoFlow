@@ -9,7 +9,7 @@ import { expect, test, type Page } from "@playwright/test"
  *  admin@                       -> env: e-mail do ambiente (funcionando), WhatsApp sem configuração
  *  comunicacao-pronta@          -> database: e-mail e WhatsApp ligados e funcionando
  *  comunicacao-vazia@           -> env, nada configurado
- *  comunicacao-sem-chave@       -> servidor sem PAYMENT_SECRETS_KEY
+ *  comunicacao-sem-chave@       -> chave de segredos do servidor inválida/indisponível (override PAYMENT_SECRETS_KEY inválido)
  *  comunicacao-ilegivel@        -> segredos salvos que não decifram
  *  comunicacao-indisponivel@    -> o GET responde 503
  *  comunicacao-rede-privada@    -> privateHostsAllowed
@@ -226,10 +226,14 @@ test.describe("leitura: origem env e origem database", () => {
     await expect(page.getByTestId("secret-evolutionApiKey-chip")).toHaveText("Configurada (ilegível)")
   })
 
-  test("servidor sem chave de cifragem (sem-chave@): alerta; digitar segredo é erro de campo e bloqueia salvar", async ({ page }) => {
+  test("chave de segredos do servidor indisponível (sem-chave@): alerta (sem mandar criar variável); digitar segredo é erro de campo e bloqueia salvar", async ({ page }) => {
     await login(page, "comunicacao-sem-chave@innoelektron.com")
     await openTab(page, "email")
-    await expect(page.getByTestId("secrets-key-missing-alert")).toContainText("PAYMENT_SECRETS_KEY")
+    const keyAlert = page.getByTestId("secrets-key-missing-alert")
+    await expect(keyAlert).toContainText("Chave de segredos do servidor indisponível")
+    await expect(keyAlert).toContainText("administrador do servidor")
+    await expect(keyAlert).toContainText("JWT_SECRET")
+    await expect(keyAlert).not.toContainText("openssl")
     await page.getByRole("button", { name: "Informar Senha SMTP" }).click()
     await page.getByTestId("secret-smtpPassword").locator("input").fill("SEGREDO-SEM-CHAVE")
     await expect(page.getByTestId("secret-smtpPassword")).toContainText("não dá para guardar este segredo")

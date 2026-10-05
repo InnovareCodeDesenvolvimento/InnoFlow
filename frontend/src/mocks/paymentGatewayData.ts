@@ -20,16 +20,16 @@ const MOCK_ADMIN_PASSWORD = "senha1234"
  * ambiente. Regras espelhadas do bloco "F5.5" de `types/api.ts`:
  *  - SEGREDOS NUNCA SÃO GUARDADOS NEM DEVOLVIDOS: o mock só lembra `...Set`;
  *  - campo ausente no PUT = não mexer;
- *  - 503 `PAYMENT_SECRETS_KEY_MISSING` ao gravar segredo sem a chave de cifragem do servidor;
+ *  - 503 `PAYMENT_SECRETS_KEY_MISSING` ao gravar segredo com a chave de segredos do servidor inválida/indisponível (hoje só com override `PAYMENT_SECRETS_KEY` inválido: a chave é derivada do JWT_SECRET);
  *  - 400 `PRODUCTION_CONFIRMATION_REQUIRED` ao mudar sandbox → production sem `confirmProduction: true`;
  *  - 409 `GATEWAY_NOT_READY` (com a lista em `details`) ao ir para produção ou habilitar um meio com pré-requisito faltando;
  *  - `source: "env"` até o primeiro PUT; depois `"database"` com `updatedAt`.
  *
  * SUPOSIÇÕES DO MOCK (o contrato não fecha; alinhar com o Vega):
- *  - "pronto" do cartão = MERCHANT_ID, MERCHANT_KEY, SOP_CLIENT_ID, SOP_CLIENT_SECRET, PAYMENT_SECRETS_KEY (C1.1: o backend
+ *  - "pronto" do cartão = MERCHANT_ID, MERCHANT_KEY, SOP_CLIENT_ID, SOP_CLIENT_SECRET, chave de segredos do servidor [`PAYMENT_SECRETS_KEY` no contrato] (C1.1: o backend
  *    real NÃO exige mais SOP_SCRIPT_URL/SOP_OAUTH_TOKEN_URL - as URLs do SOP têm default por ambiente e as envs são só override);
  *    do Pix = MERCHANT_ID, MERCHANT_KEY, WEBHOOK_PATH_TOKEN,
- *    WEBHOOK_HEADER_SECRET, PAYMENT_SECRETS_KEY;
+ *    WEBHOOK_HEADER_SECRET, chave de segredos do servidor (`PAYMENT_SECRETS_KEY` no contrato);
  *  - ir para produção exige que todo meio HABILITADO (no estado resultante) esteja pronto;
  *  - `details` do 409 é um array de strings (`["MERCHANT_KEY", ...]`) em ordem estável.
  *
@@ -43,7 +43,7 @@ const MOCK_ADMIN_PASSWORD = "senha1234"
  *  - `admin@innoelektron.com`                → origem `env`, NADA configurado (servidor completo);
  *  - `gateway-pronto@innoelektron.com`       → `database`, sandbox, tudo pronto, Pix habilitado;
  *  - `gateway-producao@innoelektron.com`     → `database`, produção, tudo pronto, Pix e cartão habilitados;
- *  - `gateway-sem-chave@innoelektron.com`    → `env`, servidor SEM `PAYMENT_SECRETS_KEY` e sem token do webhook (503 ao enviar segredo; `webhookUrl: null`),
+ *  - `gateway-sem-chave@innoelektron.com`    → `env`, chave de segredos do servidor INVÁLIDA (override `PAYMENT_SECRETS_KEY` inválido; `readiness.missing` traz `PAYMENT_SECRETS_KEY`) e sem token do webhook (503 ao enviar segredo; `webhookUrl: null`),
  *                                              Pix já habilitado sem estar pronto (ir para produção => 409 GATEWAY_NOT_READY);
  *  - `gateway-falhas@innoelektron.com`       → como o "pronto", mas o PUT falha de forma determinística conforme o MerchantId enviado:
  *                                              "ERRO-429" => 429 RATE_LIMITED_PAYMENT_GATEWAY, "ERRO-503" => 503 PAYMENT_GATEWAY_UNAVAILABLE,
@@ -174,7 +174,7 @@ function missingFor(method: "card" | "pix", state: GatewayState, server: ServerE
   const missing = new Set<PaymentGatewayRequirement>()
   if (!state.merchantId) missing.add("MERCHANT_ID")
   if (!state.merchantKeySet) missing.add("MERCHANT_KEY")
-  if (!server.secretsKey) missing.add("PAYMENT_SECRETS_KEY")
+  if (!server.secretsKey) missing.add("PAYMENT_SECRETS_KEY") // nome do contrato mantido; = chave de segredos do servidor inválida/indisponível
   if (method === "card") {
     if (!state.sopClientId) missing.add("SOP_CLIENT_ID")
     if (!state.sopClientSecretSet) missing.add("SOP_CLIENT_SECRET")
@@ -270,10 +270,10 @@ export function updateGatewayConfig(userId: string, body: unknown): GatewayUpdat
     if (trigger === "ERRO-500") return fail(500, "INTERNAL_ERROR", "Erro interno.")
   }
 
-  // ---- 503: sem chave de cifragem o servidor não grava segredo ----
+  // ---- 503: com a chave de segredos inválida/indisponível o servidor não grava segredo ----
   const writesSecret = input.merchantKey !== undefined || input.sopClientSecret !== undefined || input.webhookHeaderSecret !== undefined
   if (writesSecret && !scenario.server.secretsKey) {
-    return fail(503, "PAYMENT_SECRETS_KEY_MISSING", "O servidor não está configurado para guardar segredos (PAYMENT_SECRETS_KEY ausente).")
+    return fail(503, "PAYMENT_SECRETS_KEY_MISSING", "A chave de segredos do servidor está inválida ou indisponível.")
   }
 
   // ---- 400: virar produção exige confirmação explícita ----

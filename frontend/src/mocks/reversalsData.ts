@@ -534,7 +534,7 @@ export function refundAccountDeletion(requestId: string, body: unknown, adminUse
   const denied = stepUp(b.currentPassword)
   if (denied) return denied.status === 429 ? fail(429, "RATE_LIMITED_ACCOUNT_DELETION", "Muitas tentativas.", undefined, { "Retry-After": "120" }) : denied
   if (mode === "5xx") return fail(500, "INTERNAL_ERROR", "Erro interno.")
-  if (mode === "key-missing") return fail(503, "PAYMENT_SECRETS_KEY_MISSING", "Sem a chave de cifragem.")
+  if (mode === "key-missing") return fail(503, "PAYMENT_SECRETS_KEY_MISSING", "Chave de segredos do servidor indisponível.")
 
   const state = seedDeletions().find((d) => d.row.id === requestId)
   if (!state) return fail(404, "NOT_FOUND", "Pedido não encontrado.")

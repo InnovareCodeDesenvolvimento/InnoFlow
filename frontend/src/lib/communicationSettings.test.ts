@@ -205,11 +205,12 @@ describe("validateDraft", () => {
     expect(validateDraft(dto(), draft({ whatsapp: { apiVersion: 1 } }))["whatsapp.apiKey"]).toBeUndefined()
   })
 
-  it("servidor sem chave de cifragem: digitar segredo é erro de campo", () => {
+  it("chave de segredos do servidor indisponível: digitar segredo é erro de campo (sem citar variável)", () => {
     const d = dto({ secretsKeyConfigured: false })
     expect(validateDraft(d, draft({ email: { password: "x" } }))["email.password"]).toBe(NO_SECRETS_KEY_MESSAGE)
     expect(validateDraft(d, draft({ whatsapp: { apiKey: "x" } }))["whatsapp.apiKey"]).toBe(NO_SECRETS_KEY_MESSAGE)
     expect(validateDraft(d, draft({ email: { fromName: "x" } }))).toEqual({})
+    expect(NO_SECRETS_KEY_MESSAGE).not.toMatch(/PAYMENT_SECRETS_KEY|criar/)
   })
 })
 
@@ -292,6 +293,8 @@ describe("parseCommunicationError — por code, nunca pelo texto do servidor", (
   })
   it("503 SECRETS_KEY_MISSING tem mensagem própria, distinta de COMMUNICATION_SETTINGS_UNAVAILABLE", () => {
     expect(msg(503, "SECRETS_KEY_MISSING").message).toBe(MSG_SECRETS_KEY_MISSING)
+    expect(MSG_SECRETS_KEY_MISSING).toMatch(/inválida ou indisponível.*administrador do servidor/)
+    expect(MSG_SECRETS_KEY_MISSING).not.toMatch(/criá-la|EasyPanel/)
     expect(msg(503, "COMMUNICATION_SETTINGS_UNAVAILABLE").message).not.toBe(MSG_SECRETS_KEY_MISSING)
   })
   it("DESTINATION_NOT_ALLOWED: explica em linguagem simples e aponta o campo", () => {

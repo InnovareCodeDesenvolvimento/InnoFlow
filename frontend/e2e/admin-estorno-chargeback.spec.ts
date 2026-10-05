@@ -533,7 +533,7 @@ test.describe("ADMIN — Devoluções de contas excluídas", () => {
     await scenario(page, "mock:devolucoes", "key-missing")
     await confirm.getByLabel("Sua senha atual").fill(PASSWORD)
     await confirm.getByRole("button", { name: "Registrar devolução" }).click()
-    await expect(confirm.getByRole("alert")).toContainText("PAYMENT_SECRETS_KEY")
+    await expect(confirm.getByRole("alert")).toContainText("chave de segredos do servidor está inválida ou indisponível")
     await scenario(page, "mock:devolucoes", "already-refunded")
     await confirm.getByLabel("Sua senha atual").fill(PASSWORD)
     await confirm.getByRole("button", { name: "Registrar devolução" }).click()
