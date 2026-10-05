@@ -287,15 +287,11 @@ via `StatusNotification`. Eles aparecem automaticamente no painel.
 2. Você verá os conectores que o carregador reportou (ex.: connectorId 1, 2 para
    um poste com 2 saídas).
 
-3. **Vincule a tarifa ao carregador (ou ao site/conector).** Hoje a API existe
-   (`POST /api/admin/tariff-assignments`, com `scope` = CONNECTOR, CHARGE_POINT,
-   SITE ou OPERATOR), mas **a tela para fazer isso ainda NÃO existe** (pendência
-   do projeto, já encaminhada ao time de frontend). Até a tela sair, peça ao Atlas
-   para criar o vínculo pela API. **Não insira direto no banco:** a tabela exige
-   campos que é fácil errar (o `scope` e o identificador certo para cada escopo),
-   e um vínculo errado faz o sistema cobrar com a tarifa errada ou recusar a
-   recarga. **Sem tarifa vinculada o QR do carregador não consegue iniciar a
-   recarga**: confirme este passo antes dos testes.
+3. **Vincule a tarifa ao carregador (ou ao site/conector).** No painel: **Admin → Tarifas**,
+   coluna "Vínculos" da tarifa, com escopo CONNECTOR, CHARGE_POINT, SITE ou OPERATOR (a tela
+   existe desde a F5; antes disso só havia a API `POST /api/admin/tariff-assignments`).
+   **Não insira direto no banco.** **Sem tarifa vinculada o QR do carregador não consegue
+   iniciar a recarga**: confirme este passo antes dos testes.
 
 ### 4.2 Tarifas
 
