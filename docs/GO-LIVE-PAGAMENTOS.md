@@ -347,7 +347,7 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
   - [ ] Iniciar sessão com cartão salvo
   - [ ] Conferir no log que pré-autorização foi criada (`paymentIntent.status = AUTHORIZED`)
   - [ ] Parar recarga → captura parcial é enfileirada
-  - [ ] Webhook de captura chega (ou varredor executa em background)
+  - [ ] Captura executada: o varredor de pré-autorizações roda em segundo plano (sem webhook do InnoFlow); conferir nos logs a captura e o `paymentIntent.status`
   - [ ] **Conferir recibo:** valor cobrado bate com o calculado (energia + mínimo tarifa)
   - [ ] **Reconciliar:** Admin → Financeiro (conciliação): a diferença entre faturamento e o que foi contabilizado (cartão capturado + captura pendente + carteira + dívida quitada + dívida aberta) deve ser ZERO
 
@@ -494,7 +494,7 @@ F5.9 (watchdog) só interfere **quando cartão está envolvido** — Pix é inde
 2. **Efeito:**
    - ✅ Novos motoristas NÃO conseguem pagar com esse meio (recebem `409 PAYMENT_METHOD_DISABLED`)
    - ✅ Carteira/Pix/cartão salvos não são deletados (apenas desabilitados)
-   - ✅ Webhook / varredor / jobs continuam funcionando (finalizar o que já começou)
+   - ✅ Varredores e jobs continuam funcionando (finalizar o que já começou)
 
 3. **Voltar:**
    - [ ] Ligar o flag de novo na tela (mesmo passo, `enabled = true`)
@@ -522,12 +522,12 @@ F5.9 (watchdog) só interfere **quando cartão está envolvido** — Pix é inde
 
 ## 8. Chargeback / Estorno — Processo Manual (por enquanto)
 
-**Status atual:** chargeback/estorno só são **gravados** em `WebhookEvent` (tabela append-only); não há processamento automático.
+**Status atual:** o InnoFlow NÃO recebe notificações da Cielo (conta compartilhada com o Parque: a URL de notificação é do Parque). Chargeback e estorno só aparecem no painel da Cielo e no webhook do Parque; nada é gravado no InnoFlow e não há processamento automático.
 
-**Quando a Cielo avisa (webhook `ChangeType 7 = Chargeback` ou `25 = Estorno`):**
+**Quando houver chargeback ou estorno (a Cielo avisa o webhook do Parque, não o InnoFlow):**
 
-1. **Webhook chega**, sistema grava em `WebhookEvent` com `changeType` + dados
-2. **Não há alerta automático para isso hoje:** o dono precisa olhar o painel da Cielo nos primeiros dias (conferir chargebacks e estornos) e conferir a tabela de eventos de webhook com o suporte técnico
+1. **Não chega nada ao InnoFlow.** O dono descobre pelo painel da Cielo (e, se o Parque registrar, por lá).
+2. **Não há alerta automático para isso hoje:** o dono precisa olhar o painel da Cielo nos primeiros dias (conferir chargebacks e estornos de vendas com referência `IF-`)
 3. **Processo manual** (decidir com DPO/compliance):
    - Debitador (estorno): reembolsar para carteira do motorista
    - Chargeback: reverter tudo (carteira, session, auditoria) — operação complexa, requer investigação caso-a-caso
