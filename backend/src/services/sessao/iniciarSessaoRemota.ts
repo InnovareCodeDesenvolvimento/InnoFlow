@@ -18,6 +18,7 @@ import { CieloHttpError } from '../pagamentos/cieloHttpClient'
 import { registrarRecusaDeCartao } from '../pagamentos/elegibilidadeCartao'
 import { assertMeioDePagamentoHabilitado, getAmbienteEfetivoParaBancoOu503 } from '../pagamentos/gatewayConfig'
 import { criarPaymentIntentNoAmbienteEfetivo } from '../pagamentos/criarIntentNoAmbiente'
+import { guardarOrigemDoInicio } from './origemDoInicio'
 
 const COMMAND_TIMEOUT_MS = 35_000
 
@@ -40,6 +41,11 @@ export interface IniciarSessaoRemotaParams {
   clientIp?: string | null
   /** Ausente = WALLET (retrocompatível — o remote-start do admin nunca manda isto, F5.4). */
   payment?: SessaoPaymentInput
+  /**
+   * L1.8: IP e User-Agent da requisição do APP (prova para o dossiê de chargeback). SÓ o `POST /api/me/sessions/start` passa; o remote-start do ADMIN não (sessão do suporte fica sem origem).
+   * Vai para o Redis (15 min) e o gateway OCPP grava na sessão quando o StartTransaction chega — ver `origemDoInicio.ts`. NUNCA derruba o início: falha aqui é engolida.
+   */
+  origemDoInicio?: { ip?: string | null; userAgent?: string | null }
 }
 
 export interface IniciarSessaoRemotaResultado {
@@ -81,7 +87,7 @@ export interface IniciarSessaoRemotaResultado {
  * WALLET — CARD não olha `walletBalanceCents` pra decidir se pode começar.
  */
 export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Promise<IniciarSessaoRemotaResultado> {
-  const { chargePointId, chargePointScope, connectorId, userId, payment, clientIp } = params
+  const { chargePointId, chargePointScope, connectorId, userId, payment, clientIp, origemDoInicio } = params
   const mode = payment?.mode ?? 'WALLET'
 
   // F5.5: cartão desligado na tela do gateway => 409 PAYMENT_METHOD_DISABLED ANTES de qualquer efeito (nem PaymentIntent, nem pré-auth). Só COMEÇOS novos: a carteira não passa por aqui.
@@ -284,6 +290,9 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
     idTag = `V${randomUUID().replace(/-/g, '')}`.slice(0, 20)
     await prisma.authToken.create({ data: { idTag, type: 'VIRTUAL', userId, status: 'ACCEPTED' } })
   }
+
+  // L1.8: a origem (IP/User-Agent do app) precisa estar no Redis ANTES de o carregador poder responder com o StartTransaction. Prazo curto e nunca lança.
+  if (origemDoInicio) await guardarOrigemDoInicio(idTag, origemDoInicio)
 
   const correlationId = randomUUID()
   logger.info({ chargePointId: chargePoint.id, connectorId, userId, idTag, correlationId, paymentMode: mode }, '[sessao] remote-start disparado')
