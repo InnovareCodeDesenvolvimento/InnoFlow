@@ -15,18 +15,18 @@ export function TopupSuccessCard({ topup, walletBalanceCents }: { topup: MeTopup
 
   return (
     <div className="mx-auto flex max-w-md flex-col items-center pt-5 text-center">
-      <div className="surface-dark surface-dark-rich flex w-full flex-col items-center rounded-3xl px-6 pb-9 pt-8 shadow-tinted-card ring-1 ring-white/10">
+      <div className="surface-dark surface-dark-rich flex w-full flex-col items-center rounded-feature px-6 pb-9 pt-8 shadow-tinted-card ring-1 ring-white/10">
         <span className="relative">
           <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
             <MascotFace size={64} />
           </span>
-          <CheckCircle2 className="animate-pop-in absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-night text-lime" aria-hidden="true" />
+          <CheckCircle2 className="animate-pop absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-night text-lime" aria-hidden="true" />
         </span>
         <h1 className="mt-4 text-xl font-black tracking-tight text-ink">Saldo adicionado!</h1>
         <p className="mt-1 text-sm text-ink-softer">Seu Pix de {formatCents(topup.amountCents)} foi confirmado.</p>
       </div>
 
-      <Card className="animate-fade-in-up -mt-5 w-[calc(100%-1rem)] text-left">
+      <Card className="animate-enter -mt-5 w-[calc(100%-1rem)] text-left">
         <CardContent className="p-5 sm:p-5">
           <dl className="space-y-2.5 text-sm">
             {topup.debtSettledCents > 0 && (

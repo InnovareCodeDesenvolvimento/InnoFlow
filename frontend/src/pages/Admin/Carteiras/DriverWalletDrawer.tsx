@@ -91,7 +91,7 @@ export function DriverWalletDrawer({ driver, isAdmin, onClose }: { driver: Drive
             </header>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              <div className="rounded-2xl bg-primary-950 p-4 text-white">
+              <div className="rounded-card bg-primary-950 p-4 text-white">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-white/60">Saldo atual</p>
                 <p className="mt-1 text-3xl font-black tracking-tight tabular-nums" data-testid="wallet-balance">
                   {formatCents(balanceCents)}

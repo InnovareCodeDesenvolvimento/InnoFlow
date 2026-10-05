@@ -32,7 +32,7 @@ export function ErrorState({
       <div
         role="alert"
         className={cn(
-          "surface-dark flex flex-col items-center justify-center gap-3 rounded-2xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 text-center shadow-tinted-card ring-1 ring-white/10",
+          "surface-dark flex flex-col items-center justify-center gap-3 rounded-card bg-gradient-to-br from-primary-950 to-primary-800 px-6 text-center shadow-tinted-card ring-1 ring-white/10",
           page ? "min-h-[60svh] py-16" : "py-12",
           className,
         )}
@@ -57,7 +57,7 @@ export function ErrorState({
         className,
       )}
     >
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-danger-100 text-danger-600" aria-hidden="true">
+      <span className="flex h-12 w-12 items-center justify-center rounded-card bg-danger-100 text-danger-600" aria-hidden="true">
         <AlertTriangle className="h-6 w-6" />
       </span>
       <p className="max-w-sm text-sm font-medium text-danger-700">{message}</p>

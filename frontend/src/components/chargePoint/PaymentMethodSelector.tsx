@@ -41,7 +41,7 @@ export function PaymentMethodSelector({
           />
           <span
             className={cn(
-              "pressable flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-bold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2",
+              "press flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-bold peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2",
               value.mode === "WALLET" ? "border-primary bg-primary/10 text-primary-700" : "border-border bg-surface text-ink hover:bg-muted",
             )}
           >
@@ -65,7 +65,7 @@ export function PaymentMethodSelector({
               />
               <span
                 className={cn(
-                  "pressable flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-bold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2",
+                  "press flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-bold peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2",
                   selected ? "border-primary bg-primary/10 text-primary-700" : "border-border bg-surface text-ink hover:bg-muted",
                 )}
               >

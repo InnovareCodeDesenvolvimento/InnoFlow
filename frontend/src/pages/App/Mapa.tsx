@@ -19,7 +19,6 @@ import { useStations } from "@/hooks/useStations"
 import { getApiErrorMessage } from "@/services/api"
 import { NEARBY_RADIUS_KM } from "@/lib/geo"
 import type { StationSort } from "@/lib/stations"
-import { cn } from "@/lib/utils"
 
 // Leaflet só é baixado quando o mapa é de fato mostrado (aba "Mapa" no mobile,
 // sempre visível a partir de `lg`) — nunca no bundle inicial nem em chunk de
@@ -116,8 +115,8 @@ export function Mapa() {
 
       {!isLoading &&
         !isError &&
-        sites.map((site, index) => (
-          <div key={site.id} className={cn("animate-fade-in-up", index < 4 && `stagger-${index + 1}`)}>
+        sites.map((site) => (
+          <div key={site.id}>
             <PublicSiteCard site={site} distanceKm={site.distanceKm} selected={site.id === selectedId} onSelect={() => selectFromCard(site.id)} />
           </div>
         ))}
@@ -234,7 +233,7 @@ export function Mapa() {
               {selected ? (
                 <PublicSiteCard site={selected} distanceKm={selected.distanceKm} selected onSelect={() => setDetailId(selected.id)} />
               ) : (
-                <p className="rounded-2xl bg-muted px-4 py-5 text-center text-xs text-ink-softer">
+                <p className="rounded-card bg-muted px-4 py-5 text-center text-xs text-ink-softer">
                   Toque num pino do mapa para ver o eletroposto. O número dentro do pino é quantos conectores estão livres agora.
                 </p>
               )}

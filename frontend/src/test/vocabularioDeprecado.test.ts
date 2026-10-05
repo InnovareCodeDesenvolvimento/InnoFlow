@@ -3,70 +3,69 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 /**
- * CATRACA do vocabulário "premium" de 17/09 (design system unificado, F-A — docs/DESIGN-SYSTEM-UNIFICACAO.md §3.10).
+ * CATRACA do vocabulário "premium" de 17/09 — ENCERRADA na F-F do design system unificado (05/10/2026): todas as contagens chegaram a ZERO e o CSS legado foi apagado do
+ * `src/index.css`. O teste continua porque agora ele guarda o contrário: uma classe apagada que reaparece num `className` ficaria SEM estilo nenhum (silenciosamente), então
+ * qualquer uso é falha. Substitutos: `<Card variant>`, `<Button variant>`, `IconBadge`, `EmptyState tone`, `.press`, e as animações de marca do `tailwind.config.js`
+ * (`animate-enter`, `-pop`, `-sheet`, `-radar`, `-live`). Ver `frontend/DESIGN-SYSTEM.md`.
  *
- * As classes abaixo são DEPRECADAS (bloco "VOCABULÁRIO PREMIUM" do `src/index.css`, fora de `@layer`). Continuam funcionando como aliases
- * durante a migração, mas NÃO se cria uso novo: este teste conta as ocorrências em `src/pages` e `src/components` (fora `components/landing`,
- * que tem o vocabulário `lnd-*` próprio) e FALHA se a contagem SUBIR acima do número gravado aqui. Cada fase da migração (F-B…F-D) troca usos por
- * `<Card variant>` / `<Button variant>` / `IconBadge` / `EmptyState tone` e BAIXA os números; na F-F tudo chega a zero e o bloco é apagado.
- *
- * Ao BAIXAR a contagem, atualize o número abaixo no mesmo commit (o teste também falha se a contagem real ficar MENOR que a gravada, para a
- * catraca não "folgar": o número gravado é sempre o piso real). Nunca suba um número para fazer o teste passar — troque o uso novo pela variante.
+ * Varre `src/pages`, `src/components` (a landing inclusive: o mock do celular usa `lnd-mock-*`) e `src/pagamento-cartao`, e confere que `index.css` não define mais nenhuma delas.
  */
 
 const ROOT = path.resolve(import.meta.dirname, "..")
-const SCAN = ["pages", "components"]
-const SKIP_DIRS = new Set([path.join(ROOT, "components", "landing")])
+const SCAN = ["pages", "components", "pagamento-cartao"]
 
-/** classe -> quantidade gravada (piso). `(?![\w-])` evita contar `card-premium` dentro de `card-premium-interactive`. */
-const GRAVADO: Record<string, number> = {
-  "card-premium": 2,
-  "card-premium-interactive": 0,
-  "btn-glow-primary": 0,
-  "btn-glow-accent": 0,
-  pressable: 8,
-  "text-gradient-brand": 1,
-  "shadow-tinted-primary": 0,
-  "table-premium": 0,
-  "animate-fade-in-up": 24,
-  "animate-float-soft": 0,
-  "animate-radar-ping": 1,
-  "animate-live-glow": 1,
-  "animate-pop-in": 2,
-  "animate-sheet-up": 1,
-}
+const APAGADAS = [
+  "card-premium",
+  "card-premium-interactive",
+  "btn-glow-primary",
+  "btn-glow-accent",
+  "pressable",
+  "text-gradient-brand",
+  "shadow-tinted-primary",
+  "table-premium",
+  "animate-fade-in-up",
+  "animate-float-soft",
+  "animate-radar-ping",
+  "animate-live-glow",
+  "animate-pop-in",
+  "animate-sheet-up",
+  "stagger-1",
+  "stagger-2",
+  "stagger-3",
+  "stagger-4",
+]
 
 function walk(dir: string, out: string[]) {
   for (const name of readdirSync(dir)) {
     const full = path.join(dir, name)
-    if (SKIP_DIRS.has(full)) continue
     if (statSync(full).isDirectory()) walk(full, out)
-    else if (/\.(tsx|ts)$/.test(name) && !/\.test\.(tsx|ts)$/.test(name)) out.push(full)
+    else if (/\.(tsx|ts|css)$/.test(name) && !/\.test\.(tsx|ts)$/.test(name)) out.push(full)
   }
 }
 
-function contar(): Record<string, number> {
-  const files: string[] = []
-  for (const d of SCAN) walk(path.join(ROOT, d), files)
-  const counts: Record<string, number> = Object.fromEntries(Object.keys(GRAVADO).map((k) => [k, 0]))
-  for (const file of files) {
-    const text = readFileSync(file, "utf8")
-    for (const cls of Object.keys(GRAVADO)) {
-      const re = new RegExp(`(?<![\\w-])${cls.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}(?![\\w-])`, "g")
-      counts[cls] += (text.match(re) ?? []).length
-    }
-  }
-  return counts
-}
+const re = (cls: string) => new RegExp(`(?<![\\w-])${cls.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}(?![\\w-])`, "g")
 
-describe("catraca do vocabulário deprecado (só pode descer)", () => {
-  const atual = contar()
+describe("vocabulário deprecado: zerado (a catraca virou guarda)", () => {
+  const arquivos: string[] = []
+  for (const d of SCAN) walk(path.join(ROOT, d), arquivos)
 
-  it.each(Object.keys(GRAVADO))("%s não cresce", (cls) => {
-    expect(atual[cls], `${cls}: ${atual[cls]} usos, o teto gravado é ${GRAVADO[cls]}. Use a variante do componente (Card/Button/IconBadge/EmptyState) em vez de criar uso novo.`).toBeLessThanOrEqual(GRAVADO[cls])
+  it("varre o app inteiro", () => {
+    expect(arquivos.length).toBeGreaterThan(150)
   })
 
-  it.each(Object.keys(GRAVADO))("%s: o número gravado é o piso real (baixou? atualize GRAVADO)", (cls) => {
-    expect(atual[cls], `${cls}: a contagem real (${atual[cls]}) é MENOR que a gravada (${GRAVADO[cls]}). Atualize o número em GRAVADO para travar o ganho.`).toBe(GRAVADO[cls])
+  it.each(APAGADAS)("%s: nenhum uso em className nem CSS de componente", (cls) => {
+    const achados: string[] = []
+    for (const file of arquivos) {
+      // Comentários ficam de fora: eles citam o que foi apagado.
+      const codigo = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+      if (re(cls).test(codigo)) achados.push(path.relative(ROOT, file))
+    }
+    expect(achados, `${cls} foi APAGADA do CSS; use o componente/classe novos (ver DESIGN-SYSTEM.md)`).toEqual([])
+  })
+
+  it("index.css não define mais nenhuma delas", () => {
+    const css = readFileSync(path.join(ROOT, "index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "")
+    const definidas = APAGADAS.filter((cls) => new RegExp(`\\.${cls.replace(/[-]/g, "\\-")}(?![\\w-])`).test(css))
+    expect(definidas).toEqual([])
   })
 })

@@ -25,8 +25,8 @@ export function CardEligibilityNotice({ issue, className, onLinked }: { issue: C
 
   if (issue.reason === "TEMPORARILY_BLOCKED") {
     return (
-      <div role="status" data-testid="card-eligibility-notice" data-reason="TEMPORARILY_BLOCKED" className={`flex items-start gap-3 rounded-2xl bg-warning-50 p-4 ring-1 ring-warning-600/30 ${className ?? ""}`}>
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-warning-100 text-warning-700" aria-hidden="true">
+      <div role="status" data-testid="card-eligibility-notice" data-reason="TEMPORARILY_BLOCKED" className={`flex items-start gap-3 rounded-card bg-warning-50 p-4 ring-1 ring-warning-600/30 ${className ?? ""}`}>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-warning-100 text-warning-700" aria-hidden="true">
           <Clock className="h-5 w-5" />
         </span>
         <div className="min-w-0">

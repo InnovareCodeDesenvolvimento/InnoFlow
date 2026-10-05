@@ -352,270 +352,29 @@
 
 /*
  * ============================================================================
- * VOCABULÁRIO "PREMIUM" DE 17/09 — DEPRECADO desde a F-A do design system unificado (04/10/2026)
+ * MOVIMENTO E TOQUE — o que sobrou do vocabulário "premium" de 17/09 (limpeza final, F-F do design system, 05/10/2026)
  * ============================================================================
- * F-D (Admin, 04/10/2026): APAGADAS por falta de uso — `.btn-glow-primary/-accent`, `.card-premium-interactive`, `.shadow-tinted-primary`, `.table-premium` e
- * `.animate-float-soft` (+ `@keyframes softFloat`). Sobram, por ainda terem uso no PWA/público (classificados nas F-B/F-C): `.card-premium` (PublicSiteCard),
- * `.pressable`, `.text-gradient-brand` (QR), `.animate-fade-in-up`/`stagger`, `-radar-ping`, `-live-glow`, `-pop-in`, `-sheet-up`. A F-F apaga o resto.
- *
- * LEIA PRIMEIRO — a regra de cascata abaixo foi INVERTIDA:
- *   - O vocabulário NOVO (`.surface-dark`, `.glass`, `.eyebrow`, `.brand-*`, mais as variantes de `Button`/`Card`/`Badge`/
- *     `EmptyState`/`Table`/`StatCard`/`IconBadge` em `components/ui`) nasce em `@layer components` (bloco logo acima, no
- *     topo deste arquivo). Os utilitários do Tailwind ganham dele, então os componentes base PODEM carregar o padrão como
- *     default e ainda aceitar `className`. A regra velha "NUNCA mude a classe default do componente base" (mais abaixo)
- *     existia SÓ porque ESTE bloco está fora de layer e ganha dos utilitários. Para as classes novas ela não vale mais.
- *   - As classes DESTE bloco (`.card-premium`, `.card-premium-interactive`, `.btn-glow-primary/-accent`, `.pressable`,
- *     `.text-gradient-brand`, `.shadow-tinted-primary`, `.table-premium` e os `animate-*`) CONTINUAM funcionando, fora de
- *     layer, como aliases durante a migração — e CONTINUAM com a regra velha (aplicar por `className` em cada tela, não
- *     como default de componente), porque a causa dela (CSS fora de layer) continua valendo para elas. NÃO CRIE uso novo:
- *     `src/test/vocabularioDeprecado.test.ts` é uma catraca — a contagem só pode DESCER, e cada fase da migração baixa o
- *     número até zero (F-F), quando este bloco é apagado.
- *
- * (texto original abaixo, mantido enquanto o bloco existir)
- * ============================================================================
- * Nasceu na revisão do PWA do motorista (17/09/2026, pedido explícito do
- * dono: "capriche, deixe o layout realmente premium, mesmo nível do
- * Pontua.me — mas fiel à NOSSA paleta"). A TÉCNICA visual é emprestada do
- * Pontua.me (sombras tingidas da cor da marca em vez de cinza neutro,
- * microinterações via CSS puro — sem framer-motion —, gradiente sutil só em
- * valores de destaque); a PALETA é 100% InnoFlow (tokens de `:root` no topo
- * deste arquivo — nenhuma classe aqui embute um hex novo, todas compõem
- * `--color-primary`/`--color-accent`/etc. via `rgb(var(...) / alpha)`).
- *
- * Este bloco é a ÚNICA fonte de verdade do vocabulário — quando o Admin
- * passar pela mesma revisão de layout (ainda não feita), ele deve REAPROVEITAR
- * estas classes, não recriar equivalentes com outro nome. Mesmo DNA visual
- * (paleta, sombras tingidas, raios, tipografia) nos dois lugares é decisão
- * explícita do dono — "isso traz confiabilidade, credibilidade,
- * profissionalismo" entre PWA e painel administrativo.
- *
- * ---- GUIA DE INTENSIDADE (a decisão mais importante deste bloco) --------
- * O PWA do motorista (experiência de consumidor, "carregue um futuro
- * melhor") pode ser mais OUSADO em motion do que o Admin (ferramenta de
- * trabalho de operador/admin) vai ser quando chegar a vez dele. Mesmas
- * classes, dosagem diferente por contexto:
- *
- *   - Estático (`.card-premium`, `.text-gradient-brand`, `.btn-glow-*`):
- *     sombra tingida e gradiente de texto são baixo risco — servem tanto
- *     pro PWA quanto pro Admin, sem ressalva.
- *   - Feedback de toque (`.pressable`, `.card-premium-interactive`): use em
- *     QUALQUER elemento tocável/clicável nos dois produtos — é acessibilidade
- *     tátil (confirma que o toque registrou), não "efeito bonito".
- *   - Entrada em sequência (`.animate-fade-in-up` + `.stagger-1..4`): ótimo
- *     em LISTAS (extrato, histórico, itens carregados de uma vez). No Admin,
- *     usar com moderação bem maior (ex.: só a tabela principal ao trocar de
- *     página) — lá o operador quer densidade de informação rápida, não
- *     espetáculo.
- *   - Loops contínuos (`.animate-float-soft`, `.animate-radar-ping`,
- *     `.animate-live-glow`): RESERVADOS a hero/estado principal de uma tela
- *     do PWA (blob decorativo de fundo em Login/Cadastro/Landing; spinner de
- *     "aguardando o carregador responder"; número que está de fato mudando
- *     ao vivo). NUNCA em nav, ícones de lista, ou qualquer coisa repetida
- *     N vezes na tela — um loop múltiplo vira ruído visual, não vida. Se/quando
- *     isso for portado pro Admin, a recomendação é NÃO usar loops contínuos
- *     lá (o dono foi claro: Admin é mais contido) — ficam só os itens acima.
- *   - Pop de confirmação (`.animate-pop-in`): um-tiro, só em ícone de
- *     sucesso/confirmação (ex.: recibo concluído). Não usar em nada que
- *     apareça com frequência (perderia o efeito de "quero comemorar" e viraria
- *     só uma distração).
- *
- * Todo LOOP contínuo cai sob `@media (prefers-reduced-motion: reduce)` no
- * fim deste arquivo (`animation-duration: 0.001ms !important` no seletor
- * universal) — é automático, não precisa repetir a regra por classe.
- *
- * Deliberadamente FORA de @layer: a ordem de declaração no arquivo já garante
- * prioridade sobre `.card-elevated`/utilities do Tailwind sem precisar de
- * `!important` — mesmo raciocínio do bloco de `prefers-reduced-motion` logo
- * abaixo.
- *
- * ---- REGRA DE APLICAÇÃO: className nas telas, não editar o componente base
- * `Card`/`Button`/`Badge`/`EmptyState`/`ErrorState`/`Skeleton`/`Pagination`/
- * `ConfirmDialog`/`Dialog` (em `components/ui/`) são compartilhados entre PWA
- * E Admin (`Card` sozinho é importado por 5 telas do PWA + Dashboard/
- * Financeiro/Faturamento do Admin). Por isso a regra vale nos dois produtos:
- * aplicar estas classes via `className` em cada tela, NUNCA mudar a classe
- * default desses componentes base. Motivo verificado, não hipotético: como
- * este bloco fica fora de `@layer` (então sai DEPOIS do bucket de utilities
- * do Tailwind na cascata compilada), se `.card-premium` virasse a classe
- * default de `Card` ela ganharia de qualquer `bg-*` que uma tela passe por
- * `className` (ex.: o card de saldo do PWA usa `bg-primary-950` — perderia
- * pro `background-color` do `.card-premium` e o card ficaria branco). Testado
- * raciocinando sobre a ordem de cascata do Tailwind (`@layer components` sai
- * ANTES de `@layer utilities`, e um bloco não-layered escrito depois de
- * `@tailwind utilities;` no arquivo sai depois dos dois).
- *
- * Exceção: componentes que são EXCLUSIVOS do Admin (não importados por
- * nenhuma tela do PWA) podem ter a classe base trocada direto, sem esse
- * risco — é o caso de `components/ui/Table.tsx`, `components/painel/
- * PageHeader.tsx`, `components/relatorios/MetricCard.tsx` e `pages/Admin/
- * Layout.tsx`. Confirme com um grep de import antes de decidir por esse
- * caminho num componente novo.
+ * O vocabulário antigo (`.card-premium`, `.pressable`, `.text-gradient-brand`, `.btn-glow-*`, `.animate-fade-in-up`/`.stagger-*`, `-radar-ping`, `-live-glow`, `-pop-in`,
+ * `-sheet-up`, `-float-soft`, `.table-premium`, `.shadow-tinted-primary`) FOI APAGADO. O que o substitui:
+ *   - cards/botões/campos: `components/ui` (variantes de `Card`, `Button`, `Badge`, `EmptyState`...), tokens em `:root` e `.surface-dark`/`.glass`/`.eyebrow` em `@layer components`;
+ *   - toque: `.press` (abaixo) — feedback tátil de 150 ms em linha/cartão tocável;
+ *   - animações de marca: SÓ as do `tailwind.config.js` (`animate-enter`, `-pop`, `-sheet`, `-radar`, `-live`, mais `fade-in`/`scale-in` do Dialog), todas com `--ease-brand`/`--dur-*`
+ *     e todas sob o `prefers-reduced-motion` no fim deste arquivo. `radar`/`live` são LOOPS e só existem no PWA (espera de hardware / dado ao vivo); o Admin não tem nenhum
+ *     (portão `src/test/adminSemLoops.test.ts`). A catraca `src/test/vocabularioDeprecado.test.ts` segura todos os nomes antigos em ZERO.
+ * A landing mantém uma cópia local do que o mock do celular precisa (`.lnd-mock-*` em `components/landing/landing.css`).
  * ============================================================================
  */
 
-/* ---- 1. Cards — sombra tingida da marca, não cinza neutro --------------- */
-.card-premium {
-  position: relative;
-  border-radius: 1.25rem;
-  background-color: rgb(var(--color-surface));
-  box-shadow:
-    0 1px 2px rgb(15 23 42 / 0.04),
-    0 12px 28px -16px rgb(var(--color-primary) / 0.35);
-}
-/* Só a sombra tingida, SEM `background-color`/`border-radius` — pra empilhar
-   em cima de um elemento que já tem sua própria cor de fundo por utilitário
-   (ex.: um selo `bg-primary/10`). `.card-premium` completo sobrescreveria
-   esse fundo (mesmo motivo do aviso "REGRA DE APLICAÇÃO" no topo do bloco);
-   esta variante existe justamente pra evitar precisar dele nesses casos. */
-/* ---- 2. Feedback tátil — confirma visualmente que o toque registrou ----- */
-/* Genérico pra qualquer card/linha tocável (listas, cards de ação) — sem
-   precisar herdar o `.card-premium` inteiro. */
-.pressable {
-  /* Mesmo motivo do comentário em `.card-premium-interactive` acima: lista
-     explícita de propriedades, não o atalho `transition:`. */
-  transition-property: transform, box-shadow, color, background-color, border-color;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
-}
-.pressable:active {
-  transform: scale(0.98);
-}
-
-/* ---- 3. CTA em destaque — sombra tingida da cor da marca ---------------- */
-/* `-primary` pro botão de ação principal (variant default, azul-petróleo,
-   o mais usado no PWA); `-accent` pra quando o verde for o destaque. */
-/* ---- 4. Números de destaque — gradiente sutil só no TEXTO --------------- */
-/* Saldo, kWh, preço, total do recibo. Nunca em fundo grande. Só usar sobre
-   fundo CLARO: mantém contraste AA (o degrau mais claro do gradiente,
-   accent-600, já é 4.54:1 sozinho contra branco); sobre fundo escuro (ex.:
-   card de saldo bg-primary-950) usar branco sólido, não clip de gradiente —
-   evita risco de contraste. Moderação: no máximo 1 número em destaque por
-   tela/card — vira poluição se todo texto grande virar gradiente. */
-.text-gradient-brand {
-  background-image: linear-gradient(135deg, rgb(var(--color-primary-700)), rgb(var(--color-accent-600)));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-/* ---- 5. Entrada em sequência (listas) — CSS puro, sem framer-motion ----- */
-/* Dispara uma vez (não é loop), mas cai sob o bloco de
-   `prefers-reduced-motion` abaixo do mesmo jeito (vira instantâneo). */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
+@layer components {
+  /* Feedback tátil: lista EXPLÍCITA de propriedades (não o atalho `transition:`), para coexistir com `hover:*` de cor sem apagar a transição. */
+  .press {
+    transition-property: transform, box-shadow, color, background-color, border-color;
+    transition-timing-function: var(--ease-brand);
+    transition-duration: var(--dur-fast);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  .press:active {
+    transform: scale(0.98);
   }
-}
-.animate-fade-in-up {
-  animation: fadeInUp 0.45s ease-out both;
-}
-.stagger-1 {
-  animation-delay: 60ms;
-}
-.stagger-2 {
-  animation-delay: 120ms;
-}
-.stagger-3 {
-  animation-delay: 180ms;
-}
-.stagger-4 {
-  animation-delay: 240ms;
-}
-
-/* ---- 6. Loops contínuos — só em hero/estado principal, NUNCA repetido --- */
-/* Ver "GUIA DE INTENSIDADE" no topo do bloco: reservados a UM elemento
-   principal por tela, nunca em algo que se repete (nav, ícones de lista). */
-
-/* 6b. "Radar" — usar SÓ no spinner de espera de uma resposta real de
-   hardware (ex.: comando de início ainda não confirmado pelo carregador,
-   `Sessao.tsx` estado "conectando"). Composição em JSX (não `::before`, pra
-   não brigar com a ordem de pintura do ícone dentro do círculo):
-     <span className="relative ...">
-       <span className="absolute inset-0 rounded-full bg-primary/20 animate-radar-ping" aria-hidden="true" />
-       <span className="relative z-10 ...">{ícone}</span>
-     </span> */
-@keyframes radarPing {
-  0% {
-    transform: scale(0.85);
-    opacity: 0.5;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-}
-.animate-radar-ping {
-  animation: radarPing 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-/* 6c. "Pulso de dado ao vivo" — halo suave atrás de um número que está DE
-   FATO mudando em tempo real (kWh/potência durante a recarga em
-   andamento). NÃO usar em números estáticos (recibo, extrato) — só
-   enquanto o valor está de fato ao vivo, senão vira mentira visual. */
-@keyframes liveGlow {
-  0%,
-  100% {
-    box-shadow:
-      0 1px 2px rgb(15 23 42 / 0.04),
-      0 12px 28px -16px rgb(var(--color-primary) / 0.35),
-      0 0 0 0 rgb(var(--color-accent) / 0.16);
-  }
-  50% {
-    box-shadow:
-      0 1px 2px rgb(15 23 42 / 0.04),
-      0 12px 28px -16px rgb(var(--color-primary) / 0.35),
-      0 0 0 12px rgb(var(--color-accent) / 0);
-  }
-}
-.animate-live-glow {
-  animation: liveGlow 2.2s ease-out infinite;
-}
-
-/* ---- 7. Pop de confirmação — um-tiro, só em ícone de sucesso ------------ */
-/* Ex.: check verde do "Recarga concluída" no recibo. Não é loop (não
-   precisaria do bloco de reduced-motion, mas cai nele mesmo assim por
-   estar sob o seletor universal — vira instantâneo, não perde a
-   informação). Não usar em nada frequente/repetido. */
-@keyframes popIn {
-  0% {
-    transform: scale(0.5);
-    opacity: 0;
-  }
-  60% {
-    transform: scale(1.08);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-.animate-pop-in {
-  animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-
-/* ---- 7b. Bottom sheet — entrada de baixo pra cima, um-tiro -------------- */
-/* Só o detalhe da estação (`StationDetailSheet`). O sheet é `fixed inset-x-0
-   mx-auto` (sem `translate` de centralização), então a animação de
-   `transform` não briga com posicionamento. Cai no bloco de
-   `prefers-reduced-motion` como todas as outras (vira instantâneo). */
-@keyframes sheetUp {
-  from {
-    opacity: 0;
-    transform: translateY(28px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.animate-sheet-up {
-  animation: sheetUp 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 /* ---- Foco do mapa (Leaflet) — FORA de @layer de propósito: `.leaflet-container` é criada pelo Leaflet em tempo de execução, nenhum arquivo do app a cita, então o purge

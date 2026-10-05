@@ -35,11 +35,11 @@ function GatewaySkeleton() {
     <div className="space-y-6" aria-busy="true" aria-label="Carregando configuração do gateway">
       <Skeleton className="h-16 w-full rounded-xl" />
       <div className="grid gap-4 md:grid-cols-2">
-        <Skeleton className="h-56 w-full rounded-2xl" />
-        <Skeleton className="h-56 w-full rounded-2xl" />
+        <Skeleton className="h-56 w-full rounded-card" />
+        <Skeleton className="h-56 w-full rounded-card" />
       </div>
-      <Skeleton className="h-48 w-full rounded-2xl" />
-      <Skeleton className="h-64 w-full rounded-2xl" />
+      <Skeleton className="h-48 w-full rounded-card" />
+      <Skeleton className="h-64 w-full rounded-card" />
     </div>
   )
 }

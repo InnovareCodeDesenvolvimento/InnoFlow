@@ -29,7 +29,7 @@ export function NearbyStationsSection() {
   const nearest = sites.slice(0, 3)
 
   return (
-    <section aria-labelledby="perto-de-voce" className="stagger-2 animate-fade-in-up">
+    <section aria-labelledby="perto-de-voce" className="animate-enter">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 id="perto-de-voce" className="text-sm font-bold text-ink">
           Perto de você
@@ -51,15 +51,15 @@ export function NearbyStationsSection() {
 
       {hasPosition && isLoading && (
         <div className="space-y-2" aria-hidden="true">
-          <Skeleton className="h-16 rounded-2xl" />
-          <Skeleton className="h-16 rounded-2xl" />
+          <Skeleton className="h-16 rounded-card" />
+          <Skeleton className="h-16 rounded-card" />
         </div>
       )}
 
-      {hasPosition && isError && <p className="rounded-2xl bg-muted px-4 py-5 text-center text-xs text-ink-softer">Não foi possível carregar os eletropostos agora.</p>}
+      {hasPosition && isError && <p className="rounded-card bg-muted px-4 py-5 text-center text-xs text-ink-softer">Não foi possível carregar os eletropostos agora.</p>}
 
       {hasPosition && !isLoading && !isError && nearest.length === 0 && (
-        <p className="rounded-2xl bg-muted px-4 py-5 text-center text-xs text-ink-softer">
+        <p className="rounded-card bg-muted px-4 py-5 text-center text-xs text-ink-softer">
           Nenhum eletroposto num raio de cerca de 30 km.{" "}
           <Link to="/app/mapa" className="font-semibold text-primary hover:underline">
             Ver todos
@@ -79,7 +79,7 @@ export function NearbyStationsSection() {
                     state={{ stationId: site.id }}
                     data-station-id={site.id}
                     data-state={state}
-                    className="card-elevated pressable flex min-h-14 items-center gap-3 p-3.5 transition-colors hover:ring-primary/30"
+                    className="card-elevated press flex min-h-14 items-center gap-3 p-3.5 hover:ring-primary/30"
                   >
                     <IconBadge icon={Zap} size="lg" />
                     <div className="min-w-0 flex-1">

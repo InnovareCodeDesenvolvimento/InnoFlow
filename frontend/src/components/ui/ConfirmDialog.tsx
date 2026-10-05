@@ -32,7 +32,7 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent widthClassName="sm:max-w-sm">
         <DialogHeader>
-          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-danger-100 text-danger-600">
+          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-card bg-danger-100 text-danger-600">
             <AlertTriangle className="h-5 w-5" aria-hidden="true" />
           </div>
           <DialogTitle>{title}</DialogTitle>

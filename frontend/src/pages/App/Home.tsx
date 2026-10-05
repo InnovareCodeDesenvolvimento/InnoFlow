@@ -31,7 +31,7 @@ export function Home() {
         <p className="text-sm text-ink-softer">Olá, {user?.name?.split(" ")[0] ?? "motorista"}</p>
         <h1 className="text-xl font-black tracking-tight text-ink">Bem-vindo de volta</h1>
 
-        <div className="glass-strong animate-fade-in-up mt-4 flex items-center justify-between gap-3 rounded-3xl p-5">
+        <div className="glass-strong animate-enter mt-4 flex items-center justify-between gap-3 rounded-feature p-5">
           <div>
             <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-ink-softer">
               <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
@@ -54,7 +54,7 @@ export function Home() {
         {session && (
           <Link
             to="/app/sessao"
-            className="stagger-1 animate-fade-in-up mt-3 flex items-center gap-3 rounded-2xl bg-lime/10 p-4 ring-1 ring-lime/40 transition-colors hover:bg-lime/15 active:scale-[0.99]"
+            className="animate-enter mt-3 flex items-center gap-3 rounded-card bg-lime/10 p-4 ring-1 ring-lime/40 transition-colors hover:bg-lime/15 active:scale-[0.99]"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime text-on-lime">
               <Zap className="h-5 w-5" aria-hidden="true" />
@@ -69,7 +69,7 @@ export function Home() {
       </AppBand>
 
       <div className="mx-auto max-w-md space-y-5 px-4 py-5">
-        <Card className="stagger-2 animate-fade-in-up flex items-center gap-3.5 p-4">
+        <Card className="animate-enter flex items-center gap-3.5 p-4">
           <IconBadge icon={QrCode} size="lg" />
           <div className="min-w-0">
             <p className="text-sm font-bold text-ink">Pronto para carregar?</p>
@@ -89,7 +89,7 @@ export function Home() {
 
           {sessionsLoading && (
             <div className="space-y-2" aria-hidden="true">
-              <Skeleton className="h-16 rounded-2xl" />
+              <Skeleton className="h-16 rounded-card" />
             </div>
           )}
 
@@ -99,11 +99,11 @@ export function Home() {
 
           {!sessionsLoading && recentSessions && recentSessions.items.length > 0 && (
             <div className="space-y-2">
-              {recentSessions.items.map((item, index) => (
+              {recentSessions.items.map((item) => (
                 <Link
                   key={item.id}
                   to={`/app/sessoes/${item.id}`}
-                  className={`card-elevated pressable stagger-${Math.min(index + 3, 4)} animate-fade-in-up flex items-center gap-3 p-3.5 transition-colors hover:ring-primary/30`}
+                  className="card-elevated press flex items-center gap-3 p-3.5 hover:ring-primary/30"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

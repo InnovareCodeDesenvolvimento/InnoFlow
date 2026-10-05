@@ -86,15 +86,15 @@ export function PublicSiteCard({
     <Card
       data-station-id={site.id}
       data-state={state}
-      // `outline`, não `ring`: `.card-premium` define `box-shadow` fora de @layer e ganharia do anel (que é box-shadow).
-      className={cn("card-premium transition-shadow", selected && "outline outline-2 outline-primary", className)}
+      // `outline`, não `ring`: o `ring-1` do card já ocupa o box-shadow; o destaque da seleção é um contorno.
+      className={cn("transition-shadow", selected && "outline outline-2 outline-primary", className)}
     >
       {onSelect ? (
         <button
           type="button"
           onClick={onSelect}
           aria-label={`${site.name}: ver detalhes`}
-          className="pressable block w-full rounded-t-[1.25rem] p-5 pb-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="press block w-full rounded-t-[1.25rem] p-5 pb-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {info}
         </button>

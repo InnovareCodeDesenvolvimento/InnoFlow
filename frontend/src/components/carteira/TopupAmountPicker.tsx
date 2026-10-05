@@ -99,7 +99,7 @@ export function TopupAmountPicker({
       </fieldset>
 
       {debtMessage && (
-        <div className="animate-fade-in-up flex items-start gap-2.5 rounded-2xl bg-warning-50 px-4 py-3.5">
+        <div className="animate-enter flex items-start gap-2.5 rounded-card bg-warning-50 px-4 py-3.5">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning-600" aria-hidden="true" />
           <div>
             <p className="text-sm font-bold text-warning-700">{debtMessage}</p>

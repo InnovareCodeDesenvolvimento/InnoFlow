@@ -4,6 +4,8 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { AlertTriangle, CreditCard, Loader2, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/Button"
+import { cardVariants } from "@/components/ui/cardVariants"
+import { cn } from "@/lib/utils"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { MascotFace } from "@/components/brand/Mascot"
 import { AppBand } from "@/components/pwa/AppBand"
@@ -132,7 +134,7 @@ export function Sessao() {
         <AppBand className="pb-10 pt-10">
           <div className="flex flex-col items-center text-center">
             <span className="relative flex h-16 w-16 items-center justify-center">
-              <span className="animate-radar-ping absolute inset-0 rounded-full bg-lime/25" aria-hidden="true" />
+              <span className="animate-radar absolute inset-0 rounded-full bg-lime/25" aria-hidden="true" />
               <span className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
                 <Loader2 className="h-8 w-8 animate-spin text-lime" aria-hidden="true" />
               </span>
@@ -145,14 +147,14 @@ export function Sessao() {
         </AppBand>
         <div className="mx-auto max-w-md space-y-3 px-4 pt-5">
           {startState?.paymentMode === "CARD" && startState.authorizedCents != null && (
-            <p className="flex items-center gap-2 rounded-2xl bg-primary-50 px-4 py-3 text-left text-xs font-semibold text-primary-700">
+            <p className="flex items-center gap-2 rounded-card bg-primary-50 px-4 py-3 text-left text-xs font-semibold text-primary-700">
               <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
               Pré-autorizamos {formatCents(startState.authorizedCents)} no cartão {startState.cardBrand ?? ""}
               {startState.cardLast4 ? ` •••• ${startState.cardLast4}` : ""} — você só paga pelo que consumir.
             </p>
           )}
           {startWarning && (
-            <p className="flex items-center gap-2 rounded-2xl bg-warning-50 px-4 py-3 text-left text-xs font-semibold text-warning-700">
+            <p className="flex items-center gap-2 rounded-card bg-warning-50 px-4 py-3 text-left text-xs font-semibold text-warning-700">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
               Isso está demorando mais que o esperado. Continue aguardando ou verifique o carregador.
             </p>
@@ -167,7 +169,7 @@ export function Sessao() {
   if (!session) {
     return (
       <div className="mx-auto max-w-md px-4 py-5">
-        <div className="surface-dark flex flex-col items-center gap-3 rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-12 text-center shadow-tinted-card ring-1 ring-white/10">
+        <div className={cn(cardVariants({ variant: "inverse" }), "flex flex-col items-center gap-3 rounded-feature px-6 py-12 text-center")}>
           <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
             <MascotFace size={64} />
           </span>
@@ -186,7 +188,7 @@ export function Sessao() {
     <div>
       <AppBand className="pb-7">
         {activeQuery.isError && (
-          <div role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-700">
+          <div role="status" className="mb-4 flex items-center gap-2 rounded-card bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-700">
             <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
             Sem conexão — sua recarga continua.
           </div>
@@ -194,7 +196,7 @@ export function Sessao() {
 
         {/* F5.9: `FAULTED` é "ativa" (o motorista pode encerrar), mas o carregador reportou falha — sem aviso a tela de "carregando" mentiria. */}
         {session.status === "FAULTED" && (
-          <div role="status" className="mb-4 flex items-start gap-2 rounded-2xl bg-danger-50 px-4 py-3 text-sm font-semibold text-danger-700">
+          <div role="status" className="mb-4 flex items-start gap-2 rounded-card bg-danger-50 px-4 py-3 text-sm font-semibold text-danger-700">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             {DRIVER_CLOSURE_COPY.faulted}
           </div>
@@ -210,7 +212,7 @@ export function Sessao() {
         </div>
 
         {/* O painel ao vivo é O momento de marca da tela: kWh em branco 800; o lima fica só no indicador "ao vivo" (e some quando a parada foi pedida). */}
-        <div className={`glass-strong animate-fade-in-up mt-4 rounded-3xl p-5 text-center ${!stopRequested ? "animate-live-glow" : ""}`}>
+        <div className={`glass-strong animate-enter mt-4 rounded-feature p-5 text-center ${!stopRequested ? "animate-live" : ""}`}>
           {stopRequested ? (
             <p className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wide text-warning-100">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -241,11 +243,11 @@ export function Sessao() {
           </p>
 
           <div className="mt-5 grid grid-cols-2 gap-3 text-left">
-            <div className="rounded-2xl bg-white/10 px-3 py-2.5">
+            <div className="rounded-card bg-white/10 px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Potência</p>
               <p className="text-sm font-bold text-ink">{session.lastPowerW !== null ? `${(session.lastPowerW / 1000).toFixed(1)} kW` : "—"}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-3 py-2.5">
+            <div className="rounded-card bg-white/10 px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Bateria</p>
               <p className="text-sm font-bold text-ink">{session.lastSoc !== null ? `${session.lastSoc}%` : "—"}</p>
             </div>

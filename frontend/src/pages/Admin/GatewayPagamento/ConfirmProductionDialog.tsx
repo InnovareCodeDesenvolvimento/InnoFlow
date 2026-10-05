@@ -20,7 +20,7 @@ export function ConfirmProductionDialog({ onConfirm, onCancel }: { onConfirm: ()
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent widthClassName="sm:max-w-md">
         <DialogHeader>
-          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-danger-100 text-danger-600" aria-hidden="true">
+          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-card bg-danger-100 text-danger-600" aria-hidden="true">
             <TriangleAlert className="h-5 w-5" />
           </div>
           <DialogTitle>Passar para produção?</DialogTitle>

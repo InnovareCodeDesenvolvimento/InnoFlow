@@ -1,5 +1,5 @@
 import { type ClassValue, clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { extendTailwindMerge } from "tailwind-merge"
 import type {
   AuditAction,
   AuditOutcome,
@@ -14,6 +14,19 @@ import type {
   WalletEntryType,
 } from "@/types/api"
 import { STOP_UNCONFIRMED_LABEL } from "./sessionClosureCopy"
+
+/**
+ * tailwind-merge ciente dos tokens do design system (raios `control|card|feature`, sombras `tinted|tinted-card|lime|lime-lg`): sem isto ele não os reconhece como
+ * "raio"/"sombra" e deixaria `rounded-card` e `rounded-lg` juntos no mesmo elemento (vence a ordem do CSS, não a do `className`).
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      rounded: [{ rounded: ["control", "card", "feature"] }],
+      shadow: [{ shadow: ["tinted", "tinted-card", "lime", "lime-lg"] }],
+    },
+  },
+})
 
 /** Combina classes Tailwind com o tailwind-merge resolvendo conflitos (última classe conflitante vence). */
 export function cn(...inputs: ClassValue[]) {

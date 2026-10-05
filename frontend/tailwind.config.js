@@ -129,13 +129,34 @@ export default {
         lime: "0 14px 30px -10px rgb(var(--color-lime) / 0.55), 0 0 0 1px rgb(255 255 255 / 0.25) inset",
         "lime-lg": "0 20px 40px -12px rgb(var(--color-lime) / 0.7), 0 0 0 1px rgb(255 255 255 / 0.35) inset",
       },
+      // Movimento da marca (F-F): um conjunto PEQUENO, todo sob o `prefers-reduced-motion` global de `index.css`. Só existe CSS das que a tela usa (o Tailwind gera por uso).
+      //  - fade-in / scale-in  entrada de Dialog e menus (150-200 ms) · enter  entrada de bloco-herói de tela do PWA/auth/QR (sem stagger de linhas) ·
+      //  - pop  um-tiro no check de sucesso · sheet  entrada do bottom sheet do mapa ·
+      //  - radar / live  LOOPS, reservados ao PWA: espera de resposta do carregador e dado ao vivo da recarga. O Admin não usa nenhum (portão `adminSemLoops.test.ts`).
       animation: {
-        "fade-in": "fadeIn 0.2s ease-out",
-        "scale-in": "scaleIn 0.15s ease-out",
+        "fade-in": "fadeIn var(--dur-fast) var(--ease-brand)",
+        "scale-in": "scaleIn var(--dur-fast) var(--ease-brand)",
+        enter: "enter var(--dur-enter) var(--ease-brand) both",
+        pop: "pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both",
+        sheet: "sheet 0.28s var(--ease-brand) both",
+        radar: "radar 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+        live: "live 2.2s ease-out infinite",
       },
       keyframes: {
         fadeIn: { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
         scaleIn: { "0%": { opacity: "0", transform: "scale(0.97)" }, "100%": { opacity: "1", transform: "scale(1)" } },
+        enter: { from: { opacity: "0", transform: "translateY(10px)" }, to: { opacity: "1", transform: "translateY(0)" } },
+        pop: { "0%": { transform: "scale(0.5)", opacity: "0" }, "60%": { transform: "scale(1.08)", opacity: "1" }, "100%": { transform: "scale(1)", opacity: "1" } },
+        sheet: { from: { opacity: "0", transform: "translateY(28px)" }, to: { opacity: "1", transform: "translateY(0)" } },
+        radar: { "0%": { transform: "scale(0.85)", opacity: "0.5" }, "100%": { transform: "scale(1.9)", opacity: "0" } },
+        live: {
+          "0%, 100%": {
+            boxShadow: "0 1px 2px rgb(15 23 42 / 0.04), 0 12px 28px -16px rgb(var(--color-primary) / 0.35), 0 0 0 0 rgb(var(--color-accent) / 0.16)",
+          },
+          "50%": {
+            boxShadow: "0 1px 2px rgb(15 23 42 / 0.04), 0 12px 28px -16px rgb(var(--color-primary) / 0.35), 0 0 0 12px rgb(var(--color-accent) / 0)",
+          },
+        },
       },
     },
   },

@@ -21,7 +21,7 @@ import type { TourScreen } from "./landing-data"
 
 /**
  * Telas do celular da seção "Como funciona". São RÉPLICAS ILUSTRATIVAS do que o app mostra (mesmo vocabulário
- * visual: `card-premium`, `text-gradient-brand`, `animate-live-glow`, mesmos rótulos de `pages/App/*` e
+ * visual: `lnd-mock-card`, `lnd-mock-grad`, `lnd-mock-live`, mesmos rótulos de `pages/App/*` e
  * `pages/Public/ChargePointLanding.tsx`), com DADOS DE EXEMPLO — nenhum eletroposto, preço ou saldo aqui é real.
  * Tudo é aria-hidden; o texto do passo (ao lado) é quem informa. Os números ao vivo (kWh, valor, tempo, bateria)
  * sobem de verdade enquanto a tela está ativa.
@@ -227,7 +227,7 @@ function IniciarScreen() {
         </p>
       </div>
       <div className="relative z-10 -mt-7 px-3">
-        <div className="card-premium p-3.5">
+        <div className="lnd-mock-card p-3.5">
           <p className="text-[9px] font-bold uppercase tracking-wide text-ink-subtle">Eletroposto de exemplo A</p>
           <p className="mt-0.5 flex items-center gap-1 text-[10px] text-ink-softer">
             <MapPin className="h-2.5 w-2.5" />
@@ -248,13 +248,13 @@ function IniciarScreen() {
           </div>
           <div className="mt-3 rounded-xl bg-primary-50 p-2.5">
             <p className="text-[9px] font-semibold uppercase tracking-wide text-ink-softer">Tarifa</p>
-            <p className="text-lg font-black tracking-tight text-gradient-brand">{brl(TARIFF_PER_KWH)} / kWh</p>
+            <p className="text-lg font-black tracking-tight lnd-mock-grad">{brl(TARIFF_PER_KWH)} / kWh</p>
           </div>
           <div className="mt-2.5 flex items-center justify-between rounded-xl bg-muted px-3 py-2">
             <span className="text-[10px] font-semibold text-ink-softer">Seu saldo</span>
             <span className="text-[11px] font-black text-ink">{brl(START_BALANCE)}</span>
           </div>
-          <div className="lnd-a-tap btn-glow-primary mt-3 flex h-10 items-center justify-center gap-1.5 rounded-xl bg-primary text-[12px] font-bold text-white">
+          <div className="lnd-a-tap lnd-mock-glow mt-3 flex h-10 items-center justify-center gap-1.5 rounded-xl bg-primary text-[12px] font-bold text-white">
             <Zap className="h-3.5 w-3.5" />
             Iniciar recarga
           </div>
@@ -287,8 +287,8 @@ function CarregandoLive() {
   const ss = String(Math.floor(total % 60)).padStart(2, "0")
   const soc = Math.min(96, 54 + s * 0.28)
   return (
-    <div className="card-premium animate-live-glow mx-3 mt-3 p-4 text-center">
-      <p className="text-5xl font-black leading-none tracking-tight text-gradient-brand">
+    <div className="lnd-mock-card lnd-mock-live mx-3 mt-3 p-4 text-center">
+      <p className="text-5xl font-black leading-none tracking-tight lnd-mock-grad">
         {num(kwh)}
         <span className="ml-1 text-base font-bold text-ink-softer">kWh</span>
       </p>
@@ -324,8 +324,8 @@ function CarregandoScreen({ active }: { active: boolean }) {
       {active ? (
         <CarregandoLive />
       ) : (
-        <div className="card-premium mx-3 mt-3 p-4 text-center">
-          <p className="text-5xl font-black leading-none tracking-tight text-gradient-brand">
+        <div className="lnd-mock-card mx-3 mt-3 p-4 text-center">
+          <p className="text-5xl font-black leading-none tracking-tight lnd-mock-grad">
             12,4<span className="ml-1 text-base font-bold text-ink-softer">kWh</span>
           </p>
         </div>
@@ -352,7 +352,7 @@ function ReciboScreen() {
           </div>
           <span className="shrink-0 rounded-full bg-success-100 px-2 py-0.5 text-[10px] font-bold text-success-700">Concluída</span>
         </div>
-        <div className="card-premium lnd-a-rise grid grid-cols-2 gap-2.5 p-3" style={{ "--a-d": "150ms" } as React.CSSProperties}>
+        <div className="lnd-mock-card lnd-a-rise grid grid-cols-2 gap-2.5 p-3" style={{ "--a-d": "150ms" } as React.CSSProperties}>
           {[
             ["Início", "hoje, 09:41"],
             ["Fim", "hoje, 10:19"],
@@ -365,7 +365,7 @@ function ReciboScreen() {
             </div>
           ))}
         </div>
-        <div className="card-premium lnd-a-rise p-3" style={{ "--a-d": "300ms" } as React.CSSProperties}>
+        <div className="lnd-mock-card lnd-a-rise p-3" style={{ "--a-d": "300ms" } as React.CSSProperties}>
           <p className="mb-2 text-[9px] font-bold uppercase tracking-wide text-ink-subtle">Detalhamento do custo</p>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-ink-softer">Energia</span>
@@ -373,7 +373,7 @@ function ReciboScreen() {
           </div>
           <div className="mt-2 flex items-center justify-between border-t border-border-subtle pt-2">
             <span className="text-[12px] font-bold text-ink">Total</span>
-            <span className="text-base font-black text-gradient-brand">{brl(energy * TARIFF_PER_KWH)}</span>
+            <span className="text-base font-black lnd-mock-grad">{brl(energy * TARIFF_PER_KWH)}</span>
           </div>
           <div className="mt-2.5 flex items-center justify-between rounded-lg bg-muted px-2.5 py-2">
             <span className="text-[10px] font-semibold text-ink-softer">Novo saldo da carteira</span>

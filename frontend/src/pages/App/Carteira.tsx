@@ -34,12 +34,12 @@ export function Carteira() {
 
         {isLoading && (
           <div className="mt-4" aria-hidden="true">
-            <Skeleton className="h-24 rounded-3xl bg-white/10" />
+            <Skeleton className="h-24 rounded-feature bg-white/10" />
           </div>
         )}
 
         {!isLoading && !isError && data && (
-          <div className="glass-strong animate-fade-in-up mt-4 rounded-3xl p-5">
+          <div className="glass-strong animate-enter mt-4 rounded-feature p-5">
             <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-ink-softer">
               <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
               Saldo disponível
@@ -52,7 +52,7 @@ export function Carteira() {
       <div className="mx-auto max-w-md px-4 pb-5">
         {isLoading && (
           <div className="mt-4 space-y-3" aria-hidden="true">
-            <Skeleton className="h-16 rounded-2xl" />
+            <Skeleton className="h-16 rounded-card" />
           </div>
         )}
 
@@ -69,7 +69,7 @@ export function Carteira() {
         {!isLoading && !isError && data && (
           <>
             {data.openDebtCents > 0 && (
-              <div className="mt-4 flex items-start gap-2.5 rounded-2xl bg-danger-50 px-4 py-3.5">
+              <div className="mt-4 flex items-start gap-2.5 rounded-card bg-danger-50 px-4 py-3.5">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger-600" aria-hidden="true" />
                 <div>
                   <p className="text-sm font-bold text-danger-700">Dívida em aberto: {formatCents(data.openDebtCents)}</p>
@@ -81,7 +81,7 @@ export function Carteira() {
             {/* CTA ÚNICO da tela (D2): lima. "Meus cartões" é navegação secundária — linha de cartão claro. */}
             <Link
               to="/app/carteira/adicionar"
-              className="mt-4 flex items-center gap-3 rounded-2xl bg-lime p-4 text-on-lime shadow-lime transition-[transform,box-shadow] duration-150 ease-brand active:scale-[0.98] [@media(hover:hover)]:hover:shadow-lime-lg"
+              className="mt-4 flex items-center gap-3 rounded-card bg-lime p-4 text-on-lime shadow-lime transition-[transform,box-shadow] duration-150 ease-brand active:scale-[0.98] [@media(hover:hover)]:hover:shadow-lime-lg"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-night/10">
                 <QrCode className="h-5 w-5" aria-hidden="true" />
@@ -111,10 +111,10 @@ export function Carteira() {
               <EmptyState tone="brand" art={<MascotFace size={64} />} title="Nenhum lançamento ainda" className="py-8" />
             ) : (
               <div className={`space-y-2 ${isFetching ? "opacity-60" : ""}`}>
-                {data.entries.map((entry, index) => {
+                {data.entries.map((entry) => {
                   const credit = entry.amountCents > 0
                   return (
-                    <div key={entry.id} className={`card-elevated stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 p-3.5`}>
+                    <div key={entry.id} className="card-elevated flex items-center gap-3 p-3.5">
                       <WalletEntryIcon type={entry.type} credit={credit} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-ink">{entry.description || WALLET_ENTRY_TYPE_LABELS[entry.type]}</p>

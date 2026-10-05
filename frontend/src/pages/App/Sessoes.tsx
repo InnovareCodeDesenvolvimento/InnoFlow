@@ -32,7 +32,7 @@ export function Sessoes() {
         {isLoading && (
           <div className="-mt-3 space-y-2" aria-hidden="true">
             {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 rounded-2xl" />
+              <Skeleton key={i} className="h-20 rounded-card" />
             ))}
           </div>
         )}
@@ -60,11 +60,11 @@ export function Sessoes() {
         {!isLoading && !isError && data && data.items.length > 0 && (
           <>
             <div className={`-mt-3 space-y-2.5 ${isFetching ? "opacity-60" : ""}`}>
-              {data.items.map((item, index) => (
+              {data.items.map((item) => (
                 <Link
                   key={item.id}
                   to={`/app/sessoes/${item.id}`}
-                  className={`card-elevated pressable stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 p-4 transition-colors hover:ring-primary/30 active:bg-primary-50`}
+                  className="card-elevated press flex items-center gap-3 p-4 hover:ring-primary/30 active:bg-primary-50"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

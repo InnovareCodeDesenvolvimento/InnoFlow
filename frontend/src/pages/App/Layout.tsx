@@ -119,7 +119,7 @@ export function AppLayout() {
   if (user?.role !== "DRIVER") {
     return (
       <div className="mx-auto max-w-md px-4 py-20 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-danger-100">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-card bg-danger-100">
           <ShieldAlert className="h-8 w-8 text-danger-600" aria-hidden="true" />
         </div>
         <p className="text-lg font-bold text-ink">Área exclusiva de motoristas</p>

@@ -34,8 +34,8 @@ export default function FinanceiroPage() {
 
       {isLoading && (
         <div className="space-y-4">
-          <Skeleton className="h-40 rounded-2xl" />
-          <Skeleton className="h-48 rounded-2xl" />
+          <Skeleton className="h-40 rounded-card" />
+          <Skeleton className="h-48 rounded-card" />
         </div>
       )}
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os dados financeiros.")} onRetry={() => refetch()} />}

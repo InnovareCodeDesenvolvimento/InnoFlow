@@ -36,7 +36,7 @@ export function TopupPendingCard({ topup }: { topup: MeTopupDTO }) {
       <h1 className="mt-4 text-lg font-black tracking-tight text-ink">Escaneie o QR code Pix</h1>
       <p className="mt-1 text-sm text-ink-softer">Abra o app do seu banco e escaneie, ou use o código copia e cola abaixo.</p>
 
-      <Card className="animate-fade-in-up mt-5 w-full">
+      <Card className="animate-enter mt-5 w-full">
         <CardContent className="flex flex-col items-center p-5">
           {topup.qrCodeImageBase64 ? (
             <img
@@ -50,7 +50,7 @@ export function TopupPendingCard({ topup }: { topup: MeTopupDTO }) {
             </div>
           )}
 
-          <div className="mt-4 w-full rounded-2xl bg-muted px-3.5 py-2.5 text-left">
+          <div className="mt-4 w-full rounded-card bg-muted px-3.5 py-2.5 text-left">
             <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Pix copia e cola</p>
             <p className="mt-0.5 truncate text-xs text-ink-softer" title={topup.qrCodeString ?? undefined}>
               {topup.qrCodeString ?? "Indisponível"}

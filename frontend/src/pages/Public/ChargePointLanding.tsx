@@ -201,7 +201,7 @@ export function ChargePointLanding() {
         {isLoading && (
           <div className="space-y-3" aria-hidden="true">
             <Skeleton className="h-5 w-2/3 rounded-md" />
-            <Skeleton className="h-40 rounded-2xl" />
+            <Skeleton className="h-40 rounded-card" />
           </div>
         )}
 
@@ -255,7 +255,7 @@ export function ChargePointLanding() {
               // sobreposição com o herói (ver comentário do `<main>` acima)
               // — "flutua" por cima da fronteira em vez de nascer colado
               // nela, evitando o vazio entre o herói e o card.
-              <Card className="animate-fade-in-up -mt-8 shadow-tinted-card">
+              <Card className="animate-enter -mt-8 shadow-tinted-card">
                 <CardContent className="p-5">
                   <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">{cp.site.name}</p>
                   {(cp.site.addressLine || cp.site.city) && (
@@ -271,7 +271,7 @@ export function ChargePointLanding() {
 
                   <div className="mt-4 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
-                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-black text-primary-700">
+                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-card bg-primary/10 text-2xl font-black text-primary-700">
                         {selected.connectorId}
                       </span>
                       <div className="min-w-0">
@@ -289,7 +289,7 @@ export function ChargePointLanding() {
 
                   {selected.tariff ? (
                     <div className="mt-5 rounded-xl bg-primary-50 p-4">
-                      <p className="text-2xl font-black tracking-tight text-gradient-brand">{formatTariffHeadlinePrice(selected.tariff)}</p>
+                      <p className="text-2xl font-black tracking-tight text-primary-700">{formatTariffHeadlinePrice(selected.tariff)}</p>
                       {selected.tariff.minChargeCents ? (
                         <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold text-warning-700">
                           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />

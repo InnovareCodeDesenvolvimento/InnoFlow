@@ -65,7 +65,7 @@ export function Register() {
         </p>
       }
     >
-      <Card className="animate-fade-in-up p-6 shadow-tinted-card">
+      <Card className="animate-enter p-6 shadow-tinted-card">
         <h1 className="text-xl font-extrabold tracking-tight text-ink">Criar conta</h1>
         <p className="mt-1 text-sm text-ink-softer">Cadastre-se como motorista para acompanhar sua recarga.</p>
 

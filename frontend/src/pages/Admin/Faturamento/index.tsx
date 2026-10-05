@@ -76,7 +76,7 @@ export default function FaturamentoPage() {
 
       {isLoading && (
         <div className="space-y-4">
-          <Skeleton className="h-56 rounded-2xl" />
+          <Skeleton className="h-56 rounded-card" />
           <TableSkeleton cols={4} />
         </div>
       )}

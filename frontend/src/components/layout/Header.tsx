@@ -93,7 +93,7 @@ export function Header() {
                 <ChevronDown className={cn("hidden h-3.5 w-3.5 text-white/70 transition-transform sm:block", userMenuOpen && "rotate-180")} aria-hidden="true" />
               </button>
               {userMenuOpen && (
-                <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-border bg-surface py-2 shadow-lg">
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-card border border-border bg-surface py-2 shadow-lg">
                   <div className="border-b border-border-subtle px-4 py-2.5">
                     <p className="truncate text-sm font-bold text-ink">{user.name}</p>
                     <p className="truncate text-xs text-ink-softer">{user.email}</p>

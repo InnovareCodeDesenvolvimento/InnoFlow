@@ -70,12 +70,12 @@ export function SessaoDetalhe() {
           <>
             {/* Momento de marca (D3): o fim de uma recarga é o único lugar do app em que o robô comemora. o pop é de um tiro só. */}
             {justCompleted && isStopped && (
-              <div className="glass animate-fade-in-up mb-4 flex items-center gap-3 rounded-2xl px-4 py-3">
+              <div className="glass animate-enter mb-4 flex items-center gap-3 rounded-card px-4 py-3">
                 <span className="relative shrink-0">
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
                     <MascotFace size={56} />
                   </span>
-                  <CheckCircle2 className="animate-pop-in absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-night text-lime" aria-hidden="true" />
+                  <CheckCircle2 className="animate-pop absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-night text-lime" aria-hidden="true" />
                 </span>
                 <p className="text-base font-extrabold text-white">Recarga concluída</p>
               </div>
@@ -111,8 +111,8 @@ export function SessaoDetalhe() {
 
         {isLoading && (
           <div className="mt-4 space-y-4" aria-hidden="true">
-            <Skeleton className="h-32 rounded-2xl" />
-            <Skeleton className="h-60 rounded-2xl" />
+            <Skeleton className="h-32 rounded-card" />
+            <Skeleton className="h-60 rounded-card" />
           </div>
         )}
 
@@ -123,7 +123,7 @@ export function SessaoDetalhe() {
             {isReanimated && (
               <Link
                 to="/app/sessao"
-                className="animate-fade-in-up mt-4 flex items-center gap-3 rounded-2xl bg-lime/15 p-4 text-sm font-bold text-ink ring-1 ring-lime/50 transition-colors hover:bg-lime/25 active:scale-[0.99]"
+                className="animate-enter mt-4 flex items-center gap-3 rounded-card bg-lime/15 p-4 text-sm font-bold text-ink ring-1 ring-lime/50 transition-colors hover:bg-lime/25 active:scale-[0.99]"
               >
                 <Zap className="h-5 w-5 shrink-0 text-accent-700" aria-hidden="true" />
                 <span className="min-w-0">
@@ -132,7 +132,7 @@ export function SessaoDetalhe() {
               </Link>
             )}
 
-            <Card className="animate-fade-in-up mt-4">
+            <Card className="animate-enter mt-4">
               <CardContent className="grid grid-cols-2 gap-4 p-5 sm:p-5">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Início</p>
@@ -155,7 +155,7 @@ export function SessaoDetalhe() {
 
             {/* Sem valor final enquanto confirma: o aviso acima já diz que nada foi cobrado — mostrar "Total R$ 0,00" aqui seria uma afirmação falsa. */}
             {!isUnconfirmed && !isReanimated && (
-              <Card className="stagger-1 animate-fade-in-up mt-4">
+              <Card className="animate-enter mt-4">
                 <CardContent className="p-5 sm:p-5">
                   <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-softer">Detalhamento do custo</p>
                   <dl className="space-y-2">
@@ -173,7 +173,7 @@ export function SessaoDetalhe() {
 
                   {session.paymentMode === "CARD" ? (
                     session.payment?.card ? (
-                      <div className="mt-4 space-y-2 rounded-2xl bg-muted px-4 py-3">
+                      <div className="mt-4 space-y-2 rounded-card bg-muted px-4 py-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-semibold text-ink-softer">Cartão</span>
                           <span className="text-sm font-bold text-ink">
@@ -200,19 +200,19 @@ export function SessaoDetalhe() {
                         )}
                       </div>
                     ) : (
-                      <p className="mt-4 rounded-2xl bg-muted px-4 py-3 text-xs text-ink-softer">A cobrança ainda está sendo processada.</p>
+                      <p className="mt-4 rounded-card bg-muted px-4 py-3 text-xs text-ink-softer">A cobrança ainda está sendo processada.</p>
                     )
                   ) : session.walletEntry ? (
-                    <div className="mt-4 flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
+                    <div className="mt-4 flex items-center justify-between rounded-card bg-muted px-4 py-3">
                       <span className="text-xs font-semibold text-ink-softer">Novo saldo da carteira</span>
                       <span className="text-sm font-black text-ink">{formatCents(session.walletEntry.balanceAfterCents)}</span>
                     </div>
                   ) : (
-                    <p className="mt-4 rounded-2xl bg-muted px-4 py-3 text-xs text-ink-softer">A cobrança ainda está sendo processada.</p>
+                    <p className="mt-4 rounded-card bg-muted px-4 py-3 text-xs text-ink-softer">A cobrança ainda está sendo processada.</p>
                   )}
 
                   {session.debt && (
-                    <p className="mt-3 flex items-start gap-2 rounded-2xl bg-danger-50 px-4 py-3 text-xs font-semibold text-danger-700">
+                    <p className="mt-3 flex items-start gap-2 rounded-card bg-danger-50 px-4 py-3 text-xs font-semibold text-danger-700">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                       {formatCents(session.debt.amountCents)} ficaram em aberto — quite na carteira para poder carregar de novo.
                     </p>

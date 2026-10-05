@@ -33,7 +33,7 @@ export function LoadingScreen({
   return (
     <div
       role="status"
-      className={`surface-dark surface-dark-rich flex flex-col items-center justify-center gap-4 ${variant === "screen" ? "min-h-screen" : "mx-4 min-h-[56svh] rounded-3xl"} ${className ?? ""}`}
+      className={`surface-dark surface-dark-rich flex flex-col items-center justify-center gap-4 ${variant === "screen" ? "min-h-screen" : "mx-4 min-h-[56svh] rounded-feature"} ${className ?? ""}`}
     >
       <span className="sr-only">Carregando…</span>
       {art && showArt && (

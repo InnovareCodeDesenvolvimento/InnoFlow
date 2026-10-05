@@ -11,8 +11,8 @@ import { cn } from "@/lib/utils"
 const SIZE = {
   sm: { box: "h-8 w-8 rounded-lg", icon: "h-4 w-4" },
   md: { box: "h-9 w-9 rounded-xl", icon: "h-4 w-4" },
-  lg: { box: "h-11 w-11 rounded-2xl", icon: "h-5 w-5" },
-  xl: { box: "h-12 w-12 rounded-2xl", icon: "h-6 w-6" },
+  lg: { box: "h-11 w-11 rounded-card", icon: "h-5 w-5" },
+  xl: { box: "h-12 w-12 rounded-card", icon: "h-6 w-6" },
 } as const
 
 const TONE = {

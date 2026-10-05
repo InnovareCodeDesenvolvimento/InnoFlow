@@ -50,7 +50,7 @@ export function InstallPromptCard() {
   }
 
   return (
-    <div className="card-elevated animate-fade-in-up p-4">
+    <div className="card-elevated animate-enter p-4">
       <div className="flex items-start gap-3">
         <IconBadge icon={showAndroidPrompt ? Download : Share} size="lg" />
         <div className="min-w-0 flex-1">

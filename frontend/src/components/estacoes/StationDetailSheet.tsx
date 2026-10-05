@@ -27,7 +27,7 @@ function ChargePointBlock({ chargePoint }: { chargePoint: PublicChargePoint }) {
   const { data: card } = usePublicChargePoint(chargePoint.ocppIdentity)
 
   return (
-    <section className="rounded-2xl border border-border-subtle p-3.5" aria-label={`Carregador ${chargePoint.ocppIdentity}`}>
+    <section className="rounded-card border border-border-subtle p-3.5" aria-label={`Carregador ${chargePoint.ocppIdentity}`}>
       <div className="flex items-center justify-between gap-2">
         <p className="min-w-0 truncate text-xs font-bold uppercase tracking-wide text-ink-softer">
           {chargePoint.ocppIdentity}
@@ -87,7 +87,7 @@ export function StationDetailSheet({
         {site && links && (
           <DialogPrimitive.Content
             aria-describedby="station-sheet-desc"
-            className="animate-sheet-up fixed inset-x-0 bottom-0 z-50 mx-auto max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-[var(--radius-feature)] bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-lg focus-visible:outline-none"
+            className="animate-sheet fixed inset-x-0 bottom-0 z-50 mx-auto max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-[var(--radius-feature)] bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-lg focus-visible:outline-none"
           >
             <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-border-strong" aria-hidden="true" />
             <div className="flex items-start gap-3">

@@ -5,6 +5,8 @@ import { ArrowLeft, QrCode, RotateCcw } from "lucide-react"
 import { MascotFace } from "@/components/brand/Mascot"
 import { AppBand } from "@/components/pwa/AppBand"
 import { Button } from "@/components/ui/Button"
+import { cardVariants } from "@/components/ui/cardVariants"
+import { cn } from "@/lib/utils"
 import { IconBadge } from "@/components/ui/IconBadge"
 import { buttonVariants } from "@/components/ui/buttonVariants"
 import { ErrorState } from "@/components/ui/ErrorState"
@@ -84,7 +86,7 @@ export function CarteiraAdicionar() {
         </div>
       ) : (
         <AppBand back={{ to: "/app/carteira", label: "Carteira" }} className="pb-8">
-          <div className="animate-fade-in-up flex items-start gap-3">
+          <div className="animate-enter flex items-start gap-3">
             <IconBadge icon={QrCode} size="lg" tone="onDark" />
             <div>
               <h1 className="text-lg font-black tracking-tight text-ink">Adicionar saldo</h1>
@@ -100,7 +102,7 @@ export function CarteiraAdicionar() {
             {walletQuery.isLoading && (
               <div className="space-y-3" aria-hidden="true">
                 <Skeleton className="h-12 rounded-xl" />
-                <Skeleton className="h-24 rounded-2xl" />
+                <Skeleton className="h-24 rounded-card" />
               </div>
             )}
 
@@ -117,7 +119,7 @@ export function CarteiraAdicionar() {
               <div
                 role="alert"
                 data-testid="pix-unavailable"
-                className="surface-dark flex flex-col items-center rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-10 text-center shadow-tinted-card ring-1 ring-white/10"
+                className={cn(cardVariants({ variant: "inverse" }), "flex flex-col items-center rounded-feature px-6 py-10 text-center")}
               >
                 <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
                   <MascotFace size={64} />
@@ -143,7 +145,7 @@ export function CarteiraAdicionar() {
         {topupId && topupQuery.isLoading && (
           <div className="space-y-3 py-8" aria-hidden="true">
             <Skeleton className="mx-auto h-6 w-40 rounded-full" />
-            <Skeleton className="h-64 rounded-2xl" />
+            <Skeleton className="h-64 rounded-card" />
           </div>
         )}
 
@@ -162,7 +164,7 @@ export function CarteiraAdicionar() {
         {topup?.status === "PAID" && <TopupSuccessCard topup={topup} walletBalanceCents={walletQuery.data?.balanceCents} />}
 
         {topup?.status === "EXPIRED" && (
-          <div className="surface-dark mt-5 flex flex-col items-center rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-10 text-center shadow-tinted-card ring-1 ring-white/10">
+          <div className={cn(cardVariants({ variant: "inverse" }), "mt-5 flex flex-col items-center rounded-feature px-6 py-10 text-center")}>
             <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
               <MascotFace size={64} />
             </span>
@@ -176,7 +178,7 @@ export function CarteiraAdicionar() {
         )}
 
         {topup?.status === "FAILED" && (
-          <div className="surface-dark mt-5 flex flex-col items-center rounded-3xl bg-gradient-to-br from-primary-950 to-primary-800 px-6 py-10 text-center shadow-tinted-card ring-1 ring-white/10">
+          <div className={cn(cardVariants({ variant: "inverse" }), "mt-5 flex flex-col items-center rounded-feature px-6 py-10 text-center")}>
             <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
               <MascotFace size={64} />
             </span>

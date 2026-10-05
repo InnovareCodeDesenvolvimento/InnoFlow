@@ -85,7 +85,7 @@ export function Cartoes() {
           </Button>
         )}
         {addCardFlow.unavailable && (
-          <p role="alert" data-testid="add-card-unavailable" className="mt-3 flex items-start gap-2 rounded-2xl bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
+          <p role="alert" data-testid="add-card-unavailable" className="mt-3 flex items-start gap-2 rounded-card bg-warning-50 px-4 py-3 text-sm font-medium text-warning-700">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             {CARD_GATEWAY_DISABLED_ADD_MESSAGE}
           </p>
@@ -94,8 +94,8 @@ export function Cartoes() {
         <div className="mt-6">
           {isLoading && (
             <div className="space-y-2.5" aria-hidden="true">
-              <Skeleton className="h-20 rounded-2xl" />
-              <Skeleton className="h-20 rounded-2xl" />
+              <Skeleton className="h-20 rounded-card" />
+              <Skeleton className="h-20 rounded-card" />
             </div>
           )}
 
@@ -119,13 +119,13 @@ export function Cartoes() {
 
           {!isLoading && !isError && data && data.items.length > 0 && (
             <ul className="space-y-2.5">
-              {data.items.map((method, index) => {
+              {data.items.map((method) => {
                 const exp = expiry(method)
                 return (
                   <li
                     key={method.id}
                     data-disabled={cardsDisabled || undefined}
-                    className={`card-elevated stagger-${Math.min(index + 1, 4)} animate-fade-in-up flex items-center gap-3 p-4`}
+                    className="card-elevated flex items-center gap-3 p-4"
                   >
                     <IconBadge icon={CreditCard} size="lg" className={cardsDisabled ? "opacity-50 grayscale" : undefined} />
                     <div className="min-w-0 flex-1">

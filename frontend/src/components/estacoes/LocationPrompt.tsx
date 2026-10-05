@@ -41,7 +41,7 @@ export function LocationPrompt({
 }) {
   if (status === "requesting") {
     return (
-      <div role="status" className="flex items-center gap-2.5 rounded-2xl bg-primary/5 px-4 py-3 text-sm font-semibold text-primary-700">
+      <div role="status" className="flex items-center gap-2.5 rounded-card bg-primary/5 px-4 py-3 text-sm font-semibold text-primary-700">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
         Obtendo sua localização…
       </div>
@@ -66,7 +66,7 @@ export function LocationPrompt({
   if (status === "denied" || status === "unavailable" || status === "timeout") {
     const msg = GEO_MESSAGES[status]
     return (
-      <div role="alert" className="rounded-2xl border border-warning-100 bg-warning-50 p-4">
+      <div role="alert" className="rounded-card border border-warning-100 bg-warning-50 p-4">
         <p className="flex items-center gap-2 text-sm font-bold text-warning-700">
           <LocateOff className="h-4 w-4 shrink-0" aria-hidden="true" />
           {msg.title}

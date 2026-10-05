@@ -13,9 +13,9 @@ export const cardVariants = cva("", {
   variants: {
     variant: {
       surface: "card-elevated",
-      inverse: "surface-dark relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-950 to-primary-800 shadow-tinted-card ring-1 ring-white/10",
-      glass: "glass rounded-2xl",
-      outline: "rounded-2xl border border-dashed border-border-strong bg-muted/30",
+      inverse: "surface-dark relative overflow-hidden rounded-card bg-gradient-to-br from-primary-950 to-primary-800 shadow-tinted-card ring-1 ring-white/10",
+      glass: "glass rounded-card",
+      outline: "rounded-card border border-dashed border-border-strong bg-muted/30",
     },
   },
   defaultVariants: { variant: "surface" },

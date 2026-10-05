@@ -192,7 +192,7 @@ export function GoogleAuthSection({
               onClick={() => void handleCredential("mock-google-credential")}
               disabled={submitting}
               className={cn(
-                "pressable flex w-full items-center justify-center gap-2.5 rounded-full border border-border bg-white px-4 text-sm font-semibold text-ink transition-colors hover:bg-muted disabled:cursor-wait disabled:opacity-60",
+                "press flex w-full items-center justify-center gap-2.5 rounded-full border border-border bg-white px-4 text-sm font-semibold text-ink hover:bg-muted disabled:cursor-wait disabled:opacity-60",
                 BUTTON_AREA,
               )}
             >

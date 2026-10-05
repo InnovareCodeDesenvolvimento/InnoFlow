@@ -16,7 +16,7 @@ export function SessionClosureNotice({ notice }: { notice: DriverClosureNotice }
       role="status"
       data-testid="session-closure-notice"
       data-kind={notice.kind}
-      className={`animate-fade-in-up mt-4 flex items-start gap-3 rounded-2xl px-4 py-3.5 text-sm ${
+      className={`animate-enter mt-4 flex items-start gap-3 rounded-card px-4 py-3.5 text-sm ${
         pending ? "bg-warning-50 text-warning-700 ring-1 ring-warning/30" : "bg-info-50 text-info-700 ring-1 ring-info/30"
       }`}
     >

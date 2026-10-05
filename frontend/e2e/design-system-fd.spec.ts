@@ -79,7 +79,15 @@ test.describe("Admin — desktop (1440px)", () => {
     const celula = page.locator("tbody tr").first().locator("td").first()
     await expect(celula).toBeVisible()
     expect(await celula.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap")
-    expect(await page.locator("tbody tr").first().evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(72)
+    // Mede o CONTEÚDO da célula da data (uma linha), não a altura da linha inteira: a altura da linha depende dos dados do mock (que usam `new Date()`) — um nome de local
+    // longo ("Terminal Rodoviário Barra Funda") numa coluna estreita quebra em 3 linhas e estoura a linha sem que a data tenha quebrado.
+    expect(
+      await celula.evaluate((el) => {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        return range.getBoundingClientRect().height
+      }),
+    ).toBeLessThan(28)
     await page.locator("tbody tr").first().click()
     await expect(page.getByRole("dialog")).toBeVisible()
     expect(await page.locator(".dialog-scrim").evaluate((el) => getComputedStyle(el).backdropFilter)).toBe("none")

@@ -17,7 +17,7 @@ export function NotFound({ compact = false, className }: { compact?: boolean; cl
     <main
       className={cn(
         "surface-dark surface-dark-rich relative flex flex-col items-center justify-center overflow-hidden px-4 py-16 text-center",
-        compact ? "rounded-2xl" : "min-h-screen",
+        compact ? "rounded-card" : "min-h-screen",
         className,
       )}
     >
