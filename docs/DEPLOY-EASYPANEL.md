@@ -146,7 +146,18 @@ OCPP_AUTH_IP_MAX_FAILURES=30            # falhas de um IP (qualquer identidade) 
 OCPP_AUTH_IP_MAX_CONCURRENT=100         # tentativas de um IP em andamento AO MESMO TEMPO (frota atrás de NAT reconectando junta)
 OCPP_AUTH_RATE_LIMIT_WINDOW_SECONDS=300
 OCPP_TRUST_PROXY_HOPS=0                 # proxies reversos entre o carregador e a porta 9000 (com o domínio wss:// da seção 4: medir, esperado 1)
+OCPP_MESSAGE_RATE_MAX=1000              # mensagens RECEBIDAS por conexão na janela abaixo; acima, a conexão é fechada (1008)
+OCPP_MESSAGE_RATE_WINDOW_SECONDS=10     # janela deslizante do limite acima
 ```
+
+**Limite de mensagens por conexão (N-10).** Default: 1000 mensagens em 10 s (100/s). Um
+carregador normal manda ~2/s no pior caso (2 conectores com `MeterValues` a cada 1 s) e o
+replay de transações guardadas offline é serial (cada CALL espera a resposta), então não chega
+perto. Estourou: a conexão é fechada com código 1008 e um `warn` com `alert: "ocpp_message_flood"`
+(procure por ele nos logs; o carregador reconecta sozinho). Se o firmware real (C-P9) precisar de
+mais folga, suba `OCPP_MESSAGE_RATE_MAX` — não precisa de deploy de código. O gateway também fecha
+(1002) a conexão após **10 mensagens malformadas seguidas** (`maxBadMessages`), e o handler de
+métodos sem implementação loga só o nome da ação e o tamanho do payload, nunca o conteúdo.
 
 `OCPP_TRUST_PROXY_HOPS` **não é** o `TRUST_PROXY_HOPS` da API (o caminho até a porta 9000 é
 outro: não passa pelo nginx do frontend). Default `0` = usa só o endereço do socket — correto

@@ -26,6 +26,13 @@ import {
   OCPP_MAX_PAYLOAD_BYTES,
   deveAvisarTrustProxyZeroEmProducao,
 } from '../core/ocpp/configGateway'
+import {
+  ALERTA_OCPP_MESSAGE_FLOOD,
+  JanelaDeslizanteMensagens,
+  OCPP_MAX_BAD_MESSAGES,
+  OCPP_RATE_LIMIT_CLOSE_CODE,
+  OCPP_RATE_LIMIT_CLOSE_REASON,
+} from '../core/ocpp/limiteMensagens'
 
 type AuthResult = { ok: true; ctx: OcppHandlerCtx } | { ok: false; reason: 'rate_limited' | 'invalid' }
 
@@ -49,6 +56,8 @@ export async function startOcppServer(port: number) {
     pingIntervalMs: 30_000,
     // Teto por mensagem (256 KiB): acima disso o `ws` fecha a conexão com 1009 — ver `core/ocpp/configGateway.ts`.
     wssOptions: { maxPayload: OCPP_MAX_PAYLOAD_BYTES },
+    // Mensagens RUINS seguidas (JSON inválido, não-array...) além disto fecham a conexão (1002). O default da lib é Infinity (N-10).
+    maxBadMessages: OCPP_MAX_BAD_MESSAGES,
   })
 
   server.auth((accept, reject, handshake) => {
@@ -209,6 +218,8 @@ async function registrarFalha(attempt: { identity: string; ip: string }, reserva
 
 async function onClientConnected(client: RpcServerClient): Promise<void> {
   const ctx = client.session as OcppHandlerCtx
+  // PRIMEIRO, antes de qualquer await: o ocpp-rpc entrega as mensagens já na fila do socket no próximo tick — o contador tem de estar ouvindo.
+  limitarMensagensDaConexao(client, ctx)
   // `clientIp` (já resolvido pelos saltos configurados) e `xForwardedFor` (header cru) TAMBÉM no sucesso: medir
   // `OCPP_TRUST_PROXY_HOPS` exige ver o IP real de uma conexão boa (a falha já logava). Nunca a senha/Authorization.
   const origem = origemDoHandshake(client.handshake)
@@ -251,6 +262,37 @@ async function onClientConnected(client: RpcServerClient): Promise<void> {
   // voltar a verde NA HORA — sem depender do BootNotification, que um carregador
   // que só reconectou o socket (sem reiniciar) não é obrigado a mandar.
   void registrarConexao(ctx)
+}
+
+/**
+ * N-10: conta TODA mensagem recebida desta conexão numa janela deslizante e, ao exceder, FECHA a conexão (1008) com log `alert`.
+ * Limites lidos do `env` a cada conexão (ajustáveis sem mexer no código). Depois de fechar, o `ocpp-rpc` já não despacha chamadas
+ * (estado != OPEN), então o excedente que ainda chegar só é contado — o `fechando` evita logar/fechar em dobro. O log leva só
+ * identificação e contagem: nunca o conteúdo das mensagens.
+ */
+function limitarMensagensDaConexao(client: RpcServerClient, ctx: OcppHandlerCtx): void {
+  const janela = new JanelaDeslizanteMensagens(env.OCPP_MESSAGE_RATE_MAX, env.OCPP_MESSAGE_RATE_WINDOW_SECONDS * 1000)
+  let fechando = false
+  client.on('message', ({ outbound }: { outbound: boolean }) => {
+    if (outbound || fechando) return
+    if (!janela.registrar()) return
+    fechando = true
+    logger.warn(
+      {
+        alert: ALERTA_OCPP_MESSAGE_FLOOD,
+        chargePointId: ctx.chargePointId,
+        ocppIdentity: ctx.ocppIdentity,
+        maxMessages: env.OCPP_MESSAGE_RATE_MAX,
+        windowSeconds: env.OCPP_MESSAGE_RATE_WINDOW_SECONDS,
+      },
+      '[ocpp] ALERTA: conexão fechada por excesso de mensagens (flood ou firmware com defeito)',
+    )
+    void client.close({ code: OCPP_RATE_LIMIT_CLOSE_CODE, reason: OCPP_RATE_LIMIT_CLOSE_REASON, awaitPending: false }).catch(() => {})
+  })
+  // Mensagem malformada: só tamanho e código (nunca o conteúdo cru). O fechamento por excesso de ruins seguidas é do próprio ocpp-rpc.
+  client.on('badMessage', ({ buffer, error }: { buffer: Buffer; error: { rpcErrorCode?: string } }) => {
+    logger.warn({ chargePointId: ctx.chargePointId, bytes: buffer?.length ?? 0, errorCode: error?.rpcErrorCode ?? 'unknown' }, '[ocpp] mensagem inválida recebida')
+  })
 }
 
 /**

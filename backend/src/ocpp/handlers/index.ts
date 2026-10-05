@@ -1,6 +1,7 @@
 import { createRPCError } from 'ocpp-rpc'
 import type RpcServerClient from 'ocpp-rpc/lib/server-client'
 import { logger } from '../../lib/logger'
+import { resumirChamadaSemHandler } from '../../core/ocpp/limiteMensagens'
 import type { OcppHandlerCtx } from '../context'
 import { handleBootNotification } from './bootNotification'
 import { handleHeartbeat } from './heartbeat'
@@ -28,7 +29,8 @@ export function registerOcppHandlers(client: RpcServerClient, ctx: OcppHandlerCt
   client.handle('StopTransaction', (args) => handleStopTransaction(args, ctx))
 
   client.handle(({ method, params }) => {
-    logger.warn({ method, params, chargePointId: ctx.chargePointId }, '[ocpp] método recebido sem handler nesta fase')
+    // N-10: NUNCA os `params` crus (dados do carregador sem validação, até 256 KiB) — só a ação (truncada) e o tamanho.
+    logger.warn({ ...resumirChamadaSemHandler(method, params), chargePointId: ctx.chargePointId }, '[ocpp] método recebido sem handler nesta fase')
     throw createRPCError('NotImplemented', `Método ${String(method)} não é suportado nesta fase do InnoElektron.`)
   })
 }

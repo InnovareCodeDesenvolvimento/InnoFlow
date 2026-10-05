@@ -96,6 +96,10 @@ const envSchema = z.object({
   // os carregadores compartilham o IP do proxy — ver o log `[ocpp] auth` (clientIp/xForwardedFor)
   // para conferir o valor certo ANTES de confiar em hops > 0.
   OCPP_TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
+  // N-10 (Órion, 05/10/2026): limite de mensagens RECEBIDAS por conexão, em janela deslizante (excedeu -> fecha 1008 + log `alert`).
+  // Default 1000 em 10 s (100/s): 50x o regime normal de um carregador e acima do replay offline serial — racional em `core/ocpp/limiteMensagens.ts`.
+  OCPP_MESSAGE_RATE_MAX: z.coerce.number().int().positive().default(1000),
+  OCPP_MESSAGE_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(10),
 
   // Achado da Nova (log de auditoria, 2026-09-17): `app.set('trust proxy')`
   // nunca existiu neste backend. Sem isto, `req.ip` em produção é sempre o
