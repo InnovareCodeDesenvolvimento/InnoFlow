@@ -30,6 +30,7 @@ export function SecretField({
   actions,
   testId,
   setNote,
+  setHint,
 }: {
   /** Nome legível do segredo ("MerchantKey"). */
   name: string
@@ -46,6 +47,8 @@ export function SecretField({
   testId: string
   /** Texto curto ao lado do chip quando o segredo existe (ex.: dica "…a1b2" da apikey). Só leitura, nunca o valor. */
   setNote?: string | null
+  /** Dica sob o chip quando o segredo existe e o campo está fechado (ex.: "Deixe em branco para manter"). Só texto fixo, nunca o valor. */
+  setHint?: string
 }) {
   const inputId = useId()
   const replacing = value !== undefined
@@ -124,6 +127,7 @@ export function SecretField({
         </p>
       )}
       {!replacing && !error && !isSet && hint && <p className="text-xs text-ink-softer">{hint}</p>}
+      {!replacing && !error && isSet && setHint && <p className="text-xs text-ink-softer">{setHint}</p>}
     </div>
   )
 }

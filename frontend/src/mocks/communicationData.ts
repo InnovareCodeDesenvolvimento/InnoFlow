@@ -1,9 +1,15 @@
 import type {
   CommunicationSettingsDTO,
+  DnsInstruction,
+  DnsRecordCheck,
+  DnsRecordStatus,
+  DomainCheckResponse,
   NotificationSeverity,
+  SmtpConnectionStage,
   TestChannelErrorCode,
   TestChannelResult,
   TestEmailRequest,
+  TestSmtpConnectionResult,
   TestWhatsappRequest,
   UpdateCommunicationSettingsRequest,
 } from "@/types/api"
@@ -37,7 +43,12 @@ const MOCK_ADMIN_PASSWORD = "senha1234"
  *  - host SMTP `limite.exemplo.com` -> 429 `RATE_LIMITED_COMMUNICATION_SETTINGS`; `indisponivel.exemplo.com` -> 503 `COMMUNICATION_SETTINGS_UNAVAILABLE`; `erro500.exemplo.com` -> 500;
  *  - senha atual `stepup-503` -> 503 `STEPUP_UNAVAILABLE`; `stepup-429` -> 429 `RATE_LIMITED_PAYMENT_GATEWAY` (com `Retry-After`); qualquer outra diferente de `senha1234` -> 403 `INVALID_CURRENT_PASSWORD`;
  *  - destino de rede interna (SSRF): `localhost`, `127.*`, `10.*`, `192.168.*`, `172.16-31.*`, `169.254.169.254`, nomes `*.local`/`*.internal`/sem ponto, ou URL `http://` -> 400 `DESTINATION_NOT_ALLOWED`;
- *  - testes: `localStorage["mock:comunicacao-teste"]` = um `TestChannelErrorCode` (a falha do resultado) ou `ok`; `HTTP_503` devolve 503 da rota.
+ *  - testes: `localStorage["mock:comunicacao-teste"]` = um `TestChannelErrorCode` (a falha do resultado) ou `ok`; `HTTP_503` devolve 503 da rota;
+ *  - TESTE DE CONEXÃO SMTP (`test-smtp-connection`; estágio por `code`: SMTP_CONNECTION_FAILED/TIMEOUT/NETWORK_ERROR -> CONNECT, SMTP_TLS_REQUIRED -> TLS, SMTP_AUTH_FAILED -> AUTH): host digitado
+ *    `falha-conexao.exemplo.com`, `falha-tls.exemplo.com`, `falha-auth.exemplo.com`, `lento.exemplo.com` (TIMEOUT); o mesmo `localStorage["mock:comunicacao-teste"]` vale aqui; 5/min, mesmo balde dos testes;
+ *  - VERIFICAÇÃO DE DOMÍNIO (`domain-check`, 6/min, domínio = o do remetente SALVO): `innoflow.example` (persona pronta): SPF ok, DMARC em atenção, DKIM só com seletor (`default` ok, `ausente`, `erro`);
+ *    `todos-ok.exemplo.com` tudo ok; `spf-ausente.exemplo.com`; `dns-falha.exemplo.com` (tudo `ERRO`); `gmail.com` (aviso de domínio gratuito); sem remetente = nada consultado;
+ *    `localStorage["mock:comunicacao-dominio"]` = `HTTP_503` devolve 503 da rota.
  */
 
 type Source = "database" | "env" | "none"
@@ -196,7 +207,7 @@ function emailProblems(e: EmailState): string[] {
   const out: string[] = []
   if (!e.host) out.push("Informe o servidor SMTP.")
   if (!e.fromAddress) out.push("Informe o e-mail do remetente.")
-  if (e.recipients.length === 0) out.push("Informe ao menos um destinatário.")
+  // Destinatários de alerta são OPCIONAIS desde a L1.6 (contrato, regra 4): sem eles o canal fica ativo só para o e-mail ao motorista e `warnings` avisa.
   return out
 }
 
@@ -213,7 +224,7 @@ function toDto(s: Scenario): CommunicationSettingsDTO {
   const emailOk = s.email.enabled && emailProblems(s.email).length === 0 && (s.decryptable || !s.email.passwordSet)
   const whatsappOk = s.whatsapp.enabled && whatsappProblems(s.whatsapp).length === 0 && s.decryptable
   const warnings: string[] = []
-  if (s.email.enabled && s.email.source === "database" && s.email.recipients.length === 0) warnings.push("E-mail ligado no painel, mas sem destinatário válido.")
+  if (s.email.enabled && s.email.source === "database" && s.email.recipients.length === 0) warnings.push("E-mail ligado, mas sem destinatário de alerta: só os e-mails ao motorista são enviados; os avisos ao dono por e-mail não.")
   if (s.email.enabled && !emailOk && s.email.recipients.length > 0 && !s.decryptable) warnings.push("E-mail ligado, mas a senha SMTP salva não pode ser lida: salve a senha de novo.")
   if (s.whatsapp.enabled && !whatsappOk && !s.decryptable) warnings.push("WhatsApp ligado, mas a apikey salva não pode ser lida: salve a apikey de novo.")
   return {
@@ -556,4 +567,175 @@ export function testCommunicationChannel(userId: string, channel: "email" | "wha
   const configured = Boolean(config?.baseUrl ?? scenario.whatsapp.baseUrl) && Boolean(config?.instance ?? scenario.whatsapp.instance) && (scenario.whatsapp.apiKeySet || config?.apiKey !== undefined)
   if (!target || !configured || (!scenario.decryptable && config?.apiKey === undefined)) return testResult("whatsapp", target ? maskPhone(target) : null, "INVALID_CONFIGURATION")
   return testResult("whatsapp", maskPhone(target), override && TEST_CODES.has(override) ? override : null)
+}
+
+// ---------------------------------------------------------------------------
+// POST test-smtp-connection (só handshake: conectar, TLS, autenticar)
+// ---------------------------------------------------------------------------
+
+const STAGE_BY_CODE: Partial<Record<TestChannelErrorCode, SmtpConnectionStage>> = { SMTP_AUTH_FAILED: "AUTH", SMTP_TLS_REQUIRED: "TLS" }
+const stageOf = (code: TestChannelErrorCode): SmtpConnectionStage => STAGE_BY_CODE[code] ?? "CONNECT"
+
+const HOST_FAILURES: Record<string, TestChannelErrorCode> = {
+  "falha-conexao.exemplo.com": "SMTP_CONNECTION_FAILED",
+  "falha-tls.exemplo.com": "SMTP_TLS_REQUIRED",
+  "falha-auth.exemplo.com": "SMTP_AUTH_FAILED",
+  "lento.exemplo.com": "TIMEOUT",
+}
+
+export type SmtpConnectionOutcome = { status: 200; body: TestSmtpConnectionResult } | { status: CommunicationStatus; body: { error: string; code: string; details?: unknown }; headers?: Record<string, string> }
+
+/** Divide o balde de 5/min com os outros testes (mesmo `callsByUser`). `null` = passou; senão, a resposta 429/503. */
+function testBucket(userId: string, override: string | null): SmtpConnectionOutcome | null {
+  if (userId === "user_admin_comunicacao_indisponivel" || override === "HTTP_503") {
+    return { status: 503, body: { error: "Não foi possível ler a configuração.", code: "COMMUNICATION_SETTINGS_UNAVAILABLE" } }
+  }
+  const now = Date.now()
+  const recent = (callsByUser.get(userId) ?? []).filter((t) => now - t < 60_000)
+  if (recent.length >= TEST_LIMIT_PER_MINUTE) {
+    callsByUser.set(userId, recent)
+    return { status: 429, body: { error: "Muitos testes.", code: "RATE_LIMITED_COMMUNICATION_SETTINGS" }, headers: { "retry-after": "60" } }
+  }
+  callsByUser.set(userId, [...recent, now])
+  return null
+}
+
+export function testSmtpConnection(userId: string, body: unknown, override: string | null): SmtpConnectionOutcome {
+  const scenario = scenarioFor(userId)
+  const blocked = testBucket(userId, override)
+  if (blocked) return blocked
+
+  const input = (isObject(body) ? body : {}) as { config?: unknown }
+  const config = isObject(input.config) ? (input.config as Record<string, unknown>) : undefined
+  const host = (typeof config?.host === "string" ? config.host.trim() : (scenario.email.host ?? "")).toLowerCase()
+  const reply = (ok: boolean, code: TestChannelErrorCode | null, authenticated: boolean): SmtpConnectionOutcome => ({
+    status: 200,
+    body: { ok, stage: code ? stageOf(code) : "OK", code, message: ok ? null : `mock: ${code}`, authenticated, testedAt: new Date().toISOString(), durationMs: ok ? 187 : 2210 },
+  })
+
+  if (typeof config?.host === "string" && config.host.trim()) {
+    // Contrato (rota 9): destino interno é RESULTADO do teste (200, `DESTINATION_BLOCKED`, etapa CONNECT), não erro da rota; a 400 é só `SECRET_REQUIRED_FOR_NEW_DESTINATION`.
+    if (smtpHostReason(host, scenario.privateHostsAllowed)) return reply(false, "DESTINATION_BLOCKED", false)
+    const changed = host !== (scenario.email.host ?? "").toLowerCase() || (config && "user" in config && (config.user ?? null) !== scenario.email.user)
+    if (changed && scenario.email.passwordSet && config?.password === undefined) {
+      return { status: 400, body: { error: "Reenvie a senha.", code: "SECRET_REQUIRED_FOR_NEW_DESTINATION", details: [{ field: "config.password" }] } }
+    }
+  }
+  if (!host) return reply(false, "INVALID_CONFIGURATION", false)
+  if (!scenario.decryptable && config?.password === undefined) return reply(false, "INVALID_CONFIGURATION", false)
+
+  const user = config && "user" in config ? config.user : scenario.email.user
+  const hasPassword = config?.password !== undefined || scenario.email.passwordSet
+  const authenticated = Boolean(user) && hasPassword
+  const failure = HOST_FAILURES[host] ?? (override && TEST_CODES.has(override) ? (override as TestChannelErrorCode) : null)
+  return reply(failure === null, failure, authenticated)
+}
+
+// ---------------------------------------------------------------------------
+// GET domain-check (SPF / DKIM / DMARC do domínio do remetente SALVO)
+// ---------------------------------------------------------------------------
+
+const DOMAIN_LIMIT_PER_MINUTE = 6
+const domainCallsByUser = new Map<string, number[]>()
+const SELECTOR_RE = /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/
+
+export type DomainCheckOutcome = { status: 200; body: DomainCheckResponse } | { status: CommunicationStatus; body: { error: string; code: string; details?: unknown }; headers?: Record<string, string> }
+
+const rec = (status: DnsRecordStatus, nomeConsultado: string | null, valorEncontrado: string | null, recomendacao: string): DnsRecordCheck => ({ status, nomeConsultado, valorEncontrado, recomendacao })
+
+function spfFor(domain: string): DnsRecordCheck {
+  if (domain === "dns-falha.exemplo.com") return rec("ERRO", domain, null, "Não deu para consultar o SPF agora (o servidor de DNS não respondeu a tempo). Tente de novo em instantes.")
+  if (domain === "spf-ausente.exemplo.com" || domain === "gmail.com") return rec("AUSENTE", domain, null, "Não encontramos um registro SPF. Peça ao provedor do seu servidor de e-mail o registro correto e cadastre-o no DNS do domínio.")
+  return rec("OK", domain, "v=spf1 include:_spf.innoflow.example ~all", "O SPF está configurado e autoriza o seu provedor de e-mail.")
+}
+
+function dmarcFor(domain: string): DnsRecordCheck {
+  const name = `_dmarc.${domain}`
+  if (domain === "dns-falha.exemplo.com") return rec("ERRO", name, null, "Não deu para consultar o DMARC agora. Tente de novo em instantes.")
+  if (domain === "todos-ok.exemplo.com") return rec("OK", name, "v=DMARC1; p=quarantine; rua=mailto:dmarc@todos-ok.exemplo.com", "O DMARC está ativo e protege o domínio.")
+  if (domain === "spf-ausente.exemplo.com" || domain === "gmail.com") return rec("AUSENTE", name, null, "Não encontramos um registro DMARC. Cadastre o exemplo sugerido para começar só monitorando.")
+  return rec("ATENCAO", name, "v=DMARC1; p=none", "O DMARC existe, mas só monitora (p=none). Quando estiver tudo certo, endureça para quarentena.")
+}
+
+function dkimFor(domain: string, selector: string | null): DnsRecordCheck {
+  // Sem seletor o servidor NÃO consulta nada (`nomeConsultado: null`).
+  if (selector === null) return rec("ATENCAO", null, null, "Informe o seletor DKIM (o provedor mostra ao ativar o DKIM) para verificar este registro. Ele não conta no resultado geral.")
+  const name = `${selector}._domainkey.${domain}`
+  if (domain === "dns-falha.exemplo.com" || selector === "erro") return rec("ERRO", name, null, "Não deu para consultar o DKIM agora. Tente de novo em instantes.")
+  if (selector === "ausente") return rec("AUSENTE", name, null, "Não encontramos o DKIM com esse seletor. Confira o seletor no painel do provedor e se o registro já foi cadastrado.")
+  return rec("OK", name, "v=DKIM1; k=rsa; p=MIIBIjANBgkqh…", "O DKIM está publicado: seus e-mails saem assinados.")
+}
+
+const STATUS_ORDER: DnsRecordStatus[] = ["OK", "ATENCAO", "AUSENTE", "ERRO"]
+const DOMAIN_NOTE =
+  "SPF, DKIM e DMARC são configurados no painel de DNS do domínio (onde ele foi registrado), não no InnoFlow. Depois de alterar, a mudança leva de alguns minutos a algumas horas para valer; consulte de novo mais tarde."
+
+export function domainCheck(userId: string, selectorRaw: string | null, override: string | null): DomainCheckOutcome {
+  const scenario = scenarioFor(userId)
+  if (userId === "user_admin_comunicacao_indisponivel" || override === "HTTP_503") {
+    return { status: 503, body: { error: "Não foi possível ler a configuração.", code: "COMMUNICATION_SETTINGS_UNAVAILABLE" } }
+  }
+  const selector = selectorRaw && selectorRaw.trim() !== "" ? selectorRaw.trim() : null
+  if (selector !== null && !SELECTOR_RE.test(selector)) {
+    return { status: 400, body: { error: "Seletor inválido.", code: "VALIDATION_ERROR", details: [{ path: "selector", message: "Seletor inválido: use só letras, números e hífen (até 63 caracteres)." }] } }
+  }
+  const now = Date.now()
+  const recent = (domainCallsByUser.get(userId) ?? []).filter((t) => now - t < 60_000)
+  if (recent.length >= DOMAIN_LIMIT_PER_MINUTE) {
+    domainCallsByUser.set(userId, recent)
+    return { status: 429, body: { error: "Muitas verificações.", code: "RATE_LIMITED_COMMUNICATION_SETTINGS" }, headers: { "retry-after": "60" } }
+  }
+  domainCallsByUser.set(userId, [...recent, now])
+
+  const checkedAt = new Date().toISOString()
+  const domain = scenario.email.fromAddress?.split("@")[1]?.toLowerCase() ?? null
+  if (!domain) {
+    return {
+      status: 200,
+      body: {
+        senderConfigured: false,
+        domain: null,
+        smtpProvider: null,
+        overallStatus: null,
+        spf: null,
+        dkim: null,
+        dmarc: null,
+        warnings: ['Cadastre primeiro o e-mail remetente (o "de") com um domínio de verdade, como aviso@suaempresa.com.br. A verificação usa o domínio dele.'],
+        instructions: null,
+        note: DOMAIN_NOTE,
+        checkedAt,
+      },
+    }
+  }
+
+  const spf = spfFor(domain)
+  const dmarc = dmarcFor(domain)
+  const dkim = dkimFor(domain, selector)
+  const considered = selector === null ? [spf, dmarc] : [spf, dmarc, dkim]
+  const overall = considered.map((r) => r.status).reduce<DnsRecordStatus>((worst, s) => (STATUS_ORDER.indexOf(s) > STATUS_ORDER.indexOf(worst) ? s : worst), "OK")
+  const warnings: string[] = []
+  if (domain === "gmail.com") {
+    warnings.push(`O remetente usa um endereço de e-mail gratuito (${domain}). SPF, DKIM e DMARC desse domínio pertencem ao provedor e você não consegue alterá-los aqui. Para e-mails de cobrança e avisos mais confiáveis, use um e-mail do domínio da sua empresa.`)
+  }
+  const instruction = (nome: string, tipo: DnsInstruction["tipo"], valorSugerido: string | null, texto: string): DnsInstruction => ({ nome, tipo, valorSugerido, texto })
+  return {
+    status: 200,
+    body: {
+      senderConfigured: true,
+      domain,
+      smtpProvider: "Provedor de exemplo",
+      overallStatus: overall,
+      spf,
+      dkim,
+      dmarc,
+      warnings,
+      instructions: {
+        spf: instruction(domain, "TXT", null, "O valor exato do SPF depende do provedor do seu servidor de e-mail (SMTP): peça a ele o registro SPF correto e cadastre-o como um registro TXT no nome do domínio."),
+        dkim: instruction(selector ? `${selector}._domainkey.${domain}` : `<seletor>._domainkey.${domain}`, "TXT ou CNAME", null, "O DKIM é gerado pelo provedor do seu servidor de e-mail: ative-o no painel dele e cadastre no DNS exatamente como informado."),
+        dmarc: instruction(`_dmarc.${domain}`, "TXT", `v=DMARC1; p=none; rua=mailto:dmarc@${domain}`, "Exemplo seguro para começar: ele só monitora e não bloqueia nenhum e-mail."),
+      },
+      note: DOMAIN_NOTE,
+      checkedAt,
+    },
+  }
 }

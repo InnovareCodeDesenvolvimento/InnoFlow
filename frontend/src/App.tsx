@@ -44,7 +44,12 @@ const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
 const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
-const AdminComunicacao = lazy(() => import("@/pages/Admin/Comunicacao"))
+// Configurações da plataforma (só ADMIN): casca com abas por SUBROTA, cada aba num chunk próprio (geral = dados da empresa; email, whatsapp e alertas = comunicação).
+const AdminConfiguracoes = lazy(() => import("@/pages/Admin/Configuracoes"))
+const ConfigGeral = lazy(() => import("@/pages/Admin/Configuracoes/GeralTab"))
+const ConfigEmail = lazy(() => import("@/pages/Admin/Configuracoes/EmailTab"))
+const ConfigWhatsapp = lazy(() => import("@/pages/Admin/Configuracoes/WhatsappTab"))
+const ConfigAlertas = lazy(() => import("@/pages/Admin/Configuracoes/AlertasTab"))
 const AdminBackups = lazy(() => import("@/pages/Admin/Backups"))
 // Estorno e chargeback (L1.8) e devoluções de contas excluídas (L1.4): dinheiro de terceiros, só ADMIN (UI e servidor).
 const AdminChargebacks = lazy(() => import("@/pages/Admin/Chargebacks"))
@@ -100,6 +105,12 @@ function LandingFallback() {
       <Loader2 className="h-8 w-8 animate-spin text-accent-glow" aria-hidden="true" />
     </div>
   )
+}
+
+/** `/admin/comunicacao` (rota antiga, favoritos e links) virou a aba E-mail de Configurações: redireciona preservando a query e o fragmento. */
+function ComunicacaoRedirect() {
+  const { search, hash } = useLocation()
+  return <Navigate to={{ pathname: "/admin/configuracoes/email", search, hash }} replace />
 }
 
 /** O callback do Google (`GET /api/backup/google/callback`) devolve o navegador a `/admin/backup?google=ok|erro&motivo=…`; a tela vive em `/admin/backups`. Preserva a query. */
@@ -216,15 +227,24 @@ export default function App() {
                   </RequireAuth>
                 }
               />
-              {/* Avisos ao dono (e-mail SMTP + WhatsApp Evolution): configuração da PLATAFORMA, só ADMIN (N-7); o servidor confere de novo (403). */}
+              {/* Configurações da PLATAFORMA (dados da empresa, e-mail SMTP, WhatsApp Evolution, alertas): só ADMIN; o servidor confere de novo (403). Abas por subrota; `/admin/configuracoes` abre a Geral. */}
               <Route
-                path="comunicacao"
+                path="configuracoes"
                 element={
                   <RequireAuth roles={["ADMIN"]}>
-                    <AdminComunicacao />
+                    <AdminConfiguracoes />
                   </RequireAuth>
                 }
-              />
+              >
+                <Route index element={<Navigate to="geral" replace />} />
+                <Route path="geral" element={<ConfigGeral />} />
+                <Route path="email" element={<ConfigEmail />} />
+                <Route path="whatsapp" element={<ConfigWhatsapp />} />
+                <Route path="alertas" element={<ConfigAlertas />} />
+                {/* Aba que não existe: volta à Geral (um 404 de página inteira, com `<main>` e `<h1>` próprios, ficaria aninhado na casca do painel). */}
+                <Route path="*" element={<Navigate to="/admin/configuracoes/geral" replace />} />
+              </Route>
+              <Route path="comunicacao" element={<ComunicacaoRedirect />} />
               {/* Backup automático do banco: configuração da PLATAFORMA, só ADMIN; o servidor confere de novo (403). `/admin/backup` (singular) é para onde o callback do Google devolve o navegador (`?google=ok|erro`): redireciona para a tela, preservando a query. */}
               <Route
                 path="backups"

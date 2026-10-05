@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { communicationSettingsService } from "@/services/communicationSettings"
-import type { TestEmailRequest, TestWhatsappRequest, UpdateCommunicationSettingsRequest } from "@/types/api"
+import type { TestEmailRequest, TestSmtpConnectionRequest, TestWhatsappRequest, UpdateCommunicationSettingsRequest } from "@/types/api"
 
 export const communicationSettingsKeys = {
   config: ["admin", "communication-settings"] as const,
@@ -48,4 +48,14 @@ export function useTestEmail() {
 /** "Enviar WhatsApp de teste". `config` pode levar a APIKEY: mesmo `gcTime: 0` + `reset()`. */
 export function useTestWhatsapp() {
   return useMutation({ gcTime: 0, mutationFn: (payload: TestWhatsappRequest) => communicationSettingsService.testWhatsapp(payload) })
+}
+
+/** "Testar conexão" do SMTP. `config` pode levar a SENHA SMTP digitada: mesmo `gcTime: 0` + `reset()`. Não persiste nada. */
+export function useTestSmtpConnection() {
+  return useMutation({ gcTime: 0, mutationFn: (payload: TestSmtpConnectionRequest) => communicationSettingsService.testSmtpConnection(payload) })
+}
+
+/** "Verificar" o domínio do remetente (SPF/DKIM/DMARC). Consulta o DNS público do domínio salvo: sem segredo no pedido; mutation (ação do admin, sem cache nem refetch automático). */
+export function useDomainCheck() {
+  return useMutation({ gcTime: 0, mutationFn: (selector: string | undefined) => communicationSettingsService.domainCheck(selector) })
 }

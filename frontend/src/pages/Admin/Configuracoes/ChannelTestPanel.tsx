@@ -68,8 +68,6 @@ export function ChannelTestPanel<TReq>({
     }
   }
 
-  const text = result && !result.ok ? testErrorText(result.error?.code) : null
-
   return (
     <div className="space-y-4 border-t border-border-subtle pt-5" data-testid={testId}>
       <div className="space-y-1">
@@ -124,42 +122,48 @@ export function ChannelTestPanel<TReq>({
           </Alert>
         )}
 
-        {result && !pending && (
-          <Alert
-            tone={result.ok ? "success" : "danger"}
-            icon={result.ok ? CircleCheck : CircleX}
-            data-testid={`${testId}-result`}
-            data-ok={result.ok ? "true" : "false"}
-            data-code={result.error?.code}
-          >
-            {result.ok ? (
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-ink">Teste enviado com sucesso.</p>
-                <p className="text-sm text-ink-soft">
-                  {result.to ? (
-                    <>
-                      Enviado para <span className="font-semibold text-ink">{result.to}</span>. Confira se chegou{result.channel === "email" ? " (olhe também o spam)." : "."}
-                    </>
-                  ) : (
-                    "Confira se a mensagem chegou."
-                  )}
-                </p>
-                <p className="text-xs text-ink-softer">
-                  {formatDateTime(result.testedAt)} · {result.durationMs} ms
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-ink">{text?.title}</p>
-                <p className="text-sm text-ink-soft">{text?.action}</p>
-                <p className="break-words text-xs text-ink-softer">
-                  {[result.error ? `Código: ${result.error.code}` : null, result.to ? `Destino: ${result.to}` : null, `${result.durationMs} ms`].filter(Boolean).join(" · ")}
-                </p>
-              </div>
-            )}
-          </Alert>
-        )}
+        {result && !pending && <TestResultAlert testId={testId} result={result} />}
       </div>
     </div>
+  )
+}
+
+/** Resultado de um teste de canal (ok ou falha por `code`): o texto é nosso (`testErrorText`), o destino já vem mascarado do servidor. Compartilhado pelo teste de e-mail e de WhatsApp. */
+export function TestResultAlert({ testId, result }: { testId: string; result: TestChannelResult }) {
+  const text = !result.ok ? testErrorText(result.error?.code) : null
+  return (
+    <Alert
+      tone={result.ok ? "success" : "danger"}
+      icon={result.ok ? CircleCheck : CircleX}
+      data-testid={`${testId}-result`}
+      data-ok={result.ok ? "true" : "false"}
+      data-code={result.error?.code}
+    >
+      {result.ok ? (
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-ink">Teste enviado com sucesso.</p>
+          <p className="text-sm text-ink-soft">
+            {result.to ? (
+              <>
+                Enviado para <span className="font-semibold text-ink">{result.to}</span>. Confira se chegou{result.channel === "email" ? " (olhe também o spam)." : "."}
+              </>
+            ) : (
+              "Confira se a mensagem chegou."
+            )}
+          </p>
+          <p className="text-xs text-ink-softer">
+            {formatDateTime(result.testedAt)} · {result.durationMs} ms
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-ink">{text?.title}</p>
+          <p className="text-sm text-ink-soft">{text?.action}</p>
+          <p className="break-words text-xs text-ink-softer">
+            {[result.error ? `Código: ${result.error.code}` : null, result.to ? `Destino: ${result.to}` : null, `${result.durationMs} ms`].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      )}
+    </Alert>
   )
 }

@@ -1,7 +1,7 @@
 import { useId } from "react"
 import { CheckCircle2, CircleAlert, CircleMinus, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
-import { CardHeader, CardTitle } from "@/components/ui/Card"
+import { CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { IconBadge } from "@/components/ui/IconBadge"
 import { Switch } from "@/components/ui/Switch"
 
@@ -10,12 +10,15 @@ type ChannelState = { enabled: boolean; active: boolean; source: "database" | "e
 const SOURCE_LABEL = { database: "Configurado no painel", env: "Vem do servidor (env)", none: "Não configurado" } as const
 
 /** Cabeçalho do cartão de um canal: ícone + título (h2) + estado (funcionando / com problema / desligado) e de onde vale a configuração. */
-export function ChannelHeader({ icon, title, testId, state }: { icon: LucideIcon; title: string; testId: string; state: ChannelState }) {
+export function ChannelHeader({ icon, title, description, testId, state }: { icon: LucideIcon; title: string; description?: string; testId: string; state: ChannelState }) {
   return (
     <CardHeader className="flex flex-row items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
         <IconBadge icon={icon} size="md" tinted />
-        <CardTitle as="h2">{title}</CardTitle>
+        <div className="min-w-0">
+          <CardTitle as="h2">{title}</CardTitle>
+          {description && <CardDescription>{description}</CardDescription>}
+        </div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         <Badge variant="neutral" data-testid={`${testId}-source`}>

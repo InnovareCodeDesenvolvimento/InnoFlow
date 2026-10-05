@@ -21,7 +21,7 @@ export const CHECKLIST_ITEMS: readonly ChecklistItemScript[] = [
   { key: "tariff", title: "Criar uma tarifa", description: "Preço por kWh, por minuto e taxa de ociosidade.", href: "/admin/tariffs", cta: "Criar" },
   { key: "assignment", title: "Vincular a tarifa", description: "Sem tarifa válida, o QR não inicia a recarga.", href: "/admin/tariffs", cta: "Vincular" },
   { key: "gateway", title: "Configurar o gateway de pagamento", description: "Para cobrar por Pix e cartão.", href: "/admin/gateway-pagamento", cta: "Configurar" },
-  { key: "communication", title: "Configurar os avisos", description: "E-mail ou WhatsApp para os alertas da operação.", href: "/admin/comunicacao", cta: "Configurar" },
+  { key: "communication", title: "Configurar os avisos", description: "E-mail ou WhatsApp para os alertas da operação.", href: "/admin/configuracoes/email", cta: "Configurar" },
 ]
 
 export const CHECKLIST_UI = {

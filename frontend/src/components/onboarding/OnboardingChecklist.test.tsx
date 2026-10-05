@@ -31,7 +31,7 @@ describe("OnboardingChecklist", () => {
     expect(screen.getByRole("region", { name: "Primeiros passos" })).toBeInTheDocument()
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuetext", "5 de 7 passos")
     expect(screen.getByRole("link", { name: /configurar: configurar o gateway de pagamento/i })).toHaveAttribute("href", "/admin/gateway-pagamento")
-    expect(screen.getByRole("link", { name: /configurar: configurar os avisos/i })).toHaveAttribute("href", "/admin/comunicacao")
+    expect(screen.getByRole("link", { name: /configurar: configurar os avisos/i })).toHaveAttribute("href", "/admin/configuracoes/email")
     // itens feitos aparecem como feitos (texto para leitor de tela), sem botão de ação
     expect(screen.getByText(/cadastrar um site/i).textContent).toContain("Feito")
     expect(screen.queryByRole("link", { name: /cadastrar: cadastrar um site/i })).toBeNull()

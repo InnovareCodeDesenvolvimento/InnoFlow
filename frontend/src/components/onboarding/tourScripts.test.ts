@@ -90,11 +90,11 @@ describe("roteiro do OPERATOR = o do ADMIN sem as telas só-ADMIN", () => {
     }
   })
 
-  it("o ADMIN vê os passos de gateway e comunicação; o OPERATOR não (e o resto é o mesmo)", () => {
-    expect(admin.map((s) => s.id)).toEqual(expect.arrayContaining(["gateway", "comunicacao"]))
+  it("o ADMIN vê os passos de gateway e configurações; o OPERATOR não (e o resto é o mesmo)", () => {
+    expect(admin.map((s) => s.id)).toEqual(expect.arrayContaining(["gateway", "configuracoes"]))
     expect(operator.map((s) => s.id)).not.toContain("gateway")
-    expect(operator.map((s) => s.id)).not.toContain("comunicacao")
-    const adminOnlyIds = new Set(["gateway", "comunicacao", "backups"])
+    expect(operator.map((s) => s.id)).not.toContain("configuracoes")
+    const adminOnlyIds = new Set(["gateway", "configuracoes", "backups"])
     expect(admin.filter((s) => !adminOnlyIds.has(s.id)).map((s) => s.id)).toEqual(operator.map((s) => s.id))
   })
 

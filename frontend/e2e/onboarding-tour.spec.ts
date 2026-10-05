@@ -423,21 +423,21 @@ const ADMIN_WIDE_TARGETS: Record<string, string | undefined> = {
   Sessões: "nav-sessoes",
   Financeiro: "nav-financeiro",
   "Gateway de pagamento": "nav-gateway-pagamento",
-  Comunicação: "nav-comunicacao",
+  Configurações: "nav-configuracoes",
   "Atalhos rápidos": "admin-quick-actions",
   "Seu nome, aqui embaixo": "admin-user",
   "Tudo pronto!": undefined,
 }
 
-/** Mesmo roteiro com o passo "Backups" (entra depois de "Comunicação") — só vale quando a tela existir no menu. */
+/** Mesmo roteiro com o passo "Backups" (entra depois de "Configurações") — só vale quando a tela existir no menu. */
 const ADMIN_WIDE_TARGETS_WITH_BACKUPS: Record<string, string | undefined> = Object.fromEntries(
-  Object.entries(ADMIN_WIDE_TARGETS).flatMap(([title, target]) => (title === "Comunicação" ? [[title, target], ["Backups", "nav-backups"]] : [[title, target]])),
+  Object.entries(ADMIN_WIDE_TARGETS).flatMap(([title, target]) => (title === "Configurações" ? [[title, target], ["Backups", "nav-backups"]] : [[title, target]])),
 )
 
 test.describe("tour do painel (ADMIN) @ 1440", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
-  test("todos os passos (14, ou 15 quando a tela de Backups entrar no menu), cada um com a régua; inclui Gateway e Comunicação", async ({ page }) => {
+  test("todos os passos (14, ou 15 quando a tela de Backups entrar no menu), cada um com a régua; inclui Gateway e Configurações", async ({ page }) => {
     await login(page, ADMIN)
     await waitForTour(page, /tour do painel administrativo/i)
     // Backups: o passo existe se e somente se o menu já tem a tela (feature check do roteiro). Hoje não tem; quando entrar, o passo aparece sozinho.
@@ -554,11 +554,11 @@ test.describe("tour do painel (ADMIN) @ 1440", () => {
 test.describe("tour do painel (OPERATOR)", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
-  test("o roteiro é o do ADMIN sem as telas só-ADMIN (12 passos, sem Gateway/Comunicação/Rede)", async ({ page }) => {
+  test("o roteiro é o do ADMIN sem as telas só-ADMIN (12 passos, sem Gateway/Configurações/Rede)", async ({ page }) => {
     await login(page, OPERATOR)
     await waitForTour(page, /tour do painel do operador/i)
     await expect(progress(page)).toHaveText("Passo 1 de 12")
-    const { "Gateway de pagamento": _g, Comunicação: _c, ...operatorTargets } = ADMIN_WIDE_TARGETS
+    const { "Gateway de pagamento": _g, Configurações: _c, ...operatorTargets } = ADMIN_WIDE_TARGETS
     void _g
     void _c
     const titles: string[] = []
@@ -575,10 +575,10 @@ test.describe("tour do painel (OPERATOR)", () => {
     }
     expect(titles).toEqual(Object.keys(operatorTargets))
     const all = texts.join("\n")
-    expect(all).not.toMatch(/gateway|comunicação|auditoria|tokens|cielo|\bRede\b|primeiros passos/i)
+    expect(all).not.toMatch(/gateway|configurações|auditoria|tokens|cielo|\bRede\b|primeiros passos/i)
     // o menu do OPERATOR realmente não tem essas telas (o roteiro não esconde nada que existe)
     await expect(page.getByRole("link", { name: "Gateway de pagamento" })).toHaveCount(0)
-    await expect(page.getByRole("link", { name: "Comunicação" })).toHaveCount(0)
+    await expect(page.getByRole("link", { name: "Configurações" })).toHaveCount(0)
   })
 
   test("OPERATOR não vê o card de Primeiros passos (é só do ADMIN)", async ({ page }) => {
@@ -607,7 +607,7 @@ for (const size of SIZES.filter((s) => s.width < 1024)) {
       await waitForTour(page, /tour do painel administrativo/i)
       await next(page).click()
       const text = await tour(page).innerText()
-      for (const label of ["Dashboard", "Pontos de recarga", "Gateway de pagamento", "Comunicação", "Auditoria"]) expect(text).toContain(label)
+      for (const label of ["Dashboard", "Pontos de recarga", "Gateway de pagamento", "Configurações", "Auditoria"]) expect(text).toContain(label)
     })
 
     test("Rever tour no drawer do menu abre o tour do 1º passo", async ({ page }) => {
@@ -627,7 +627,7 @@ for (const size of SIZES.filter((s) => s.width < 1024)) {
       await next(page).click()
       const text = await tour(page).innerText()
       expect(text).toContain("Dashboard")
-      expect(text).not.toMatch(/gateway|comunicação|auditoria|tokens/i)
+      expect(text).not.toMatch(/gateway|configurações|auditoria|tokens/i)
     })
 
     test("axe: 0 violações em cada passo", async ({ page }) => {

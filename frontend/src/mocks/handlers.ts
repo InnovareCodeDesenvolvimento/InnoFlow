@@ -74,7 +74,8 @@ import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
 import { commandStatus, parseScenario, remoteStartPolicyDenied, startRemote } from "./remoteStartData"
 import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
-import { getCommunicationSettings, testCommunicationChannel, updateCommunicationSettings } from "./communicationData"
+import { domainCheck, getCommunicationSettings, testCommunicationChannel, testSmtpConnection, updateCommunicationSettings } from "./communicationData"
+import { getCompanyProfile, updateCompanyProfile } from "./companyData"
 import {
   disconnectGoogle,
   generateBackupKey,
@@ -1413,6 +1414,42 @@ export const handlers = [
     const body = await request.json().catch(() => ({}))
     const outcome = testCommunicationChannel(scope.user.userId, "email", body, localStorage.getItem("mock:comunicacao-teste"))
     return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  // Teste de CONEXÃO SMTP (só handshake, sem enviar e-mail; estágio por gatilho de host ou `localStorage["mock:comunicacao-teste"]`) e verificação do domínio do remetente (SPF/DKIM/DMARC).
+  http.post("/api/admin/communication-settings/test-smtp-connection", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => ({}))
+    const outcome = testSmtpConnection(scope.user.userId, body, localStorage.getItem("mock:comunicacao-teste"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  http.get("/api/admin/communication-settings/domain-check", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const outcome = domainCheck(scope.user.userId, new URL(request.url).searchParams.get("selector"), localStorage.getItem("mock:comunicacao-dominio"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  // ---- Dados da empresa e versões dos Termos/Privacidade (ADMIN only; regras e personas em `companyData.ts`) ----------------
+  http.get("/api/admin/company-profile", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getCompanyProfile(scope.user.userId)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.put("/api/admin/company-profile", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateCompanyProfile(scope.user.userId, body)
+    if (!result.ok) {
+      return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    }
+    return HttpResponse.json(result.dto)
   }),
 
   http.post("/api/admin/communication-settings/test-whatsapp", async ({ request }) => {

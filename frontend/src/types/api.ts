@@ -2402,6 +2402,152 @@ export interface TestChannelResult {
   error: { code: TestChannelErrorCode; message: string } | null
 }
 
+/** Etapas do teste de conexão SMTP (`CONNECT` = TCP, `TLS` = negociação segura, `AUTH` = usuário/senha, `OK` = tudo passou). `stage` é a etapa em que PAROU. */
+export type SmtpConnectionStage = 'CONNECT' | 'TLS' | 'AUTH' | 'OK'
+
+/**
+ * `POST /api/admin/communication-settings/test-smtp-connection`. Contrato literal: `docs/CONTRATO-COMUNICACAO-ADMIN.md` (rota 9). Só conecta, negocia TLS e autentica; NÃO envia e-mail.
+ * Sempre 200 com o resultado (`DESTINATION_BLOCKED` e `INVALID_CONFIGURATION` também são RESULTADO, etapa `CONNECT`);
+ * 400 `SECRET_REQUIRED_FOR_NEW_DESTINATION` se `config` troca host/usuário sem reenviar a senha. Mesmo balde de 5/min do `test-email`.
+ */
+export interface TestSmtpConnectionRequest {
+  /** Sem `config`, testa a config SALVA. Mesmos nomes do PUT. */
+  config?: { host?: string; port?: number; secure?: boolean; user?: string | null; password?: string; fromName?: string | null; fromAddress?: string }
+}
+
+export interface TestSmtpConnectionResult {
+  ok: boolean
+  stage: SmtpConnectionStage
+  /** `null` no sucesso. */
+  code: TestChannelErrorCode | null
+  /** Texto fixo em PT-BR do servidor (`null` se `ok`); a tela escolhe o seu texto por `code`. */
+  message: string | null
+  /** `true` = fez login com usuário/senha; `false` = servidor usado sem autenticação (nada configurado). */
+  authenticated: boolean
+  testedAt: string
+  durationMs: number
+}
+
+export type DnsRecordStatus = 'OK' | 'ATENCAO' | 'AUSENTE' | 'ERRO'
+
+/** Um registro verificado (SPF, DKIM ou DMARC). `valorEncontrado` é TXT público do DNS, truncado. */
+export interface DnsRecordCheck {
+  status: DnsRecordStatus
+  /** Nome DNS consultado; `null` = não consultado (DKIM sem seletor). */
+  nomeConsultado: string | null
+  valorEncontrado: string | null
+  /** Texto em PT-BR, pronto para exibir. */
+  recomendacao: string
+}
+
+export interface DnsInstruction {
+  /** Nome (host) do registro a cadastrar no DNS. */
+  nome: string
+  tipo: 'TXT' | 'TXT ou CNAME'
+  /** Valor pronto para colar: só existe para o DMARC (SPF e DKIM dependem do provedor e vêm `null`). */
+  valorSugerido: string | null
+  texto: string
+}
+
+/**
+ * `GET /api/admin/communication-settings/domain-check?selector=` — diagnóstico de SPF/DKIM/DMARC do domínio do e-mail REMETENTE SALVO (o domínio nunca vem do cliente; só o seletor DKIM, opcional:
+ * letras, números e hífen, até 63). Contrato literal: `docs/CONTRATO-COMUNICACAO-ADMIN.md` (rota 10). Balde de 6/min;
+ * falha de DNS vira `ERRO` no registro (200). `Cache-Control: no-store`.
+ */
+export interface DomainCheckResponse {
+  /** `false` = não há e-mail remetente (ou o domínio dele não é público): nada foi consultado (veja `warnings`). */
+  senderConfigured: boolean
+  domain: string | null
+  smtpProvider: string | null
+  /** Pior resultado entre SPF, DMARC e (se houve seletor) DKIM; `null` quando nada foi consultado. */
+  overallStatus: DnsRecordStatus | null
+  spf: DnsRecordCheck | null
+  dkim: DnsRecordCheck | null
+  dmarc: DnsRecordCheck | null
+  warnings: string[]
+  instructions: { spf: DnsInstruction; dkim: DnsInstruction; dmarc: DnsInstruction } | null
+  note: string
+  checkedAt: string
+}
+
+// ---------------------------------------------------------------------------
+// Dados da empresa e versões dos Termos/Privacidade (Admin > Configurações > Geral). Contrato LITERAL: `docs/CONTRATO-EMPRESA-ADMIN.md` (copiado sem renomear, salvo o comentário).
+// ---------------------------------------------------------------------------
+
+/** `db` = o painel já assumiu o dado; `env` = nada salvo, valem as variáveis `LEGAL_*` do deploy (reserva). */
+export type LegalDataSource = 'db' | 'env'
+
+/** `GET/PUT /api/admin/company-profile` (ADMIN-only). Nada aqui é segredo: tudo aparece na página pública de termos, no rodapé e nos e-mails ao motorista. */
+export interface CompanyProfileDTO {
+  source: LegalDataSource
+  /** O que o dono DIGITOU (a razão social verdadeira, sem o "nome de exibição" com fallback do público). */
+  profile: {
+    legalName: string | null
+    tradeName: string | null
+    /** Formatado `00.000.000/0000-00` (ou alfanumérico, mesma máscara). O PUT aceita com ou sem pontuação. */
+    cnpj: string | null
+    supportEmail: string | null
+    supportPhone: string | null
+    address: string | null
+    website: string | null
+    dpoName: string | null
+    dpoEmail: string | null
+  }
+  versions: {
+    /** Versões VIGENTES agora (a que o motorista aceita). */
+    termsVersion: string
+    privacyVersion: string
+    termsSource: LegalDataSource
+    privacySource: LegalDataSource
+    /** A versão que vale se o campo do painel for limpo (`null`): a variável `LEGAL_*_VERSION` do deploy ou o padrão do código. */
+    envTermsVersion: string
+    envPrivacyVersion: string
+  }
+  /** Campos da ENV com valor inválido (ficam vazios na página pública). Só aparece enquanto `source = env`. */
+  invalidEnvFields: string[]
+  updatedAt: string | null
+}
+
+/**
+ * `PUT /api/admin/company-profile`. Campo AUSENTE = "não mexer"; `null` (ou texto vazio) = "limpar". `strict`: campo desconhecido é 400; ao menos um campo além de `confirmVersionChange`.
+ * SEM step-up de senha (não há segredo), mas cada PUT é auditado. Rate limit de 10/min por ADMIN (`RATE_LIMITED`).
+ */
+export interface UpdateCompanyProfileRequest {
+  legalName?: string | null // até 160
+  tradeName?: string | null // até 120
+  /** Com ou sem pontuação; o servidor valida os dígitos verificadores (numérico e alfanumérico) e normaliza. */
+  cnpj?: string | null
+  supportEmail?: string | null // até 180
+  supportPhone?: string | null // 8 a 30 caracteres: números, DDD e + ( ) - . espaço
+  address?: string | null // até 300
+  website?: string | null // https://… (o servidor completa o https://)
+  dpoName?: string | null // até 120
+  dpoEmail?: string | null
+  /** Até 32 caracteres: letras, números, ponto, hífen e sublinhado. `null` volta a valer a variável `LEGAL_*_VERSION`. */
+  termsVersion?: string | null
+  privacyVersion?: string | null
+  /** OBRIGATÓRIO (`true`) quando o PUT MUDA a versão efetiva dos Termos ou da Privacidade: todos os motoristas voltam a `upToDate=false` e aceitam de novo. */
+  confirmVersionChange?: boolean
+}
+
+export type CompanyProfileErrorCode =
+  | 'VALIDATION_ERROR' // 400 — details: [{ path: 'cnpj' | 'supportEmail' | ..., message }]; nada gravado
+  | 'VERSION_CHANGE_NOT_CONFIRMED' // 409 — details: [VersionChangeDetail]
+  | 'RATE_LIMITED' // 429 — 10 PUTs/min por ADMIN
+  | 'LEGAL_SETTINGS_UNAVAILABLE' // 503 — não deu para ler/gravar no banco
+
+/** `details[0]` do 409 `VERSION_CHANGE_NOT_CONFIRMED` (nada foi gravado): mostre "isto obriga N motoristas a aceitar de novo" e reenvie o MESMO PUT com `confirmVersionChange: true`. */
+export interface VersionChangeDetail {
+  field: 'confirmVersionChange'
+  reason: 'REQUIRED_TRUE'
+  currentTermsVersion: string
+  currentPrivacyVersion: string
+  newTermsVersion: string
+  newPrivacyVersion: string
+  /** Motoristas ativos que terão de aceitar de novo. */
+  driversAffected: number
+}
+
 export type CommunicationSettingsErrorCode =
   | 'VALIDATION_ERROR' // 400 (details: [{ path, message }])
   | 'INVALID_CURRENT_PASSWORD' // 403 — step-up

@@ -3,7 +3,9 @@ import type {
   CommunicationSettingsDTO,
   NotificationSeverity,
   TestChannelErrorCode,
+  SmtpConnectionStage,
   TestEmailRequest,
+  TestSmtpConnectionRequest,
   TestWhatsappRequest,
   UpdateCommunicationSettingsRequest,
 } from "@/types/api"
@@ -65,6 +67,8 @@ export interface EmailDraft {
   password?: string
   fromName?: string
   fromAddress?: string
+  /** Campo ÚNICO "Remetente" da tela ("Nome <email>" ou só o e-mail). Quando presente, vale por cima de `fromName`/`fromAddress` (ver `parseFrom`). */
+  from?: string
   /** Texto bruto (um por linha, ou separados por vírgula/ponto e vírgula). */
   recipients?: string
   minSeverity?: NotificationSeverity
@@ -153,6 +157,30 @@ export function isEmailAddress(value: string): boolean {
   return value.length <= 254 && EMAIL_RE.test(value)
 }
 
+/** Nome que entra no remetente quando o admin digita só o e-mail (a dica da tela promete isso). */
+export const DEFAULT_FROM_NAME = "InnoFlow"
+export const FROM_ERROR = "Remetente inválido. Use Nome <email@seudominio.com.br> ou só o e-mail (o nome tem até 80 caracteres)."
+
+/**
+ * "InnoFlow <no-reply@seudominio.com.br>" -> { name, address }. Só o e-mail -> nome padrão (`DEFAULT_FROM_NAME`). `null` se o e-mail é inválido ou o nome passa de 80
+ * caracteres. Aceita o nome entre aspas ("Inno Flow" <a@b.com>).
+ */
+export function parseFrom(text: string): { name: string; address: string } | null {
+  const raw = text.trim()
+  if (!raw) return null
+  const bracket = /^(.*?)\s*<([^<>]*)>$/.exec(raw)
+  const address = (bracket ? bracket[2] : raw).trim()
+  const name = (bracket ? bracket[1] : "").trim().replace(/^"(.*)"$/, "$1").trim() || DEFAULT_FROM_NAME
+  if (!isEmailAddress(address) || name.length > 80) return null
+  return { name, address }
+}
+
+/** O que o campo "Remetente" mostra para o que está salvo. */
+export function formatFrom(name: string | null, address: string | null): string {
+  if (!address) return ""
+  return name ? `${name} <${address}>` : address
+}
+
 /** DDI + número, só dígitos: 10 a 15 (E.164). A validação final é do servidor; aqui só barramos o óbvio. */
 export function isPhoneNumber(value: string): boolean {
   return /^\d{10,15}$/.test(value)
@@ -208,9 +236,14 @@ function buildEmailChanges(dto: CommunicationSettingsDTO, draft: EmailDraft): No
   const user = trimmed(draft.user)
   if (user !== undefined && user !== (dto.email.user ?? "")) out.user = user === "" ? null : user
   if (hasText(draft.password)) out.password = draft.password
-  const fromName = trimmed(draft.fromName)
+  let fromName = trimmed(draft.fromName)
+  let fromAddress = trimmed(draft.fromAddress)
+  const parsedFrom = draft.from !== undefined ? parseFrom(draft.from) : null
+  if (parsedFrom) {
+    fromName = parsedFrom.name
+    fromAddress = parsedFrom.address
+  }
   if (fromName !== undefined && fromName !== (dto.email.fromName ?? "")) out.fromName = fromName === "" ? null : fromName
-  const fromAddress = trimmed(draft.fromAddress)
   if (fromAddress && fromAddress !== (dto.email.fromAddress ?? "")) out.fromAddress = fromAddress
   if (draft.recipients !== undefined) {
     const list = parseRecipientList(draft.recipients)
@@ -350,6 +383,7 @@ export function validateDraft(dto: CommunicationSettingsDTO, draft: Communicatio
   const fromAddress = trimmed(e.fromAddress)
   if (fromAddress && !isEmailAddress(fromAddress)) errors["email.fromAddress"] = "E-mail do remetente inválido."
   if ((trimmed(e.fromName) ?? "").length > 80) errors["email.fromName"] = "No máximo 80 caracteres."
+  if (trimmed(e.from) && !parseFrom(e.from ?? "")) errors["email.from"] = FROM_ERROR
   const user = trimmed(e.user)
   if (user !== undefined && user.length > 254) errors["email.user"] = "Usuário muito longo."
   if (e.recipients !== undefined) {
@@ -450,7 +484,7 @@ export function describeChanges(dto: CommunicationSettingsDTO, payload: Communic
 // Testes (e-mail e WhatsApp)
 // ---------------------------------------------------------------------------
 
-const EMAIL_CONFIG_KEYS = ["host", "port", "secure", "user", "password", "fromName", "fromAddress"] as const
+const EMAIL_CONFIG_KEYS = ["host", "port", "secure", "user", "password", "fromName", "fromAddress", "from"] as const
 const WHATSAPP_CONFIG_KEYS = ["baseUrl", "instance", "apiKey", "apiVersion"] as const
 
 /** O rascunho mexeu em algo que o teste usa (conexão/remetente)? Sem isso o teste vale para a config SALVA. */
@@ -532,6 +566,60 @@ export function planWhatsappTest(dto: CommunicationSettingsDTO, draft: WhatsappD
   return { errors: out, request: { ...(to ? { to } : {}), ...(config ? { config } : {}) } }
 }
 
+/**
+ * "Testar conexão" do SMTP (só conecta, negocia TLS e autentica — não envia e-mail). Usa o que está NA TELA: sem alteração no rascunho vale a config salva (`{}`); com
+ * alteração, manda `config` com os valores EFETIVOS (rascunho sobre o salvo). A senha só vai se foi digitada; mudou servidor/usuário e há senha salva = digitar de novo.
+ */
+export function planSmtpConnectionTest(dto: CommunicationSettingsDTO, draft: EmailDraft, errors: DraftErrors): TestPlan<TestSmtpConnectionRequest> {
+  const out: DraftErrors = {}
+  const host = trimmed(draft.host) || dto.email.host || ""
+  const portText = trimmed(draft.port)
+  const port = portText ? Number(portText) : dto.email.port
+  if (!host) out["email.host"] = "Informe o servidor SMTP para testar (mesmo que ainda não tenha salvo)."
+  else if (errors["email.host"]) out["email.host"] = errors["email.host"]
+  if (!port) out["email.port"] = "Informe a porta para testar (587 ou 465)."
+  else if (errors["email.port"]) out["email.port"] = errors["email.port"]
+  if (errors["email.user"]) out["email.user"] = errors["email.user"]
+  if (smtpDestinationChanged(dto, draft) && dto.email.passwordSet && !hasText(draft.password)) out["email.password"] = SMTP_SECRET_AGAIN_MESSAGE
+  if (!dto.secretsKeyConfigured && hasText(draft.password)) out["email.password"] = NO_SECRETS_KEY_MESSAGE
+  if (Object.keys(out).length > 0) return { errors: out }
+  if (!emailTestUsesDraft(draft)) return { errors: out, request: {} }
+  return {
+    errors: out,
+    request: {
+      config: {
+        host,
+        port: port ?? undefined,
+        secure: draft.secure ?? dto.email.secure,
+        user: draft.user !== undefined ? trimmed(draft.user) || null : dto.email.user,
+        ...(hasText(draft.password) ? { password: draft.password } : {}),
+      },
+    },
+  }
+}
+
+/** Etapas do teste de conexão, na ordem em que acontecem, com o nome que a tela mostra. */
+export const SMTP_STAGES: ReadonlyArray<{ stage: Exclude<SmtpConnectionStage, "OK">; label: string }> = [
+  { stage: "CONNECT", label: "Conexão" },
+  { stage: "TLS", label: "TLS" },
+  { stage: "AUTH", label: "Autenticação" },
+]
+
+export type StageState = "ok" | "failed" | "skipped"
+
+/**
+ * Estado de cada etapa a partir do resultado: sucesso = todas ok (menos a autenticação, "não testado", se o servidor foi usado sem login); falha na etapa X = anteriores ok, X falhou,
+ * depois dela "não chegou a testar".
+ */
+export function smtpStageStates(result: { ok: boolean; stage: SmtpConnectionStage; authenticated?: boolean }): Array<{ stage: string; label: string; state: StageState }> {
+  const found = SMTP_STAGES.findIndex((s) => s.stage === result.stage)
+  const failedAt = result.ok ? -1 : found === -1 ? 0 : found
+  return SMTP_STAGES.map((s, i): { stage: string; label: string; state: StageState } => {
+    if (failedAt === -1) return { ...s, state: s.stage === "AUTH" && result.authenticated === false ? "skipped" : "ok" }
+    return { ...s, state: i < failedAt ? "ok" : i === failedAt ? "failed" : "skipped" }
+  })
+}
+
 /** Texto do RESULTADO do teste por `code` (o servidor também manda `message`, mas a tela usa o seu: o texto é nosso e não muda com o deploy do backend). */
 export const TEST_ERROR_TEXT: Record<TestChannelErrorCode, { title: string; action: string }> = {
   DESTINATION_BLOCKED: {
@@ -581,8 +669,8 @@ export const SERVER_FIELD_LABELS: Record<string, string> = {
   "email.secure": "Conexão segura",
   "email.user": "Usuário SMTP",
   "email.password": "Senha SMTP",
-  "email.fromName": "Nome do remetente",
-  "email.fromAddress": "E-mail do remetente",
+  "email.fromName": "Remetente",
+  "email.fromAddress": "Remetente",
   "email.recipients": "Destinatários de e-mail",
   "email.minSeverity": "Severidade mínima (e-mail)",
   "whatsapp.baseUrl": "URL da Evolution API",
@@ -601,6 +689,7 @@ export const SERVER_FIELD_LABELS: Record<string, string> = {
 function screenField(field: string): string {
   if (field === "config.password") return "email.password"
   if (field === "config.apiKey") return "whatsapp.apiKey"
+  if (field === "email.fromName" || field === "email.fromAddress") return "email.from"
   return field
 }
 

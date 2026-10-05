@@ -20,6 +20,7 @@ export function SecretControl({
   error,
   hint,
   note,
+  setHint,
 }: {
   testId: string
   name: string
@@ -34,6 +35,8 @@ export function SecretControl({
   error?: string
   hint?: string
   note?: string | null
+  /** Ver `SecretField`: dica quando o segredo já existe e o campo está fechado. */
+  setHint?: string
 }) {
   if (markedForRemoval) {
     return (
@@ -58,7 +61,7 @@ export function SecretControl({
 
   return (
     <div className="space-y-1">
-      <SecretField testId={testId} name={name} isSet={isSet} unreadable={unreadable} value={value} onChange={onChange} error={error} hint={hint} setNote={note} />
+      <SecretField testId={testId} name={name} isSet={isSet} unreadable={unreadable} value={value} onChange={onChange} error={error} hint={hint} setNote={note} setHint={setHint} />
       {isSet && value === undefined && (
         <Button type="button" variant="ghost" size="touch-sm" className="text-danger-700" onClick={() => onMarkRemoval(true)} aria-label={removeLabel}>
           <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

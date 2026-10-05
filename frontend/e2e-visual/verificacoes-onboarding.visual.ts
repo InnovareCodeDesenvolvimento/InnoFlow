@@ -157,7 +157,7 @@ test.describe("onboarding: balão do tour (painel)", () => {
     await page.waitForTimeout(400)
     await verificarEstado(page, p, largo ? "admin-3-dashboard" : "admin-3-atalhos")
     if (largo) {
-      for (let i = 0; i < 9; i++) await page.getByRole("button", { name: "Próximo" }).click() // Sites…Comunicação
+      for (let i = 0; i < 9; i++) await page.getByRole("button", { name: "Próximo" }).click() // Sites…Configurações
       await page.waitForTimeout(500)
       await verificarEstado(page, p, "admin-12-atalhos")
     }

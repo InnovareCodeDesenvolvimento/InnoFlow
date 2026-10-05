@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { CommunicationSettingsDTO, TestChannelResult, TestEmailRequest, TestWhatsappRequest, UpdateCommunicationSettingsRequest } from "@/types/api"
+import type { CommunicationSettingsDTO, DomainCheckResponse, TestChannelResult, TestEmailRequest, TestSmtpConnectionRequest, TestSmtpConnectionResult, TestWhatsappRequest, UpdateCommunicationSettingsRequest } from "@/types/api"
 
 /**
  * `/api/admin/communication-settings` — canais de aviso ao dono (e-mail SMTP e WhatsApp Evolution), N-7. ADMIN-only (403 `FORBIDDEN` para OPERATOR).
@@ -20,6 +20,18 @@ export const communicationSettingsService = {
   /** Sempre 200 com o resultado (erro do provedor é RESULTADO, `ok: false`). Erros HTTP (400/403/429/503) são falha da rota. */
   async testEmail(payload: TestEmailRequest): Promise<TestChannelResult> {
     const { data } = await api.post<TestChannelResult>("/api/admin/communication-settings/test-email", payload)
+    return data
+  },
+
+  /** Só conecta, negocia TLS e autentica (não envia e-mail). SEMPRE 200 com o estágio; 400/403/429/503 são falha da rota. */
+  async testSmtpConnection(payload: TestSmtpConnectionRequest): Promise<TestSmtpConnectionResult> {
+    const { data } = await api.post<TestSmtpConnectionResult>("/api/admin/communication-settings/test-smtp-connection", payload)
+    return data
+  },
+
+  /** Diagnóstico de SPF/DKIM/DMARC do remetente SALVO. Falha de DNS vem como `ERRO` no registro (200); 400/403/429/503 são falha da rota. */
+  async domainCheck(selector?: string): Promise<DomainCheckResponse> {
+    const { data } = await api.get<DomainCheckResponse>("/api/admin/communication-settings/domain-check", { params: selector ? { selector } : undefined })
     return data
   },
 

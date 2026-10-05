@@ -19,8 +19,12 @@ import {
   parseCommunicationError,
   parsePhoneList,
   parseRecipientList,
+  parseFrom,
+  formatFrom,
   planEmailTest,
+  planSmtpConnectionTest,
   planWhatsappTest,
+  smtpStageStates,
   testErrorText,
   validateDraft,
   withCurrentPassword,
@@ -311,5 +315,67 @@ describe("parseCommunicationError — por code, nunca pelo texto do servidor", (
     expect(e.retryAfterSeconds).toBe(300)
     expect(parseCommunicationError(axiosError(429, "<html>")).message).toMatch(/Muitas/)
     expect(parseCommunicationError(axiosError(503, "<html>")).message).toMatch(/configuração de comunicação/)
+  })
+})
+
+describe("campo único \"Remetente\" (nome <e-mail> ou só o e-mail)", () => {
+  it("parseFrom separa nome e e-mail, aceita aspas e usa o nome InnoFlow quando só vem o e-mail", () => {
+    expect(parseFrom("InnoFlow <no-reply@seudominio.com.br>")).toEqual({ name: "InnoFlow", address: "no-reply@seudominio.com.br" })
+    expect(parseFrom('"Inno Flow" <a@b.com>')).toEqual({ name: "Inno Flow", address: "a@b.com" })
+    expect(parseFrom("no-reply@seudominio.com.br")).toEqual({ name: "InnoFlow", address: "no-reply@seudominio.com.br" })
+    expect(parseFrom("<a@b.com>")).toEqual({ name: "InnoFlow", address: "a@b.com" })
+  })
+  it("recusa e-mail inválido, nome longo e vazio", () => {
+    expect(parseFrom("sem-arroba")).toBeNull()
+    expect(parseFrom("Nome <invalido>")).toBeNull()
+    expect(parseFrom(`${"x".repeat(81)} <a@b.com>`)).toBeNull()
+    expect(parseFrom("   ")).toBeNull()
+  })
+  it("formatFrom mostra o salvo do jeito que o campo aceita", () => {
+    expect(formatFrom("InnoFlow", "u@x.com")).toBe("InnoFlow <u@x.com>")
+    expect(formatFrom(null, "u@x.com")).toBe("u@x.com")
+    expect(formatFrom("InnoFlow", null)).toBe("")
+  })
+  it("o PUT leva fromName e fromAddress só do que mudou; o mesmo texto do salvo não é alteração", () => {
+    const d = dto()
+    expect(buildUpdatePayload(d, draft({ email: { from: "InnoFlow <u@x.com>" } }))).toEqual({})
+    expect(buildUpdatePayload(d, draft({ email: { from: "Outro <novo@x.com>" } }))).toEqual({ email: { fromName: "Outro", fromAddress: "novo@x.com" } })
+    expect(buildUpdatePayload(d, draft({ email: { from: "novo@x.com" } }))).toEqual({ email: { fromAddress: "novo@x.com" } })
+  })
+  it("remetente inválido vira erro de campo e em branco mantém o valor", () => {
+    expect(validateDraft(dto(), draft({ email: { from: "invalido" } }))["email.from"]).toMatch(/Remetente inválido/)
+    expect(validateDraft(dto(), draft({ email: { from: "" } }))["email.from"]).toBeUndefined()
+    expect(buildUpdatePayload(dto(), draft({ email: { from: "" } }))).toEqual({})
+  })
+  it("erro do servidor em fromName/fromAddress aponta para o campo único", () => {
+    const err = parseCommunicationError(axiosError(400, { code: "VALIDATION_ERROR", details: [{ path: "email.fromAddress", message: "x" }] }))
+    expect(err.fields).toEqual(["email.from"])
+  })
+})
+
+describe("planSmtpConnectionTest (Testar conexão)", () => {
+  it("sem alteração testa o SALVO: pedido vazio", () => {
+    expect(planSmtpConnectionTest(dto(), {}, {}).request).toEqual({})
+  })
+  it("com alteração manda o EFETIVO e só leva a senha se digitada", () => {
+    const plan = planSmtpConnectionTest(dto(), { host: "novo.x.com", port: "465", secure: true, password: "nova" }, {})
+    expect(plan.request).toEqual({ config: { host: "novo.x.com", port: 465, secure: true, user: "u@x.com", password: "nova" } })
+    expect(JSON.stringify(planSmtpConnectionTest(dto(), { secure: true }, {}).request)).not.toContain("password")
+  })
+  it("host novo sem redigitar a senha salva é bloqueado no cliente; sem servidor/porta também", () => {
+    expect(planSmtpConnectionTest(dto(), { host: "novo.x.com" }, {}).errors["email.password"]).toBe(SMTP_SECRET_AGAIN_MESSAGE)
+    const vazio = planSmtpConnectionTest(dto({}, { host: null, port: null, passwordSet: false }), {}, {})
+    expect(vazio.request).toBeUndefined()
+    expect(Object.keys(vazio.errors).sort()).toEqual(["email.host", "email.port"])
+  })
+  it("sem chave de cifragem no servidor não envia senha digitada", () => {
+    expect(planSmtpConnectionTest(dto({ secretsKeyConfigured: false }), { password: "x" }, {}).errors["email.password"]).toBe(NO_SECRETS_KEY_MESSAGE)
+  })
+  it("estágios: sucesso = tudo ok (login não testado sem usuário); falha na etapa = antes ok, ela falhou, depois não testado", () => {
+    expect(smtpStageStates({ ok: true, stage: "OK", authenticated: true }).map((s) => s.state)).toEqual(["ok", "ok", "ok"])
+    expect(smtpStageStates({ ok: true, stage: "OK", authenticated: false }).map((s) => s.state)).toEqual(["ok", "ok", "skipped"])
+    expect(smtpStageStates({ ok: false, stage: "CONNECT" }).map((s) => s.state)).toEqual(["failed", "skipped", "skipped"])
+    expect(smtpStageStates({ ok: false, stage: "TLS" }).map((s) => s.state)).toEqual(["ok", "failed", "skipped"])
+    expect(smtpStageStates({ ok: false, stage: "AUTH" }).map((s) => s.state)).toEqual(["ok", "ok", "failed"])
   })
 })

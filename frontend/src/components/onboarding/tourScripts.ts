@@ -227,13 +227,13 @@ const PANEL_STEPS: readonly TourStep[] = [
     body: "Aqui ficam as credenciais da conta Cielo, o ambiente e os meios de pagamento (cartão e Pix). Os segredos só se gravam: nunca voltam para a tela.",
   },
   {
-    id: "comunicacao",
+    id: "configuracoes",
     kind: "step",
-    target: "nav-comunicacao",
-    requiresNavHref: "/admin/comunicacao",
+    target: "nav-configuracoes",
+    requiresNavHref: "/admin/configuracoes",
     wideOnly: true,
-    title: "Comunicação",
-    body: "Configure por onde você recebe os avisos da operação: e-mail (SMTP) e WhatsApp (Evolution API).",
+    title: "Configurações",
+    body: "Em abas: os dados da empresa (que aparecem nos Termos), o e-mail (SMTP, com teste de conexão), o WhatsApp (Evolution API) e os alertas que chegam a você.",
   },
   {
     // Feature check por rota (`requiresNavHref`): o passo só entra com a tela no menu. Texto conferido com as seções reais da tela em 05/10/2026 (Destino, Chave de criptografia, Agendamento,

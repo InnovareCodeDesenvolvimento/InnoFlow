@@ -1,28 +1,17 @@
-import { Database, Info, KeyRound, ShieldAlert, TriangleAlert } from "lucide-react"
+import { Info, KeyRound, ShieldAlert, TriangleAlert } from "lucide-react"
 import { Alert } from "@/components/ui/Alert"
 import { InlineCode } from "@/components/ui/InlineCode"
-import { formatDateTime } from "@/lib/utils"
-import type { CommunicationSettingsDTO } from "@/types/api"
 
 /**
- * Origem dos valores efetivos: `env` = nada salvo no painel (valem as variáveis `ALERT_*` do servidor; a primeira gravação cria a configuração do canal no banco);
- * `database` = configuração salva nesta tela, com data/hora. O painel manda e a variável de ambiente é a reserva.
+ * Origem `env`: nada foi salvo nesta tela ainda, valem as variáveis `ALERT_*` do servidor; a primeira gravação cria a configuração do canal no banco e daí em diante o painel manda
+ * (a variável fica de reserva). Quando a configuração já está no painel não há banner: o selo "Configurado no painel" do cartão e o "Última alteração" do rodapé dizem isso.
  */
-export function SourceBanner({ source, updatedAt }: Pick<CommunicationSettingsDTO, "source" | "updatedAt">) {
-  if (source === "env") {
-    return (
-      <Alert tone="info" role="status" icon={Info} data-testid="source-banner-env">
-        <p>
-          <span className="font-bold">Usando as variáveis do servidor.</span> Nada foi salvo nesta tela ainda: valem as variáveis <InlineCode>ALERT_*</InlineCode> do ambiente. Daí em diante, o que for salvo aqui manda
-          e a variável fica só de reserva.
-        </p>
-      </Alert>
-    )
-  }
+export function SourceEnvBanner() {
   return (
-    <Alert tone="neutral" role="status" icon={Database} iconClassName="text-primary" data-testid="source-banner-database">
+    <Alert tone="info" role="status" icon={Info} data-testid="source-banner-env">
       <p>
-        <span className="font-bold text-ink">Configuração salva nesta tela.</span> Última alteração em {formatDateTime(updatedAt)}.
+        <span className="font-bold">Usando as variáveis do servidor.</span> Nada foi salvo nesta tela ainda: valem as variáveis <InlineCode>ALERT_*</InlineCode> do ambiente. Daí em diante, o que for salvo aqui manda
+        e a variável fica só de reserva.
       </p>
     </Alert>
   )

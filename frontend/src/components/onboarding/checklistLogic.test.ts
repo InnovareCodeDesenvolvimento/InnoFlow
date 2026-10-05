@@ -40,7 +40,7 @@ describe("deriveChecklist", () => {
   })
 
   it("todo item aponta para uma rota do painel", () => {
-    for (const item of CHECKLIST_ITEMS) expect(item.href).toMatch(/^\/admin\/[a-z-]+$/)
+    for (const item of CHECKLIST_ITEMS) expect(item.href).toMatch(/^\/admin\/[a-z-]+(\/[a-z-]+)?$/)
   })
 })
 
