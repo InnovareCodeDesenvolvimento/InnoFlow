@@ -1092,3 +1092,9 @@ Regra permanente: 100% das telas seguem o padrão premium da landing (plano em `
 - **D4:** Login/Cadastro falam com o motorista (consistente com a landing).
 - **D5:** página 404 de verdade com mascote (o E2E `landing.spec.ts:314` que fixa o redirecionamento é reescrito de propósito).
 - **D6:** sem poses novas do mascote agora (só com arte fornecida). **D7:** portão de desempenho = não piorar a linha de base medida pela Íris (A0).
+
+## Design system unificado FECHADO (05/10/2026) — F-A a F-F + acabamento
+- Entregue e publicado (HEAD d34ebc8 nos dois remotos): vocabulario deprecado zerado (catraca em zero), Admin/PWA/auth/publico/cartao isolado no padrao da landing, drawer do Admin como dialog Radix, folga de contraste (accent/success #1F7B25, warning-700 #A74C08), /app/sessao sem CLS, S-9 (tokenization-session sem merchantId).
+- Baselines visuais (win32) regravadas e classificadas pela Iris; `test:visual` 114/114 (3 rodadas), catalogo `/__ds` 68 imagens 45/45; contraste por pixel 0 reprovados (menor 4,76:1), axe 0/3.257/937. Guia: frontend/DESIGN-SYSTEM.md; politica de baseline: frontend/e2e-visual/BASELINE.md (§10-13).
+- Nao coberto: Admin com dado real, Lighthouse do Admin logado, leitor de tela real, Linux/Safari. Contrastes 4,76-4,83 (info-700, branco/danger, "Saldo disponivel") passam AA e ficaram como estao.
+- Decisao aberta do dono: I-2 (pagina de cartao em subdominio dedicado vs aceitar risco de origem compartilhada).
