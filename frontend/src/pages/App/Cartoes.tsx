@@ -16,6 +16,7 @@ import { getApiErrorMessage } from "@/services/api"
 import { CARD_GATEWAY_DISABLED_ADD_MESSAGE } from "@/lib/paymentMethodDisabled"
 import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
 import { disabledCardReason, issueFromEligibility } from "@/lib/cardEligibility"
+import { UNREADABLE_CARD_BADGE, UNREADABLE_CARD_HOW_TO, UNREADABLE_CARD_MESSAGE, isUnreadable } from "@/lib/cardUnreadable"
 import { toast } from "sonner"
 import type { MePaymentMethodDTO } from "@/types/api"
 
@@ -121,21 +122,32 @@ export function Cartoes() {
             <ul className="space-y-2.5">
               {data.items.map((method) => {
                 const exp = expiry(method)
+                const unreadable = isUnreadable(method)
                 return (
                   <li
                     key={method.id}
-                    data-disabled={cardsDisabled || undefined}
+                    data-disabled={cardsDisabled || unreadable || undefined}
+                    data-unreadable={unreadable || undefined}
                     className="card-elevated flex items-center gap-3 p-4"
                   >
-                    <IconBadge icon={CreditCard} size="lg" className={cardsDisabled ? "opacity-50 grayscale" : undefined} />
+                    <IconBadge icon={CreditCard} size="lg" className={cardsDisabled || unreadable ? "opacity-50 grayscale" : undefined} />
                     <div className="min-w-0 flex-1">
-                      <p className={`flex items-center gap-2 text-sm font-bold ${cardsDisabled ? "text-ink-softer" : "text-ink"}`}>
+                      <p className={`flex items-center gap-2 text-sm font-bold ${cardsDisabled || unreadable ? "text-ink-softer" : "text-ink"}`}>
                         {brandLabel(method.brand)} {method.last4 && <span className="whitespace-nowrap font-normal text-ink-softer">•••• {method.last4}</span>}
                       </p>
                       <p className="text-xs text-ink-softer">
                         {method.holderName ? `${method.holderName}${exp ? " · " : ""}` : ""}
                         {exp ? `validade ${exp}` : ""}
                       </p>
+                      {unreadable && (
+                        <div className="mt-1.5 space-y-1">
+                          <Badge variant="neutral">{UNREADABLE_CARD_BADGE}</Badge>
+                          <p className="text-xs font-medium text-ink-soft" data-testid="card-unreadable-reason">
+                            {UNREADABLE_CARD_MESSAGE}
+                            {!cardsDisabled && ` ${UNREADABLE_CARD_HOW_TO}`}
+                          </p>
+                        </div>
+                      )}
                       {issue && (
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                           <Badge variant="neutral">Indisponível</Badge>
@@ -145,7 +157,7 @@ export function Cartoes() {
                         </div>
                       )}
                     </div>
-                    {method.isDefault && !cardsDisabled && (
+                    {method.isDefault && !cardsDisabled && !unreadable && (
                       <Badge variant="primary" className="shrink-0">
                         <Star className="h-3 w-3" aria-hidden="true" />
                         Padrão
@@ -162,7 +174,7 @@ export function Cartoes() {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {!method.isDefault && !cardsDisabled && (
+                        {!method.isDefault && !cardsDisabled && !unreadable && (
                           <DropdownMenuItem onSelect={() => handleSetDefault(method)}>
                             <Star className="h-4 w-4" aria-hidden="true" />
                             Tornar padrão

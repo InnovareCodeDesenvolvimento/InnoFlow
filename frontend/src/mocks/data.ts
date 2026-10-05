@@ -109,6 +109,10 @@ export const mockUsers: MockUser[] = [
   // L1.8: chargeback registrado pelo ADMIN - `cardEligibility` volta CHARGEBACK_BLOCKED e o cartão (cadastro, tokenização, iniciar com CARD) responde 403 `CARD_CHARGEBACK_BLOCKED`.
   // Pix e carteira seguem normais. Nasce com 2 cartões (aparecem desabilitados). Conta separada de propósito: o estado do mock vive na página e os E2E de cartão dependem de elegível.
   { id: "user_driver_chargeback", name: "Cléber Chargeback", email: "chargeback@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  // Chave dos segredos derivada do JWT_SECRET (05/10): cartão ILEGÍVEL (`MePaymentMethodDTO.unreadable`). `cartao-ilegivel@` = padrão ilegível + 1 cartão legível; `cartao-ilegivel-todos@` = os 2 ilegíveis
+  // (a escolha de pagamento cai na carteira). Ver `UNREADABLE_CARD_DRIVER_ID` em `mocks/meData.ts`. Contas separadas de propósito: o estado do mock vive na página.
+  { id: "user_driver_cartao_ilegivel", name: "Iara Ilegível", email: "cartao-ilegivel@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_driver_cartao_ilegivel_todos", name: "Ivo Ilegível", email: "cartao-ilegivel-todos@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
   // L1.4/L1.9 (privacidade): personas da exclusão de conta e do aceite dos termos (ver o cabeçalho de `mocks/legalData.ts`). Contas separadas de propósito: a exclusão ANONIMIZA a conta no
   // mock (o login com a senha antiga passa a falhar), então não pode ser feita em motorista que outro E2E usa.

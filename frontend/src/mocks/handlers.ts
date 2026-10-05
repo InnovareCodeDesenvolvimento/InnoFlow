@@ -39,6 +39,7 @@ import {
   linkGoogleToMockDriver,
   listMockPaymentMethods,
   listMockSessions,
+  markMockPaymentMethodUnreadable,
   removeMockPaymentMethod,
   setDefaultMockPaymentMethod,
   startMockSession,
@@ -1749,9 +1750,15 @@ export const handlers = [
     if (body.payment?.mode === "CARD" && isGatewayDisabledFor(scope.user.userId)) {
       return HttpResponse.json(gatewayDisabledBody(scope.user.userId, "CARD"), { status: 409 })
     }
+    // Cartão que ficou ilegível DEPOIS de a lista carregar (uma vez só): a tentativa seguinte já vem com 409 `PAYMENT_METHOD_UNREADABLE`.
+    if (body.payment?.mode === "CARD" && localStorage.getItem("mock:cartao-ilegivel") === "ao-iniciar") {
+      localStorage.removeItem("mock:cartao-ilegivel")
+      markMockPaymentMethodUnreadable(scope.user.userId, body.payment.paymentMethodId)
+    }
     const result = startMockSession(scope.user.userId, body.ocppIdentity, body.connectorId, body.payment)
     if (!result.ok) {
-      const status = result.code === "ALREADY_HAS_ACTIVE_SESSION" ? 409 : result.code === "PAYMENT_METHOD_NOT_FOUND" ? 404 : 422
+      const status =
+        result.code === "ALREADY_HAS_ACTIVE_SESSION" || result.code === "PAYMENT_METHOD_UNREADABLE" ? 409 : result.code === "PAYMENT_METHOD_NOT_FOUND" ? 404 : 422
       return HttpResponse.json(errorBody(result.message, result.code), { status })
     }
     return HttpResponse.json(

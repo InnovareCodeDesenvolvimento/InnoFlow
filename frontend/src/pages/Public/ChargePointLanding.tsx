@@ -21,6 +21,7 @@ import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
 import { CARD_GATEWAY_DISABLED_START_MESSAGE, isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
 import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
 import { issueErrorMessage, issueFromEligibility, issueFromError, type CardEligibilityIssue } from "@/lib/cardEligibility"
+import { UNREADABLE_CARD_START_MESSAGE, isUnreadableCardError, usableMethods } from "@/lib/cardUnreadable"
 import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
 
 /**
@@ -84,10 +85,12 @@ export function ChargePointLanding() {
   // Carteira e Pix não são afetados: com problema de cartão a seleção efetiva é sempre Carteira e o botão "Iniciar recarga" segue normal.
   const [serverCardIssue, setServerCardIssue] = useState<CardEligibilityIssue | null>(null)
   const cardIssue = serverCardIssue ?? issueFromEligibility(paymentMethodsData?.cardEligibility)
-  const defaultPaymentMethod = paymentMethods.find((m) => m.isDefault)
+  // Cartão ILEGÍVEL (`unreadable`) aparece no seletor, mas nunca é escolhido nem pré-selecionado: tudo abaixo olha só os usáveis. Com todos ilegíveis, a seleção efetiva é a Carteira.
+  const usablePaymentMethods = usableMethods(paymentMethods)
+  const defaultPaymentMethod = usablePaymentMethods.find((m) => m.isDefault)
   const paymentSelectionIsValid =
     !!userPaymentSelection &&
-    (userPaymentSelection.mode === "WALLET" || paymentMethods.some((m) => m.id === userPaymentSelection.paymentMethodId))
+    (userPaymentSelection.mode === "WALLET" || usablePaymentMethods.some((m) => m.id === userPaymentSelection.paymentMethodId))
   const paymentSelection: PaymentSelection = cardGatewayDisabled || cardIssue
     ? { mode: "WALLET" }
     : paymentSelectionIsValid && userPaymentSelection
@@ -126,6 +129,13 @@ export function ChargePointLanding() {
         queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
         // Chargeback (403 CARD_CHARGEBACK_BLOCKED): o card explicativo já traz o texto da API inteiro - repeti-lo num alerta ao lado seria o mesmo parágrafo duas vezes.
         setStartError(issue.reason === "CHARGEBACK_BLOCKED" ? null : issueErrorMessage(issue))
+        return
+      }
+      if (isUnreadableCardError(err)) {
+        // 409: o cartão ficou ilegível depois de a lista ter dito o contrário. Nada foi autorizado nem cobrado. Atualiza a lista (o cartão passa a vir com o selo e a seleção
+        // derivada cai para outro cartão/Carteira sozinha) e explica, sem culpa.
+        queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
+        setStartError(UNREADABLE_CARD_START_MESSAGE)
         return
       }
       if (code === "PAYMENT_METHOD_NOT_FOUND") {

@@ -1073,6 +1073,8 @@ export type MeStartSessionErrorCode =
   /** `payment.paymentMethodId` não existe (mais) para este motorista — pode ter sido removido em outra aba. */
   | "PAYMENT_METHOD_NOT_FOUND"
   | "PAYMENT_METHOD_DISABLED"
+  /** 409 (05/10/2026): o cartão escolhido ficou ilegível no servidor (`MePaymentMethodDTO.unreadable`) — nada foi cobrado nem autorizado. Atualizar a lista e pedir para cadastrá-lo de novo. */
+  | "PAYMENT_METHOD_UNREADABLE"
   | "CARD_AUTHORIZATION_DENIED"
   | "PAYMENT_GATEWAY_UNAVAILABLE"
   /** I-7: `payment.mode = "CARD"` sem identidade verificada (login Google) — 403. Carteira/Pix seguem normais. */
@@ -1307,6 +1309,12 @@ export interface MePaymentMethodDTO {
   expiryYear: number | null
   isDefault: boolean
   createdAt: string
+  /**
+   * Aditivo (05/10/2026, chave dos segredos derivada do `JWT_SECRET`): `true` = o servidor NÃO consegue mais ler o token deste cartão (o `JWT_SECRET` mudou). O cartão fica na lista,
+   * mas não serve para pagar: iniciar sessão com ele responde 409 `PAYMENT_METHOD_UNREADABLE`. A tela mostra "Cadastre de novo", não deixa escolher e deixa REMOVER.
+   * Ausente = legível (tolera o front publicado antes do backend).
+   */
+  unreadable?: boolean
 }
 
 // ---- GET /api/me/payment-methods ----

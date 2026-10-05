@@ -316,6 +316,8 @@ export function startMockSession(
     const paymentMethodId = payment && "paymentMethodId" in payment ? payment.paymentMethodId : undefined
     const method = paymentMethodId ? getPaymentMethods(driverId).find((m) => m.id === paymentMethodId) : undefined
     if (!method) return { ok: false, code: "PAYMENT_METHOD_NOT_FOUND", message: "Cartão não encontrado — pode ter sido removido." }
+    // Antes de qualquer autorização: nada é cobrado (o servidor real também responde ANTES de criar o intent).
+    if (method.unreadable) return { ok: false, code: "PAYMENT_METHOD_UNREADABLE", message: "Este cartão precisa ser cadastrado novamente." }
 
     const holder = (method.holderName ?? "").toUpperCase()
     if (holder.includes(CARD_DENIED_MARKER)) {
@@ -865,6 +867,8 @@ interface MockPaymentMethod {
   expiryYear: number | null
   isDefault: boolean
   createdAt: string
+  /** Cartão cujo token o servidor não consegue mais ler (JWT_SECRET trocado) — `MePaymentMethodDTO.unreadable`. */
+  unreadable?: boolean
 }
 
 const paymentMethodsByDriver = new Map<string, MockPaymentMethod[]>()
@@ -888,6 +892,31 @@ const CARD_DEMO_DRIVER_ID = "user_driver_cartoes"
  * Pagamento por carteira segue normal.
  */
 const GATEWAY_OFF_DRIVER_ID = "user_driver_gateway_off"
+
+/**
+ * Cartão ILEGÍVEL (05/10/2026; `MePaymentMethodDTO.unreadable`): contas separadas de propósito (o estado do mock vive na página).
+ *  - `user_driver_cartao_ilegivel` (`cartao-ilegivel@`): 2 cartões — o PADRÃO (Visa 1111) ilegível e um Master 4444 legível. Saldo normal.
+ *  - `user_driver_cartao_ilegivel_todos` (`cartao-ilegivel-todos@`): os 2 cartões ilegíveis -> a escolha de pagamento cai na carteira com o aviso.
+ * Iniciar sessão com um cartão ilegível = 409 `PAYMENT_METHOD_UNREADABLE` (sem cobrar). Para o 409 INESPERADO (a lista disse "legível" e o servidor discorda):
+ * `localStorage["mock:cartao-ilegivel"] = "ao-iniciar"` — a PRÓXIMA tentativa com cartão vira ilegível e responde 409 (uma vez só; depois a lista já vem com o selo).
+ */
+const UNREADABLE_CARD_DRIVER_ID = "user_driver_cartao_ilegivel"
+const UNREADABLE_ALL_CARDS_DRIVER_ID = "user_driver_cartao_ilegivel_todos"
+
+function seedUnreadableCardsDriver(driverId: string): MockPaymentMethod[] {
+  const now = new Date().toISOString()
+  const all = driverId === UNREADABLE_ALL_CARDS_DRIVER_ID
+  return [
+    { id: `pm_seed_${driverId}_1`, driverId, brand: "Visa", last4: "1111", holderName: "Motorista Ilegivel", expiryMonth: 8, expiryYear: 2030, isDefault: true, createdAt: now, unreadable: true },
+    { id: `pm_seed_${driverId}_2`, driverId, brand: "Master", last4: "4444", holderName: "Motorista Aprovado", expiryMonth: 9, expiryYear: 2029, isDefault: false, createdAt: now, unreadable: all },
+  ]
+}
+
+/** Gatilho `mock:cartao-ilegivel = ao-iniciar`: o cartão ficou ilegível DEPOIS de a lista ser carregada. */
+export function markMockPaymentMethodUnreadable(driverId: string, id: string): void {
+  const method = getPaymentMethods(driverId).find((m) => m.id === id)
+  if (method) method.unreadable = true
+}
 
 /**
  * `user_driver_gateway_restrito` (F5.7): servidor de produção em ambiente SANDBOX e este motorista não está na lista de testadores.
@@ -1011,7 +1040,9 @@ function getPaymentMethods(driverId: string): MockPaymentMethod[] {
         ? seedCardDemoDriver()
         : driverId === SO_SENHA_DRIVER_ID || driverId === BLOCKED_DRIVER_ID || driverId === CHARGEBACK_DRIVER_ID
           ? seedEligibilityDriver(driverId)
-          : isGatewayDisabledFor(driverId)
+          : driverId === UNREADABLE_CARD_DRIVER_ID || driverId === UNREADABLE_ALL_CARDS_DRIVER_ID
+            ? seedUnreadableCardsDriver(driverId)
+            : isGatewayDisabledFor(driverId)
             ? seedGatewayOffDriver(driverId)
             : [],
     )
@@ -1073,6 +1104,7 @@ function toPaymentMethodDTO(m: MockPaymentMethod): MePaymentMethodDTO {
     expiryYear: m.expiryYear,
     isDefault: m.isDefault,
     createdAt: m.createdAt,
+    unreadable: m.unreadable === true,
   }
 }
 
