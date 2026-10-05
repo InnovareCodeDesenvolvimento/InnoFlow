@@ -13,3 +13,6 @@ test-results
 *.log
 .git
 .vscode
+
+# apresentacao: PDFs (~20 MB) e capturas geradas, nada disso entra na imagem
+apresentacao
