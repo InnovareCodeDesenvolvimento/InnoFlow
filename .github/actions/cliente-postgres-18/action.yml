@@ -1,0 +1,47 @@
+name: Cliente do PostgreSQL 18 (pg_dump / pg_restore / psql)
+description: >-
+  Instala o cliente 18 do repositorio oficial do PostgreSQL (pgdg) e o coloca na frente do PATH. E o MESMO cliente das imagens
+  do backend (postgresql18-client). Usado pelo job `backend` (testes de backup que executam pg_dump/pg_restore de verdade) e
+  pelo job `backup-restore`. Exige `actions/checkout` ANTES (acao local). So Ubuntu.
+
+runs:
+  using: composite
+  steps:
+    - name: Instala o postgresql-client-18 (pgdg), com tentativas
+      shell: bash
+      run: |
+        set -u
+        # Por que o 18: e o cliente das imagens (Dockerfile*: postgresql18-client). Cliente >= servidor e regra do pg_dump; o 18 copia
+        # servidores 16, 17 e 18. O Ubuntu do runner traz um cliente mais antigo, entao o 18 vai na FRENTE do PATH.
+        instalar() {
+          sudo install -d /usr/share/postgresql-common/pgdg &&
+          sudo curl -fsSL --retry 3 --retry-delay 2 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc &&
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null &&
+          sudo apt-get update -qq &&
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+        }
+        ok=0
+        for tentativa in 1 2 3; do
+          if instalar; then ok=1; break; fi
+          echo "::warning title=pgdg::tentativa $tentativa de instalar o postgresql-client-18 falhou; repetindo em 10 s"
+          sleep 10
+        done
+        if [ "$ok" = "1" ]; then
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          echo "BACKUP_PG_BIN_DIR=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          exit 0
+        fi
+        # O repositorio pgdg esta fora do ar. Cai para o cliente 16/17 que o runner ja tenha (o Ubuntu 24.04 do GitHub traz o 16), COM
+        # aviso: serve para servidor 16 (o job `backend`); contra um servidor 18 o pg_dump se recusa sozinho, com a mensagem clara.
+        for v in 17 16; do
+          if [ -x "/usr/lib/postgresql/$v/bin/pg_dump" ]; then
+            echo "::warning title=pgdg indisponivel::usando o cliente $v ja instalado no runner (nao e o 18 das imagens)"
+            echo "/usr/lib/postgresql/$v/bin" >> "$GITHUB_PATH"
+            echo "BACKUP_PG_BIN_DIR=/usr/lib/postgresql/$v/bin" >> "$GITHUB_ENV"
+            "/usr/lib/postgresql/$v/bin/pg_dump" --version
+            exit 0
+          fi
+        done
+        echo "::error title=Cliente do PostgreSQL::nao consegui instalar o postgresql-client-18 e o runner nao tem 16/17; os testes de backup (pg_dump/pg_restore) nao podem rodar"
+        exit 1

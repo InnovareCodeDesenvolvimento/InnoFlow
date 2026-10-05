@@ -22,6 +22,11 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     css: false,
+    // O default do Vitest (5 s por teste) e justo para os testes de dialog/formulario com user-event: medido, o RemoteStartDialog leva
+    // ~1,5-1,9 s por teste SOZINHO numa maquina de 24 nucleos e estourou os 5 s quando a suite inteira rodou em paralelo (2 falhas, passou
+    // isolado). O runner do GitHub tem 2-4 vCPU: sem folga, o CI ficaria vermelho por lentidao, nao por bug. Mesmos valores do backend.
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     coverage: {
       provider: "v8",

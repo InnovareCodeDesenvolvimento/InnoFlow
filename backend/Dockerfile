@@ -31,7 +31,10 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
 RUN npx prisma generate
-RUN npm run build
+# Teto do heap do Node so neste passo (nao afeta `npm ci`/runtime). Medido: `tsc` do backend PASSA com 512 MB e ABORTA com 384
+# ("JavaScript heap out of memory", exit 134); o piso (~450 MB) sobe com o codigo e o padrao do V8 em container pequeno pode ficar
+# perto dele. 1536 MB = ~3x o piso; nao reserva memoria. Mesma regra do frontend/Dockerfile. Copie a mudanca aos 3 Dockerfiles.
+RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
 
 # ---- Estágio 2: prod-deps — node_modules SÓ de produção (sem eslint/vitest/tsc/@types) ----
 # Estágio próprio em vez de `npm prune` no builder: o `npm ci --omit=dev` parte do zero e é

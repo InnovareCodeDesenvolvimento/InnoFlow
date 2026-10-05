@@ -23,7 +23,15 @@ COPY . .
 ARG VITE_API_URL=""
 ENV VITE_API_URL=$VITE_API_URL
 
-RUN npm run build
+# Teto do heap do Node para o build (MB). Medido: `tsc -b` PASSA com 448 MB e ABORTA com 384 ("JavaScript heap out of memory");
+# o `vite build` quase nao usa heap JS (o resto do pico, ~0,6 GB, e memoria nativa do rolldown). O V8 do Node 22 costuma derivar o
+# teto padrao de ~1/4 da memoria do container (2 GB -> ~512 MB, a poucos MB do piso do tsc, que sobe com o codigo; comportamento
+# conhecido do V8, NAO medido num container aqui): fixar 1536 (~3,4x o piso) tira o limite artificial. NAO reserva memoria: se o servidor nao tem, o kernel mata o build e o script diz isso no fim do log.
+# `scripts/build-docker.sh` roda o MESMO `npm run build` (tsc -b && vite build && vite build do cartao, nada mudou na saida),
+# imprime a memoria disponivel no comeco e, se falhar, a causa provavel no fim (OOM/heap/TS/rede). Ver docs/FLUXO-DE-PUBLICACAO.md.
+ARG BUILD_MAX_OLD_SPACE_MB=1536
+ENV BUILD_MAX_OLD_SPACE_MB=$BUILD_MAX_OLD_SPACE_MB
+RUN sh scripts/build-docker.sh
 
 # ---- Stage 2: Serve ----
 # `nginx:1.30-alpine` = linha estável do nginx (1.30.x). Acompanhe a linha estável (as pares:

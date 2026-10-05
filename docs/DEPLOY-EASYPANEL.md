@@ -11,6 +11,10 @@ criados no EasyPanel apontam para o repositório antigo**: repointe a origem
 git de cada um (api, ocpp-gateway, worker, frontend) para a URL nova, senão
 o deploy automático por push para de funcionar.
 
+**Publicação segura:** o EasyPanel constrói o `main`; mudanças de infraestrutura/Dockerfile entram por branch + PR com o CI verde
+(que já faz `docker build` das 4 imagens). Fluxo, proteção de branch e o checklist "se o deploy falhar":
+[`docs/FLUXO-DE-PUBLICACAO.md`](FLUXO-DE-PUBLICACAO.md).
+
 ## 0. Bancos gerenciados
 
 Crie no EasyPanel (como serviços de banco, não como App):
