@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { Gauge, Inbox, List, Map as MapIcon, PlugZap, Wallet, Zap } from "lucide-react"
 import { Mascot, MascotFace } from "@/components/brand/Mascot"
 import { Logo } from "@/components/brand/Logo"
@@ -67,24 +67,6 @@ const PAIRS: Array<{ name: string; fg: [number, number, number]; bg: [number, nu
   { name: "ink-subtle escuro #8CA5B4 / surface escura", fg: [140, 165, 180], bg: [17, 46, 63], min: 3 },
   { name: "lima SOBRE BRANCO (proibido como texto)", fg: [97, 219, 36], bg: [255, 255, 255], min: 4.5, forbidden: true },
 ]
-
-/** Liga/desliga o escopo do PWA (`html[data-area="driver"]`) só neste catálogo, para comparar campos, véu e cards dos dois escopos. */
-function ScopeToggle() {
-  const [on, setOn] = useState(false)
-  useEffect(() => {
-    if (on) document.documentElement.dataset.area = "driver"
-    else delete document.documentElement.dataset.area
-    return () => {
-      delete document.documentElement.dataset.area
-    }
-  }, [on])
-  return (
-    <label className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-ink">
-      <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
-      Escopo do PWA (data-area="driver")
-    </label>
-  )
-}
 
 export default function DesignSystemCatalog() {
   const [hero, setHero] = useState(true)
@@ -198,7 +180,7 @@ export default function DesignSystemCatalog() {
         </Section>
 
         <Section title="PageHeader e StatCard" note="O hero é único por tela; sem contagem animada.">
-          <PageHeader title="Título da tela" description="Descrição curta da área." icon={Gauge} eyebrow="Financeiro" actions={<Button variant="lime">Nova ação</Button>} animate={false} />
+          <PageHeader title="Título da tela" description="Descrição curta da área." icon={Gauge} eyebrow="Financeiro" actions={<Button variant="lime">Nova ação</Button>} />
           <Row className="items-start">
             <label className="flex items-center gap-2 text-sm text-ink-soft">
               <input type="checkbox" checked={hero} onChange={(e) => setHero(e.target.checked)} /> hero
@@ -235,11 +217,7 @@ export default function DesignSystemCatalog() {
           </div>
         </Section>
 
-        <Section
-          title="Campos, véu e Segmented — escopo de área"
-          note="Input/Select/Textarea/Button usam --field-radius (12 px por padrão; 14 px com data-area='driver'). O interruptor abaixo liga o escopo do PWA no <html> para comparar."
-        >
-          <ScopeToggle />
+        <Section title="Campos e Segmented" note="Input/Select/Textarea/Button usam --field-radius (= --radius-control, 14 px) em TODO o app desde a F-D.">
           <div className="grid gap-4 md:grid-cols-3">
             <Input label="Input" placeholder="Digite" />
             <Select label="Select" options={[{ value: "a", label: "Opção A" }]} />

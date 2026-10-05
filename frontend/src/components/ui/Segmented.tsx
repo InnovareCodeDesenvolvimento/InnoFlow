@@ -20,6 +20,7 @@ export function Segmented<T extends string>({
   options,
   label,
   className,
+  size = "md",
 }: {
   value: T
   onChange: (value: T) => void
@@ -27,6 +28,8 @@ export function Segmented<T extends string>({
   /** Nome acessível do grupo (vira `aria-label`). */
   label: string
   className?: string
+  /** `sm` (36 px) para barras de filtro do admin; `md` (44 px, alvo de toque) é o do app do motorista. */
+  size?: "md" | "sm"
 }) {
   return (
     <div className={cn("flex flex-wrap gap-1 rounded-[var(--field-radius)] border border-border bg-surface p-1", className)} role="group" aria-label={label}>
@@ -39,7 +42,8 @@ export function Segmented<T extends string>({
           title={title}
           onClick={() => onChange(v)}
           className={cn(
-            "flex min-h-11 items-center gap-1.5 rounded-[calc(var(--field-radius)-0.25rem)] px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+            size === "sm" ? "min-h-9" : "min-h-11",
+            "flex items-center gap-1.5 rounded-[calc(var(--field-radius)-0.25rem)] px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
             value === v ? "bg-focus text-on-focus" : "text-ink-softer hover:bg-muted hover:text-ink",
           )}
         >

@@ -38,12 +38,12 @@ test.describe("shell do PWA — mobile (390px)", () => {
     expect(await horizontalOverflow(page)).toBe(0)
   })
 
-  test("o escopo data-area='driver' existe só dentro do app (público e login não o têm)", async ({ page }) => {
+  test("sem escopo transitório (F-D): nenhuma página tem data-area; o shell do app se marca com data-app-shell; campos do app em 14 px e CTA lima", async ({ page }) => {
     await page.goto("/login")
-    await expect(page.locator("html")).not.toHaveAttribute("data-area", "driver")
+    await expect(page.locator("html")).not.toHaveAttribute("data-area", /.*/)
     await login(page, "motorista@innoelektron.com")
-    await expect(page.locator("html")).toHaveAttribute("data-area", "driver")
-    // Campo do app: raio de controle (14 px). O de login/admin segue com o raio de antes (12 px = rounded-lg) — conferido abaixo.
+    await expect(page.locator("html")).not.toHaveAttribute("data-area", /.*/)
+    await expect(page.locator("[data-app-shell]")).toHaveCount(1)
     await page.getByRole("link", { name: "Carteira", exact: true }).last().click()
     await page.getByRole("link", { name: /Adicionar saldo/ }).click()
     expect(await css(page, 'input[inputmode="decimal"]', "border-top-left-radius")).toBe("14px")
@@ -139,16 +139,17 @@ test.describe("shell do PWA — desktop (1440px)", () => {
   })
 })
 
-test.describe("fora do PWA nada mudou", () => {
+test.describe("Admin com os defaults promovidos (F-D)", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
-  test("Admin: campo do diálogo com raio de 12 px e véu COM desfoque de 2 px", async ({ page }) => {
+  test("Admin: campo do diálogo com raio de 14 px e véu SEM desfoque (os mesmos valores do PWA)", async ({ page }) => {
     await login(page, "admin@innoelektron.com", /\/admin/)
-    await expect(page.locator("html")).not.toHaveAttribute("data-area", "driver")
+    await expect(page.locator("html")).not.toHaveAttribute("data-area", /.*/)
     await page.goto("/admin/sites")
     await page.getByRole("button", { name: "Novo site" }).first().click()
     await expect(page.getByRole("dialog")).toBeVisible()
-    expect(await css(page, ".dialog-scrim", "backdrop-filter")).toBe("blur(2px)")
-    expect(await css(page, '[role="dialog"] input', "border-top-left-radius")).toBe("12px")
+    expect(await css(page, ".dialog-scrim", "backdrop-filter")).toBe("none")
+    expect(await css(page, '[role="dialog"] input', "border-top-left-radius")).toBe("14px")
+    expect(await page.getByRole("dialog").evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe("24px")
   })
 })

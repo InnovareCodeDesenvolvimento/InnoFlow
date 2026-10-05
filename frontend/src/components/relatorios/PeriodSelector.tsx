@@ -1,5 +1,5 @@
 import { PERIOD_PRESET_LABELS, PERIOD_PRESETS, type PeriodPreset } from "@/lib/period"
-import { cn } from "@/lib/utils"
+import { Segmented } from "@/components/ui/Segmented"
 
 /**
  * Seletor de período (hoje/7d/30d/mês/personalizado) — usado em todas as
@@ -21,22 +21,7 @@ export function PeriodSelector({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-surface p-1" role="group" aria-label="Período">
-        {PERIOD_PRESETS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onPresetChange(p)}
-            aria-pressed={preset === p}
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-xs font-bold transition-colors",
-              preset === p ? "bg-primary text-primary-foreground" : "text-ink-softer hover:bg-muted hover:text-ink",
-            )}
-          >
-            {PERIOD_PRESET_LABELS[p]}
-          </button>
-        ))}
-      </div>
+      <Segmented size="sm" label="Período" value={preset} onChange={onPresetChange} options={PERIOD_PRESETS.map((p) => ({ value: p, label: PERIOD_PRESET_LABELS[p] }))} />
 
       {preset === "custom" && (
         <div className="flex items-center gap-2">
@@ -49,7 +34,7 @@ export function PeriodSelector({
             value={from}
             max={to}
             onChange={(e) => onCustomChange({ from: e.target.value, to })}
-            className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+            className="rounded-[var(--field-radius)] border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-focus/40 focus:border-focus"
           />
           <span className="text-xs text-ink-softer">até</span>
           <label className="sr-only" htmlFor="period-to">
@@ -61,7 +46,7 @@ export function PeriodSelector({
             value={to}
             min={from}
             onChange={(e) => onCustomChange({ from, to: e.target.value })}
-            className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+            className="rounded-[var(--field-radius)] border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-focus/40 focus:border-focus"
           />
         </div>
       )}

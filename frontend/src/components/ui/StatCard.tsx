@@ -11,7 +11,7 @@ import { IconBadge } from "./IconBadge"
  *
  * `variant="hero"` = KPI-herói: `Card inverse` com o valor em BRANCO 800 (nunca gradiente de texto sobre escuro — contraste incerto em
  * valor financeiro). No máximo UM por tela. Sem `useCountUp`: numa captura no meio da contagem o número financeiro apareceria errado.
- * Este componente vive em `components/ui` (compartilhado por Admin e PWA); `relatorios/MetricCard` é só o nome antigo dele.
+ * Sem animação de entrada (F-D): o admin não faz espetáculo com número financeiro.
  */
 export function StatCard({
   label,
@@ -21,10 +21,6 @@ export function StatCard({
   formatValue = (v) => String(v),
   /** Para métricas onde "subir" é ruim (nenhuma das 6 do dashboard hoje, mas deixa pronto). */
   invertDeltaColor = false,
-  /** Destaque visual (gradiente sutil no valor) — LEGADO: a F-D troca por `variant="hero"`. Reservar pra 1 métrica por tela. */
-  highlight = false,
-  /** Ordem de entrada (stagger) quando a métrica faz parte de uma grade/lista — index 0-based. */
-  index = 0,
   variant = "default",
 }: {
   label: string
@@ -33,15 +29,12 @@ export function StatCard({
   icon?: LucideIcon
   formatValue?: (value: number) => string
   invertDeltaColor?: boolean
-  highlight?: boolean
-  index?: number
   variant?: "default" | "hero"
 }) {
   const isNew = deltaPct === null && value !== 0
   const isFlat = deltaPct === null && value === 0
   const isPositive = deltaPct !== null && deltaPct >= 0
   const deltaIsGood = invertDeltaColor ? !isPositive : isPositive
-  const stagger = Math.min(index + 1, 4)
   const hero = variant === "hero"
 
   const body = (
@@ -53,7 +46,7 @@ export function StatCard({
       <p
         className={cn(
           "mt-2 break-words text-lg leading-tight tracking-tight tabular-nums sm:text-xl xl:text-2xl",
-          hero ? "font-extrabold text-white" : cn("font-black", highlight ? "text-gradient-brand" : "text-ink"),
+          hero ? "font-extrabold text-white" : "font-black text-ink",
         )}
       >
         {formatValue(value)}
@@ -79,6 +72,5 @@ export function StatCard({
     </>
   )
 
-  if (hero) return <Card variant="inverse" className={cn("animate-fade-in-up p-5", `stagger-${stagger}`)}>{body}</Card>
-  return <div className={`card-premium animate-fade-in-up stagger-${stagger} p-5`}>{body}</div>
+  return <Card variant={hero ? "inverse" : "surface"} className="p-5">{body}</Card>
 }

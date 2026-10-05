@@ -160,10 +160,10 @@
     --color-on-focus: 255 255 255;          /* texto sobre `bg-focus` (item ativo de Segmented): branco sobre petróleo; noite sobre lima em .surface-dark */
     --color-state-off: 107 114 128;         /* #6B7280 — FUNDO de marcador "fora do ar" (pino do mapa, ponto, Switch desligado). Existe porque `ink-softer` era usado como texto E como fundo: o texto precisou escurecer (#5F6673, AA) e o fundo nao devia mudar junto */
 
-    /* ESCOPO DE ÁREA (F-C): defaults = o visual de sempre (Admin e público ficam pixel-idênticos); `html[data-area="driver"]` (ligado pelo shell
-       do PWA, ver `pages/App/Layout.tsx`) migra os componentes base SEM tocar o Admin. Na F-D, o default sobe para o valor do driver e o bloco some. */
-    --field-radius: 0.75rem;                /* Input/Select/Textarea e Button: o `rounded-lg` de antes = 0,75rem no tailwind.config (NÃO é o 0,5rem do Tailwind padrão) */
-    --dialog-radius: 1.25rem;               /* rounded-2xl */
+    /* Raios de CONTROLE e de DIÁLOGO (F-D: promovidos a default do app inteiro; na F-C viviam em `html[data-area="driver"]`, escopo que acabou). Input/Select/Textarea/Button
+       usam --field-radius; o Dialog usa --dialog-radius. */
+    --field-radius: var(--radius-control);
+    --dialog-radius: var(--radius-feature);
 
     --radius-control: 0.875rem;             /* botão/input grande (= .lnd-btn) */
     --radius-card: 1.25rem;                 /* card de conteúdo */
@@ -213,7 +213,7 @@
   }
 
   .card-elevated {
-    @apply bg-surface rounded-2xl shadow-card ring-1 ring-border-subtle;
+    @apply bg-surface rounded-2xl shadow-tinted-card ring-1 ring-border-subtle;
   }
 
   /* Card que é link/botão (linha de histórico, "Meus cartões"...): o `ring-1` do card ocupa o box-shadow e, por estar em @layer components, vencia o anel de
@@ -334,30 +334,17 @@
   /* Véu de Dialog/sheet. Default = o de sempre (ink/50 + desfoque de 2 px). No PWA: véu noite, SEM desfoque (backdrop-filter em tela cheia custa
      quadros em celular modesto e o guia de motion da unificação o proíbe). */
   .dialog-scrim {
-    background-color: rgb(var(--color-ink) / 0.5);
-    backdrop-filter: blur(2px);
+    background-color: rgb(var(--color-night) / 0.62);
   }
 
-  /* ==== ESCOPO "driver" (F-C): ligado em <html data-area="driver"> pelo shell do PWA. Portais (Dialog, sheet, Toaster) vivem em <body>, fora do
-     shell — por isso o atributo fica no <html> e não numa <div>. Admin e público NÃO entram aqui. ==== */
-  :root[data-area="driver"] {
-    --field-radius: var(--radius-control);
-    --dialog-radius: var(--radius-feature);
-  }
-  /* Foco não pode ficar ESCONDIDO atrás do cabeçalho fixo (3,5 rem) nem da navegação fixa de baixo (~4,5 rem): o navegador rola o focado para dentro desta margem. */
-  :root[data-area="driver"] {
+  /* Foco não pode ficar ESCONDIDO atrás do cabeçalho fixo (3,5 rem) nem da navegação fixa de baixo (~4,5 rem) do app do motorista: o navegador rola o focado para
+     dentro desta margem. `data-app-shell` está na raiz do shell do PWA (`pages/App/Layout.tsx`). */
+  html:has([data-app-shell]) {
     scroll-padding-top: 4.5rem;
     scroll-padding-bottom: 6rem;
   }
-  :root[data-area="driver"] .dialog-scrim {
-    background-color: rgb(var(--color-night) / 0.62);
-    backdrop-filter: none;
-  }
-  :root[data-area="driver"] .card-elevated {
-    @apply shadow-tinted-card;
-  }
-  /* Toaster temático: mesma gramática dos cards (raio de controle, sombra tingida, borda sutil). */
-  :root[data-area="driver"] [data-sonner-toast] {
+  /* Toaster temático: mesma gramática dos cards (raio de controle, sombra tingida, borda sutil). Portal no <body>. */
+  [data-sonner-toast] {
     border-radius: var(--radius-control);
     box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 14px 30px -14px rgb(var(--color-primary) / 0.45);
   }
@@ -367,6 +354,10 @@
  * ============================================================================
  * VOCABULÁRIO "PREMIUM" DE 17/09 — DEPRECADO desde a F-A do design system unificado (04/10/2026)
  * ============================================================================
+ * F-D (Admin, 04/10/2026): APAGADAS por falta de uso — `.btn-glow-primary/-accent`, `.card-premium-interactive`, `.shadow-tinted-primary`, `.table-premium` e
+ * `.animate-float-soft` (+ `@keyframes softFloat`). Sobram, por ainda terem uso no PWA/público (classificados nas F-B/F-C): `.card-premium` (PublicSiteCard),
+ * `.pressable`, `.text-gradient-brand` (QR), `.animate-fade-in-up`/`stagger`, `-radar-ping`, `-live-glow`, `-pop-in`, `-sheet-up`. A F-F apaga o resto.
+ *
  * LEIA PRIMEIRO — a regra de cascata abaixo foi INVERTIDA:
  *   - O vocabulário NOVO (`.surface-dark`, `.glass`, `.eyebrow`, `.brand-*`, mais as variantes de `Button`/`Card`/`Badge`/
  *     `EmptyState`/`Table`/`StatCard`/`IconBadge` em `components/ui`) nasce em `@layer components` (bloco logo acima, no
@@ -476,32 +467,6 @@
    (ex.: um selo `bg-primary/10`). `.card-premium` completo sobrescreveria
    esse fundo (mesmo motivo do aviso "REGRA DE APLICAÇÃO" no topo do bloco);
    esta variante existe justamente pra evitar precisar dele nesses casos. */
-.shadow-tinted-primary {
-  box-shadow:
-    0 1px 2px rgb(15 23 42 / 0.04),
-    0 10px 20px -12px rgb(var(--color-primary) / 0.35);
-}
-.card-premium-interactive {
-  /* Propriedade explícita (não o atalho `transition:`) porque várias telas
-     já têm `transition-colors` do Tailwind no mesmo elemento — usar o
-     atalho aqui zeraria a lista de propriedades dele e o hover de cor
-     pararia de suavizar (achado testando o hover do Card da Landing). */
-  transition-property: transform, box-shadow, color, background-color, border-color;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 180ms;
-}
-@media (hover: hover) {
-  .card-premium-interactive:hover {
-    box-shadow:
-      0 4px 10px rgb(15 23 42 / 0.05),
-      0 20px 38px -18px rgb(var(--color-primary) / 0.42);
-    transform: translateY(-2px);
-  }
-}
-.card-premium-interactive:active {
-  transform: scale(0.98);
-}
-
 /* ---- 2. Feedback tátil — confirma visualmente que o toque registrou ----- */
 /* Genérico pra qualquer card/linha tocável (listas, cards de ação) — sem
    precisar herdar o `.card-premium` inteiro. */
@@ -519,42 +484,6 @@
 /* ---- 3. CTA em destaque — sombra tingida da cor da marca ---------------- */
 /* `-primary` pro botão de ação principal (variant default, azul-petróleo,
    o mais usado no PWA); `-accent` pra quando o verde for o destaque. */
-.btn-glow-primary {
-  box-shadow:
-    0 10px 22px -8px rgb(var(--color-primary) / 0.45),
-    0 3px 8px -3px rgb(var(--color-primary) / 0.3);
-  /* Mesmo motivo do comentário em `.card-premium-interactive`: o Button já
-     tem `transition-colors` (buttonVariants) — atalho `transition:` aqui
-     apagaria essa lista. */
-  transition-property: transform, box-shadow, color, background-color, border-color;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
-}
-@media (hover: hover) {
-  .btn-glow-primary:hover:not(:disabled) {
-    transform: translateY(-1px);
-  }
-}
-.btn-glow-primary:active:not(:disabled) {
-  transform: scale(0.97);
-}
-.btn-glow-accent {
-  box-shadow:
-    0 10px 22px -8px rgb(var(--color-accent) / 0.5),
-    0 3px 8px -3px rgb(var(--color-accent) / 0.3);
-  transition-property: transform, box-shadow, color, background-color, border-color;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
-}
-@media (hover: hover) {
-  .btn-glow-accent:hover:not(:disabled) {
-    transform: translateY(-1px);
-  }
-}
-.btn-glow-accent:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
 /* ---- 4. Números de destaque — gradiente sutil só no TEXTO --------------- */
 /* Saldo, kWh, preço, total do recibo. Nunca em fundo grande. Só usar sobre
    fundo CLARO: mantém contraste AA (o degrau mais claro do gradiente,
@@ -601,21 +530,6 @@
 /* ---- 6. Loops contínuos — só em hero/estado principal, NUNCA repetido --- */
 /* Ver "GUIA DE INTENSIDADE" no topo do bloco: reservados a UM elemento
    principal por tela, nunca em algo que se repete (nav, ícones de lista). */
-
-/* 6a. Flutuação bem sutil pros blobs decorativos de fundo (Login/Cadastro/
-   Landing do QR) — decorativo, sempre `aria-hidden`. */
-@keyframes softFloat {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-  50% {
-    transform: translateY(-10px) scale(1.03);
-  }
-}
-.animate-float-soft {
-  animation: softFloat 7s ease-in-out infinite;
-}
 
 /* 6b. "Radar" — usar SÓ no spinner de espera de uma resposta real de
    hardware (ex.: comando de início ainda não confirmado pelo carregador,
@@ -702,20 +616,6 @@
 }
 .animate-sheet-up {
   animation: sheetUp 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-/* ---- 8. Tabela densa (Admin) — sombra tingida no CONTAINER, não na linha */
-/* `components/ui/Table.tsx` é exclusivo do Admin (não é importado por
-   nenhuma tela do PWA) — por isso é o único componente-base desta lista que
-   leva a classe direto nele, sem precisar repetir via `className` em cada
-   tela. Só o wrapper (`<div>` que já faz `overflow-x-auto` — mantém o
-   scroll horizontal CONTIDO no card, nunca na página inteira) ganha a
-   sombra; a linha (`TableRow`) continua só com `hover:bg-muted/40` — data
-   densa pede mais silêncio visual por linha, não sombra em cada uma. */
-.table-premium {
-  box-shadow:
-    0 1px 2px rgb(15 23 42 / 0.04),
-    0 10px 24px -18px rgb(var(--color-primary) / 0.3);
 }
 
 /* ---- Foco do mapa (Leaflet) — FORA de @layer de propósito: `.leaflet-container` é criada pelo Leaflet em tempo de execução, nenhum arquivo do app a cita, então o purge

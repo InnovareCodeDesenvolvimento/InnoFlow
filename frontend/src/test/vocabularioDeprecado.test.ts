@@ -20,15 +20,15 @@ const SKIP_DIRS = new Set([path.join(ROOT, "components", "landing")])
 
 /** classe -> quantidade gravada (piso). `(?![\w-])` evita contar `card-premium` dentro de `card-premium-interactive`. */
 const GRAVADO: Record<string, number> = {
-  "card-premium": 23,
+  "card-premium": 2,
   "card-premium-interactive": 0,
-  "btn-glow-primary": 5,
+  "btn-glow-primary": 0,
   "btn-glow-accent": 0,
-  pressable: 15,
-  "text-gradient-brand": 6,
-  "shadow-tinted-primary": 3,
-  "table-premium": 1,
-  "animate-fade-in-up": 34,
+  pressable: 8,
+  "text-gradient-brand": 1,
+  "shadow-tinted-primary": 0,
+  "table-premium": 0,
+  "animate-fade-in-up": 24,
   "animate-float-soft": 0,
   "animate-radar-ping": 1,
   "animate-live-glow": 1,

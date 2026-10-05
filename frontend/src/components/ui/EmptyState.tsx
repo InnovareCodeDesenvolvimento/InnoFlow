@@ -6,9 +6,9 @@ import { IconBadge } from "./IconBadge"
 
 /**
  * Estado vazio — sem registro nenhum (não confundir com erro, ver `ErrorState`). Três tons:
- *  - `outline` (padrão, o de hoje): caixa tracejada cinza. LEGADO — a unificação reserva o tracejado para "drop zone";
+ *  - `outline`: caixa tracejada cinza. LEGADO (era o padrão até a F-D; hoje o padrão é `quiet`) — a unificação reserva o tracejado para "drop zone";
  *    as telas migram para `quiet`/`brand` nas fases B–D.
- *  - `quiet`: sem tracejado, selo de ícone tingido. Para o ADMIN e para listas vazias por filtro/busca (nunca o mascote).
+ *  - `quiet` (padrão): sem tracejado, selo de ícone tingido. Para o ADMIN e para listas vazias por filtro/busca (nunca o mascote).
  *  - `brand`: primeiro uso no app do motorista (ainda sem recarga, sem cartão): `Card inverse` + a arte que o chamador passar em
  *    `art` (use `<MascotFace size={64} />` de `components/brand`) + CTA lima. `art` é um SLOT de propósito: este componente
  *    vive no chunk `ui-kit` e NÃO pode importar o mascote (a landing compartilha esse módulo e o caminho crítico dela é medido).
@@ -19,7 +19,7 @@ export function EmptyState({
   description,
   action,
   className,
-  tone = "outline",
+  tone = "quiet",
   art,
 }: {
   icon?: LucideIcon

@@ -5,7 +5,7 @@ import { cva } from "class-variance-authority"
  * (`success`, `warning`, `danger`, `info`) NUNCA usam lima: "livre/sucesso" continua verde `accent-600` para não confundir com "ação".
  */
 export const badgeVariants = cva(
-  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide",
+  "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide",
   {
     variants: {
       variant: {

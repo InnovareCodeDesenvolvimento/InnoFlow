@@ -66,7 +66,7 @@ DialogContent.displayName = DialogPrimitive.Content.displayName
 
 /**
  * Cabeçalho do modal. `icon` reaproveita a linguagem visual do `PageHeader`
- * (selo com fundo tingido `bg-primary/10 text-primary` + `shadow-tinted-primary`)
+ * (selo com fundo tingido `bg-primary/10 text-primary` + `shadow-tinted`)
  * só que menor — o modal não é o cabeçalho da página inteira. Fica de fora do
  * `DialogTitle` (que é o `Radix.Title`, texto puro) para não misturar o nome
  * acessível do diálogo com decoração.

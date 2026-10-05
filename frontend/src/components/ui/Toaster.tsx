@@ -2,7 +2,7 @@ import { Toaster as SonnerToaster } from "sonner"
 
 /**
  * Instância única do sonner — montada uma vez perto da raiz (ver App.tsx). O tema do PWA (raio de controle, sombra tingida) vem de
- * `html[data-area="driver"] [data-sonner-toast]` em `index.css`: o Toaster mora num portal em <body>, fora do shell, e o atributo no <html> o alcança.
+ * `[data-sonner-toast]` em `index.css` (vale para o app inteiro desde a F-D).
  * Cores de estado seguem as do sonner (`richColors`): sucesso verde, erro vermelho — lima é AÇÃO, nunca estado.
  */
 export function Toaster() {

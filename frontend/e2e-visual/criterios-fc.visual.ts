@@ -104,7 +104,7 @@ for (const persona of ["driver", "travado"] as const) {
 
           expect(m.sobraHorizontal, `rolagem horizontal em ${tela.id} a ${vp}px`).toBe(0)
           expect(m.estourados, `elementos além da borda direita em ${tela.id} a ${vp}px`).toEqual([])
-          expect(m.area, `escopo data-area em ${tela.id}`).toBe("driver")
+          expect(m.area, `o escopo transitório data-area acabou na F-D (${tela.id})`).toBeNull()
           expect(m.headerBg, `cabeçalho = theme-color em ${tela.id}`).toBe(THEME)
           expect(m.surfaceDark, `moldura escura (cabeçalho + navegação) em ${tela.id}`).toBeGreaterThanOrEqual(2)
           expect(escuros / total, `moldura escura visível em ${tela.id} a ${vp}px`).toBeGreaterThan(0.03)

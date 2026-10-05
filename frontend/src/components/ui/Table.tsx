@@ -18,7 +18,7 @@ function Table({ className, density = "comfortable", ...props }: React.TableHTML
     <DensityContext.Provider value={density}>
       {/* `relative`: contém elementos `absolute` (ex.: `sr-only` num <th>) DENTRO do scroller — sem isso
           eles escapam do `overflow-x-auto` e criam scroll horizontal na página inteira (achado em Carteiras, 390px). */}
-      <div className="table-premium relative w-full overflow-x-auto rounded-xl border border-border-subtle" data-density={density}>
+      <div className="relative w-full overflow-x-auto rounded-card border border-border-subtle bg-surface shadow-tinted" data-density={density}>
         <table className={cn("w-full min-w-[640px] border-collapse text-sm", className)} {...props} />
       </div>
     </DensityContext.Provider>

@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from "react"
+import { Suspense } from "react"
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { History, Home, LogOut, MapPin, ShieldAlert, Wallet, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -38,15 +38,6 @@ function AppShell() {
   const { data: activeData } = useActiveSession()
   const hasActiveSession = !!activeData?.session
 
-  // Escopo de área: migra os componentes base (raio dos campos, véu do Dialog, Toaster) só para o PWA, sem tocar o Admin (ver `index.css`).
-  // Vive no <html> porque Dialog/sheet/Toaster renderizam em portais no <body>, fora deste shell.
-  useEffect(() => {
-    document.documentElement.dataset.area = "driver"
-    return () => {
-      delete document.documentElement.dataset.area
-    }
-  }, [])
-
   const handleLogout = () => {
     logout()
     navigate("/")
@@ -55,7 +46,7 @@ function AppShell() {
   const isActive = (href: string, exact: boolean) => (exact ? location.pathname === href : location.pathname.startsWith(href))
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-screen flex-col bg-background" data-app-shell>
       <header className="surface-dark sticky top-0 z-40 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-white/10 bg-primary-950 bg-none px-4 pt-[env(safe-area-inset-top)]">
         <Link to="/app" className="flex items-center rounded-md">
           <Logo tone="dark" size={28} />
