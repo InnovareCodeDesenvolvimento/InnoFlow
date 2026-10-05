@@ -252,6 +252,15 @@ const envSchema = z.object({
   // repassa Host/X-Forwarded-*, mas uma env explícita não depende disso.
   PUBLIC_API_BASE_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
 
+  // L1.3 (05/10/2026) — origem PÚBLICA do FRONTEND (ex.: https://innoflow.innovarecode.com.br), usada para montar os links dos e-mails (redefinir senha).
+  // NUNCA derivada do header Host/X-Forwarded-Host da requisição (host header injection: quem pede o e-mail de outra pessoa poderia fazê-lo apontar para um domínio
+  // do atacante). OPCIONAL: sem ela cai na PRIMEIRA origem de `CORS_ALLOWED_ORIGINS` (já é o domínio do frontend, definido pelo dono); sem nenhuma utilizável
+  // (produção com localhost/http) o e-mail de link NÃO é enviado e o erro é logado. Só a ORIGEM é usada (caminho/query descartados).
+  PUBLIC_APP_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+  // L1.3 — teto GLOBAL de e-mails de redefinição realmente enviados por hora (todos os destinatários): o SMTP do dono não pode virar relé de spam para endereços alheios
+  // por quem varre e-mails de várias origens (o limite por e-mail e por IP já barra o martelo em UM endereço/UM IP). Conta só envios reais (e-mail inexistente não gasta).
+  PASSWORD_RESET_MAX_EMAILS_PER_HOUR: z.coerce.number().int().positive().default(500),
+
   // F5.4 (30/09/2026) — sessão de recarga cobrando de cartão (pré-auth +
   // captura parcial via PaymentIntent). Cadência do varredor de
   // pré-autorizações (`worker/jobs/varrerPreAutorizacoesCartaoJob.ts`) — mesmo

@@ -164,3 +164,15 @@ export const communicationSettingsTestRateLimit = buildLimiter(60 * 1000, 5, 'RA
  * `authenticate`/`requireRole('ADMIN')`. Além disso a rota exige a senha do ADMIN (step-up, com throttle próprio) e o trigger do banco impõe o teto do estorno.
  */
 export const paymentReversalWriteRateLimit = buildLimiter(60 * 1000, 20, 'RATE_LIMITED', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/auth/password/forgot` (L1.3, rota PÚBLICA) — 5 pedidos / 15 min por IP, contando TODOS (cada pedido, existente ou não, pode disparar e-mail). É o 429 `RATE_LIMITED_AUTH` do contrato;
+ * o limite por E-MAIL é silencioso e mora no serviço (continua 202). Em memória do processo, como o login.
+ */
+export const forgotPasswordRateLimit = buildLimiter(15 * 60 * 1000, 5, 'RATE_LIMITED_AUTH')
+
+/**
+ * `POST /api/auth/password/reset` (L1.3, PÚBLICA) — teto geral por IP contra martelo (20 / 15 min, todos os pedidos). O contador de tokens INVÁLIDOS por IP (mais apertado, em Redis)
+ * mora no serviço.
+ */
+export const resetPasswordRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH')

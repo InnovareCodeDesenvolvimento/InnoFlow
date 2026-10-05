@@ -64,7 +64,7 @@ export interface OpcoesDoTransporteSmtp {
 }
 
 export interface TransporteDeEmail {
-  sendMail(msg: { from: string; to: string[]; subject: string; text: string }): Promise<unknown>
+  sendMail(msg: { from: string; to: string[]; subject: string; text: string; html?: string }): Promise<unknown>
   close?(): void
 }
 
@@ -98,11 +98,11 @@ export interface DepsDoCanalEmail {
   dns?: ResolvedorDns
 }
 
-export async function enviarPorSmtp(c: ConfigEmail, msg: { subject: string; text: string; para?: string[] }, deps: DepsDoCanalEmail = {}): Promise<void> {
+export async function enviarPorSmtp(c: ConfigEmail, msg: { subject: string; text: string; html?: string; para?: string[] }, deps: DepsDoCanalEmail = {}): Promise<void> {
   const destino = await destinoOuFalha('email', c.host, c.politicaDeDestino, deps.dns ?? resolvedorDnsPadrao)
   const transporte = (deps.criarTransporte ?? criarTransporteSmtp)({ host: c.host, porta: c.porta, secure: c.secure, exigirTls: c.exigirTls, usuario: c.usuario, senha: c.senha, ip: destino.ip })
   try {
-    await transporte.sendMail({ from: c.de, to: msg.para ?? c.para, subject: msg.subject, text: msg.text })
+    await transporte.sendMail({ from: c.de, to: msg.para ?? c.para, subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}) })
   } catch (err) {
     throw new FalhaDeCanal('email', motivoDeFalhaSmtp(err))
   } finally {

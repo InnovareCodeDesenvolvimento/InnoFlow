@@ -73,6 +73,13 @@ export const REDACT_PATHS = [
   // do corpo e nunca a loga, mas a rede de segurança vale para qualquer log de corpo/erro que um dia a carregue (solta E `*.`, como as demais).
   'currentPassword',
   '*.currentPassword',
+  // L1.3 (redefinição de senha por e-mail) — a senha NOVA e o token do link no CORPO do POST .../password/reset. A rota nunca os loga; rede de segurança como as demais.
+  'newPassword',
+  '*.newPassword',
+  'resetToken',
+  '*.resetToken',
+  'token',
+  '*.token',
   // F5.7 (B6, portão do Órion) — dado pessoal/sensível do payload da Cielo e do Pix: `Identity` (CPF do pagador no
   // `Customer`), `Holder` (nome impresso no cartão, `CreditCard.Holder`), `holderName` (idem, camelCase do nosso lado),
   // `QrCodeString`/`pixQrCode` (o "copia e cola" do Pix: quem o tem paga para a NOSSA conta, mas ele identifica o pagamento

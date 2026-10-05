@@ -13,6 +13,7 @@ import { AppError, errorHandler } from './middleware/errorHandler'
 import { adminRateLimit, publicRateLimit, webhookCieloRateLimit } from './middleware/rateLimit'
 import { auditTrail } from './middleware/auditTrail'
 import authRoutes from './routes/auth.routes'
+import passwordResetRoutes from './routes/passwordReset.routes'
 import publicSitesRoutes from './routes/publicSites.routes'
 import publicChargePointsRoutes from './routes/publicChargePoints.routes'
 import publicConfigRoutes from './routes/publicConfig.routes'
@@ -105,6 +106,7 @@ export function createApp(): Express {
   })
 
   app.use('/api/auth', authRoutes) // rate limit próprio (mais apertado) já aplicado nas rotas de login/registro
+  app.use('/api/auth/password', passwordResetRoutes) // público (L1.3): /forgot e /reset — rate limit próprio nas rotas; o POST autenticado /api/auth/password segue em authRoutes
   app.use('/api/sites', publicRateLimit, publicSitesRoutes) // público — app do motorista
   app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
   app.use('/api/public/config', publicRateLimit, publicConfigRoutes) // público — configuração da tela de login (Google client ID)
