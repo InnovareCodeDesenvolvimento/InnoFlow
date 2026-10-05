@@ -8,6 +8,7 @@ import { startCapturarSessaoCartaoWorker } from '../worker/jobs/capturarSessaoCa
 import { startVarrerPreAutorizacoesCartaoWorker, scheduleVarrerPreAutorizacoesCartaoScan } from '../worker/jobs/varrerPreAutorizacoesCartaoJob'
 import { startVigiarSessoesWorker, scheduleVigiarSessoesScan } from '../worker/jobs/vigiarSessoesJob'
 import { startManterParticoesWorker, scheduleManterParticoes, manterParticoesNoBoot } from '../worker/jobs/manterParticoesJob'
+import { startConfirmarEstornosPortalWorker, scheduleConfirmarEstornosPortal } from '../worker/jobs/confirmarEstornosPortalJob'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -48,5 +49,12 @@ scheduleManterParticoes().catch((err) =>
   logger.error({ err }, '[worker] falha ao agendar a manutenção de partições — o worker segue de pé, mas sem manutenção periódica até reiniciar'),
 )
 void manterParticoesNoBoot()
+
+// L1.8 (Vega, 2026-10-06): reconsulta, a cada REFUND_PORTAL_SCAN_INTERVAL_MS (30 min), as devoluções que o ADMIN registrou como feitas no PORTAL da Cielo (PENDING_CONFIRMATION) e confirma só o
+// que a consulta PROVA. Só leitura na Cielo; sem credencial a rodada é pulada. Falhar ao agendar não derruba o worker.
+startConfirmarEstornosPortalWorker()
+scheduleConfirmarEstornosPortal().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar a confirmação das devoluções no portal — o worker segue de pé, mas sem confirmação automática até reiniciar'),
+)
 
 logger.info('worker ok')

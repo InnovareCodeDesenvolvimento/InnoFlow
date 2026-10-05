@@ -94,3 +94,12 @@ export const MANTER_PARTICOES_QUEUE_NAME = 'manter-particoes'
 
 /** Sem dado próprio — mesmo espírito de `VigiarSessoesJobData`. */
 export type ManterParticoesJobData = Record<string, never>
+
+/**
+ * Confirmação das devoluções feitas no PORTAL DA CIELO (L1.8) — job REPEATABLE (`upsertJobScheduler`, agendado em `entrypoints/worker.ts`), sem dado próprio: cada disparo
+ * reconsulta as devoluções `PENDING_CONFIRMATION` no momento em que roda. Baixa frequência (`REFUND_PORTAL_SCAN_INTERVAL_MS`). Ver `services/estornos/confirmarEstornosPortal.ts`.
+ */
+export const CONFIRMAR_ESTORNOS_PORTAL_QUEUE_NAME = 'confirmar-estornos-portal'
+
+/** Sem dado próprio — mesmo espírito de `ManterParticoesJobData`. */
+export type ConfirmarEstornosPortalJobData = Record<string, never>

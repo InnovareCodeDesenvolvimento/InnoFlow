@@ -257,6 +257,14 @@ const envSchema = z.object({
   // pré-autorizações (`worker/jobs/varrerPreAutorizacoesCartaoJob.ts`) — mesmo
   // padrão/default de `TOPUP_PIX_EXPIRY_SCAN_INTERVAL_MS`.
   CARD_PREAUTH_SCAN_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  // L1.8 (estorno pelo portal da Cielo): o job confirmarEstornosPortal reconsulta, de tempos em tempos, as devoluções registradas pelo ADMIN (PENDING_CONFIRMATION). Baixa frequência de propósito
+  // (30 min): cada rodada faz UMA consulta de venda por pedido pendente numa conta Cielo COMPARTILHADA com o Parque, e o estorno no portal leva horas/dias para aparecer.
+  REFUND_PORTAL_SCAN_INTERVAL_MS: z.coerce.number().int().min(60_000).default(1_800_000),
+  // Janela (dias, contados da data da VENDA) em que a consulta de venda da Cielo ainda responde (~3 meses; 85 d deixa folga). Passada a janela o job PARA de reconsultar e só alerta
+  // (a confirmação passa a ser humana: conferir o extrato da Cielo e cancelar/registrar de novo).
+  REFUND_PORTAL_RECONSULT_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(85),
+  // Idade (horas) a partir da qual uma devolução ainda PENDING_CONFIRMATION vira alerta (o ADMIN registrou, a Cielo não mostra o estorno).
+  REFUND_PORTAL_PENDING_ALERT_HOURS: z.coerce.number().int().min(1).max(24 * 90).default(72),
   // Quanto tempo uma pré-autorização AUTHORIZED pode ficar sem `StartTransaction`
   // vinculado antes do varredor cancelá-la (VOIDED) — decisão do dono,
   // 2026-09-17, documentada em decisoes-f5-pagamento-cielo.md (mesma premissa

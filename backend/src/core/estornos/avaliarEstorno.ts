@@ -2,7 +2,7 @@
  * Regra PURA do estorno de uma sessão (L1.8) — quanto dá para devolver e por que um pedido é recusado. Sem Prisma/Redis/relógio:
  * quem chama (`services/estornos/registrarEstornoSessao.ts`) lê os números sob o lock da sessão e passa aqui.
  *
- * O BANCO também impõe um teto (trigger `payment_reversal_before_insert`: Σ estornos <= `totalCostCents` da sessão e, no cartão, Σ <= capturado). Este
+ * O BANCO também impõe um teto (trigger BEFORE INSERT de PaymentReversal: Σ estornos <= `totalCostCents` da sessão e, no cartão, Σ <= capturado). Este
  * módulo é a regra MAIS FINA por cima dele: "o que de fato foi cobrado" (uma sessão que virou dívida não foi paga, então não há o que devolver).
  */
 

@@ -19,7 +19,7 @@ export interface RequisicaoEstorno {
 }
 
 /**
- * O trigger `payment_reversal_before_insert` (Cronos) é a rede de segurança por baixo da regra da aplicação: se uma corrida ou um bug deixar passar um valor
+ * O trigger BEFORE INSERT de PaymentReversal (Cronos) é a rede de segurança por baixo da regra da aplicação: se uma corrida ou um bug deixar passar um valor
  * acima do teto, é ELE que recusa — com a mensagem começando pelo código do contrato. Traduz para o 409 estruturado em vez de um 500.
  * (`prisma.create()` devolve esse RAISE como erro desconhecido do Prisma com o texto do Postgres na mensagem.)
  */
