@@ -36,6 +36,7 @@ import {
   scopeDraft,
   situationOf,
   statusRefetchInterval,
+  testDestinationText,
   validateDraft,
   validateEndpoint,
   withCurrentPassword,
@@ -461,6 +462,27 @@ describe("textos do JWT_SECRET (a chave dos segredos agora é derivada dele)", (
     expect(all).not.toMatch(/PAYMENT_SECRETS_KEY/)
     // o NOME do código do servidor continua o mesmo
     expect(parseBackupError(axiosError(503, { code: "SECRETS_KEY_MISSING" })).code).toBe("SECRETS_KEY_MISSING")
+  })
+})
+
+describe("erro KEY x SECRETS_KEY (JWT_SECRET trocado): cada um aponta para a sua saída", () => {
+  it("KEY manda gerar a chave do backup de novo; não manda cadastrar o destino", () => {
+    const { title, action } = runErrorText("KEY")
+    expect(title).toMatch(/chave do backup/i)
+    expect(action).toMatch(/Gere a chave de novo/)
+    expect(action).not.toMatch(/Cadastre o destino/i)
+  })
+
+  it("SECRETS_KEY manda cadastrar o destino de novo; não manda gerar a chave", () => {
+    const { title, action } = runErrorText("SECRETS_KEY")
+    expect(title).toMatch(/destino/i)
+    expect(action).toMatch(/Cadastre o destino de novo/)
+    expect(action).not.toMatch(/Gere a chave/i)
+  })
+
+  it("o 'Testar destino' usa o mesmo texto por código", () => {
+    expect(testDestinationText("KEY")).toEqual(runErrorText("KEY"))
+    expect(testDestinationText("SECRETS_KEY")).toEqual(runErrorText("SECRETS_KEY"))
   })
 })
 

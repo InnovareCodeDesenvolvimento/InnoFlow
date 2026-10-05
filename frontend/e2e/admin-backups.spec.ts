@@ -406,6 +406,8 @@ test.describe("ações: backup agora, conferir, testar destino (assíncronas, co
     ["OAUTH_DISCONNECTED", "Conta Google desconectada"],
     ["NOT_PICKED_UP", "Ninguém pegou o pedido"],
     ["DUMP_TIMEOUT", "A cópia do banco passou do prazo"],
+    ["KEY", "Problema com a chave do backup"],
+    ["SECRETS_KEY", "Credenciais do destino ilegíveis"],
   ]
   for (const [code, titulo] of FALHAS) {
     test(`falha por código ${code}: texto próprio (nunca o do servidor), código visível, linha vermelha no histórico`, async ({ page }) => {
@@ -424,6 +426,25 @@ test.describe("ações: backup agora, conferir, testar destino (assíncronas, co
       await expect(page.getByTestId("fact-last-attempt")).toContainText(`Última tentativa falhou: ${titulo}`)
     })
   }
+
+  test("KEY x SECRETS_KEY (JWT_SECRET trocado): KEY manda gerar a chave de novo; SECRETS_KEY manda cadastrar o destino de novo", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    await openPage(page)
+    const outcome = page.getByTestId("run-outcome")
+
+    await page.evaluate(() => localStorage.setItem("mock:backup-execucao", "KEY"))
+    await page.getByTestId("action-run").click()
+    await expect(outcome).toHaveAttribute("data-code", "KEY", { timeout: 15_000 })
+    await expect(outcome).toContainText("Gere a chave de novo aqui na tela")
+    await expect(outcome).not.toContainText("Cadastre o destino de novo")
+
+    await page.evaluate(() => localStorage.setItem("mock:backup-execucao", "SECRETS_KEY"))
+    await page.getByTestId("action-run").click()
+    await expect(outcome).toHaveAttribute("data-code", "SECRETS_KEY", { timeout: 15_000 })
+    await expect(outcome).toContainText("Cadastre o destino de novo")
+    await expect(outcome).not.toContainText("Gere a chave de novo")
+    expect(await page.locator("body").innerText()).not.toContain("PAYMENT_SECRETS_KEY")
+  })
 
   test("Conferir backup: aprovado e reprovado (VERIFY)", async ({ page }) => {
     await login(page, "backup-s3@innoelektron.com")

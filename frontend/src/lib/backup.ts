@@ -234,8 +234,16 @@ export const RUN_ERROR_TEXT: Record<BackupErrorCode, { title: string; action: st
   OAUTH_DISCONNECTED: { title: "Conta Google desconectada", action: "O acesso foi revogado ou expirou. Conecte a conta Google de novo. Com o app do Google Cloud em modo “Teste”, o acesso expira em 7 dias." },
   DUMP: { title: "Falha ao copiar o banco", action: "O pg_dump não rodou (cliente ausente na imagem, versão antiga…). É um problema do servidor: avise quem cuida da infraestrutura." },
   DUMP_TIMEOUT: { title: "A cópia do banco passou do prazo", action: "O banco demorou mais que o limite para ser copiado. Avise quem cuida da infraestrutura." },
-  KEY: { title: "Problema com a chave do backup", action: "A chave está ausente, ilegível ou é diferente da que cifrou o arquivo. Confira a impressão digital da chave." },
-  SECRETS_KEY: { title: "A chave dos segredos (JWT_SECRET) ausente ou trocada", action: "Sem o JWT_SECRET original o servidor não decifra as credenciais do destino. Restaure o JWT_SECRET original ou salve as credenciais de novo." },
+  // KEY x SECRETS_KEY são problemas DIFERENTES (05/10, JWT_SECRET trocado): KEY = a chave do ARQUIVO (a cópia dela guardada no servidor não abre mais) -> gerar a chave de novo;
+  // SECRETS_KEY = as credenciais do DESTINO (S3/Drive) não decifram -> cadastrar o destino de novo. Os dois textos se citam o mínimo para não confundir.
+  KEY: {
+    title: "Problema com a chave do backup",
+    action: "A chave do backup está ausente, é diferente da que cifrou o arquivo ou a cópia dela guardada no servidor ficou ilegível (acontece quando o JWT_SECRET muda). Gere a chave de novo aqui na tela (cartão “Chave”) e guarde o arquivo da chave nova. As cópias antigas só abrem com a chave antiga.",
+  },
+  SECRETS_KEY: {
+    title: "Credenciais do destino ilegíveis",
+    action: "O servidor não consegue decifrar as credenciais do destino salvas (o JWT_SECRET mudou). Cadastre o destino de novo (chave de acesso e segredo no S3, ou conecte o Google outra vez) e salve. A chave do backup não é afetada.",
+  },
   TOO_BIG: { title: "Arquivo maior que 5 GiB", action: "O envio simples do S3 não aceita arquivo desse tamanho. Avise quem cuida da infraestrutura." },
   NO_BACKUP: { title: "Nenhuma cópia no destino", action: "Não há arquivo para conferir. Faça um backup primeiro." },
   VERIFY: { title: "A conferência reprovou a cópia", action: "O arquivo está vazio, adulterado, sem a marca do sistema ou sem tabelas. Faça um backup novo e confira de novo." },
