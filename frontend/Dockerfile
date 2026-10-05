@@ -1,9 +1,12 @@
 # InnoElektron — frontend (serviço inno-elekton-frontend)
 # Build: Vite + React + TypeScript · Serve: Nginx
 # EasyPanel: Build Path = frontend
+#
+# N-3 da auditoria pré-produção (05/10/2026): Node 22 LTS no build (o 20 saiu de suporte em
+# abril/2026) e nginx 1.30 (linha ESTÁVEL; o 1.25 usado antes não recebia mais correção).
 
 # ---- Stage 1: Build ----
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -23,7 +26,9 @@ ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # ---- Stage 2: Serve ----
-FROM nginx:1.25-alpine AS runner
+# `nginx:1.30-alpine` = linha estável do nginx (1.30.x). Acompanhe a linha estável (as pares:
+# 1.30 -> 1.32...), não a mainline (ímpares), para o runner não pegar mudança de comportamento.
+FROM nginx:1.30-alpine AS runner
 
 RUN rm /etc/nginx/conf.d/default.conf
 
@@ -39,6 +44,14 @@ COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 ARG API_UPSTREAM=http://innovare-code_inno-elekton-beckend:3000
 ENV API_UPSTREAM=${API_UPSTREAM}
 
+# SEM `USER` aqui, de propósito (N-3): o processo MASTER do nginx sobe como root porque (1) escuta na
+# porta 80 (privilegiada) e (2) o entrypoint da imagem oficial escreve o /etc/nginx/conf.d/default.conf
+# gerado pelo envsubst e o /var/run/nginx.pid. Os WORKERS — os que de fato atendem requisição e tocam
+# em tráfego externo — já rodam como o usuário `nginx` (diretiva `user nginx;` do nginx.conf da imagem).
+# Sem Node/shell de aplicação no container, só arquivos estáticos + proxy. Para rodar 100% sem root é
+# preciso trocar a base por `nginxinc/nginx-unprivileged` (escuta na 8080) E mudar a porta do proxy do
+# serviço no EasyPanel de 80 para 8080 — decisão operacional do dono, não feita aqui para não derrubar
+# o site (502) se a porta não for trocada junto. `nginx.conf.template` precisaria de `listen 8080;`.
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]

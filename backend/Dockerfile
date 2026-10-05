@@ -9,8 +9,15 @@
 # entrypoint da API porque não havia como sobrescrever o CMD do Dockerfile
 # único). Editou algo aqui? Copie a mudança pros outros dois — CI não pega
 # divergência entre eles.
-FROM node:20-alpine AS builder
-# Alpine (node:20-alpine) nao vem com o binario `openssl` instalado. Sem ele,
+#
+# N-3 da auditoria pré-produção (05/10/2026): Node 22 LTS (o 20 saiu de suporte
+# em abril/2026), runner SEM devDependencies e rodando como `node` (não root).
+# Estágios: builder (compila TS) -> prod-deps (só dependências de produção) ->
+# runner (o que de fato roda).
+
+# ---- Estágio 1: builder — instala TUDO (devDependencies inclusive) e compila ----
+FROM node:22-alpine AS builder
+# Alpine (node:22-alpine) nao vem com o binario `openssl` instalado. Sem ele,
 # a propria deteccao de versao do OpenSSL que o Prisma roda (tanto aqui no
 # `generate` quanto no runner abaixo, em runtime) falha silenciosamente e
 # assume por padrao "openssl-1.1.x" (legado) mesmo com binaryTargets
@@ -26,11 +33,36 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:20-alpine AS runner
+# ---- Estágio 2: prod-deps — node_modules SÓ de produção (sem eslint/vitest/tsc/@types) ----
+# Estágio próprio em vez de `npm prune` no builder: o `npm ci --omit=dev` parte do zero e é
+# determinístico, e o client do Prisma é gerado de novo aqui (explícito) para não depender de
+# o prune preservar `node_modules/.prisma`. Precisa de `openssl` pelo mesmo motivo do builder
+# (detecção do Prisma) e do `prisma/` ANTES do `npm ci` (o postinstall do @prisma/client
+# procura o schema).
+# O que sobra de propósito, e por quê: `prisma` (CLI) — o CMD roda `prisma migrate deploy` a
+# cada boot; `tsx` — seed e scripts operacionais (`npm run prisma:seed`, `user:set-password`,
+# `payments:recifrar-segredos`, `db:seed:demo`, ver docs/DEPLOY-EASYPANEL.md) rodam no shell do
+# serviço, em produção, direto do código-fonte. Por isso ambos estão em `dependencies` (o `tsx`
+# foi promovido de devDependencies em 05/10/2026, N-3).
+FROM node:22-alpine AS prod-deps
+RUN apk add --no-cache openssl
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+RUN npm ci --omit=dev
+RUN npx prisma generate
+
+# ---- Estágio 3: runner — não-root, sem devDependencies ----
+FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/node_modules ./node_modules
+# `--chown=node:node` só no node_modules: o Prisma CLI/engines podem precisar escrever ali
+# (ex.: baixar um engine faltante) e o app roda como `node`. O resto (dist, src, prisma,
+# scripts) fica de root, somente leitura para o processo — o app não escreve em disco
+# (só stdout; conferido em src/), então nada mais precisa ser gravável. HOME=/home/node
+# (do usuário `node`) cobre o cache do Prisma/npm/tsx.
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
@@ -43,10 +75,13 @@ COPY --from=builder /app/src ./src
 # scripts administrativos rodados à mão no terminal do serviço (F5.7: `npm run payments:recifrar-segredos` — rotação da PAYMENT_SECRETS_KEY, via tsx).
 COPY --from=builder /app/scripts ./scripts
 
+# Daqui em diante, não-root. Portas 3000 (api) e 9000 (ocpp) são > 1024: não precisam de root.
+USER node
+
 # Sobrescrito por `command:` em cada serviço do docker-compose.yml
 # (start:api / start:ocpp / start:worker).
 #
-# `npx prisma migrate deploy &&` — achado real em produção, 17/09/2026: as
+# `prisma migrate deploy &&` — achado real em produção, 17/09/2026: as
 # migrations nunca rodavam sozinhas no deploy (só existia o passo manual
 # documentado em docs/DEPLOY-EASYPANEL.md, "rodar no shell do App depois do
 # deploy") — já esqueceram de rodar mais de uma vez, e a última vez derrubou
@@ -58,4 +93,9 @@ COPY --from=builder /app/scripts ./scripts
 # Postgres, quem chega depois só espera e não reaplica nada. Copie esta
 # mesma mudança pros outros dois Dockerfiles — CI não pega divergência entre
 # eles (mesmo aviso do comentário no topo deste arquivo).
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/entrypoints/api.js"]
+#
+# `node_modules/.bin/prisma` em vez de `npx prisma` (05/10/2026): se o binário local sumisse,
+# o `npx` tentaria baixar o `prisma` MAIS RECENTE da internet (hoje, outra major — o schema é
+# Prisma 5) e rodaria migration com ele. Chamando o binário direto, a falta dele é erro alto
+# e imediato, não uma migration com a versão errada.
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/entrypoints/api.js"]

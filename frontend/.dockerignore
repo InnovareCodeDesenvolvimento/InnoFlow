@@ -1,0 +1,15 @@
+# Contexto de build do frontend (EasyPanel: Build Path = frontend). O Dockerfile faz `COPY . .`;
+# sem isto, node_modules do host (binários nativos do Windows/macOS que NÃO servem no Alpine),
+# dist/ antigo, relatórios e artefatos de teste entrariam na imagem e invalidariam o cache.
+node_modules
+dist
+coverage
+e2e
+e2e-visual
+playwright-report
+test-results
+.env
+.env.*
+*.log
+.git
+.vscode
