@@ -3,14 +3,24 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 /**
- * Ferramentas do Postgres para os testes do backup (`pg_dump`/`pg_restore`). Na CI (`postgres:16` + ubuntu) estão no PATH; nesta máquina de desenvolvimento ficam em
+ * Ferramentas do Postgres para os testes do backup (`pg_dump`/`pg_restore`). Na CI (ubuntu, servidor postgres:16) vêm do cliente 16+ do runner (PATH ou /usr/lib/postgresql/<versão>/bin); nesta máquina de desenvolvimento ficam em
  * `C:\Program Files\PostgreSQL\18\bin`. `BACKUP_PG_BIN_DIR` manda sobre tudo. Sem as ferramentas a suíte avisa e PULA — exceto na CI (`CI=true`), onde a ausência é FALHA (sem isso o
  * teste de ciclo completo "passaria" sem provar nada).
  */
 export function pastaDasFerramentasDoPg(): string {
   const env = process.env.BACKUP_PG_BIN_DIR?.trim()
   if (env) return env
-  for (const candidato of ['C:/Program Files/PostgreSQL/18/bin', 'C:/Program Files/PostgreSQL/17/bin', 'C:/Program Files/PostgreSQL/16/bin']) if (existsSync(candidato)) return candidato
+  for (const candidato of [
+    'C:/Program Files/PostgreSQL/18/bin',
+    'C:/Program Files/PostgreSQL/17/bin',
+    'C:/Program Files/PostgreSQL/16/bin',
+    // Linux (runner do GitHub / Debian): os binários versionados ficam aqui, mesmo quando só o wrapper está no PATH.
+    '/usr/lib/postgresql/18/bin',
+    '/usr/lib/postgresql/17/bin',
+    '/usr/lib/postgresql/16/bin',
+  ]) {
+    if (existsSync(candidato)) return candidato
+  }
   return ''
 }
 

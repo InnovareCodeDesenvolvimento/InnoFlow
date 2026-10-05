@@ -28,7 +28,11 @@ export async function tomarTrava(agora: Date, opcoes: { intervaloDoBatimentoMs?:
   let perdeu = false
   let emVoo: Promise<void> | null = null
   const relogio = opcoes.relogio ?? (() => new Date())
+  let batendo = false
   const timer = setInterval(() => {
+    // UM batimento por vez: com o banco lento (mais que o intervalo) dois em voo se pisariam — o 2º usaria o valor antigo no WHERE, perderia a corrida CONTRA MIM MESMO e marcaria a trava como tomada por outro (falso BUSY).
+    if (batendo) return
+    batendo = true
     const novo = relogio()
     emVoo = prisma.backupConfig
       .updateMany({ where: { id: 1, runningSince: atual }, data: { runningSince: novo } })
@@ -37,6 +41,9 @@ export async function tomarTrava(agora: Date, opcoes: { intervaloDoBatimentoMs?:
         else perdeu = true
       })
       .then(() => undefined, (err) => logger.warn({ err }, '[backup] não consegui renovar a trava (tento de novo no próximo batimento)'))
+      .finally(() => {
+        batendo = false
+      })
   }, opcoes.intervaloDoBatimentoMs ?? INTERVALO_DO_BATIMENTO_MS)
   timer.unref()
 

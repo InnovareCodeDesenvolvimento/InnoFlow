@@ -389,17 +389,38 @@ describe.skipIf(!temPg)('backup automático — serviço contra Postgres, Redis 
     it('o processo vivo RENOVA a trava (batimento): uma execução longa não a perde para outra', async () => {
       const espiao = execEspiao({
         pg_dump: async (args, env, opcoes) => {
-          if (args[0] !== '--version') await new Promise((r) => setTimeout(r, 900))
+          if (args[0] !== '--version') await new Promise((r) => setTimeout(r, 2500))
           return m.pgf.executarComando('pg_dump', args, env, opcoes)
         },
       })
       const p = m.exe.executarBackup({ gatilho: 'SCHEDULED' }, { pastaTemporariaBase: tmpBase, dormir: semEspera, exec: espiao.fn, intervaloDoBatimentoMs: 100 })
-      await new Promise((r) => setTimeout(r, 300))
-      const r1 = (await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })).runningSince!
-      await new Promise((r) => setTimeout(r, 400))
-      const r2 = (await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })).runningSince!
-      expect(r2.getTime()).toBeGreaterThan(r1.getTime())
+      const lerTrava = async () => (await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })).runningSince
+      const limite = Date.now() + 20_000
+      let r1: Date | null = null
+      while (!r1 && Date.now() < limite) {
+        await new Promise((r) => setTimeout(r, 50))
+        r1 = await lerTrava()
+      }
+      let r2 = r1
+      while (r1 && r2 && r2.getTime() === r1.getTime() && Date.now() < limite) {
+        await new Promise((r) => setTimeout(r, 50))
+        r2 = await lerTrava()
+      }
+      expect(r1).not.toBeNull()
+      expect(r2!.getTime()).toBeGreaterThan(r1!.getTime()) // a trava ANDOU: foi renovada pelo processo vivo
       await p
+    }, 120_000)
+
+    it('banco MAIS LENTO que o batimento (intervalo de 1 ms: batimentos se sobreporiam) NÃO dá falso "trava tomada por outro": um batimento por vez', async () => {
+      const espiao = execEspiao({
+        pg_dump: async (args, env, opcoes) => {
+          if (args[0] !== '--version') await new Promise((r) => setTimeout(r, 1500))
+          return m.pgf.executarComando('pg_dump', args, env, opcoes)
+        },
+      })
+      const r = await m.exe.executarBackup({ gatilho: 'SCHEDULED' }, { pastaTemporariaBase: tmpBase, dormir: semEspera, exec: espiao.fn, intervaloDoBatimentoMs: 1 })
+      expect(r.objectKey).toBeTruthy()
+      expect((await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })).runningSince).toBeNull()
     }, 120_000)
 
     it('se OUTRO tomou a trava no meio (batimento descobre), o upload NÃO acontece e a trava do outro não é apagada', async () => {
