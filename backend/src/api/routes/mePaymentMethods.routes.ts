@@ -67,10 +67,11 @@ router.post(
     }
 
     // S-5: o AccessToken do SOP vai ao navegador (validade ~540 s) — nunca em cache de proxy/navegador.
+    // S-9 (minimização de dados): o `merchantId` NÃO vai ao navegador — o script do SOP só precisa do AccessToken (que já carrega o lojista) e o front não o usa.
+    // A validade (`expiresAt`) vem da `ExpiresIn` da Braspag menos 30 s; a emissão do AccessToken (`POST /accesstoken`) não tem parâmetro documentado para encurtá-la, então não é configurável.
     res.setHeader('Cache-Control', 'no-store')
     res.json({
       accessToken: sessao.accessToken,
-      merchantId: sessao.merchantId,
       environment: sessao.environment,
       scriptUrl: sessao.scriptUrl,
       expiresAt: sessao.expiresAt.toISOString(),

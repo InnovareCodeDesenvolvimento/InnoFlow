@@ -546,7 +546,10 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       expect(salvar.status, dumpSeguro(salvar.body)).toBe(200)
       const sandbox = await request(app).post('/api/me/payment-methods/tokenization-session').set(auth(motorista))
       expect(sandbox.status, dumpSeguro(sandbox.body)).toBe(200)
-      expect(sandbox.body).toMatchObject({ environment: 'sandbox', merchantId: 'mid-tokenizacao', accessToken: 'access-token-falso' })
+      expect(sandbox.body).toMatchObject({ environment: 'sandbox', accessToken: 'access-token-falso' })
+      // MUDANÇA DELIBERADA (S-9, minimização de dados): a resposta NÃO traz mais o `merchantId` (era asserido aqui); o contrato restante é exato.
+      expect(sandbox.body).not.toHaveProperty('merchantId')
+      expect(Object.keys(sandbox.body).sort()).toEqual(['accessToken', 'environment', 'expiresAt', 'scriptUrl'])
 
       expect((await put(admin, { environment: 'production', confirmProduction: true })).status).toBe(200)
       const producao = await request(app).post('/api/me/payment-methods/tokenization-session').set(auth(motorista))
