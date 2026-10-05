@@ -76,6 +76,34 @@ test.describe("diálogos do admin", () => {
   })
 })
 
+test.describe("diálogos do gateway de pagamento (admin)", () => {
+  test.use({ storageState: path.join(PASTA_AUTH, `${PERSONAS.admin.arquivo}.json`) })
+
+  // Os dois diálogos são montados só enquanto abertos e não têm dado variável (a senha fica vazia): determinísticos. O 2º só abre com produção
+  // escolhida E uma alteração pendente, por isso é o MESMO fluxo (o mock mora na página, zera a cada goto).
+  test("adm-dialogo-gateway-producao e adm-dialogo-gateway-salvar (confirmação de produção; resumo + step-up de senha)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto("/admin/gateway-pagamento", { waitUntil: "load" })
+    await aguardarEstavel(page)
+
+    // 1) Escolher "Produção" abre a confirmação por palavra digitada.
+    await page.locator("label").filter({ hasText: "Cobranças reais" }).click()
+    const confirmarProducao = page.getByRole("dialog", { name: "Passar para produção?" })
+    await expect(confirmarProducao).toBeVisible()
+    await foto(page, "adm-dialogo-gateway-producao")
+
+    // 2) Digita a palavra e seleciona produção (rascunho): há alteração pendente e válida (credencial é par MerchantId+MerchantKey, então não se mexe nela).
+    await confirmarProducao.getByLabel(/Para confirmar, digite/).fill("PRODUÇÃO")
+    await confirmarProducao.getByRole("button", { name: "Selecionar produção" }).click()
+    await expect(confirmarProducao).toBeHidden()
+    await page.getByRole("button", { name: "Salvar alterações" }).click()
+    const resumo = page.getByRole("dialog", { name: "Confirmar alterações no gateway" })
+    await expect(resumo).toBeVisible()
+    await expect(resumo.getByRole("alert")).toContainText("passa a cobrar de verdade")
+    await foto(page, "adm-dialogo-gateway-salvar")
+  })
+})
+
 test.describe("documento isolado do cartão", () => {
   test.use({ storageState: path.join(PASTA_AUTH, `${PERSONAS.driver.arquivo}.json`) })
 

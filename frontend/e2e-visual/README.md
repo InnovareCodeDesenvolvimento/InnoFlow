@@ -12,6 +12,8 @@ Este diretório **não faz parte** da suíte E2E de 185 testes (`frontend/e2e/`,
 | `npm run build && npm run medir:tamanhos` | CSS global, JS por chunk, precache e modulepreload (gzip e bruto). `-- --comparar e2e-visual/tamanhos-baseline.json` confere os orçamentos da §3.11. |
 | `node scripts/medir-lighthouse.mjs --path /login --no-build ...` | Lighthouse mobile, mediana de 5 rodadas (ver `BASELINE.md`). |
 
+`verificacoes-gateway.visual.ts` (`npx playwright test --config playwright.visual.config.ts verificacoes-gateway`): contraste por pixel em ~24 estados da tela do gateway (contas do mock, diálogos, erros de salvar, resultado do teste de conexão) e a geometria que a foto não mostra (barra de salvar solta × grudada, alvo do interruptor, alvos de 44 px a 375).
+
 Filtros úteis: `npx playwright test --config playwright.visual.config.ts rotas --project 375 -g "adm-sessoes"`.
 
 ## O que é fotografado
@@ -21,7 +23,7 @@ Filtros úteis: `npx playwright test --config playwright.visual.config.ts rotas 
 - `estados.visual.ts`: estados que não são uma URL:
   - **sessão ao vivo** (`pwa-sessao-conectando`, `pwa-sessao-ao-vivo` a 02:05 de recarga = 0,24 kWh, `pwa-sessao-parar-dialogo`),
   - **recibo de recarga concluída** (`pwa-recibo-concluida`: R$ 5,00, piso da tarifa) — o recibo que a auditoria não conseguiu capturar,
-  - **dois diálogos do admin** (`adm-dialogo-novo-site`, `adm-dialogo-detalhe-sessao`),
+  - **dois diálogos do admin** (`adm-dialogo-novo-site`, `adm-dialogo-detalhe-sessao`) e **dois do gateway de pagamento** (`adm-dialogo-gateway-producao`, `adm-dialogo-gateway-salvar`),
   - **formulário do documento isolado do cartão** (`pub-cartao-isolado-formulario`, handshake real com o app).
 
 Os recibos pré-semeados (`/app/sessoes/me_seed_*`) pertencem ao motorista `travado@innoelektron.com` (F5.9, `src/mocks/meData.ts`).
