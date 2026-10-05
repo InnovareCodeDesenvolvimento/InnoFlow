@@ -13,6 +13,26 @@ describe("safeRedirect", () => {
     expect(safeRedirect("")).toBeNull()
     expect(safeRedirect(null)).toBeNull()
   })
+
+  it("rejeita barra invertida (o navegador a lê como '/')", () => {
+    expect(safeRedirect("/\\evil.example")).toBeNull()
+    expect(safeRedirect("/\\/evil.example")).toBeNull()
+    expect(safeRedirect("/c/CP-01\\1")).toBeNull()
+  })
+
+  it("rejeita TAB, quebra de linha e outros caracteres de controle (o navegador remove TAB/LF/CR de dentro da URL)", () => {
+    expect(safeRedirect("/" + String.fromCharCode(9) + "/evil.example")).toBeNull()
+    expect(safeRedirect("/" + String.fromCharCode(10) + "/evil.example")).toBeNull()
+    expect(safeRedirect("/" + String.fromCharCode(13) + "/evil.example")).toBeNull()
+    expect(safeRedirect("/c/CP-01" + String.fromCharCode(0) + "1")).toBeNull()
+    expect(safeRedirect("/c/CP-01" + String.fromCharCode(0x7f))).toBeNull()
+  })
+
+  it("não recusa o que é legítimo: acentos, percent-encoding, querystring e hash", () => {
+    expect(safeRedirect("/c/CP-VILA-NORTE-01/1?x=1&y=a%20b#topo")).toBe("/c/CP-VILA-NORTE-01/1?x=1&y=a%20b#topo")
+    expect(safeRedirect("/app/sessões")).toBe("/app/sessões")
+    expect(safeRedirect("/c/%5Cevil")).toBe("/c/%5Cevil") // %5C literal não é barra invertida
+  })
 })
 
 describe("resolvePostAuthPath", () => {
@@ -28,5 +48,7 @@ describe("resolvePostAuthPath", () => {
 
   it("redirect inseguro é ignorado (cai no padrão do papel)", () => {
     expect(resolvePostAuthPath({ role: "DRIVER" }, "//evil.com")).toBe("/app")
+    expect(resolvePostAuthPath({ role: "DRIVER" }, "/\\evil.example")).toBe("/app")
+    expect(resolvePostAuthPath({ role: "ADMIN" }, "/" + String.fromCharCode(9) + "/evil.example")).toBe("/admin")
   })
 })

@@ -27,7 +27,7 @@ export function Eletropostos() {
 
   return (
     <>
-      <PageBand eyebrow="Rede InnoFlow" title="Eletropostos" description="Disponibilidade de conectores em tempo real, por operador." />
+      <PageBand eyebrow="Rede InnoFlow" title="Eletropostos" description="Veja o que está livre agora, atualizado em tempo real." />
 
       <div className="container-app min-h-[100svh] py-10">
         {isLoading && (

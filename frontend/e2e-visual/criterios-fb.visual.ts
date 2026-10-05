@@ -259,10 +259,9 @@ test.describe("D) fluxos", () => {
     }
   })
 
-  // ACHADO (a F-B não introduziu: `lib/authRedirect.ts` é anterior): `safeRedirect` só recusa "//". Com "/\\evil.example" o navegador trata a barra invertida como "/" e o app navega para
-  // `/evil.example` — MESMA ORIGEM (cai na 404), então não é redirecionamento aberto, mas o `?redirect` hostil não é ignorado como os outros. `test.fail`: ao endurecer `safeRedirect`
-  // (recusar "\\" e caracteres de controle) este teste passa e o `fail` acusa, para virar `test`.
-  test.fail("redirect com barra invertida deveria ser ignorado (cair em /app); hoje cai em /evil.example (mesma origem)", async ({ page }) => {
+  // Era `test.fail` (achado da Íris: `safeRedirect` só recusava "//"; com "/\evil.example" o navegador lê "\\" como "/" e o app navegava para `/evil.example`, mesma origem, 404).
+  // Corrigido na F-C: `lib/authRedirect.ts` recusa "\\" e caracteres de controle/TAB/LF/CR; o `?redirect` hostil é ignorado e cai em /app.
+  test("redirect com barra invertida ou caractere de controle é ignorado (cai em /app)", async ({ page }) => {
     await page.goto(`/login?redirect=${encodeURIComponent("/\\evil.example")}`)
     await page.getByLabel("E-mail").fill("motorista@innoelektron.com")
     await page.getByLabel("Senha").fill("senha1234")

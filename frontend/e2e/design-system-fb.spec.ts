@@ -83,7 +83,8 @@ test.describe("/eletropostos", () => {
     })
     await page.goto("/eletropostos")
     await expect(page.getByRole("heading", { level: 1, name: "Eletropostos" })).toBeVisible()
-    await expect(page.getByText("Disponibilidade de conectores em tempo real, por operador.")).toBeVisible()
+    // MUDANÇA DELIBERADA (F-C, D4): o subtítulo era "Disponibilidade de conectores em tempo real, por operador." — linguagem de operador numa tela de motorista.
+    await expect(page.getByText("Veja o que está livre agora, atualizado em tempo real.")).toBeVisible()
     await expect(page.locator("[data-station-id]").first()).toBeVisible()
     await page.waitForTimeout(800)
     const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls)
