@@ -75,6 +75,14 @@ PORT=3000
 OCPP_PORT=9000
 ```
 
+**Só 3 variáveis são essenciais** (decisão do dono, 05/10/2026 — "como no InnoChat"): `DATABASE_URL`, `REDIS_URL` e `JWT_SECRET` (+ `PUBLIC_APP_URL` para os links dos e-mails). **Não existe mais uma variável de "chave de segredos" obrigatória:** a chave que cifra os segredos guardados no banco é *derivada* do `JWT_SECRET`. A `PAYMENT_SECRETS_KEY` virou **override opcional** (rotação avançada; seção "Rotação da `PAYMENT_SECRETS_KEY`" abaixo) — se não existir, tudo funciona.
+
+> ## ⚠️ `JWT_SECRET` TEM DOIS PAPÉIS — GUARDE UMA CÓPIA FORA DO EASYPANEL
+>
+> 1. assina as sessões (login) e 2. é a **fonte da chave** que cifra os segredos salvos no banco (credenciais da Cielo, senha SMTP, apikey da Evolution, S3/Drive e a cópia da chave do backup, chave Pix de devolução, **e o token dos cartões salvos dos motoristas**).
+>
+> **Trocar o `JWT_SECRET` (ou perdê-lo):** derruba todas as sessões (todo mundo loga de novo) **e** torna ilegíveis todos os segredos salvos — eles passam a valer como *ausentes* e precisam ser **recadastrados** no painel (Admin → Gateway de pagamento, Comunicação, Backup); **os motoristas precisam cadastrar o cartão de novo**. Não derruba o sistema (nada lança erro), mas o pagamento com credencial do banco, os avisos e o backup ficam parados até recadastrar. O sistema avisa: alerta `secrets_undecryptable` (CRÍTICO) no boot do worker. **Voltar ao valor antigo desfaz tudo na hora** — por isso a cópia fora do servidor. Passo a passo (inclusive como trocar **sem perder** nada): seção "Trocar o `JWT_SECRET`" abaixo.
+
 `OCPP_NODE_ID` pode ficar vazio (cada processo gera um UUID próprio no boot).
 
 ⚠️ **`CORS_ALLOWED_ORIGINS` (só o App `api` precisa, os outros dois ignoram
@@ -206,9 +214,9 @@ exposto.
 - **CNPJ** aceito numérico e **alfanumérico** (vigente desde jul/2026), com dígito verificador conferido; fica guardado sem pontuação e é exibido formatado.
 
 **Exclusão de conta e devolução do saldo (L1.4, DL2).** A exclusão é ANONIMIZAÇÃO (a pessoa some; sessões, extrato e pagamentos ficam sob um id pseudônimo por obrigação legal/fiscal). Quem exclui com
-saldo informa uma chave Pix (guardada **cifrada** com a `PAYMENT_SECRETS_KEY` — por isso a rotação da chave também a re-cifra; ver o runbook de rotação) e o ADMIN devolve **por fora** e registra em
+saldo informa uma chave Pix (guardada **cifrada** com a chave dos segredos, derivada do `JWT_SECRET` — por isso a rotação da chave também a re-cifra; ver o runbook de rotação) e o ADMIN devolve **por fora** e registra em
 `POST /api/admin/account-deletions/:id/refund` (valor INTEGRAL, senha do ADMIN, comprovante) — o que lança o `TOPUP_REFUND` e **apaga a chave Pix**. Prazo máximo recomendado: **30 dias**; passou disso o
-worker (1x por dia) emite o alerta `payment_refund_pending_overdue` (IMPORTANTE: e-mail ao dono). Sem a `PAYMENT_SECRETS_KEY` a exclusão **com saldo** responde 503 `PAYMENT_SECRETS_KEY_MISSING` (nunca
+worker (1x por dia) emite o alerta `payment_refund_pending_overdue` (IMPORTANTE: e-mail ao dono). Sem a chave dos segredos utilizável (`JWT_SECRET` ausente ou `PAYMENT_SECRETS_KEY` definida e inválida) a exclusão **com saldo** responde 503 `PAYMENT_SECRETS_KEY_MISSING` (nunca
 guarda a chave Pix em claro). O que sobrevive à anonimização e por quê: `AuditLog` antigo do titular (append-only; sai no expurgo por idade), `WebhookEvent`, sessões/extrato/pagamentos (5 anos), aceite dos
 termos (sem IP). O IP e o User-Agent de início das sessões são **zerados** na exclusão (decisão do dono, 06/10/2026).
 
@@ -225,10 +233,11 @@ sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
   salvou qualquer um do par, o par INTEIRO vem do banco — nunca "merchantId novo + chave velha do
   env". Por isso a tela exige reenviar a chave ao trocar o `merchantId` quando o par ainda vem do env.
   O segredo do header do webhook é independente (banco > `CIELO_WEBHOOK_HEADER_SECRET` > nenhum).
-- **Segredos ficam cifrados no banco** (AES-256-GCM) com `PAYMENT_SECRETS_KEY`, que **só existe na
-  env do servidor**. Sem ela a tela recusa gravar segredo (503 `PAYMENT_SECRETS_KEY_MISSING`); **se a
-  chave for trocada/perdida, os segredos salvos não decifram e o gateway fica indisponível (503) —
-  nunca cai no simulador.** Faça backup da chave junto com os demais segredos.
+- **Segredos ficam cifrados no banco** (AES-256-GCM) com uma chave **derivada do `JWT_SECRET`** (scrypt com
+  salt fixo do InnoFlow; `PAYMENT_SECRETS_KEY` é só um override opcional), que **só existe na env do servidor**.
+  A tela só recusa gravar segredo (503 `PAYMENT_SECRETS_KEY_MISSING`) se a chave-mestra estiver indisponível
+  (override definido e inválido); **se o `JWT_SECRET` for trocado/perdido, os segredos salvos não decifram e o
+  gateway fica indisponível (503) — nunca cai no simulador.** Faça backup do `JWT_SECRET` fora do EasyPanel.
 - **Ambiente decide as URLs.** `environment` salvo na tela escolhe `sandbox`/`production` e, junto, os
   hosts da Cielo. Se `CIELO_API_BASE_URL`/`CIELO_API_QUERY_BASE_URL` forem definidas **explicitamente**
   no servidor, elas ganham — e se contradisserem o ambiente (production com URL de sandbox, ou
@@ -303,13 +312,42 @@ trava, sandbox numa instância pública seria cobrança grátis (saldo/recarga s
 - A tela do gateway mostra um aviso permanente enquanto `sandboxRestricted` for verdadeiro.
 - A env não é lida pela tela: mudar a lista exige reiniciar a API.
 
-#### Rotação da `PAYMENT_SECRETS_KEY` e chave perdida (F5.7, F5.8)
+#### Trocar o `JWT_SECRET` (a chave dos segredos é derivada dele) — runbook (05/10/2026)
+
+**Regra:** o `JWT_SECRET` é a fonte da chave que cifra todos os segredos salvos no banco. Trocar = (a) derrubar todas as sessões e (b) deixar ilegíveis (ausentes, fail-closed) os segredos salvos, **incluindo o token dos cartões dos motoristas**. Nada lança erro nem derruba o boot: cada coisa trata o ilegível como "não configurado".
+
+**O que acontece, área por área, depois de trocar sem preparo:**
+
+| Área | Efeito |
+|---|---|
+| Sessões | todas caem (login de novo). |
+| Gateway Cielo (credenciais salvas na tela) | indisponível (503; **nunca** cai no simulador) até reenviar os 3 segredos (Admin → Gateway de pagamento). Credencial que está só na env (`CIELO_*`) não é afetada. Capturas pendentes ficam **adiadas sem gastar tentativa** e retomam sozinhas quando o gateway volta. |
+| Comunicação (SMTP / apikey da Evolution) | canal desligado com aviso; salve a senha/apikey de novo (Admin → Comunicação). |
+| Backup | o agendador falha com `SECRETS_KEY` (destino ilegível) ou `KEY` (cópia da chave do backup ilegível), alerta `backup_failed`, **o worker segue de pé**. Recadastre o destino e use **Gerar chave** de novo (a chave do backup é independente: as cópias antigas seguem abrindo com o `.txt` que você guardou). |
+| Cartões salvos dos motoristas | ilegíveis: a lista mostra `unreadable: true` e iniciar sessão com eles responde 409 `PAYMENT_METHOD_UNREADABLE` ("cadastre o cartão novamente") — nada é pré-autorizado, nada fica preso. O motorista remove o cartão e cadastra de novo. Pix e carteira não dependem da chave. |
+| Pré-autorizações já feitas | a captura não usa o token do cartão: seguem capturáveis (dependem só do gateway estar de pé). |
+| Chave Pix de devolução (exclusão de conta com saldo) | ilegível: o pedido aparece como ilegível na tela; peça a chave ao titular de novo. |
+
+**Alerta:** no boot do worker, se algo salvo não decifra, o log traz `alert: secrets_undecryptable` (CRÍTICO — WhatsApp + e-mail) com a contagem por área e a orientação. Nunca imprime segredo/ciphertext.
+
+**Primeiro socorro — voltar ao valor antigo:** se foi um engano, recoloque o `JWT_SECRET` antigo no EasyPanel e reinicie api/ocpp/worker: tudo decifra de novo (nada foi apagado). **Por isso guarde uma cópia do `JWT_SECRET` FORA do EasyPanel** (gerenciador de senhas).
+
+**Trocar de propósito SEM perder segredos nem cartões (recomendado):** passe a chave para o *override* antes de trocar o `JWT_SECRET`:
+1. Gere `openssl rand -base64 32` e guarde no cofre. No App `api` e no `worker`, defina `PAYMENT_SECRETS_KEY` = essa chave (**sem** mexer no `JWT_SECRET` ainda). Reinicie. (A chave derivada do `JWT_SECRET` atual passa a ser só-decifra automática: nada fica ilegível.)
+2. No terminal do `api`: `npm run payments:recifrar-segredos` (dry-run) e depois `npm run payments:recifrar-segredos -- --apply`. Com **0 ilegíveis** tudo está na `PAYMENT_SECRETS_KEY`.
+3. **Agora** troque o `JWT_SECRET` e reinicie. Só as sessões caem; segredos e cartões continuam legíveis (estão na chave do override). **Mantenha a `PAYMENT_SECRETS_KEY` definida e guardada fora do EasyPanel** (agora é ELA a chave dos segredos).
+
+**Trocar de propósito aceitando recadastrar (estilo InnoChat):** troque o `JWT_SECRET`, reinicie, e recadastre: Admin → Gateway de pagamento (3 segredos no mesmo PUT), Admin → Comunicação (senha SMTP/apikey), Admin → Backup (destino + Gerar chave nova + guardar o `.txt`); avise os motoristas para cadastrar o cartão de novo. Confira com o botão de teste de cada tela e com o diagnóstico (`alert: secrets_undecryptable` não deve mais aparecer no próximo boot do worker).
+
+#### Rotação da `PAYMENT_SECRETS_KEY` (override opcional) e chave perdida (F5.7, F5.8)
+
+> **Desde 05/10/2026** a chave dos segredos é, por padrão, **derivada do `JWT_SECRET`**; `PAYMENT_SECRETS_KEY` só entra se você a definir (override). Este procedimento vale **quando o override está em uso** (ou para migrar: derivada → override, ou override → derivada). Com o override ativo, a chave derivada do `JWT_SECRET` vira **só-decifra automática** — o que foi cifrado antes de definir a variável continua legível, e o script abaixo o migra. Para voltar ao padrão: remova `PAYMENT_SECRETS_KEY`, deixe o valor antigo em `PAYMENT_SECRETS_KEY_PREVIOUS`, rode o script com `--apply` e depois remova o `_PREVIOUS`. Override **definido mas inválido** (não é base64 de 32 bytes) = chave-mestra indisponível (fail-closed, `alert: payment_secrets_key_invalid`): nada cifra nem decifra até corrigir a variável ou removê-la.
 
 Os segredos de pagamento (token do cartão salvo e os 3 segredos do gateway) são cifrados com AES-256-GCM
 no formato `v1:<kid>:<base64>` — o `kid` identifica a chave que cifrou (8 hex do SHA-256 da chave;
-**não é a chave**). Tudo o que a aplicação grava usa **sempre a chave atual** (`PAYMENT_SECRETS_KEY`);
-para **ler**, ela usa a atual ou, se existir, `PAYMENT_SECRETS_KEY_PREVIOUS`, conforme o `kid`. O formato
-antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e depois a anterior.
+**não é a chave**; vale também para a chave derivada). Tudo o que a aplicação grava usa **sempre a chave atual** (o override `PAYMENT_SECRETS_KEY` se existir, senão a derivada do `JWT_SECRET`);
+para **ler**, ela usa a atual ou, se existir, `PAYMENT_SECRETS_KEY_PREVIOUS` (e, com override, a derivada), conforme o `kid`. O formato
+antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e depois as demais.
 
 **Rotacionar a chave (sem perder nada), na ordem:**
 
@@ -331,10 +369,10 @@ antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e dep
 Se `PAYMENT_SECRETS_KEY_PREVIOUS` estiver inválida (não decodifica para 32 bytes), ela é ignorada e o log traz
 `alert: payment_secrets_key_previous_invalid` — a chave atual segue funcionando.
 
-**Chave PERDIDA (ou trocada sem a anterior):** os valores cifrados com ela são **irrecuperáveis** (é a
+**Chave PERDIDA (ou trocada sem a anterior — inclui um `JWT_SECRET` trocado sem passar pelo override):** os valores cifrados com ela são **irrecuperáveis** (é a
 propriedade da criptografia, não um defeito). Sintomas: a tela do gateway mostra `secretsDecryptable: false`
 (alerta vermelho), Pix/cartão respondem 503 e o log traz `alert: payment_gateway_secrets_undecryptable`. Para
-recuperar: (1) coloque uma `PAYMENT_SECRETS_KEY` válida e reinicie; (2) **reenvie os 3 segredos** pela tela do
+recuperar: (1) **volte ao `JWT_SECRET` (ou `PAYMENT_SECRETS_KEY`) antigo, se ainda o tiver** — tudo decifra de novo; senão, (2) **reenvie os 3 segredos** pela tela do
 admin (`merchantKey`, `sopClientSecret`, `webhookHeaderSecret`, todos no mesmo PUT; pede a sua senha) — não é
 preciso decifrar nada, o PUT só grava; (3) **os cartões salvos dos motoristas se perdem**: eles precisam
 cadastrar o cartão de novo (o dry-run lista os ids dos cartões ilegíveis; não há como lê-los; valores ilegíveis
@@ -342,7 +380,7 @@ NUNCA são apagados pelo script de rotação, só contados). Pix, carteira, sess
 e seguem intactos. **Faça backup da chave** junto com os demais segredos.
 
 **Envs que continuam SÓ no servidor** (a tela não edita; contam como "presentes" no `readiness` se
-estiverem setadas): `PAYMENT_SECRETS_KEY`, `CIELO_WEBHOOK_PATH_TOKEN` (compõe a URL do webhook),
+estiverem setadas): `CIELO_WEBHOOK_PATH_TOKEN` (compõe a URL do webhook),
 `CIELO_SOP_SCRIPT_URL`, `CIELO_SOP_OAUTH_TOKEN_URL` — e, opcionalmente, `PUBLIC_API_BASE_URL`
 (ex.: `https://innoflow.innovarecode.com.br`, só para montar a `webhookUrl` mostrada na tela; sem
 ela a API deriva do próprio request, respeitando `TRUST_PROXY_HOPS`). `CIELO_MERCHANT_ID`,
@@ -1032,8 +1070,8 @@ No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_cr
 ### 6.9 Configuração pelo painel: segurança e operação
 
 - **Quem pode:** só ADMIN. A senha atual é exigida em todo salvar (step-up, o mesmo do gateway; Redis do step-up fora do ar = salvar recusado com 503, nada gravado). Tentativas de senha erradas são limitadas e contam no mesmo balde do gateway.
-- **Segredos:** a senha SMTP e a apikey da Evolution são cifradas (AES-256-GCM, `v1:<kid>:...`) com a `PAYMENT_SECRETS_KEY`; **nunca** voltam à tela (só "configurada" e os 4 últimos caracteres da apikey), nunca vão para log, resposta de erro nem auditoria. **Sem a `PAYMENT_SECRETS_KEY` no servidor não dá para salvar senha/apikey** (a tela mostra o aviso e o salvar responde 503).
-- **Rotação da chave:** o script `npm run payments:recifrar-segredos` (seção "Rotação da PAYMENT_SECRETS_KEY") agora também re-cifra a senha SMTP e a apikey. Se a chave for trocada/perdida sem rotação, o canal fica desligado e a tela mostra `secretsDecryptable: false` — salve a senha/apikey de novo.
+- **Segredos:** a senha SMTP e a apikey da Evolution são cifradas (AES-256-GCM, `v1:<kid>:...`) com a chave dos segredos (derivada do `JWT_SECRET`; override opcional `PAYMENT_SECRETS_KEY`); **nunca** voltam à tela (só "configurada" e os 4 últimos caracteres da apikey), nunca vão para log, resposta de erro nem auditoria. **Sem chave utilizável no servidor (override definido e inválido) não dá para salvar senha/apikey** (a tela mostra o aviso e o salvar responde 503). **Trocar o `JWT_SECRET` desliga o canal** (segredo ilegível): salve a senha/apikey de novo (seção "Trocar o `JWT_SECRET`").
+- **Rotação da chave:** o script `npm run payments:recifrar-segredos` (seção "Rotação da PAYMENT_SECRETS_KEY") agora também re-cifra a senha SMTP e a apikey. Se a chave (ou o `JWT_SECRET`) for trocada/perdida sem rotação, o canal fica desligado e a tela mostra `secretsDecryptable: false` — salve a senha/apikey de novo.
 - **Trocar o destino exige reenviar o segredo:** mudar o servidor/usuário SMTP ou a URL/instância da Evolution sem informar a senha/apikey de novo é recusado — assim um acesso indevido não consegue apontar o servidor para um endereço do atacante e capturar a senha salva. Vale também para o botão "Testar" com valores ainda não salvos.
 - **Anti-SSRF:** em produção, host SMTP/URL da Evolution apontando para a rede interna, loopback ou metadados de nuvem são recusados (na gravação e de novo na hora de conectar, no IP já validado — um DNS que muda entre a checagem e a conexão não passa). **Resíduo documentado:** o bloqueio vale para o que o painel configura; as envs `ALERT_*` são confiáveis (definidas por quem faz o deploy) e podem apontar para a rede interna. Redirecionamentos HTTP nunca são seguidos.
 - **Auditoria:** cada salvar gera uma linha em "Auditoria" (`UPDATE` / `NotificationChannelConfig`) com antes/depois dos campos não secretos (segredo só como "alterado", destinatários só como contagem) e dispara o alerta `communication_config_changed` (IMPORTANTE) **pela configuração antiga** — se alguém trocar os destinatários, o aviso ainda chega ao dono de antes. Se não foi você: troque a senha do admin e a `PAYMENT_SECRETS_KEY`.
@@ -1079,15 +1117,15 @@ O passo a passo completo (o que é salvo e o que não é, RPO/RTO, restauração
 - **O agendador roda no `worker`**; a API só enfileira "fazer backup agora" / "conferir backup". As 3 imagens do backend (`Dockerfile`, `Dockerfile.ocpp`, `Dockerfile.worker`) trazem o cliente do Postgres (`postgresql18-client`, com queda para o 17: `pg_dump`, `pg_restore`, `psql`), que precisa ser da versão do Postgres do EasyPanel ou mais nova. Se você subir a versão do Postgres do serviço, confira que o cliente da imagem acompanha. Atualize os **3** Dockerfiles juntos.
 - O backup grava o dump em `/tmp` do container (gravável pelo usuário `node`; o diretório da aplicação não é). Precisa de espaço livre de ~2x o tamanho do dump por alguns instantes.
 - **Nenhuma variável de ambiente nova é obrigatória** para o backup: destino (S3/Drive), horário e retenção são configurados em Admin > Backup e ficam cifrados no banco. Opcionais: `BACKUP_PG_BIN_DIR` (pasta dos binários do Postgres, só para desenvolvimento) e `BACKUP_ALLOW_PRIVATE_HOSTS`.
-- **Guarde fora do EasyPanel:** a chave do backup (o `.txt` baixado em Admin > Backup) e a **`PAYMENT_SECRETS_KEY`**. Sem a segunda, restaurar o banco não devolve as credenciais da Cielo, o SMTP, a Evolution nem os cartões salvos. Detalhes na seção 4 do runbook.
+- **Guarde fora do EasyPanel:** a chave do backup (o `.txt` baixado em Admin > Backup) e o **`JWT_SECRET`** (dele deriva a chave dos segredos; se você usa o override, também a `PAYMENT_SECRETS_KEY`). Sem o segundo, restaurar o banco não devolve as credenciais da Cielo, o SMTP, a Evolution nem os cartões salvos. Detalhes na seção 4 do runbook.
 - Faça o **ensaio de restauração a cada trimestre** (runbook, seção 9) e depois de trocar de servidor/versão do Postgres.
 - **CI:** o job `backup-restore` (Postgres 16 e 18) prova o ciclo completo a cada push; é ele que avisa se uma migration nova quebrar a restauração.
 
 ### 8.1 O backup do lado da aplicação (Admin > Backup)
 
-- **Variáveis que o backup usa** (nenhuma nova é obrigatória): `DATABASE_URL` no **worker** (é de onde o `pg_dump` lê; a senha vai ao `pg_dump` por variável de ambiente do processo filho, nunca em argumento nem em log); `PAYMENT_SECRETS_KEY` no **worker e na API** (o worker decifra as credenciais do destino e a cópia da chave do backup; a API as guarda — sem ela, salvar credencial responde 503 e o backup agendado falha com `SECRETS_KEY`); `JWT_SECRET` na API (assina o `state` do "Conectar com Google"). Para o Google Drive: `PUBLIC_API_BASE_URL` (a API monta o `redirect_uri` a cadastrar no app do Google Cloud: `https://<api>/api/backup/google/callback`) e `PUBLIC_APP_URL` (para onde o callback devolve o navegador, `.../admin/backup`). Opcionais de infraestrutura: `BACKUP_ALLOW_PRIVATE_HOSTS=true` (deixa o painel aceitar um S3 **da rede interna**, ex.: MinIO no mesmo projeto, `http://minio:9000`; sem isso, em produção, só https público — loopback e metadados de nuvem nunca) e `BACKUP_PG_BIN_DIR`.
+- **Variáveis que o backup usa** (nenhuma nova é obrigatória): `DATABASE_URL` no **worker** (é de onde o `pg_dump` lê; a senha vai ao `pg_dump` por variável de ambiente do processo filho, nunca em argumento nem em log); `JWT_SECRET` no **worker e na API** (dele deriva a chave que cifra os segredos: o worker decifra as credenciais do destino e a cópia da chave do backup; a API as guarda; se o `JWT_SECRET` for trocado, o backup agendado falha com `SECRETS_KEY`/`KEY` — recadastre o destino e gere a chave de novo; o worker segue de pé) e, na API, também assina o `state` do "Conectar com Google". `PAYMENT_SECRETS_KEY` é só override opcional. Para o Google Drive: `PUBLIC_API_BASE_URL` (a API monta o `redirect_uri` a cadastrar no app do Google Cloud: `https://<api>/api/backup/google/callback`) e `PUBLIC_APP_URL` (para onde o callback devolve o navegador, `.../admin/backup`). Opcionais de infraestrutura: `BACKUP_ALLOW_PRIVATE_HOSTS=true` (deixa o painel aceitar um S3 **da rede interna**, ex.: MinIO no mesmo projeto, `http://minio:9000`; sem isso, em produção, só https público — loopback e metadados de nuvem nunca) e `BACKUP_PG_BIN_DIR`.
 - **Primeira configuração (checklist):** Admin > Backup → escolher o destino e salvar → **Testar destino** → **Gerar chave** e guardá-la FORA do servidor (aparece uma vez) → ligar o automático → **Fazer backup agora** → **Conferir backup**. Ligar sem destino completo ou sem chave é recusado (409). Backup com destino e sem chave **falha** (`KEY`), de propósito: nada sai do servidor sem cifra.
-- **O que o backup NÃO leva (cópia separada, nunca no bucket do backup):** `PAYMENT_SECRETS_KEY` (sem ela as credenciais da Cielo, SMTP, Evolution, S3/Drive e os tokens de cartão que estão **no** banco, cifrados, ficam ilegíveis), `PAYMENT_SECRETS_KEY_PREVIOUS` enquanto durar uma rotação, `JWT_SECRET`, a **chave do backup** (o `.txt`) e **todas as chaves antigas** (cada cópia só abre com a chave que a cifrou), as envs da Cielo que ainda estejam só no ambiente (`CIELO_*`) e a senha do Postgres. **Redis não é salvo** (filas BullMQ, locks, contadores de tentativa/lockout, cache de resultado de comando, deduplicação de alertas): o que se perde são jobs em voo e contadores — o banco diz o que está pendente e os varredores do worker (captura de cartão, polling de Pix, watchdog de sessão, partições, o próprio agendador do backup) reprocessam; um pedido de "fazer backup agora" na fila pode precisar ser refeito.
+- **O que o backup NÃO leva (cópia separada, nunca no bucket do backup):** o `JWT_SECRET` (sem ele as credenciais da Cielo, SMTP, Evolution, S3/Drive e os tokens de cartão que estão **no** banco, cifrados, ficam ilegíveis), `PAYMENT_SECRETS_KEY` e `PAYMENT_SECRETS_KEY_PREVIOUS` quando você usa o override, a **chave do backup** (o `.txt`) e **todas as chaves antigas** (cada cópia só abre com a chave que a cifrou), as envs da Cielo que ainda estejam só no ambiente (`CIELO_*`) e a senha do Postgres. **Redis não é salvo** (filas BullMQ, locks, contadores de tentativa/lockout, cache de resultado de comando, deduplicação de alertas): o que se perde são jobs em voo e contadores — o banco diz o que está pendente e os varredores do worker (captura de cartão, polling de Pix, watchdog de sessão, partições, o próprio agendador do backup) reprocessam; um pedido de "fazer backup agora" na fila pode precisar ser refeito.
 - **Dois níveis de proteção do que o dono já pagou:** o agendador (diário às 03h de Brasília, configurável; se falhar, tenta de novo depois de 1 h, até 3 tentativas por horário; janela de recuperação de 12 h se o worker estava fora no horário) e os **alertas**: `backup_failed` e `backup_verify_failed` (CRÍTICO: WhatsApp+e-mail), `backup_stale` (IMPORTANTE: sem cópia há mais de 36 h com o automático ligado, no máximo 1 a cada 12 h), `backup_config_changed` (IMPORTANTE: destino/chave/conta Google mexidos). Sem e-mail/WhatsApp configurados (Admin > Comunicação) os alertas só aparecem no log do worker/API (campo `alert`). **O agendador morre junto com o worker:** o `backup_stale` também é emitido pelo worker — monitore o próprio serviço `worker` no EasyPanel.
 - **Limites conhecidos:** o envio ao S3 é uma requisição só (**máx. 5 GiB** por arquivo cifrado; acima disso o backup falha com `TOO_BIG` — multipart ainda não existe); um destino por vez (S3 **ou** Drive); o Drive usa o escopo `drive.file` e o app do Google Cloud precisa estar **em produção** (em modo teste o acesso expira em 7 dias); o S3 e o Drive **reais** não foram exercitados em desenvolvimento (só servidores falsos que conferem o contrato HTTP), então faça **Testar destino**, um backup manual e **Conferir backup** logo no primeiro deploy.
 - **Migration:** `20261006120000_backup_automatico` (tabelas `BackupConfig`, singleton, e `BackupRun`, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).

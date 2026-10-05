@@ -98,7 +98,7 @@ async function testarCredencialDoEstabelecimento(config: ConfigEfetiva): Promise
   try {
     merchantKey = estado.origem.merchant === 'database' ? decryptPaymentSecret(linha!.merchantKeyCiphertext!) : env.CIELO_MERCHANT_KEY
   } catch {
-    return semChamada(step, 'MISCONFIGURED', 'Não foi possível decifrar a MerchantKey salva (PAYMENT_SECRETS_KEY trocada/ausente ou dado corrompido). Reenvie a credencial pela tela do gateway.', hostDe(urls.query))
+    return semChamada(step, 'MISCONFIGURED', 'Não foi possível decifrar a MerchantKey salva (o JWT_SECRET do servidor mudou ou o dado está corrompido). Reenvie a credencial pela tela do gateway.', hostDe(urls.query))
   }
   if (!merchantKey) return semChamada(step, 'NOT_CONFIGURED', 'MerchantKey não disponível para o teste.', hostDe(urls.query))
 
@@ -171,7 +171,7 @@ async function testarSop(config: ConfigEfetiva): Promise<ResultadoPassoTesteCone
   try {
     clientSecret = estado.origem.sop === 'database' ? decryptPaymentSecret(linha!.sopClientSecretCiphertext!) : env.CIELO_SOP_CLIENT_SECRET
   } catch {
-    const msg = 'Não foi possível decifrar o ClientSecret do SOP salvo (PAYMENT_SECRETS_KEY trocada/ausente ou dado corrompido). Reenvie pela tela do gateway.'
+    const msg = 'Não foi possível decifrar o ClientSecret do SOP salvo (o JWT_SECRET do servidor mudou ou o dado está corrompido). Reenvie pela tela do gateway.'
     return [semChamada('SOP_OAUTH', 'MISCONFIGURED', msg, hostOauth), semChamada('SOP_ACCESS_TOKEN', 'SKIPPED', 'Depende do passo anterior.', hostAccess)]
   }
   if (!clientSecret) return [semChamada('SOP_OAUTH', 'NOT_CONFIGURED', 'ClientSecret do SOP não disponível.', hostOauth), semChamada('SOP_ACCESS_TOKEN', 'SKIPPED', 'Depende do passo anterior.', hostAccess)]

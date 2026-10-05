@@ -101,7 +101,7 @@ export async function atualizarConfigComunicacao(params: { body: UpdateCommunica
   const { body, actor, request } = params
   const temSegredoNovo = body.email?.password !== undefined || body.whatsapp?.apiKey !== undefined
   if (temSegredoNovo && !isPaymentSecretsKeyConfigured()) {
-    throw new AppError('O servidor não tem a chave de cifragem (PAYMENT_SECRETS_KEY) configurada: não é possível guardar senhas e chaves.', 503, 'SECRETS_KEY_MISSING')
+    throw new AppError('O servidor não tem a chave de cifragem dos segredos utilizável (JWT_SECRET ausente/curto, ou PAYMENT_SECRETS_KEY inválida): não é possível guardar senhas e chaves.', 503, 'SECRETS_KEY_MISSING')
   }
   const politica = politicaDeDestinoDoPainel(process.env)
   validarDestinos(body, politica)

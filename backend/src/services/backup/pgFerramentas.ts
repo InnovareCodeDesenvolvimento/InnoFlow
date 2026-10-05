@@ -8,7 +8,7 @@ import { ErroDeBackup } from '../../core/backup/erros'
  * Processos filhos do backup (`pg_dump`, `pg_restore --list`). Regras:
  *  - `shell: false` e argumentos FIXOS: nada que venha da configuração vira comando;
  *  - a SENHA do banco vai por variável de ambiente do processo filho (`PGPASSWORD`), nunca em argv (legível por qualquer `ps`) nem em log;
- *  - o ambiente do filho é MÍNIMO (PATH + o que o Windows exige + as `PG*` herdadas, como `PGSSLROOTCERT`): o `JWT_SECRET`/`PAYMENT_SECRETS_KEY` do servidor não são passados a um
+ *  - o ambiente do filho é MÍNIMO (PATH + o que o Windows exige + as `PG*` herdadas, como `PGSSLROOTCERT`): o `JWT_SECRET` (e o override `PAYMENT_SECRETS_KEY`, se houver) do servidor não são passados a um
  *    binário externo;
  *  - PRAZO: passou do limite, o filho recebe SIGKILL e o erro é `DUMP_TIMEOUT`;
  *  - o stderr (onde o Postgres explica) vai só para o LOG, limpo e sem a senha; o histórico/tela recebem o CÓDIGO.

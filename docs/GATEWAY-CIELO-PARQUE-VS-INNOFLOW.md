@@ -289,7 +289,7 @@ quebra o webhook de um dos dois sistemas.
 
 | Variável | Serviço | Quando |
 |---|---|---|
-| `PAYMENT_SECRETS_KEY` | api e worker | Já é pré-requisito. Guardar em dois lugares |
+| `PAYMENT_SECRETS_KEY` | api e worker | **Opcional desde 05/10/2026** (override): a chave dos segredos é derivada do `JWT_SECRET` (como no InnoChat). Guarde o `JWT_SECRET` em dois lugares fora do EasyPanel |
 | `CIELO_WEBHOOK_PATH_TOKEN` (`openssl rand -hex 24`) | api | Antes de cadastrar a URL na Cielo |
 | `PAYMENT_SANDBOX_TESTER_EMAILS` | api | Fase A do `GO-LIVE` |
 | `CIELO_SOP_SCRIPT_URL` e `CIELO_SOP_OAUTH_TOKEN_URL` | api | **Deixam de ser obrigatórias depois da C1.1.** Só preencher se a Cielo responder outra URL na P5 |

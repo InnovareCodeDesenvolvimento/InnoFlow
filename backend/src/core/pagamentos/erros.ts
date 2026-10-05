@@ -27,7 +27,7 @@ export class CartaoTokenInvalidoError extends Error {
 
 /**
  * A configuração do gateway (banco) não pôde ser LIDA/DECIFRADA (Postgres fora, segredo corrompido,
- * `PAYMENT_SECRETS_KEY` trocada/ausente com credencial cifrada no banco). Fail-CLOSED (F5.5): nunca cai para
+ * `JWT_SECRET` trocado — a chave dos segredos é derivada dele — ou override `PAYMENT_SECRETS_KEY` trocado/inválido, com credencial cifrada no banco). Fail-CLOSED (F5.5): nunca cai para
  * o `FakeAdapter` nem para as credenciais do env "por conveniência" — a conta que o dono configurou na tela é
  * a que vale, e adivinhar outra pode cobrar da conta errada ou de graça. As rotas já convertem qualquer erro do
  * resolvedor em 503 `PAYMENT_GATEWAY_UNAVAILABLE`.

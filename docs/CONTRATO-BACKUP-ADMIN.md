@@ -51,7 +51,7 @@ export type BackupErrorCode =
   | 'DUMP' // pg_dump/pg_restore falhou (cliente ausente na imagem, versão antiga...)
   | 'DUMP_TIMEOUT' // pg_dump passou do prazo
   | 'KEY' // chave do backup ausente/ilegível/diferente da do arquivo
-  | 'SECRETS_KEY' // PAYMENT_SECRETS_KEY ausente/mudou: segredos do destino não decifram
+  | 'SECRETS_KEY' // a chave dos segredos mudou (JWT_SECRET trocado; ou override PAYMENT_SECRETS_KEY): segredos do destino não decifram
   | 'TOO_BIG' // arquivo > 5 GiB (envio simples do S3)
   | 'NO_BACKUP' // conferência: destino vazio
   | 'VERIFY' // conferência reprovou (vazio, adulterado, sem marca, índice vazio)
@@ -105,9 +105,9 @@ export interface BackupConfigDTO {
     createdAt: string | null
     shownAt: string | null
   }
-  /** O servidor tem a PAYMENT_SECRETS_KEY (sem ela não dá para guardar credenciais nem a chave). */
+  /** A chave dos segredos está utilizável (derivada do JWT_SECRET; só é false se o override PAYMENT_SECRETS_KEY foi definido e é inválido). Sem ela não dá para guardar credenciais nem a chave. */
   secretsKeyConfigured: boolean
-  /** Os segredos salvos decifram agora (false = a PAYMENT_SECRETS_KEY mudou: recadastrar). */
+  /** Os segredos salvos decifram agora (false = o JWT_SECRET mudou — ou o override —: recadastrar). */
   secretsReadable: boolean
   problemsToEnable: BackupProblemToEnable[]
   updatedAt: string
@@ -239,7 +239,7 @@ export interface BackupGoogleStartResponse {
 
 ### Gerar a chave (a única vez em que ela sai do servidor)
 
-`POST /key` com a senha → `201` com `key`, `fingerprint`, `fileName` e `fileText`. **Mostre a chave uma vez, ofereça o download do `.txt` e peça para guardar fora do servidor** (gerenciador de senhas + cópia offline); explique que sem ela os backups não abrem e que ela **não substitui** a `PAYMENT_SECRETS_KEY` (sem esta, o restore não devolve as credenciais da Cielo etc.). O sistema guarda só uma cópia cifrada para o agendador.
+`POST /key` com a senha → `201` com `key`, `fingerprint`, `fileName` e `fileText`. **Mostre a chave uma vez, ofereça o download do `.txt` e peça para guardar fora do servidor** (gerenciador de senhas + cópia offline); explique que sem ela os backups não abrem e que ela **não substitui** o `JWT_SECRET` (dele deriva a chave dos segredos; sem ele, o restore não devolve as credenciais da Cielo etc.). O sistema guarda só uma cópia cifrada para o agendador.
 Trocar uma chave existente: `replace: true` + `confirmation: "GERAR NOVA CHAVE"` (a tela pede para digitar) + `expectedFingerprint` (o que ela mostrava). As cópias antigas continuam precisando da chave antiga — avise.
 
 ### Fazer backup agora / Conferir (assíncronos)
@@ -274,7 +274,7 @@ Se `drive.redirectUri` vier `null`, a API não conhece o próprio endereço púb
 | `INVALID_CURRENT_PASSWORD` | 403 | PUT config, key, google/* | Senha errada (não é 401: o interceptor do frontend desloga em 401) |
 | `RATE_LIMITED_BACKUP` | 429 | todas as escritas/ações | Muitas tentativas (limite por ADMIN ou tranca da senha); use `Retry-After` |
 | `STEPUP_UNAVAILABLE` | 503 | PUT config, key, google/* | Não deu para confirmar a senha agora (Redis); nada foi gravado: tente de novo |
-| `SECRETS_KEY_MISSING` | 503 | PUT config (com credencial), key | O servidor não tem `PAYMENT_SECRETS_KEY`: não dá para guardar segredos |
+| `SECRETS_KEY_MISSING` | 503 | PUT config (com credencial), key | A chave dos segredos está indisponível (override `PAYMENT_SECRETS_KEY` inválido): não dá para guardar segredos |
 | `INVALID_URL` / `HTTPS_REQUIRED` / `URL_HAS_CREDENTIALS` / `URL_HAS_EXTRAS` | 400 | PUT config (`s3.endpoint`) | Endereço do bucket inválido (precisa https em produção, sem usuário/senha, sem `?`/`#`) |
 | `DESTINATION_NOT_ALLOWED` | 400 | PUT config (`s3.endpoint`) | Aponta para a rede interna/metadados/loopback: use o endereço público do provedor (`details[0].field`) |
 | `SECRET_REQUIRED_FOR_NEW_DESTINATION` | 400 | PUT config | Trocou o endereço do bucket sem reenviar `accessKey` e `secretKey` |

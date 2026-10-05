@@ -2,7 +2,7 @@
 
 Contrato LITERAL das rotas `/api/admin/communication-settings` (N-7). **Fonte da verdade do backend:** `backend/src/api/routes/communicationSettings.routes.ts`, `backend/src/api/schemas/communicationSettings.schema.ts` e `backend/src/services/comunicacao/comunicacaoDto.ts`. Os tipos abaixo ainda **não estão em** `frontend/src/types/api.ts` (o único escritor desse arquivo é o Vega-B): copie-os de lá para lá, sem renomear.
 
-Mesmo desenho e mesma segurança da tela do gateway de pagamento (F5.5): **o painel (banco) manda, as variáveis `ALERT_*` são a reserva**; segredos cifrados (AES-256-GCM, chave `PAYMENT_SECRETS_KEY`); segredo **nunca** volta em claro; PUT exige a senha atual (step-up); somente ADMIN.
+Mesmo desenho e mesma segurança da tela do gateway de pagamento (F5.5): **o painel (banco) manda, as variáveis `ALERT_*` são a reserva**; segredos cifrados (AES-256-GCM, chave derivada do `JWT_SECRET`; `PAYMENT_SECRETS_KEY` é override opcional); segredo **nunca** volta em claro; PUT exige a senha atual (step-up); somente ADMIN.
 
 Todas as rotas: `Authorization: Bearer <jwt>`, **ADMIN** (OPERATOR e DRIVER recebem `403 FORBIDDEN`; sem token `401`). Erros no envelope da casa: `{ error: string, code: string, details?: ... }`.
 
@@ -71,7 +71,7 @@ export interface CommunicationSettingsDTO {
     /** Teto de avisos por hora (env `ALERT_MAX_PER_HOUR`, só leitura aqui). */
     maxPerHour: number
   }
-  /** `PAYMENT_SECRETS_KEY` configurada no servidor. `false` => não dá para salvar senha/apikey (PUT responde 503 `SECRETS_KEY_MISSING`). */
+  /** Chave dos segredos utilizável (derivada do `JWT_SECRET`; só `false` se o override `PAYMENT_SECRETS_KEY` está definido e inválido). `false` => não dá para salvar senha/apikey (PUT responde 503 `SECRETS_KEY_MISSING`). */
   secretsKeyConfigured: boolean
   /** `true` = segredos salvos decifram; `false` = algum NÃO decifra (chave trocada/perdida: canal desligado até salvar o segredo de novo); `null` = não há segredo salvo no banco. */
   secretsDecryptable: boolean | null
@@ -247,7 +247,7 @@ export type CommunicationSettingsErrorCode =
   | 'RATE_LIMITED_PAYMENT_GATEWAY' // 429 — tentativas ERRADAS de senha demais (mesmo código/balde do gateway), header Retry-After
   | 'RATE_LIMITED_COMMUNICATION_SETTINGS' // 429 — limite por minuto do PUT/testes/verificador de DNS
   | 'STEPUP_UNAVAILABLE' // 503 — Redis do step-up fora (fail-closed): nada foi gravado
-  | 'SECRETS_KEY_MISSING' // 503 — servidor sem PAYMENT_SECRETS_KEY: não dá para guardar senha/apikey
+  | 'SECRETS_KEY_MISSING' // 503 — chave dos segredos indisponível (override PAYMENT_SECRETS_KEY inválido): não dá para guardar senha/apikey
   | 'COMMUNICATION_SETTINGS_UNAVAILABLE' // 503 — não deu para ler a config no banco (só GET/testes)
   | 'DESTINATION_NOT_ALLOWED' // 400 — details: [{ field: 'email.host' | 'whatsapp.baseUrl', reason: 'LOOPBACK' | 'REDE_PRIVADA' | 'NOME_INTERNO' | 'ENDERECO_DE_METADADOS' | 'ENDERECO_NAO_ROTEAVEL' | 'HOST_INVALIDO' | 'HTTPS_REQUIRED' | 'INVALID_URL' }]
   | 'SECRET_REQUIRED_FOR_NEW_DESTINATION' // 400 — trocar host/usuário SMTP ou URL/instância da Evolution exige reenviar a senha/apikey (details: [{ field: 'email.password' | 'whatsapp.apiKey' | 'config.password' | 'config.apiKey' }])

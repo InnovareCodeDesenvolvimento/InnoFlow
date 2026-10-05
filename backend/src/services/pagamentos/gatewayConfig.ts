@@ -173,7 +173,7 @@ let avisouSegredosIlegiveis = false
 
 /**
  * `secretsDecryptable` do DTO (F5.7, M3): tenta DECIFRAR os segredos SALVOS NO BANCO agora. `null` = não há segredo salvo no banco
- * (sem linha / `source: 'env'` / só campos não secretos); `false` = ao menos um não decifra (`PAYMENT_SECRETS_KEY` trocada/perdida ou dado
+ * (sem linha / `source: 'env'` / só campos não secretos); `false` = ao menos um não decifra (`JWT_SECRET` trocado — a chave dos segredos é derivada dele —, override `PAYMENT_SECRETS_KEY` trocado/perdido ou dado
  * corrompido) — o gateway está em 503 mesmo com os chips "Configurada"; `true` = todos decifram. NUNCA lança (o GET da config não pode
  * falhar por causa disto — é justamente pela tela que o admin lê o estado e REENVIA os segredos) e nunca devolve nem loga o texto decifrado.
  * Loga UMA vez por processo (`payment_gateway_secrets_undecryptable`). Barato: no máximo 3 decifragens AES-GCM.
@@ -190,7 +190,7 @@ export function verificarSegredosDecifraveis(linha: LinhaConfigGateway | null): 
       avisouSegredosIlegiveis = true
       logger.error(
         { alert: 'payment_gateway_secrets_undecryptable', reason: err instanceof Error ? err.name : 'erro' },
-        '[pagamentos] os segredos do gateway salvos no banco NÃO decifram (PAYMENT_SECRETS_KEY trocada/perdida ou dado corrompido) — gateway indisponível até reenviar os 3 segredos pela tela do admin',
+        '[pagamentos] os segredos do gateway salvos no banco NÃO decifram (JWT_SECRET trocado — a chave é derivada dele —, override PAYMENT_SECRETS_KEY trocado/perdido ou dado corrompido) — gateway indisponível até voltar ao JWT_SECRET original ou reenviar os 3 segredos pela tela do admin',
       )
     }
     return false

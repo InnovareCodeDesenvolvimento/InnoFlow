@@ -154,9 +154,11 @@ describe('paymentSecrets.ts (env: PAYMENT_SECRETS_KEY / PAYMENT_SECRETS_KEY_PREV
 
   it('isPaymentSecretsKeyConfigured só depende da chave ATUAL (a anterior é opcional)', () => {
     expect(isPaymentSecretsKeyConfigured()).toBe(true)
+    // MUDANÇA DELIBERADA (chave derivada do JWT_SECRET, como no InnoChat): sem o override a chave vem do JWT_SECRET — este env mockado NÃO tem JWT_SECRET, então continua "indisponível" (e a mensagem
+    // agora aponta o JWT_SECRET). Com JWT_SECRET presente, ver paymentSecretsDerivada.test.ts.
     envFake.PAYMENT_SECRETS_KEY = undefined
     resetPaymentSecretsKeyCacheParaTeste()
     expect(isPaymentSecretsKeyConfigured()).toBe(false)
-    expect(() => encryptPaymentSecret(SEGREDO)).toThrow(/PAYMENT_SECRETS_KEY/)
+    expect(() => encryptPaymentSecret(SEGREDO)).toThrow(/JWT_SECRET/)
   })
 })

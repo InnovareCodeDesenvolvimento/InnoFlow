@@ -1,4 +1,5 @@
 import type { PaymentMethod } from '@prisma/client'
+import { decifrarSegredoOuNull } from '../../lib/crypto/paymentSecrets'
 
 /**
  * Contrato LITERAL de `frontend/src/types/api.ts` (`MePaymentMethodDTO`) —
@@ -16,6 +17,11 @@ export interface MePaymentMethodDto {
   expiryYear: number | null
   isDefault: boolean
   createdAt: string
+  /**
+   * `true` = o token do cartão salvo NÃO decifra mais (o `JWT_SECRET` do servidor mudou: a chave dos segredos é derivada dele). O cartão não pode ser usado: a tela deve pedir "cadastre o cartão
+   * novamente" (e deixar remover o antigo). Iniciar sessão com ele responde 409 `PAYMENT_METHOD_UNREADABLE`. Campo ADITIVO (decisão do dono 05/10/2026: chave derivada do JWT_SECRET, como no InnoChat).
+   */
+  unreadable: boolean
 }
 
 export function toMePaymentMethodDto(row: PaymentMethod): MePaymentMethodDto {
@@ -28,5 +34,6 @@ export function toMePaymentMethodDto(row: PaymentMethod): MePaymentMethodDto {
     expiryYear: row.expiryYear,
     isDefault: row.isDefault,
     createdAt: row.createdAt.toISOString(),
+    unreadable: decifrarSegredoOuNull(row.cieloCardTokenCiphertext) === null,
   }
 }

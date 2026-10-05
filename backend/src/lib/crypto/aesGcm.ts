@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto'
 
 /**
  * AES-256-GCM puro — sem `env`, sem `logger`, sem nada além de `node:crypto`.
@@ -71,12 +71,46 @@ export function decryptAesGcm(ciphertextBase64: string, key: Buffer): string {
 }
 
 // ----------------------------------------------------------------------------------------------
+// Chave-mestra DERIVADA de um segredo do ambiente (decisão do dono, 05/10/2026: "como no InnoChat")
+// ----------------------------------------------------------------------------------------------
+//
+// O InnoChat guarda a chave dos segredos em repouso DERIVADA do `AUTH_SECRET` (`scryptSync(secret, SALT_FIXO, 32)`), para o deploy ter só as variáveis essenciais. O InnoFlow faz o mesmo
+// com o `JWT_SECRET`. `PAYMENT_SECRETS_KEY` virou OVERRIDE opcional (ver `paymentSecrets.ts`). CONSEQUÊNCIA OPERACIONAL: trocar o `JWT_SECRET` faz todo segredo já cifrado deixar de
+// decifrar (vira AUSENTE, fail-closed) e precisa ser recadastrado — e, no InnoFlow, derruba as sessões e deixa ilegíveis os cartões salvos dos motoristas. Runbook: docs/DEPLOY-EASYPANEL.md.
+
+/**
+ * Salt FIXO e PRÓPRIO do InnoFlow — só estica o segredo em material de chave (não precisa ser secreto: a segurança é do `JWT_SECRET`). NÃO ALTERE: invalida todo segredo já cifrado.
+ * (O InnoChat usa outro salt, de propósito: o mesmo segredo nos dois sistemas não pode dar a mesma chave.)
+ */
+export const SALT_DA_CHAVE_DERIVADA = 'innoflow:lib/crypto:aes-256-gcm:v1'
+
+/** Mínimo do segredo-fonte — o mesmo piso do `env.ts` para o `JWT_SECRET` (produção exige 32). */
+export const TAMANHO_MINIMO_DO_SEGREDO_FONTE = 16
+
+// scryptSync é intencionalmente caro (~100 ms): deriva UMA vez por valor de segredo. O cache é chaveado pelo próprio segredo, então um teste que troque o `JWT_SECRET` não precisa de reset.
+let derivadaEmCache: { segredo: string; chave: Buffer } | null = null
+
+/** Chave AES-256 derivada de `segredo` via scrypt com o salt fixo do InnoFlow. `null` se o segredo for ausente/curto (nunca lança por isso). Determinística: mesmo segredo => mesma chave. */
+export function derivarChaveDoSegredo(segredo: string | null | undefined): Buffer | null {
+  if (!segredo || segredo.length < TAMANHO_MINIMO_DO_SEGREDO_FONTE) return null
+  if (!derivadaEmCache || derivadaEmCache.segredo !== segredo) {
+    derivadaEmCache = { segredo, chave: scryptSync(segredo, SALT_DA_CHAVE_DERIVADA, KEY_LENGTH_BYTES) }
+  }
+  return derivadaEmCache.chave
+}
+
+/** Só para teste: provar que o scrypt é cacheado (e não recalculado a cada decifragem). */
+export function resetCacheDaChaveDerivadaParaTeste(): void {
+  derivadaEmCache = null
+}
+
+// ----------------------------------------------------------------------------------------------
 // Formato VERSIONADO + rotação de chave (F5.7)
 // ----------------------------------------------------------------------------------------------
 //
 // `v1:<kid>:<base64(iv+tag+ct)>` — o mesmo corpo de `encryptAesGcm`, precedido da versão do formato e do `kid` (identificador da CHAVE que cifrou:
 // os 8 primeiros hex do SHA-256 da chave — nunca a chave, e 32 bits de um hash de 256 bits aleatórios não ajudam ninguém a recuperá-la). Serve para
-// ROTACIONAR `PAYMENT_SECRETS_KEY` sem perder os segredos já gravados: a chave nova cifra tudo o que for gravado dali em diante (sempre `v1` com a atual),
+// ROTACIONAR a chave-mestra (modo override `PAYMENT_SECRETS_KEY`, ou voltar ao derivado do `JWT_SECRET`) sem perder os segredos já gravados: a chave nova cifra tudo o que for gravado dali em diante (sempre `v1` com a atual),
 // a antiga fica em `PAYMENT_SECRETS_KEY_PREVIOUS` só para DECIFRAR, e `backend/scripts/recifrarSegredosDePagamento.ts` regrava o que ficou com a antiga.
 // Ciphertext LEGADO (sem prefixo — tudo o que foi gravado até a F5.7) continua decifrando: tenta a chave atual e depois a anterior. O base64 padrão
 // não contém ':', então a presença do prefixo `v1:` é inequívoca.
@@ -90,10 +124,13 @@ export function keyId(key: Buffer): string {
   return createHash('sha256').update(key).digest('hex').slice(0, KID_HEX_LENGTH)
 }
 
-/** Nenhuma das chaves configuradas tem o `kid` do ciphertext — a chave que o cifrou foi trocada/perdida (ou `PAYMENT_SECRETS_KEY_PREVIOUS` não foi configurada na rotação). */
+/**
+ * Nenhuma das chaves disponíveis tem o `kid` do ciphertext — a chave que o cifrou foi trocada/perdida. Na prática: o `JWT_SECRET` (de onde a chave-mestra é DERIVADA) mudou,
+ * ou `PAYMENT_SECRETS_KEY` (override opcional) mudou/foi removida sem `PAYMENT_SECRETS_KEY_PREVIOUS`.
+ */
 export class UnknownKeyIdError extends Error {
   constructor(readonly kid: string) {
-    super(`Ciphertext cifrado com a chave de id "${kid}", que não está configurada (PAYMENT_SECRETS_KEY / PAYMENT_SECRETS_KEY_PREVIOUS).`)
+    super(`Ciphertext cifrado com a chave de id "${kid}", que não está disponível (JWT_SECRET trocado, ou PAYMENT_SECRETS_KEY / PAYMENT_SECRETS_KEY_PREVIOUS ausente).`)
     this.name = 'UnknownKeyIdError'
   }
 }
@@ -117,24 +154,30 @@ export function analisarCiphertext(ciphertext: string): CiphertextAnalisado {
 export interface ChavesDeDecifragem {
   atual: Buffer
   anterior?: Buffer | null
+  /** Outras chaves que só DECIFRAM (ex.: a derivada do `JWT_SECRET` quando a atual é o override `PAYMENT_SECRETS_KEY`). Tentadas depois de `anterior`. */
+  outras?: readonly Buffer[]
 }
 
 /**
- * Decifra qualquer formato. `v1`: escolhe a chave pelo `kid` (atual ou anterior; nenhuma bate => `UnknownKeyIdError`). Legado: tenta a atual e, se o auth tag
- * não bater, a anterior (se houver) — nunca devolve texto parcial. Lança o erro nativo de `crypto` quando NENHUMA chave decifra.
+ * Decifra qualquer formato. `v1`: escolhe a chave pelo `kid` (atual, anterior ou das `outras`; nenhuma bate => `UnknownKeyIdError`). Legado: tenta a atual e, se o auth tag
+ * não bater, cada uma das demais — nunca devolve texto parcial. Lança o erro nativo de `crypto` (o da primeira tentativa) quando NENHUMA chave decifra.
  */
 export function decryptAesGcmComChaves(ciphertext: string, chaves: ChavesDeDecifragem): string {
   const analisado = analisarCiphertext(ciphertext)
+  const candidatas = [chaves.atual, chaves.anterior, ...(chaves.outras ?? [])].filter((c): c is Buffer => Boolean(c))
   if (analisado.formato === 'v1') {
-    for (const chave of [chaves.atual, chaves.anterior]) {
-      if (chave && keyId(chave) === analisado.kid) return decryptAesGcm(analisado.corpo, chave)
+    for (const chave of candidatas) {
+      if (keyId(chave) === analisado.kid) return decryptAesGcm(analisado.corpo, chave)
     }
     throw new UnknownKeyIdError(analisado.kid)
   }
-  try {
-    return decryptAesGcm(analisado.corpo, chaves.atual)
-  } catch (err) {
-    if (!chaves.anterior) throw err
-    return decryptAesGcm(analisado.corpo, chaves.anterior)
+  let primeiroErro: unknown
+  for (const chave of candidatas) {
+    try {
+      return decryptAesGcm(analisado.corpo, chave)
+    } catch (err) {
+      primeiroErro ??= err
+    }
   }
+  throw primeiroErro
 }

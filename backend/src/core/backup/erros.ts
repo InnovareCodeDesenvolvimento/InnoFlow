@@ -14,7 +14,7 @@ export const CODIGOS_DE_ERRO_DO_BACKUP = [
   'DUMP', // pg_dump/pg_restore falhou (cliente ausente, versão antiga, banco recusou)
   'DUMP_TIMEOUT', // pg_dump passou do prazo e foi morto
   'KEY', // chave do backup ausente/ilegível/diferente da do arquivo
-  'SECRETS_KEY', // PAYMENT_SECRETS_KEY ausente ou não decifra os segredos do destino
+  'SECRETS_KEY', // a chave-mestra (derivada do JWT_SECRET, ou o override PAYMENT_SECRETS_KEY) não decifra os segredos do destino: JWT_SECRET trocado
   'TOO_BIG', // arquivo maior que o limite do envio simples (5 GiB no S3)
   'NO_BACKUP', // o destino não tem nenhuma cópia (conferência)
   'VERIFY', // a conferência reprovou (cópia vazia, adulterada, sem marca, índice vazio)
@@ -51,8 +51,8 @@ export const MENSAGEM_DO_ERRO: Readonly<Record<CodigoDeErroDoBackup, string>> = 
   OAUTH_DISCONNECTED: 'A conta Google conectada não autoriza mais o backup (acesso revogado, senha trocada ou app do Google Cloud em modo de teste). Conecte de novo em Admin > Backup.',
   DUMP: 'O pg_dump não terminou. Confira se a imagem do worker tem o cliente do PostgreSQL (versão igual ou mais nova que a do servidor) e se DATABASE_URL está certa. O detalhe está no log do servidor.',
   DUMP_TIMEOUT: 'O pg_dump passou do prazo e foi interrompido. O detalhe está no log do servidor.',
-  KEY: 'A chave de criptografia do backup está ausente, ilegível ou é diferente da que cifrou a cópia. Gere/guarde a chave em Admin > Backup.',
-  SECRETS_KEY: 'O servidor não conseguiu decifrar os segredos do destino: a PAYMENT_SECRETS_KEY do ambiente está ausente ou mudou. Restaure a chave original ou cadastre o destino de novo.',
+  KEY: 'A chave de criptografia do backup está ausente, ilegível (a cópia dela guardada no sistema não abre mais se o JWT_SECRET mudou) ou é diferente da que cifrou a cópia. Gere a chave de novo em Admin > Backup e guarde o arquivo; as cópias antigas só abrem com a chave antiga.',
+  SECRETS_KEY: 'O servidor não conseguiu decifrar os segredos do destino: o JWT_SECRET do ambiente mudou (a chave dos segredos salvos é derivada dele). Volte ao JWT_SECRET original ou cadastre o destino de novo em Admin > Backup.',
   TOO_BIG: 'O arquivo cifrado passa do limite do envio simples (5 GiB). É preciso envio em partes (multipart), que ainda não existe.',
   NO_BACKUP: 'O destino ainda não tem nenhuma cópia do backup. Use Fazer backup agora e confira de novo.',
   VERIFY: 'A conferência da cópia mais recente reprovou: o arquivo está vazio, adulterado, sem a marca do formato ou o índice do dump está vazio. Faça um backup novo e confira de novo.',

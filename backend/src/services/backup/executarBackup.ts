@@ -114,7 +114,7 @@ export async function executarBackup(opcoes: { gatilho: GatilhoDoBackup; runId?:
     if (!databaseUrl) throw new ErroDeBackup('DATABASE_URL não está definida: não há o que copiar.', 'CONFIG')
     if (opcoes.gatilho === 'SCHEDULED' && !destinoNome) throw new ErroDeBackup('Backup agendado sem destino completo. Uma cópia que fica no servidor não é backup.', 'CONFIG')
 
-    // Falhar ANTES do dump: destino/segredos/chave legíveis (um dump de gigas gasto à toa é o pior jeito de descobrir PAYMENT_SECRETS_KEY trocada).
+    // Falhar ANTES do dump: destino/segredos/chave legíveis (um dump de gigas gasto à toa é o pior jeito de descobrir JWT_SECRET trocado).
     const remoto = deps.destino !== undefined ? deps.destino : criarDestinoDaConfig(config)
     const chave = remoto ? chaveDoBackupDaConfig(config) : null
 

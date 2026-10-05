@@ -9,7 +9,7 @@ import { CAPTURAR_SESSAO_CARTAO_QUEUE_NAME, type CapturarSessaoCartaoJobData } f
 
 /**
  * Quanto o job espera antes de olhar o gateway de novo quando ele está INDISPONÍVEL POR CONFIGURAÇÃO (produção sem
- * credencial, config ilegível/indecifrável, `PAYMENT_SECRETS_KEY` trocada). F5.7: antes isso LANÇAVA, e cada volta gastava
+ * credencial, config ilegível/indecifrável, `JWT_SECRET` trocado (chave dos segredos)). F5.7: antes isso LANÇAVA, e cada volta gastava
  * uma das tentativas do job — a config fora do ar por alguns minutos esgotava tudo e deixava o intent parado.
  */
 export const GATEWAY_INDISPONIVEL_ADIAR_MS = 60_000

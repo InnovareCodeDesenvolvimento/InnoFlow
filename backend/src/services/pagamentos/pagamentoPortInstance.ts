@@ -75,7 +75,7 @@ function construirAdaptadorCielo(config: ConfigEfetiva): PagamentoPort {
     merchantKey = estado.origem.merchant === 'database' ? decryptPaymentSecret(linha!.merchantKeyCiphertext!) : env.CIELO_MERCHANT_KEY
     sopClientSecret = estado.origem.sop === 'database' ? decryptPaymentSecret(linha!.sopClientSecretCiphertext!) : env.CIELO_SOP_CLIENT_SECRET
   } catch (err) {
-    logger.error({ err: err instanceof Error ? err.message : String(err), alert: 'payment_gateway_config_decrypt_failed' }, '[pagamentos] não foi possível decifrar as credenciais salvas no banco (PAYMENT_SECRETS_KEY trocada/ausente ou dado corrompido) — gateway indisponível (fail-closed)')
+    logger.error({ err: err instanceof Error ? err.message : String(err), alert: 'payment_gateway_config_decrypt_failed' }, '[pagamentos] não foi possível decifrar as credenciais salvas no banco (JWT_SECRET trocado — a chave é derivada dele —, override PAYMENT_SECRETS_KEY trocado/ausente ou dado corrompido) — gateway indisponível (fail-closed)')
     throw new ConfiguracaoGatewayIndisponivelError('falha ao decifrar as credenciais salvas', { cause: err })
   }
 

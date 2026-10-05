@@ -14,11 +14,11 @@ Documentos relacionados: `docs/BACKUP-FORMATO.md` (o formato byte a byte do arqu
 |---|---|---|
 | **Banco Postgres inteiro**: operadores, pontos, carregadores, motoristas, carteiras e lançamentos, sessões de carga, pagamentos, estornos, auditoria, medições (`MeterSample`), log OCPP, configurações cifradas (Cielo, SMTP, Evolution, destino do backup) | **Sim** (`pg_dump` formato custom, cifrado) | Restaurar o backup (seção 7) |
 | **Redis (filas BullMQ, locks, pub/sub)** | Não, e não precisa | Reconstruível: nada de verdade mora lá. Jobs em voo se perdem; os varredores do worker (captura de cartão pendente, watchdog de sessão travada, manutenção de partições, agendador de backup) reaparecem sozinhos no boot e reprocessam o que o banco diz estar pendente. Os carregadores reconectam sozinhos (OCPP). |
-| **`PAYMENT_SECRETS_KEY`** (cifra os segredos guardados no banco) | **NÃO** | **Sem cópia fora do banco, tudo que está cifrado no banco se perde** (seção 4). É o único segredo cuja perda é irrecuperável. |
-| **`JWT_SECRET`** | Não | Gerar outro (`openssl rand -base64 48`). Efeito: todo mundo precisa entrar de novo. Nenhum dado se perde. |
-| **Chave do backup** (a de 32 bytes que cifra o `.dump.enc`) | Não (o banco guarda só uma cópia cifrada com `PAYMENT_SECRETS_KEY`, para o agendador cifrar de madrugada) | A cópia que o dono guardou ao gerá-la. **Sem ela os backups não abrem.** |
-| Credenciais da **Cielo**, SMTP, Evolution API, S3/Drive do backup | Estão **no banco, cifradas** com `PAYMENT_SECRETS_KEY` | Voltam com o restore **se** a `PAYMENT_SECRETS_KEY` for a mesma. Se não for, reentrar pela tela do admin (Cielo no portal da Cielo, SMTP/Evolution nos provedores). |
-| Token de **cartão salvo** dos motoristas | Está no banco, cifrado com `PAYMENT_SECRETS_KEY` | Sem a chave original, o motorista precisa cadastrar o cartão de novo. Não há como recuperar. |
+| **`JWT_SECRET`** (assina as sessões **e** é a fonte da chave que cifra os segredos guardados no banco — a chave é *derivada* dele) | **NÃO** | **Sem cópia fora do banco, tudo que está cifrado no banco se perde** (seção 4): credenciais, SMTP/Evolution, S3/Drive, a cópia da chave do backup e os cartões salvos dos motoristas. É o único segredo cuja perda é irrecuperável. Trocar também derruba todas as sessões. |
+| `PAYMENT_SECRETS_KEY` (override **opcional** da chave dos segredos) | Não | Só existe se foi definida de propósito. Se existe, **ela** é a chave e precisa de cópia fora do EasyPanel (como o `JWT_SECRET`). Se não existe, ignore. |
+| **Chave do backup** (a de 32 bytes que cifra o `.dump.enc`) | Não (o banco guarda só uma cópia cifrada com a chave dos segredos — derivada do `JWT_SECRET` —, para o agendador cifrar de madrugada; a chave do backup em si é **independente** do `JWT_SECRET`) | A cópia que o dono guardou ao gerá-la. **Sem ela os backups não abrem.** |
+| Credenciais da **Cielo**, SMTP, Evolution API, S3/Drive do backup | Estão **no banco, cifradas** com a chave derivada do `JWT_SECRET` | Voltam com o restore **se** o `JWT_SECRET` for o mesmo (ou a `PAYMENT_SECRETS_KEY` original, se o override estava em uso). Se não for, reentrar pela tela do admin (Cielo no portal da Cielo, SMTP/Evolution nos provedores). |
+| Token de **cartão salvo** dos motoristas | Está no banco, cifrado com a chave derivada do `JWT_SECRET` | Sem o `JWT_SECRET` original, o motorista precisa cadastrar o cartão de novo. Não há como recuperar. |
 | **Variáveis de ambiente** das 3 apps (`DATABASE_URL`, `REDIS_URL`, `CORS_ALLOWED_ORIGINS`, `OCPP_TRUST_PROXY_HOPS`...) | Não | Estão no EasyPanel, em cada App. Mantenha uma cópia da LISTA (nomes e para que servem: `docs/DEPLOY-EASYPANEL.md` seção 1) e dos valores no gerenciador de senhas. |
 | Imagem das apps / código | Não | Está no Git (`github.com/InnovareCodeDesenvolvimento/InnoFlow`). O EasyPanel reconstrói. |
 | Domínio, DNS, certificados | Não | Fora do escopo deste runbook (registro do domínio e EasyPanel). |
@@ -51,13 +51,13 @@ O que o RPO significa na prática: tudo que aconteceu entre a última cópia e o
 
 | Segredo | Para que serve | Se perder | Onde guardar |
 |---|---|---|---|
-| **`PAYMENT_SECRETS_KEY`** | Cifra no banco: credenciais da Cielo, token de cartão salvo, senha SMTP, apikey da Evolution, chaves do S3/Drive do backup, e a cópia da chave do backup. | **Irrecuperável.** Tudo isso fica ilegível: reentrar credenciais, motoristas recadastram cartão, e a cópia da chave do backup guardada no banco morre (a do dono continua valendo). | Gerenciador de senhas do dono (com 2FA) **e** uma cópia offline (pen drive/papel no cofre). Uma entrada própria, separada da chave do backup. Se houver rotação em andamento, guarde também a `PAYMENT_SECRETS_KEY_PREVIOUS` até concluir (`docs/DEPLOY-EASYPANEL.md`, "Rotação da PAYMENT_SECRETS_KEY"). |
+| **`JWT_SECRET`** | Assina as sessões (login) **e** é a fonte (scrypt) da chave que cifra no banco: credenciais da Cielo, token de cartão salvo, senha SMTP, apikey da Evolution, chaves do S3/Drive do backup, chave Pix de devolução e a cópia da chave do backup. | **Irrecuperável.** Tudo isso fica ilegível: reentrar credenciais, motoristas recadastram cartão, e a cópia da chave do backup guardada no banco morre (a do dono continua valendo). Todos precisam entrar de novo. **Voltar ao valor antigo desfaz tudo.** | Gerenciador de senhas do dono (com 2FA) **e** uma cópia offline (pen drive/papel no cofre). Uma entrada própria, separada da chave do backup. Runbook "Trocar o JWT_SECRET": `docs/DEPLOY-EASYPANEL.md`. |
+| `PAYMENT_SECRETS_KEY` (opcional) / `_PREVIOUS` | **Override** da chave dos segredos (rotação avançada). Só existe se definida de propósito. | Se estava em uso: igual ao `JWT_SECRET` acima (irrecuperável). | Se existe, guarde como o `JWT_SECRET`; durante uma rotação guarde também a `_PREVIOUS` até concluir (`docs/DEPLOY-EASYPANEL.md`, "Rotação da PAYMENT_SECRETS_KEY"). |
 | **Chave do backup** (`CHAVE: ...`, o `.txt` baixado em Admin > Backup) | Abre os arquivos `.dump.enc`. | Os backups existentes ficam **inúteis**. Se o sistema ainda estiver de pé, gerar uma chave nova protege os backups futuros (os antigos continuam precisando da antiga). | Gerenciador de senhas do dono **e** uma cópia offline. Anote também a **impressão digital** (8 caracteres): ela confere se a chave guardada é a certa sem expô-la. **Guarde todas as chaves antigas** junto com a atual: cada backup só abre com a chave que o cifrou. |
-| **`JWT_SECRET`** | Assina as sessões (login). | Gerar outro; todos precisam entrar de novo. | Gerenciador de senhas. |
 | Credenciais do bucket S3 / conta Google do Drive | Enviar e baixar os backups. | O backup para de sair. Reconfigurar em Admin > Backup. | Estão cifradas no banco; guarde também no gerenciador de senhas para o dia em que o banco não existe. |
 | Senha do Postgres do EasyPanel (`DATABASE_URL`) | Conexão do sistema. | Redefinir no EasyPanel e atualizar a env nas 3 apps. | Gerenciador de senhas. |
 
-**O erro mais caro deste sistema** é guardar a `PAYMENT_SECRETS_KEY` só dentro do EasyPanel. Se o servidor some, a chave some junto. Confira hoje que ela existe fora dele.
+**O erro mais caro deste sistema** é guardar o `JWT_SECRET` só dentro do EasyPanel. Se o servidor some, a chave some junto. Confira hoje que ela existe fora dele.
 
 ---
 
@@ -83,7 +83,7 @@ Opções: `BACKUP_KEY_FILE=<arquivo>` (arquivo com a linha `CHAVE:`) no lugar de
 1. **Não restaure por reflexo.** Primeiro entenda: o banco sumiu (serviço Postgres perdido/corrompido) ou o dado está errado (um bug, uma operação errada)? Para dado errado em poucas linhas, a **restauração parcial** (seção 8) é mais segura que sobrescrever tudo.
 2. **Pare as escritas:** pare `api`, `ocpp-gateway` e `worker` no EasyPanel. Carregadores podem continuar carregando offline (depende do modelo) e reenviam o que acumularam quando reconectarem; um ensaio de restauração não precisa parar nada (seção 9).
 3. **Tire uma cópia do estado atual**, se o banco ainda responde (seção 5), antes de substituir qualquer coisa. Restaurar é destrutivo e esta cópia é o seu "desfazer".
-4. Separe **os três itens**: o arquivo `.dump.enc`, o arquivo da chave `.txt`, e a `PAYMENT_SECRETS_KEY` (e a `JWT_SECRET`).
+4. Separe **os três itens**: o arquivo `.dump.enc`, o arquivo da chave `.txt`, e o `JWT_SECRET` (e, se usa o override, a `PAYMENT_SECRETS_KEY`).
 
 ---
 
@@ -138,8 +138,8 @@ Nas **3 apps** (`api`, `ocpp-gateway`, `worker`; todas recebem as mesmas variáv
 | Variável | Valor |
 |---|---|
 | `DATABASE_URL` | a do **novo** Postgres |
-| `PAYMENT_SECRETS_KEY` | **a original** (a que estava em uso quando o backup foi feito). Se uma rotação estava em andamento, também `PAYMENT_SECRETS_KEY_PREVIOUS`. |
-| `JWT_SECRET` | a original (ou uma nova: todos precisam entrar de novo) |
+| `JWT_SECRET` | **o original** (o que estava em uso quando o backup foi feito: dele deriva a chave dos segredos do banco). Um novo derruba as sessões **e deixa ilegíveis** credenciais, SMTP/Evolution, S3/Drive e os cartões salvos (runbook "Trocar o JWT_SECRET", `docs/DEPLOY-EASYPANEL.md`). |
+| `PAYMENT_SECRETS_KEY` | **só se estava em uso** (override opcional): a original. Se uma rotação estava em andamento, também `PAYMENT_SECRETS_KEY_PREVIOUS`. Se nunca foi definida, não defina agora. |
 | `REDIS_URL` | o Redis atual, ou um novo (vazio é normal) |
 | demais (`CORS_ALLOWED_ORIGINS`, `OCPP_TRUST_PROXY_HOPS`, `OCPP_PORT`, `PORT`, `NODE_ENV=production`...) | como estavam: `docs/DEPLOY-EASYPANEL.md` seção 1 |
 
@@ -151,8 +151,8 @@ Contar linhas prova que o dump tem dados; abrir a tela prova que o negócio volt
 
 1. `GET /health` da API responde; log do worker sem `alert:` novos. Procure `partition_horizon` (o worker recria as partições que faltarem).
 2. **Entrar** no painel admin (se a `JWT_SECRET` mudou, é normal pedir login).
-3. **Admin > Backup**: a impressão digital da chave bate com a guardada. Rode **Fazer backup agora** e espere ficar verde: isto prova que o sistema restaurado também consegue fazer backup (destino, `PAYMENT_SECRETS_KEY`, `pg_dump`). **Se aparecer erro de chave (`KEY`)**: a `PAYMENT_SECRETS_KEY` não é a original; gere uma chave de backup nova (as cópias antigas continuam precisando da antiga: guarde as duas).
-4. **Admin > Gateway de pagamento**: as credenciais da Cielo aparecem preenchidas (só de escrita). Se estiverem vazias/ilegíveis, a `PAYMENT_SECRETS_KEY` não é a original: reentrar as credenciais.
+3. **Admin > Backup**: a impressão digital da chave bate com a guardada. Rode **Fazer backup agora** e espere ficar verde: isto prova que o sistema restaurado também consegue fazer backup (destino, chave dos segredos, `pg_dump`). **Se aparecer erro de chave (`KEY`) ou de segredos (`SECRETS_KEY`)**: o `JWT_SECRET` (ou a `PAYMENT_SECRETS_KEY`, se usada) não é o original — a cópia da chave do backup e as credenciais do destino guardadas no banco não abrem; recadastre o destino e gere uma chave de backup nova (as cópias antigas continuam precisando da antiga: guarde as duas).
+4. **Admin > Gateway de pagamento**: as credenciais da Cielo aparecem preenchidas (só de escrita). Se estiverem vazias/ilegíveis, o `JWT_SECRET` (ou a `PAYMENT_SECRETS_KEY`, se usada) não é o original: volte ao original ou reentre as credenciais.
 5. **Carregadores**: a lista de pontos mostra os carregadores voltando a ficar online (eles reconectam sozinhos; leva alguns minutos). Sessões em andamento antes do desastre podem aparecer "em confirmação": o watchdog de sessão travada (se ligado) as reconcilia.
 6. Abra por amostra: **um motorista real e o saldo da carteira**, o histórico de sessões dele, uma tarifa, um operador. Compare com o que o negócio conhece.
 7. SQL de sanidade (no Postgres novo):
@@ -206,7 +206,7 @@ Cuidados específicos deste schema:
 - **`WalletEntry` e `AuditLog` são somente-anexar** (gatilhos barram `UPDATE` e `DELETE`): dá para **inserir** lançamentos que faltam, nunca alterar os existentes. O saldo é a soma dos lançamentos, não um campo: ao reinserir, respeite a ordem e o `balanceAfterCents`, e registre a correção como ajuste manual pela tela do admin sempre que possível (fica na auditoria).
 - Respeite as **chaves estrangeiras**: para devolver uma sessão de carga, o carregador, o motorista e a tarifa precisam existir no destino. Importe as tabelas pai primeiro.
 - `MeterSample` e `OcppMessage` são **particionadas por mês** e a chave de partição faz parte da chave primária: importe pela tabela-pai (`"MeterSample"`), nunca direto numa partição; o mês precisa ter partição (a `DEFAULT` pega o resto).
-- Colunas cifradas (`...Ciphertext`) só são legíveis com a `PAYMENT_SECRETS_KEY` **original**.
+- Colunas cifradas (`...Ciphertext`) só são legíveis com o `JWT_SECRET` **original** (ou a `PAYMENT_SECRETS_KEY` original, se o override estava em uso).
 - Só quer inspecionar o backup sem restaurar nada? `sh scripts/restore-db.sh backup.dump.enc --listar --chave chave.txt` lista o conteúdo; `node scripts/decrypt-backup.mjs backup.dump.enc --chave chave.txt` gera o `.dump` ao lado (sem sobrescrever nada que exista) para você usar com `pg_restore --list` / `-t`.
 - Apague o banco temporário depois: ele contém os dados de todos os motoristas.
 
@@ -214,7 +214,7 @@ Cuidados específicos deste schema:
 
 ## 9. Ensaio de restauração trimestral (obrigatório) e checklist
 
-**Quando:** a cada trimestre (jan, abr, jul, out), mais uma vez depois de qualquer mudança grande (troca de servidor Postgres, de versão major do Postgres, da `PAYMENT_SECRETS_KEY`, do destino do backup). Marque na agenda.
+**Quando:** a cada trimestre (jan, abr, jul, out), mais uma vez depois de qualquer mudança grande (troca de servidor Postgres, de versão major do Postgres, do `JWT_SECRET`, do destino do backup). Marque na agenda.
 
 **Onde:** num Postgres **descartável** (um serviço temporário no EasyPanel, ou o seu computador), **nunca** em produção e sem parar nada.
 
@@ -239,7 +239,7 @@ sh scripts/restore-db.sh backup-....dump.enc "postgresql://USUARIO@HOST:5432/ens
 - [ ] `restore-db.sh` terminou com `concluído` e "tabelas no destino" igual a "o backup define".
 - [ ] `SELECT max("createdAt") FROM "WalletEntry"` mostra uma data de **menos de 36 h** atrás (o backup é recente).
 - [ ] Um motorista conhecido e o saldo dele conferem; uma sessão recente existe.
-- [ ] A `PAYMENT_SECRETS_KEY` guardada **decifra** os segredos do banco restaurado (por exemplo, subir o backend contra o banco do ensaio e abrir Admin > Gateway de pagamento: credenciais preenchidas, não erro).
+- [ ] O `JWT_SECRET` guardado (ou a `PAYMENT_SECRETS_KEY`, se usada) **decifra** os segredos do banco restaurado (por exemplo, subir o backend contra o banco do ensaio e abrir Admin > Gateway de pagamento: credenciais preenchidas, não erro).
 - [ ] **Tempo total medido** (do passo 0 até conferir): registre aqui o número e compare com a meta de 2 h da seção 3: ______
 - [ ] O Postgres descartável foi **apagado** (contém dados de todos os motoristas).
 - [ ] Data do ensaio e resultado anotados: ______

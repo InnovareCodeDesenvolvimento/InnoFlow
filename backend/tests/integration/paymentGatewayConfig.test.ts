@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { HASH_SENHA_ADMIN_TESTE, SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
+import { OVERRIDE_INVALIDO } from './helpers/chaveMestra'
 
 /**
  * Configuração do gateway Cielo (F5.5) — ponta a ponta contra Postgres + Redis REAIS.
@@ -127,7 +128,7 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
     }
     app = m.createApp()
 
-    for (const k of ['NODE_ENV', 'CIELO_SANDBOX', 'CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'CIELO_SOP_CLIENT_ID', 'CIELO_SOP_CLIENT_SECRET', 'CIELO_SOP_SCRIPT_URL', 'CIELO_SOP_OAUTH_TOKEN_URL', 'CIELO_SOP_ACCESS_TOKEN_URL', 'PUBLIC_API_BASE_URL', 'PAYMENT_SECRETS_KEY']) {
+    for (const k of ['NODE_ENV', 'CIELO_SANDBOX', 'CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'CIELO_SOP_CLIENT_ID', 'CIELO_SOP_CLIENT_SECRET', 'CIELO_SOP_SCRIPT_URL', 'CIELO_SOP_OAUTH_TOKEN_URL', 'CIELO_SOP_ACCESS_TOKEN_URL', 'PUBLIC_API_BASE_URL', 'PAYMENT_SECRETS_KEY', 'PAYMENT_SECRETS_KEY_PREVIOUS', 'JWT_SECRET']) {
       envBaseline[k] = m.env[k]
     }
 
@@ -294,9 +295,22 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       expect(await m.prisma.paymentGatewayConfig.count()).toBe(0)
     })
 
-    it('PAYMENT_SECRETS_KEY ausente + segredo no corpo => 503 PAYMENT_SECRETS_KEY_MISSING, nada gravado; sem segredo no corpo continua funcionando', async () => {
+    it('SEM PAYMENT_SECRETS_KEY (modo padrão: chave derivada do JWT_SECRET, como no InnoChat): grava o segredo, a chave-mestra NÃO aparece como pendência e o ciphertext usa o kid da DERIVADA', async () => {
+      // MUDANÇA DELIBERADA: antes a ausência da PAYMENT_SECRETS_KEY dava 503; agora a chave vem do JWT_SECRET e a variável é só override opcional.
       const admin = await novoUsuario('ADMIN', 'admin')
-      m.env.PAYMENT_SECRETS_KEY = undefined
+      expect(m.env.PAYMENT_SECRETS_KEY).toBeUndefined()
+      const res = await put(admin, { merchantId: 'mid', merchantKey: SEGREDOS.merchantKey })
+      expect(res.status).toBe(200)
+      expect(res.body.readiness.card.missing).not.toContain('PAYMENT_SECRETS_KEY')
+      const linha = await m.prisma.paymentGatewayConfig.findUniqueOrThrow({ where: { id: 1 } })
+      const { derivarChaveDoSegredo, keyId } = await import('../../src/lib/crypto/aesGcm')
+      expect(linha.merchantKeyCiphertext!.startsWith(`v1:${keyId(derivarChaveDoSegredo(m.env.JWT_SECRET as string)!)}:`)).toBe(true)
+      expectSemSegredos(logsCapturados)
+    })
+
+    it('chave-mestra INDISPONÍVEL (override PAYMENT_SECRETS_KEY definido e inválido) + segredo no corpo => 503 PAYMENT_SECRETS_KEY_MISSING, nada gravado; sem segredo no corpo continua funcionando', async () => {
+      const admin = await novoUsuario('ADMIN', 'admin')
+      m.env.PAYMENT_SECRETS_KEY = OVERRIDE_INVALIDO
       const { resetPaymentSecretsKeyCacheParaTeste } = await import('../../src/lib/crypto/paymentSecrets')
       resetPaymentSecretsKeyCacheParaTeste()
       try {

@@ -36,7 +36,7 @@ N-16 .. N-1     16       tag de autenticação do GCM
 
 ## A chave
 
-- 32 bytes aleatórios (`crypto.randomBytes(32)`), **própria do backup** — independente de `JWT_SECRET`, `PAYMENT_SECRETS_KEY` e de qualquer outro segredo do sistema.
+- 32 bytes aleatórios (`crypto.randomBytes(32)`), **própria do backup** — independente de `JWT_SECRET`, `PAYMENT_SECRETS_KEY` (override opcional) e de qualquer outro segredo do sistema.
 - Texto: hex minúsculo em **8 grupos de 8** separados por hífen, ex.: `00010203-04050607-08090a0b-0c0d0e0f-10111213-14151617-18191a1b-1c1d1e1f`. Ao ler, aceita hex com ou sem hífen/espaço, maiúsculo ou minúsculo (64 hex).
 - É mostrada ao dono **uma única vez** (tela Admin > Backup) num arquivo `.txt`. A linha que os scripts leem começa com `CHAVE:` (sem diferença entre maiúsculas/minúsculas, espaços nas bordas ignorados); um arquivo que tenha **só** a chave também vale:
 
@@ -50,7 +50,7 @@ GERADA EM: 2026-10-06T12:00:00.000Z
 ```
 
 - A chave **não pode** ir por argumento de linha de comando (apareceria em `ps`). Os scripts leem de arquivo (`--chave arquivo.txt`) ou da variável de ambiente `BACKUP_KEY`.
-- O sistema guarda uma **cópia cifrada** da chave (com `PAYMENT_SECRETS_KEY`) só para o agendador conseguir cifrar de madrugada. Se `PAYMENT_SECRETS_KEY` for perdida, essa cópia morre — **a cópia do dono é o que vale**.
+- O sistema guarda uma **cópia cifrada** da chave (com a chave dos segredos, derivada do `JWT_SECRET`) só para o agendador conseguir cifrar de madrugada. Se o `JWT_SECRET` for trocado/perdido, essa cópia morre (o agendador falha com `KEY`: gere a chave de novo) — **a cópia do dono é o que vale**.
 
 ## Algoritmo do decifrador (para quem reimplementa)
 
@@ -92,4 +92,4 @@ Esse vetor foi produzido pelo `decrypt-backup.mjs --cifrar` do **InnoChat** (a f
 1. Baixar o `.dump.enc` do destino (S3/Drive).
 2. `node scripts/decrypt-backup.mjs backup-....dump.enc --chave chave-backup-innoflow-XXXXXXXX.txt` → gera o `.dump` (só depois da verificação de integridade).
 3. `pg_restore --no-owner --no-privileges --dbname=<banco novo> backup-....dump` (ou `./scripts/restore-db.sh ... --confirmar --chave ...`).
-4. **Antes de subir a aplicação no banco restaurado**: conferir `PAYMENT_SECRETS_KEY` e `JWT_SECRET` (ver a seção "O que NÃO está no backup"). Sem a `PAYMENT_SECRETS_KEY` original, as credenciais da Cielo, a senha SMTP, a apikey da Evolution e os tokens de cartão guardados no banco **não decifram**.
+4. **Antes de subir a aplicação no banco restaurado**: conferir o `JWT_SECRET` (e a `PAYMENT_SECRETS_KEY`, se usada como override; ver a seção "O que NÃO está no backup"). Sem o `JWT_SECRET` original, as credenciais da Cielo, a senha SMTP, a apikey da Evolution e os tokens de cartão guardados no banco **não decifram**.

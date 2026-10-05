@@ -281,7 +281,7 @@ describe('chave: formato legível e arquivo .txt', () => {
     const txt = backupKeyFileText({ key, createdAt: new Date('2026-10-06T12:00:00Z') })
     expect(txt).toContain(`CHAVE: ${formatBackupKey(key)}`)
     expect(txt).toContain(`IMPRESSAO DIGITAL: ${keyFingerprint(key)}`)
-    expect(txt).toContain('PAYMENT_SECRETS_KEY')
+    expect(txt).toContain('JWT_SECRET') // MUDANÇA DELIBERADA (chave derivada do JWT_SECRET, como no InnoChat): o arquivo manda guardar o JWT_SECRET, não mais a PAYMENT_SECRETS_KEY
     expect(extractBackupKey(txt)?.equals(key)).toBe(true)
     expect(extractBackupKey(formatBackupKey(key))?.equals(key)).toBe(true)
     expect(extractBackupKey('sem chave nenhuma aqui')).toBeNull()

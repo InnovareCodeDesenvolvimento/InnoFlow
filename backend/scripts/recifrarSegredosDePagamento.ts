@@ -1,8 +1,9 @@
 /**
- * Re-cifra os segredos de pagamento com a chave ATUAL — passo da ROTAÇÃO de `PAYMENT_SECRETS_KEY` (F5.7). Script ADMINISTRATIVO, fora do HTTP.
- * Runbook completo em `docs/DEPLOY-EASYPANEL.md` ("Rotação da PAYMENT_SECRETS_KEY").
+ * Re-cifra os segredos de pagamento com a chave ATUAL — passo da ROTAÇÃO/MIGRAÇÃO da chave-mestra dos segredos (F5.7). Desde 05/10/2026 a chave é DERIVADA do `JWT_SECRET` (padrão) e `PAYMENT_SECRETS_KEY` é um override opcional. Script ADMINISTRATIVO, fora do HTTP.
+ * Runbook completo em `docs/DEPLOY-EASYPANEL.md` ("Rotação da PAYMENT_SECRETS_KEY" e "Trocar o JWT_SECRET").
  *
- * Uso (no terminal do serviço `api` no EasyPanel, com a chave NOVA em PAYMENT_SECRETS_KEY e a ANTIGA em PAYMENT_SECRETS_KEY_PREVIOUS):
+ * Uso (no terminal do serviço `api` no EasyPanel). Casos: (a) derivada => override: defina PAYMENT_SECRETS_KEY (a derivada do JWT_SECRET vira só-decifra sozinha); (b) rotação do override: chave NOVA em
+ * PAYMENT_SECRETS_KEY e a ANTIGA em PAYMENT_SECRETS_KEY_PREVIOUS; (c) override => derivada: remova PAYMENT_SECRETS_KEY e deixe o valor antigo em PAYMENT_SECRETS_KEY_PREVIOUS:
  *   npm run payments:recifrar-segredos              # DRY-RUN (padrão): só conta, não grava nada
  *   npm run payments:recifrar-segredos -- --apply   # grava
  *

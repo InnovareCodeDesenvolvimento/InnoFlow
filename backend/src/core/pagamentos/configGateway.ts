@@ -27,6 +27,8 @@ export type RequisitoGateway =
   | 'SOP_OAUTH_TOKEN_URL'
   | 'WEBHOOK_PATH_TOKEN'
   | 'WEBHOOK_HEADER_SECRET'
+  // 'PAYMENT_SECRETS_KEY' = a CHAVE-MESTRA dos segredos (nome mantido: o frontend mapeia por ele). MUDANÇA DELIBERADA (derivada do JWT_SECRET, como no InnoChat): só aparece em `missing` se a chave-mestra
+  // estiver INDISPONÍVEL (override PAYMENT_SECRETS_KEY inválido, ou JWT_SECRET ausente) — no modo padrão ela existe sempre que o servidor sobe.
   | 'PAYMENT_SECRETS_KEY'
 
 const ORDEM_REQUISITOS: readonly RequisitoGateway[] = [
@@ -66,7 +68,7 @@ export interface EnvGateway {
   sopScriptUrl: string | null
   sopOauthTokenUrl: string | null
   webhookPathToken: string | null
-  /** `PAYMENT_SECRETS_KEY` presente E decodificável para 32 bytes. */
+  /** Chave-mestra dos segredos utilizável: derivada do `JWT_SECRET` (padrão) ou override `PAYMENT_SECRETS_KEY` válido. */
   paymentSecretsKeyOk: boolean
 }
 
@@ -143,9 +145,9 @@ export interface ReadinessMeio {
 /**
  * Pré-requisitos por meio, conferidos contra o código (F5.5):
  *  - PIX: credencial (`criarPix`/`consultarPix`). O webhook é OPCIONAL (conta compartilhada: crédito por polling).
- *    `PAYMENT_SECRETS_KEY` só entra quando algum segredo que o Pix usa está CIFRADO no banco: Pix não cifra
+ *    A chave-mestra (`PAYMENT_SECRETS_KEY` no contrato; derivada do JWT_SECRET) só entra quando algum segredo que o Pix usa está CIFRADO no banco: Pix não cifra
  *    nada de cartão, mas sem a chave não dá para decifrar `merchantKey`/segredo do webhook que vieram do banco.
- *  - CARD: credencial + par SOP (`sessaoTokenizacao`; as URLs do SOP vêm por ambiente, ver `URLS_SOP`) + `PAYMENT_SECRETS_KEY`
+ *  - CARD: credencial + par SOP (`sessaoTokenizacao`; as URLs do SOP vêm por ambiente, ver `URLS_SOP`)  + a chave-mestra (`PAYMENT_SECRETS_KEY`)
  *    SEMPRE (o `CardToken` do motorista é cifrado em repouso, F5.3).
  */
 export function calcularReadiness(estado: EstadoEfetivo, env: EnvGateway): { card: ReadinessMeio; pix: ReadinessMeio } {

@@ -22,6 +22,8 @@ const envSchema = z.object({
 
   // Auth da API REST (JWT). Sem default de propósito — segredo fraco/ausente
   // em produção não pode passar despercebido; falha o boot.
+  // DOIS PAPÉIS (desde 05/10/2026): assina as sessões (HS256) E é a FONTE da chave que cifra os segredos em repouso (scrypt com salt fixo, `lib/crypto/paymentSecrets.ts`).
+  // Trocar = derruba as sessões + torna ilegíveis os segredos salvos (gateway, e-mail/WhatsApp, backup) e os cartões dos motoristas. Guarde uma cópia FORA do EasyPanel.
   JWT_SECRET: z.string().min(16, 'JWT_SECRET é obrigatório e precisa ter pelo menos 16 caracteres'),
   JWT_EXPIRES_IN: z.string().default('12h'),
 
@@ -240,17 +242,15 @@ const envSchema = z.object({
   CIELO_WEBHOOK_PATH_TOKEN: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(8).optional()),
   CIELO_WEBHOOK_HEADER_SECRET: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(8).optional()),
 
-  // F5.3 (30/09/2026) — chave de cifragem AES-256-GCM dos segredos de
-  // pagamento (`PaymentMethod.cieloCardTokenCiphertext` agora; depois
-  // `PaymentGatewayConfig.*Ciphertext`, F5.5 — ver `lib/crypto/paymentSecrets.ts`
-  // e o comentário do model `PaymentGatewayConfig` no `schema.prisma`,
-  // Cronos). A chave NUNCA vive no banco. OPCIONAL/sem default de propósito
-  // (mesma lição de bug-env-eager-todos-entrypoints.md): ausente não derruba
-  // o boot dos 3 entrypoints — só quem tenta cifrar/decifrar (cadastro de
-  // cartão) falha, com erro claro. Gerar com `openssl rand -base64 32`
-  // (precisa decodificar para exatos 32 bytes — AES-256).
+  // MUDANÇA DELIBERADA (05/10/2026, decisão do dono: "como no InnoChat"): a chave AES-256-GCM dos segredos em repouso (`PaymentMethod.cieloCardTokenCiphertext`,
+  // `PaymentGatewayConfig.*Ciphertext`, comunicação, backup, chave Pix de devolução — ver `lib/crypto/paymentSecrets.ts`) é DERIVADA do `JWT_SECRET` via scrypt com salt fixo
+  // próprio do InnoFlow. `PAYMENT_SECRETS_KEY` deixou de ser necessária: é um OVERRIDE OPCIONAL (base64 de 32 bytes, `openssl rand -base64 32`) — se definida e válida, vale
+  // exatamente como antes (compatibilidade e rotação avançada com `_PREVIOUS`); definida e INVÁLIDA => chave-mestra indisponível (fail-closed, alerta). Ausente => usa a derivada.
+  // OPCIONAL/sem default de propósito (bug-env-eager-todos-entrypoints.md). A chave NUNCA vive no banco.
+  // ATENÇÃO: o `JWT_SECRET` tem DOIS papéis agora (assina as sessões E deriva a chave dos segredos): trocá-lo derruba as sessões, apaga (torna ilegíveis) os segredos salvos e os
+  // cartões dos motoristas. Guarde uma cópia fora do EasyPanel. Runbook: docs/DEPLOY-EASYPANEL.md, "Trocar o JWT_SECRET".
   PAYMENT_SECRETS_KEY: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
-  // F5.7 — chave ANTERIOR da rotação de `PAYMENT_SECRETS_KEY`: só DECIFRA (o que for gravado usa sempre a atual). OPCIONAL; ver o runbook de rotação em
+  // F5.7 — chave ANTERIOR da rotação (da chave-mestra: override ou, ao voltar do override para a derivada, o override antigo): só DECIFRA (o que for gravado usa sempre a atual). OPCIONAL; ver o runbook de rotação em
   // `docs/DEPLOY-EASYPANEL.md` e `lib/crypto/paymentSecrets.ts`. Remova depois de rodar `scripts/recifrarSegredosDePagamento.ts --apply`.
   PAYMENT_SECRETS_KEY_PREVIOUS: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 

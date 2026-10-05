@@ -49,9 +49,9 @@ jobs:
       # CI-only — JWT_SECRET virou obrigatório na Fase 3 (Vega, auth da API).
       # Nunca reutilizar este valor fora de CI.
       JWT_SECRET: ci-test-secret-nao-usar-em-producao-0000000000
-      # `PAYMENT_SECRETS_KEY` NÃO entra aqui: a chave de teste vem fixa do `test.env` do `vitest.config.mts`
-      # (precisa existir ANTES do 1º import de `env.ts`, o que só o `test.env` garante). Os demais segredos de
-      # pagamento (CIELO_*) os próprios testes definem.
+      # `PAYMENT_SECRETS_KEY` NÃO entra aqui (nem no `vitest.config.mts`) desde 05/10/2026: a chave dos segredos é
+      # DERIVADA do `JWT_SECRET` acima (como no InnoChat) e a suíte exercita esse modo padrão; os testes de override
+      # definem a variável no próprio teste. Os demais segredos de pagamento (CIELO_*) os próprios testes definem.
     steps:
       # Postgres 16 com `max_connections` alto. A suíte de integração abre muitas conexões: cada arquivo de teste tem
       # o seu PrismaClient, em workers paralelos, mais os bancos próprios de `bancoProprio.ts` (`CREATE DATABASE` +

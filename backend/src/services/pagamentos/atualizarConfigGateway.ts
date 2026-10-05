@@ -88,7 +88,7 @@ export async function atualizarConfigGateway(params: { body: UpdatePaymentGatewa
 
   // Sem a chave de cifragem do servidor não há como guardar segredo — recusa ANTES de abrir transação.
   if (segredosEnviados.length > 0 && !isPaymentSecretsKeyConfigured()) {
-    throw new AppError('O servidor não tem a chave de cifragem (PAYMENT_SECRETS_KEY) configurada: não é possível guardar segredos de pagamento.', 503, 'PAYMENT_SECRETS_KEY_MISSING')
+    throw new AppError('O servidor não tem a chave de cifragem dos segredos utilizável (JWT_SECRET ausente/curto, ou PAYMENT_SECRETS_KEY inválida): não é possível guardar segredos de pagamento.', 503, 'PAYMENT_SECRETS_KEY_MISSING')
   }
 
   const envGateway = lerEnvGateway()

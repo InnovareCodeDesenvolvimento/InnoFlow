@@ -103,7 +103,7 @@ export function backupKeyFileText(opts: { key: Buffer; createdAt: Date }): strin
     '',
     'GUARDE ESTE ARQUIVO FORA DO SERVIDOR (gerenciador de senhas, pen drive, outro e-mail).',
     'Sem esta chave os backups não abrem. Quem tem a chave e o arquivo de backup lê o banco inteiro: não compartilhe.',
-    'ATENCAO: a chave do backup NAO substitui a PAYMENT_SECRETS_KEY e o JWT_SECRET do servidor. Guarde as tres (docs/DEPLOY-EASYPANEL.md, secao Backups).',
+    'ATENCAO: a chave do backup NAO substitui o JWT_SECRET do servidor (dele deriva a chave dos segredos salvos no banco). Guarde as duas (docs/DEPLOY-EASYPANEL.md, secao Backups).',
     '',
     'Para abrir um backup (.dump.enc):',
     '  node scripts/decrypt-backup.mjs backup-AAAA.dump.enc --chave este-arquivo.txt',

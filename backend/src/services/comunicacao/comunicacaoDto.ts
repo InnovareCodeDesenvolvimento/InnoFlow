@@ -46,7 +46,7 @@ export interface CommunicationSettingsDto {
     globalMinSeverity: SeveridadeNotificacao
     maxPerHour: number
   }
-  /** `PAYMENT_SECRETS_KEY` presente e válida: sem ela não dá para GUARDAR segredo (PUT com senha/apikey responde 503 SECRETS_KEY_MISSING). */
+  /** Chave-mestra dos segredos utilizável (derivada do JWT_SECRET; ou o override PAYMENT_SECRETS_KEY, se definido, precisa ser válido): sem ela não dá para GUARDAR segredo (PUT com senha/apikey responde 503 SECRETS_KEY_MISSING). Na prática é sempre `true` no modo padrão. */
   secretsKeyConfigured: boolean
   /** `true` = segredos salvos decifram agora; `false` = ao menos um não decifra (canal desligado até salvar de novo); `null` = não há segredo salvo no banco. */
   secretsDecryptable: boolean | null

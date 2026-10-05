@@ -121,7 +121,7 @@ describe('backup — rotas ADMIN (Postgres + Redis reais, S3 e Google falsos)', 
     enfileirados.length = 0
   })
   afterEach(() => {
-    m.env.PAYMENT_SECRETS_KEY = envSalvo.PAYMENT_SECRETS_KEY ?? m.env.PAYMENT_SECRETS_KEY
+    m.env.PAYMENT_SECRETS_KEY = envSalvo.PAYMENT_SECRETS_KEY // (baseline é `undefined` desde a chave derivada do JWT_SECRET: atribuir direto, sem `??`, senão o override inválido de um teste vaza para o próximo)
     m.sec.resetPaymentSecretsKeyCacheParaTeste()
   })
 
@@ -289,9 +289,19 @@ describe('backup — rotas ADMIN (Postgres + Redis reais, S3 e Google falsos)', 
       expect((await cfg()).retentionCount).toBe(7)
     })
 
-    it('sem a PAYMENT_SECRETS_KEY do servidor: gravar credencial => 503 SECRETS_KEY_MISSING; sem credencial continua funcionando', async () => {
+    it('SEM PAYMENT_SECRETS_KEY (modo padrão, chave derivada do JWT_SECRET): gravar credencial e gerar a chave FUNCIONA — MUDANÇA DELIBERADA, como no InnoChat', async () => {
       const admin = await novoUsuario()
-      m.env.PAYMENT_SECRETS_KEY = undefined
+      expect(m.env.PAYMENT_SECRETS_KEY).toBeUndefined()
+      const res = await salvarS3(admin)
+      expect(res.status, dump(res.body)).toBe(200)
+      expect(res.body.secretsKeyConfigured).toBe(true)
+      expect((await cfg()).s3AccessKeyCiphertext).not.toBeNull()
+      expect((await post(admin, '/key', senha)).status).toBe(201)
+    })
+
+    it('chave-mestra INDISPONÍVEL (override PAYMENT_SECRETS_KEY definido e inválido): gravar credencial => 503 SECRETS_KEY_MISSING; sem credencial continua funcionando', async () => {
+      const admin = await novoUsuario()
+      m.env.PAYMENT_SECRETS_KEY = 'isto-nao-e-uma-chave-base64-de-32-bytes'
       m.sec.resetPaymentSecretsKeyCacheParaTeste()
       const res = await salvarS3(admin)
       expect(res.status).toBe(503)

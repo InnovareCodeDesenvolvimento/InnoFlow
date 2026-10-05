@@ -14,7 +14,7 @@ import { enqueueCapturarSessaoCartao, type OpcoesJobCaptura } from './capturarSe
  * REDE DE SEGURANÇA DA CAPTURA (F5.7, ALTO-1 do portão final do Órion).
  *
  * O buraco: `finalizarSessao` grava `CAPTURE_PENDING` na transação do Stop e só DEPOIS do commit enfileira o job de captura.
- * Se o enfileiramento falha (Redis fora) — ou se o job esgota as tentativas (Cielo/Redis/`PAYMENT_SECRETS_KEY` fora por mais
+ * Se o enfileiramento falha (Redis fora) — ou se o job esgota as tentativas (Cielo/Redis/chave dos segredos (JWT_SECRET) fora por mais
  * tempo que o backoff) — nada mais olhava para esse intent: energia entregue, nada cobrado, pré-autorização expirando no cartão.
  * O varredor antigo só ALERTAVA depois de 24 h.
  *

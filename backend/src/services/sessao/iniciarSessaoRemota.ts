@@ -11,7 +11,7 @@ import { carregarSessoesNaoConfirmadas } from '../carteira/saldoComprometido'
 import { calcularTetoReserva } from '../../core/carteira/calcularTetoReserva'
 import { recordCommandPending, recordCommandResult, isAcceptedCommandResult, type CommandOwner } from '../../ocpp/commandResultCache'
 import { getPagamentoPort } from '../pagamentos/pagamentoPortInstance'
-import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
+import { decifrarSegredoOuNull, decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
 import { identificadoresParaGravar } from '../../core/pagamentos/identificadoresAdquirente'
 import { CieloHttpError } from '../pagamentos/cieloHttpClient'
@@ -122,6 +122,12 @@ export async function iniciarSessaoRemota(params: IniciarSessaoRemotaParams): Pr
     })
     if (!found) throw new AppError('Cartão não encontrado.', 404, 'PAYMENT_METHOD_NOT_FOUND')
     if (!found.active) throw new AppError('Este cartão foi removido. Escolha outro ou cadastre um novo.', 409, 'PAYMENT_METHOD_DISABLED')
+    // Token do cartão ILEGÍVEL (o `JWT_SECRET` mudou: a chave dos segredos é derivada dele): recusa AQUI, ANTES de criar PaymentIntent e de chamar a Cielo — nada fica pendurado (sem intent CREATED para o
+    // varredor reconsultar, sem pré-autorização) e o motorista recebe um 4xx claro em vez de um 503 "indisponível" sem saída. Fail-closed: ilegível = como se o cartão não existisse.
+    if (decifrarSegredoOuNull(found.cieloCardTokenCiphertext) === null) {
+      logger.warn({ paymentMethodId: found.id, userId }, '[sessao] cartão salvo com token ilegível (JWT_SECRET trocado?) — recusado antes de pré-autorizar; o motorista precisa cadastrar o cartão de novo')
+      throw new AppError('Este cartão precisa ser cadastrado novamente. Remova-o e cadastre-o de novo, ou use outra forma de pagamento.', 409, 'PAYMENT_METHOD_UNREADABLE')
+    }
     paymentMethod = found
   }
 

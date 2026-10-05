@@ -49,7 +49,7 @@ function paraDto(linha: LinhaDoPedido, agora: Date): PedidoDeDevolucaoDto {
     } catch {
       // Sem `err`: a mensagem pode nomear o formato do ciphertext. Só o id do pedido (pseudônimo) vai para o log.
       ilegivel = true
-      logger.error({ requestId: linha.id }, '[lgpd] chave Pix de devolução não pôde ser decifrada (PAYMENT_SECRETS_KEY trocada/ausente?)')
+      logger.error({ requestId: linha.id }, '[lgpd] chave Pix de devolução não pôde ser decifrada (JWT_SECRET trocado? a chave dos segredos é derivada dele)')
     }
   }
   return {

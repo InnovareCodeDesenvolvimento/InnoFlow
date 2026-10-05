@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from 'supertest'
 import { criarBancoProprio } from './helpers/bancoProprio'
 import { HASH_SENHA_ADMIN_TESTE, SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
+import { JWT_SECRET_TROCADO, OVERRIDE_INVALIDO, trocarJwtSecret } from './helpers/chaveMestra'
+import { randomBytes } from 'node:crypto'
 import { iniciarHttpFalso, iniciarSmtpFalso, type HttpFalso, type SmtpFalso } from '../unit/helpers/servidoresFalsos'
 
 /**
@@ -98,6 +100,7 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
     }
     app = m.createApp()
     envSalvo.PAYMENT_SECRETS_KEY = m.env.PAYMENT_SECRETS_KEY as string | undefined
+    envSalvo.JWT_SECRET = m.env.JWT_SECRET as string | undefined
     for (const nivel of ['info', 'warn', 'error', 'debug'] as const) {
       const original = m.logger[nivel].bind(m.logger) as (...a: unknown[]) => void
       vi.spyOn(m.logger, nivel).mockImplementation(((...args: unknown[]) => {
@@ -133,6 +136,7 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
   afterEach(() => {
     m.env.PAYMENT_SECRETS_KEY = envSalvo.PAYMENT_SECRETS_KEY
     m.env.PAYMENT_SECRETS_KEY_PREVIOUS = undefined
+    m.env.JWT_SECRET = envSalvo.JWT_SECRET
     m.sec.resetPaymentSecretsKeyCacheParaTeste()
     for (const k of Object.keys(process.env)) if (k.startsWith('ALERT_') || k.startsWith('COMMUNICATION_')) delete process.env[k]
   })
@@ -258,9 +262,18 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
       expect(await m.prisma.notificationChannelConfig.count()).toBe(0)
     })
 
-    it('sem a chave de cifragem do servidor: PUT com senha/apikey => 503 SECRETS_KEY_MISSING; sem segredo continua funcionando', async () => {
+    it('SEM PAYMENT_SECRETS_KEY (modo padrão, chave derivada do JWT_SECRET): PUT com senha/apikey FUNCIONA — MUDANÇA DELIBERADA, como no InnoChat — e o DTO diz secretsKeyConfigured=true', async () => {
       const admin = await novoUsuario()
-      m.env.PAYMENT_SECRETS_KEY = undefined
+      expect(m.env.PAYMENT_SECRETS_KEY).toBeUndefined()
+      const res = await put(admin, { currentPassword: SENHA_ADMIN_TESTE, email: { password: SEGREDO_SMTP } })
+      expect(res.status, dump(res.body)).toBe(200)
+      expect(res.body.secretsKeyConfigured).toBe(true)
+      expect(dump(res.body)).not.toContain(SEGREDO_SMTP)
+    })
+
+    it('chave-mestra INDISPONÍVEL (override PAYMENT_SECRETS_KEY definido e inválido): PUT com senha/apikey => 503 SECRETS_KEY_MISSING; sem segredo continua funcionando', async () => {
+      const admin = await novoUsuario()
+      m.env.PAYMENT_SECRETS_KEY = OVERRIDE_INVALIDO
       m.sec.resetPaymentSecretsKeyCacheParaTeste()
       const res = await put(admin, { currentPassword: SENHA_ADMIN_TESTE, email: { password: SEGREDO_SMTP } })
       expect(res.status).toBe(503)
@@ -519,10 +532,13 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
       }
     })
 
-    it('chave de cifragem trocada: segredos salvos não decifram => canal desligado com aviso (sem derrubar) e secretsDecryptable=false; salvar de novo restabelece', async () => {
+    it('JWT_SECRET trocado (a chave dos segredos é derivada dele): segredos salvos não decifram => canal desligado com aviso (sem derrubar) e secretsDecryptable=false; salvar de novo restabelece', async () => {
       const admin = await novoUsuario()
       await salvarPadrao(admin)
-      m.env.PAYMENT_SECRETS_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' // outra chave de 32 bytes
+      const sessaoAntiga = admin.token
+      trocarJwtSecret(m.env, JWT_SECRET_TROCADO)
+      admin.token = m.issueToken({ id: admin.id, role: 'ADMIN', operatorId: null }) // trocar o JWT_SECRET derruba as sessões: o admin loga de novo
+      expect((await get({ token: sessaoAntiga })).status).toBe(401)
       m.sec.resetPaymentSecretsKeyCacheParaTeste()
       m.cfg.invalidarCacheComunicacao()
       const r = await m.cfg.getConfigComunicacao()
@@ -542,9 +558,12 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
   describe('rotação da PAYMENT_SECRETS_KEY cobre os segredos de comunicação', () => {
     it('dry-run conta, apply re-cifra para a chave nova, e depois de remover a anterior continua decifrando', async () => {
       const admin = await novoUsuario()
+      // MUDANÇA DELIBERADA (chave derivada do JWT_SECRET): a rotação de override parte de uma chave A EXPLÍCITA (antes a suíte já a trazia fixa no vitest.config).
+      const chaveA = randomBytes(32).toString('base64')
+      m.env.PAYMENT_SECRETS_KEY = chaveA
+      m.sec.resetPaymentSecretsKeyCacheParaTeste()
       await salvarPadrao(admin)
-      const chaveA = m.env.PAYMENT_SECRETS_KEY as string
-      const chaveB = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB='
+      const chaveB = randomBytes(32).toString('base64')
       m.env.PAYMENT_SECRETS_KEY_PREVIOUS = chaveA
       m.env.PAYMENT_SECRETS_KEY = chaveB
       m.sec.resetPaymentSecretsKeyCacheParaTeste()
@@ -560,6 +579,30 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
       expect(depois.smtpPasswordCiphertext).not.toBe(antes.smtpPasswordCiphertext)
       expect(depois.updatedAt.getTime()).toBe(antes.updatedAt.getTime()) // re-cifrar não é "alteração de configuração"
       m.env.PAYMENT_SECRETS_KEY_PREVIOUS = undefined
+      m.sec.resetPaymentSecretsKeyCacheParaTeste()
+      m.cfg.invalidarCacheComunicacao()
+      const r = await m.cfg.getConfigComunicacao()
+      expect(r.segredosIlegiveis).toBe(false)
+      expect(r.config.email?.senha).toBe(SEGREDO_SMTP)
+      expect(r.config.whatsapp).toMatchObject({ apikey: APIKEY })
+    })
+  })
+
+  describe('chave derivada do JWT_SECRET: migração para o override e troca do JWT_SECRET', () => {
+    it('segredos gravados na chave DERIVADA: virar override (PAYMENT_SECRETS_KEY) os mantém legíveis; re-cifrar os leva à chave nova; depois TROCAR o JWT_SECRET não os perde', async () => {
+      const admin = await novoUsuario()
+      await salvarPadrao(admin) // sem override: grava com a chave derivada do JWT_SECRET
+      const antes = await m.prisma.notificationChannelConfig.findUniqueOrThrow({ where: { id: 1 } })
+      m.env.PAYMENT_SECRETS_KEY = randomBytes(32).toString('base64')
+      m.sec.resetPaymentSecretsKeyCacheParaTeste()
+      m.cfg.invalidarCacheComunicacao()
+      expect((await m.cfg.getConfigComunicacao()).config.email?.senha).toBe(SEGREDO_SMTP) // a derivada virou só-decifra automática
+      const rel = await m.recifrar({ apply: true, prisma: m.prisma })
+      expect(rel.totais.recifrados).toBeGreaterThanOrEqual(2)
+      expect(rel.totais.ilegiveis).toBe(0)
+      const depois = await m.prisma.notificationChannelConfig.findUniqueOrThrow({ where: { id: 1 } })
+      expect(depois.smtpPasswordCiphertext).not.toBe(antes.smtpPasswordCiphertext)
+      trocarJwtSecret(m.env, JWT_SECRET_TROCADO)
       m.sec.resetPaymentSecretsKeyCacheParaTeste()
       m.cfg.invalidarCacheComunicacao()
       const r = await m.cfg.getConfigComunicacao()

@@ -16,7 +16,7 @@
 - ✅ **Autenticação de passo-a-passo (step-up)** — PUT do gateway exige senha atual
 - ✅ **Sandbox restrita a testadores** — e-mail whitelist em instância pública de produção (NODE_ENV)
 - ✅ **Marca de ambiente** — `PaymentIntent` e `PaymentMethod` rastreiam `environment` (sandbox ↔ produção)
-- ✅ **Cifragem versionada** — `v1:<kid>:<base64>`, suporta rotação `PAYMENT_SECRETS_KEY_PREVIOUS`
+- ✅ **Cifragem versionada** — `v1:<kid>:<base64>`, chave derivada do `JWT_SECRET` (padrão) ou override `PAYMENT_SECRETS_KEY`; suporta rotação `PAYMENT_SECRETS_KEY_PREVIOUS`
 - ✅ **Rede de segurança (ALTO-1)** — varredor re-enfileira capturas PENDING > 5 min com alerta
 - ✅ **Detecção de coerência** — servidor recusa se ambiente ≠ URL oficial da Cielo
 
@@ -123,18 +123,19 @@ Toda venda do InnoFlow com `MerchantOrderId = IF-…` gera um alerta falso no si
 
 ## 3. Variáveis de Ambiente — Tabela Completa
 
-📌 **Regra: banco > env > default**. O que a tela "Admin → Gateway de pagamento" salvou no banco (cifrado com `PAYMENT_SECRETS_KEY`) **prevalece** sobre env. Sem dados salvos, vale a env.
+📌 **Regra: banco > env > default**. O que a tela "Admin → Gateway de pagamento" salvou no banco (cifrado com a chave derivada do `JWT_SECRET`, ou o override `PAYMENT_SECRETS_KEY`) **prevalece** sobre env. Sem dados salvos, vale a env.
 
 ### Backend — Os 3 apps (api, ocpp-gateway, worker) compartilham validação
 
 | Variável | Obrigatória? | Onde | Como gerar | Seguro/Inseguro | Notas |
 |---|---|---|---|---|---|
 | `NODE_ENV` | ✅ Sim | Todos 3 | `production` em produção real | Seguro | **Nunca mude**: é a guarda contra `PAYMENT_ALLOW_FAKE_ADAPTER` |
-| `PAYMENT_SECRETS_KEY` | ✅ Sim (cartão/gateway) | api, worker | `openssl rand -base64 32` (AES-256) | Seguro, 32 bytes | Ausente → cartão/gateway falham 503 |
+| `JWT_SECRET` | ✅ Sim (e **fonte da chave dos segredos**) | Todos 3 | `openssl rand -base64 48` (>= 32 caracteres em produção) | Seguro | **Dois papéis:** assina as sessões E dele deriva a chave que cifra credenciais/cartões salvos. Trocar derruba sessões e torna os segredos salvos ilegíveis (recadastrar). **Guarde cópia fora do EasyPanel.** Ver `docs/DEPLOY-EASYPANEL.md`, "Trocar o JWT_SECRET" |
+| `PAYMENT_SECRETS_KEY` | ❌ **Opcional** (override) | api, worker | `openssl rand -base64 32` (AES-256) | Seguro, 32 bytes | Ausente → usa a chave derivada do `JWT_SECRET` (tudo funciona). Definida e inválida → 503 (chave-mestra indisponível, fail-closed) |
 | `PAYMENT_SECRETS_KEY_PREVIOUS` | ❌ Não (rotação) | api, worker | Chave antiga, durante rotação | Seguro, 32 bytes | OPCIONAL; remova após `npm run payments:recifrar-segredos --apply` |
 | **Cielo — Sandbox** |
 | `CIELO_MERCHANT_ID` | ❌ Não (banco > env) | Todos 3 | Vem da Cielo (painel/ticket) | Público (ID) | Env é reserva; tela prevalece |
-| `CIELO_MERCHANT_KEY` | ❌ Não (banco > env) | Todos 3 | Ticket Cielo: secreto | 🔴 Inseguro em log (veja redact) | Nunca logar! Banco cifra com `PAYMENT_SECRETS_KEY` |
+| `CIELO_MERCHANT_KEY` | ❌ Não (banco > env) | Todos 3 | Ticket Cielo: secreto | 🔴 Inseguro em log (veja redact) | Nunca logar! Banco cifra com a chave dos segredos (derivada do `JWT_SECRET`) |
 | `CIELO_SANDBOX` | ❌ Não | Todos 3 | `true` (sandbox) ou `false` (produção) | Público (flag) | Default `true` (falha segura); produção = `false` |
 | `CIELO_API_BASE_URL` | ❌ Não | Todos 3 | Deixar derivar da env `CIELO_SANDBOX` | Público (URL) | Valor padrão sandbox: `https://apisandbox.cieloecommerce.cielo.com.br` |
 | `CIELO_API_QUERY_BASE_URL` | ❌ Não | Todos 3 | Deixar derivar | Público (URL) | Valor padrão sandbox: `https://apiquerysandbox.cieloecommerce.cielo.com.br` |
@@ -297,9 +298,8 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
   - [ ] Os motoristas precisarão cadastrar o cartão real de novo (em "Meus cartões")
 
 - [ ] **Segredos de pagamento gerados:**
-  - [ ] `PAYMENT_SECRETS_KEY`: `openssl rand -base64 32` (novo, guarde em 2 lugares)
-  - [ ] `PAYMENT_SECRETS_KEY_PREVIOUS`: deixe vazio (só pra rotação depois)
-  - [ ] Backup da chave nova em 2 lugares (co-founder tem uma cópia, DPO tem outra)
+  - [ ] `JWT_SECRET` forte (`openssl rand -base64 48`): dele deriva a chave dos segredos — **nada de `PAYMENT_SECRETS_KEY` é necessário** (override opcional; deixe vazio)
+  - [ ] Backup do `JWT_SECRET` em 2 lugares FORA do EasyPanel (co-founder tem uma cópia, DPO tem outra): trocá-lo apaga os segredos salvos e os cartões dos motoristas
 
 - [ ] **Varredores aguardando:**
   - [ ] Job `varrerPreAutorizacoesCartaoJob` ativo (cancela pré-auth abandonadas)
@@ -366,7 +366,9 @@ Resultado vazio = tudo certo. Se aparecer alguma linha, avise o Atlas antes de s
 
 Se precisar rotar a `MerchantKey` por suspeita de vazamento, coordene com o operador do Parque (ver próxima seção).
 
-### Rotação de `PAYMENT_SECRETS_KEY` (cartão + gateway)
+### Trocar o `JWT_SECRET` e rotação do override `PAYMENT_SECRETS_KEY` (cartão + gateway)
+
+> **Mudança de 05/10/2026 ("como no InnoChat"):** a chave dos segredos é DERIVADA do `JWT_SECRET`. Trocar o `JWT_SECRET` derruba as sessões **e** deixa ilegíveis os segredos salvos (gateway, SMTP/Evolution, backup) e os **cartões dos motoristas** (precisam cadastrar de novo). Voltar ao valor antigo desfaz. Para trocar SEM perder nada: defina `PAYMENT_SECRETS_KEY`, rode `payments:recifrar-segredos -- --apply` e só então troque o `JWT_SECRET` — passo a passo em `docs/DEPLOY-EASYPANEL.md`, "Trocar o `JWT_SECRET`". O procedimento abaixo é a rotação **do override** (quando em uso).
 
 **Quando:** anualmente, ou se suspeitar comprometimento da chave.
 
@@ -423,7 +425,7 @@ Se precisar rotar a `MerchantKey` por suspeita de vazamento, coordene com o oper
      - Deixar `sopClientId` igual, trocar `sopClientSecret`
      - Clicar "Salvar" (step-up + senha)
    - Painel da Cielo (Parque): atualizar com os mesmos valores
-4. **Banco cifra** com `PAYMENT_SECRETS_KEY` (não precisa `recifrar`, é novo)
+4. **Banco cifra** com a chave dos segredos (não precisa `recifrar`, é novo)
 5. **Confirmar com o Parque:** após 1 minuto, ambos devem conseguir fazer uma transação de teste
 
 ---
@@ -453,16 +455,18 @@ F5.9 (watchdog) só interfere **quando cartão está envolvido** — Pix é inde
 | `ocpp_auth_lockout` | ⚠️ Importante | Carregador bloqueado por falhas de senha (tentativas esgotadas) | Conferir carregador/senha; PATCH para resetar `basicAuthSecret` se comprometido |
 | `ocpp_auth_ip_flood` | 🔴 Crítico | IP tentando autenticar muitas vezes (possível ataque) | Checar logs pra IP de origem; firewall pode bloquear esse IP |
 | `payment_secrets_key_previous_invalid` | 🟡 Aviso | `PAYMENT_SECRETS_KEY_PREVIOUS` não decifica (typo ou corruptela) | Corrigir valor no EasyPanel ou deletar se rotação completa |
+| `payment_secrets_key_invalid` | 🔴 Crítico | `PAYMENT_SECRETS_KEY` (override) definida mas inválida (não é base64 de 32 bytes): chave-mestra indisponível, nada cifra nem decifra | Corrigir (`openssl rand -base64 32`) ou REMOVER a variável para voltar à chave derivada do `JWT_SECRET` |
+| `secrets_undecryptable` | 🔴 Crítico | No boot do worker: há segredos salvos que não decifram (gateway, e-mail/WhatsApp, backup, cartões dos motoristas) — o `JWT_SECRET` (ou o override) mudou. O log traz a contagem por área | Voltar ao `JWT_SECRET` antigo (desfaz tudo) ou recadastrar: gateway/comunicação/backup no painel; motoristas recadastram o cartão. Ver `docs/DEPLOY-EASYPANEL.md`, "Trocar o JWT_SECRET" |
 | `payment_intent_environment_mismatch` | 🟡 Aviso | Intent criado em sandbox, sistema virou production (ou vice-versa) | Não é usual; procurar por race no código; rede de segurança pula o intent |
 | `payment_config_changed` | 📋 Auditoria | Admin salvou mudança no gateway (traz nome dos campos, nunca valores) | Normal; confira que foi o admin esperado (`actorUserId` no log) |
 | `login_account_locked` | ⚠️ Importante | Usuário trancado por falhas repetidas de login (throttle) | Tentar novamente depois de 60s dobrando até 15 min; ajustar senha se esqueceu |
 | `payment_gateway_config_load_failed` | 🔴 Crítico | Falha ao carregar config do banco (Postgres fora?) | Checar Postgres + Redis; Pix/cartão respondem 503 até resolver |
-| `payment_gateway_secrets_undecryptable` | 🔴 Crítico | Segredos salvos não decifram (chave perdida, trocar sem anterior) | Reenviar credenciais pela tela (exige novo login Cielo de verdade) |
+| `payment_gateway_secrets_undecryptable` | 🔴 Crítico | Segredos salvos não decifram (`JWT_SECRET` trocado; ou override perdido/trocado sem anterior) | Reenviar credenciais pela tela (exige novo login Cielo de verdade) |
 | `payment_gateway_environment_url_mismatch` | 🔴 Crítico | Incoerência: sandbox com URL de produção, ou vice-versa | Env `CIELO_API_BASE_URL` contradiz `environment` (remover a env, deixar derivar) |
-| `payment_gateway_config_decrypt_failed` | 🔴 Crítico | Credenciais não decifram (chave trocada sem `_PREVIOUS`?) | Reenviar credenciais; usar `PAYMENT_SECRETS_KEY_PREVIOUS` se houver |
+| `payment_gateway_config_decrypt_failed` | 🔴 Crítico | Credenciais não decifram (`JWT_SECRET` trocado? override trocado sem `_PREVIOUS`?) | Voltar ao `JWT_SECRET` antigo, ou reenviar credenciais; usar `PAYMENT_SECRETS_KEY_PREVIOUS` se houver |
 | `payment_fake_adapter_in_production` | 🔴 **CRÍTICO** | Simulador rodando EM PRODUÇÃO (`NODE_ENV=production` + `PAYMENT_ALLOW_FAKE_ADAPTER=true`) | 🛑 **DESLIGAR IMEDIATAMENTE.** Remover `PAYMENT_ALLOW_FAKE_ADAPTER` (ou `false`) e redeploy |
 | `payment_gateway_not_configured` | 🟡 Aviso | Produção sem credenciais Cielo (nem banco nem env) | Pix/cartão ficam 503; salvar credenciais pela tela |
-| `payment_capture_retry_exhausted` | 🔴 Crítico | Varredor desistiu de recapturar (energia entregue, cartão não cobrado) | Investigar: Cielo fora? `PAYMENT_SECRETS_KEY` perdida? Consultar com suporte Cielo |
+| `payment_capture_retry_exhausted` | 🔴 Crítico | Varredor desistiu de recapturar (energia entregue, cartão não cobrado) | Investigar: Cielo fora? `JWT_SECRET` trocado (credencial do banco ilegível)? Consultar com suporte Cielo |
 | `payment_capture_pending_stale` | 🟡 Aviso | Captura travada há > 1 h (ou 🔴 Crítico > 24 h) | Investigar a mesma causa de `retry_exhausted`; varredor tenta recuperar |
 | `payment_webhook_secret_weak` | — NÃO SE APLICA | Conta compartilhada: sem webhook do InnoFlow | Não há segredo de webhook para rotar |
 | `payment_webhook_secret_decrypt_failed` | — NÃO SE APLICA | Conta compartilhada: sem webhook do InnoFlow | Não há segredo de webhook para decifrar |

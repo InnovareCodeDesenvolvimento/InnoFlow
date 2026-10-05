@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from 'supertest'
 import { criarBancoProprio } from './helpers/bancoProprio'
 import { HASH_SENHA_ADMIN_TESTE, SENHA_ADMIN_TESTE } from './helpers/senhaAdmin'
+import { JWT_SECRET_TROCADO, OVERRIDE_INVALIDO, trocarJwtSecret } from './helpers/chaveMestra'
 
 /**
  * F5.7 — ALTO-2 (sandbox em servidor de produção restrito a testadores) e M3 (`secretsDecryptable`) contra Postgres + Redis REAIS
@@ -26,7 +27,6 @@ type Mods = {
   FakeAdapter: typeof import('../../src/services/pagamentos/fakeAdapter').FakeAdapter
 }
 
-const CHAVE_B = 'rO0r0cC8l3MZXV9yXQeQ8mR9Zf7M8wUQ1mC0pZ2dQhY=' // outra, 32 bytes
 // Renovados a cada teste (beforeEach): o e-mail é UNIQUE no banco e os testes criam o motorista-testador de novo.
 let testerEmail = ''
 let TESTADOR_NA_LISTA = ''
@@ -80,7 +80,7 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
       FakeAdapter: fakeMod.FakeAdapter,
     }
     app = m.createApp()
-    for (const k of ['NODE_ENV', 'CIELO_SANDBOX', 'CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'PAYMENT_SECRETS_KEY', 'PAYMENT_SANDBOX_TESTER_EMAILS', 'PAYMENT_ALLOW_FAKE_ADAPTER']) envBaseline[k] = m.env[k]
+    for (const k of ['NODE_ENV', 'CIELO_SANDBOX', 'CIELO_MERCHANT_ID', 'CIELO_MERCHANT_KEY', 'PAYMENT_SECRETS_KEY', 'PAYMENT_SECRETS_KEY_PREVIOUS', 'JWT_SECRET', 'PAYMENT_SANDBOX_TESTER_EMAILS', 'PAYMENT_ALLOW_FAKE_ADAPTER']) envBaseline[k] = m.env[k]
     const original = m.logger.error.bind(m.logger) as (...a: unknown[]) => void
     vi.spyOn(m.logger, 'error').mockImplementation(((...args: unknown[]) => {
       if (typeof args[0] === 'object' && args[0]) logsErro.push(args[0] as Record<string, unknown>)
@@ -304,11 +304,20 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
       m.env.CIELO_SOP_OAUTH_TOKEN_URL = 'http://127.0.0.1:1/token'
       return put(admin, { merchantId: 'mid-m3', ...SEGREDOS, sopClientId: 'sop-m3', pixEnabled: false, cardEnabled: false })
     }
-    function trocarChave(chave: string | undefined) {
-      m.env.PAYMENT_SECRETS_KEY = chave
+    function limparCaches() {
       m.resetPaymentSecretsKeyCacheParaTeste()
       m.invalidarCacheConfigGateway()
       m.resetPagamentoPortCacheParaTeste()
+    }
+    // MUDANÇA DELIBERADA (chave derivada do JWT_SECRET, como no InnoChat): "a chave trocou" = o JWT_SECRET trocou (e a sessão do admin cai: precisa reemitir o token). "A chave sumiu" = override inválido.
+    function trocarJwtSecretDoServidor(admin: { id: string; token: string }) {
+      trocarJwtSecret(m.env, JWT_SECRET_TROCADO)
+      limparCaches()
+      admin.token = m.issueToken({ id: admin.id, role: 'ADMIN', operatorId: null })
+    }
+    function chaveMestraIndisponivel() {
+      m.env.PAYMENT_SECRETS_KEY = OVERRIDE_INVALIDO
+      limparCaches()
     }
 
     it('NULL quando nada está salvo no banco: sem linha (source "env") e linha só com campos não secretos', async () => {
@@ -331,8 +340,8 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
       expect(gravou.body.secretsDecryptable).toBe(true)
       expect((await get(admin)).body.secretsDecryptable).toBe(true)
 
-      // a chave do servidor muda (trocada/perdida): os 3 segredos salvos não decifram mais
-      trocarChave(CHAVE_B)
+      // o JWT_SECRET do servidor muda (a chave dos segredos é derivada dele): os 3 segredos salvos não decifram mais
+      trocarJwtSecretDoServidor(admin)
       const ilegivel = await get(admin)
       expect(ilegivel.status, dump(ilegivel.body)).toBe(200) // o GET responde mesmo com o gateway em 503
       expect(ilegivel.body).toMatchObject({ source: 'database', merchantKeySet: true, sopClientSecretSet: true, webhookHeaderSecretSet: true, secretsDecryptable: false })
@@ -358,10 +367,10 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
       expect(reenviou.body.secretsDecryptable).toBe(true)
     })
 
-    it('FALSE se a PAYMENT_SECRETS_KEY some do servidor; o GET segue 200 e o readiness acusa a chave', async () => {
+    it('FALSE se a chave-mestra fica INDISPONÍVEL (override PAYMENT_SECRETS_KEY definido e inválido); o GET segue 200 e o readiness acusa a chave', async () => {
       const admin = await novoUsuario('ADMIN')
       await gravarTresSegredos(admin)
-      trocarChave(undefined)
+      chaveMestraIndisponivel()
       const res = await get(admin)
       expect(res.status).toBe(200)
       expect(res.body.secretsDecryptable).toBe(false)
@@ -372,7 +381,7 @@ describe('sandbox restrito a testadores (ALTO-2) e secretsDecryptable (M3) — P
       const admin = await novoUsuario('ADMIN')
       await gravarTresSegredos(admin)
       const antes = await m.prisma.paymentGatewayConfig.findUniqueOrThrow({ where: { id: 1 } })
-      trocarChave(CHAVE_B)
+      trocarJwtSecretDoServidor(admin)
       for (let i = 0; i < 4; i += 1) expect((await get(admin)).body.secretsDecryptable).toBe(false)
       const avisos = logsErro.filter((l) => l.alert === 'payment_gateway_secrets_undecryptable')
       expect(avisos).toHaveLength(1)

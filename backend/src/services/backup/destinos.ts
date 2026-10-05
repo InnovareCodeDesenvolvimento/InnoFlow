@@ -8,7 +8,7 @@ import { lerSegredoDaConfig, type LinhaDeBackup } from './configBackup'
 
 /**
  * O destino do backup (S3 ou Google Drive) atrás de UMA interface — o executor, a conferência, a retenção e o "Testar destino" não sabem qual é. Os segredos são decifrados aqui, na
- * hora de montar o destino (e só aqui): `ErroDeBackup('SECRETS_KEY')` se a PAYMENT_SECRETS_KEY faltar/mudar, ANTES de gastar um dump inteiro.
+ * hora de montar o destino (e só aqui): `ErroDeBackup('SECRETS_KEY')` se o JWT_SECRET (de onde deriva a chave dos segredos) mudar, ANTES de gastar um dump inteiro.
  */
 
 export interface CopiaRemota extends CopiaNoDestino {

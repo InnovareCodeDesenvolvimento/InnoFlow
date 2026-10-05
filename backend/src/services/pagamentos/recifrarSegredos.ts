@@ -5,7 +5,7 @@ import { ciphertextEstaNaChaveAtual, decryptPaymentSecret, encryptPaymentSecret,
 import { writeAuditLog } from '../auditoria/writeAuditLog'
 
 /**
- * Re-cifra os segredos de pagamento com a chave ATUAL (`PAYMENT_SECRETS_KEY`) — o miolo da ROTAÇÃO de chave (F5.7). Usado SÓ pelo script administrativo
+ * Re-cifra os segredos de pagamento com a chave-mestra ATUAL — o miolo da ROTAÇÃO de chave (F5.7). Desde 05/10/2026 a chave atual é a DERIVADA do `JWT_SECRET` (padrão, como no InnoChat) ou o override `PAYMENT_SECRETS_KEY`; o script serve para MIGRAR entre as duas (derivada => override, ou override => derivada com o override em `PAYMENT_SECRETS_KEY_PREVIOUS`) e para a rotação do override. Ele NÃO recupera segredo cifrado com um JWT_SECRET que já foi trocado e perdido: esses são ilegíveis e precisam ser recadastrados. Usado SÓ pelo script administrativo
  * `backend/scripts/recifrarSegredosDePagamento.ts` (fora do HTTP: ninguém aciona isto por rota). Runbook em `docs/DEPLOY-EASYPANEL.md`.
  *
  * Alvos: `PaymentMethod.cieloCardTokenCiphertext` (todas as linhas, ativas ou não — exceto as de conta excluída, com o marcador `DESTROYED`), `AccountDeletionRequest.refundPixKeyCiphertext` (chave Pix de devolução, L1.4), as três colunas `*Ciphertext` de `PaymentGatewayConfig` e as duas de `NotificationChannelConfig`
@@ -15,7 +15,7 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
  * Regras:
  *  - DRY-RUN por padrão (`apply: false` não grava NADA, só conta); `apply: true` grava.
  *  - IDEMPOTENTE: o que já está em `v1:<kid atual>:...` E DECIFRA é pulado — rodar de novo não muda nada. `v1` da chave atual que não decifra é ilegível, não "já na atual".
- *  - Decifra com `decryptPaymentSecret` (atual ou `PAYMENT_SECRETS_KEY_PREVIOUS`, `v1` ou legado) e regrava com `encryptPaymentSecret` (sempre `v1` + chave atual).
+ *  - Decifra com `decryptPaymentSecret` (atual, `PAYMENT_SECRETS_KEY_PREVIOUS` ou — com override ativo — a derivada do JWT_SECRET; `v1` ou legado) e regrava com `encryptPaymentSecret` (sempre `v1` + chave atual).
  *    O que NÃO decifra com nenhuma das chaves é CONTADO como ilegível e deixado como está (nunca apagado) — a rotação só pode ser dada como concluída com ilegíveis = 0.
  *  - Compare-and-set por linha: a regravação só vale se a coluna ainda tem o ciphertext lido (uma gravação concorrente da API não é pisada).
  *  - NUNCA devolve/imprime segredo nem ciphertext: o relatório tem só contagens (e ids de cartões ilegíveis, que não são segredo).
@@ -61,7 +61,7 @@ const MAX_IDS_ILEGIVEIS = 20
 
 export class ChaveDePagamentoNaoConfiguradaError extends Error {
   constructor() {
-    super('PAYMENT_SECRETS_KEY não configurada (ou inválida) neste ambiente — sem a chave atual não há como re-cifrar nada.')
+    super('Chave-mestra dos segredos indisponível neste ambiente (JWT_SECRET ausente/curto, ou PAYMENT_SECRETS_KEY definida e inválida) — sem a chave atual não há como re-cifrar nada.')
     this.name = 'ChaveDePagamentoNaoConfiguradaError'
   }
 }
@@ -277,8 +277,8 @@ export function formatarRelatorio(r: RelatorioRecifragem): string {
   }
   linhas.push(`  TOTAL: ${r.totais.total} — já na chave atual: ${r.totais.jaNaChaveAtual}, ${r.apply ? `re-cifrados: ${r.totais.recifrados}` : `a re-cifrar: ${r.totais.aRecifrar}`}, ilegíveis: ${r.totais.ilegiveis}`)
   if (r.totais.ilegiveis > 0) {
-    linhas.push('  ATENÇÃO: há valores que NENHUMA chave configurada decifra (PAYMENT_SECRETS_KEY / PAYMENT_SECRETS_KEY_PREVIOUS). NÃO remova a chave anterior ainda.')
-    linhas.push('  Se a chave que os cifrou foi PERDIDA, esses valores são irrecuperáveis: cartões salvos precisam ser cadastrados de novo e os 3 segredos do gateway reenviados pela tela do admin.')
+    linhas.push('  ATENÇÃO: há valores que NENHUMA chave configurada decifra (chave atual, PAYMENT_SECRETS_KEY_PREVIOUS e, com override, a derivada do JWT_SECRET). NÃO remova a chave anterior ainda.')
+    linhas.push('  Se a chave que os cifrou foi PERDIDA (ex.: o JWT_SECRET foi trocado e o valor antigo não existe mais), esses valores são irrecuperáveis: cartões salvos precisam ser cadastrados de novo pelos motoristas e os segredos do gateway/comunicação/backup reenviados pela tela do admin. Se você ainda tem o JWT_SECRET antigo, volte a ele e tudo decifra.')
   } else if (r.apply && r.totais.alteradosDuranteExecucao === 0) {
     linhas.push('  Concluído: tudo está na chave atual. Já pode remover PAYMENT_SECRETS_KEY_PREVIOUS e reiniciar.')
   } else if (!r.apply && r.totais.aRecifrar === 0) {

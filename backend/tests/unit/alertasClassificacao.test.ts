@@ -22,7 +22,7 @@ function arquivosTs(dir: string): string[] {
 }
 
 /** Prefixos de domínio que os alertas usam (convenção do projeto). Uma string com um destes prefixos entre aspas é tratada como nome de alerta. */
-const NOME_DE_ALERTA = /(?<!\b(?:event|actionDetail):\s{0,3})['"`]((?:payment|session|ocpp|google|login|card|communication|partition|retention|backup|chargeback)_[a-z0-9_]+)['"`]/g
+const NOME_DE_ALERTA = /(?<!\b(?:event|actionDetail):\s{0,3})['"`]((?:payment|session|ocpp|google|login|card|communication|partition|retention|backup|chargeback|secrets)_[a-z0-9_]+)['"`]/g
 
 /** Strings com o prefixo de alerta que NÃO são alertas (ex.: nome de coluna/enum/rota). Só entra aqui com justificativa. */
 const NAO_SAO_ALERTAS = new Set<string>([
@@ -36,6 +36,7 @@ const NAO_SAO_ALERTAS = new Set<string>([
   'partition_dropped', // valores de `acao` do relatório da retenção (services/manutencao/retencao.ts), não são alertas
   'partition_blocked',
   'partition_skipped',
+  'secrets_key_missing', // `motivo` do retorno de services/backup/googleOAuth.ts (chave-mestra indisponível ao conectar o Google), não é alerta de log
 ])
 
 function alertasNoCodigo(): Map<string, string[]> {

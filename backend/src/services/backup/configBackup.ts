@@ -1,7 +1,7 @@
 import type { BackupConfig, Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
-import { decryptPaymentSecret, encryptPaymentSecret, isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
+import { decifrarSegredoOuNull, decryptPaymentSecret, encryptPaymentSecret, isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
 import { BackupCryptoError, backupKeyFileText, formatBackupKey, generateBackupKey, keyFingerprint, parseBackupKey } from '../../lib/crypto/backupCrypto'
 import { politicaDeDestinoDoBackup } from '../../lib/backup/s3'
 import { diffEntity, type EntityDiff } from '../../core/auditoria/diffEntity'
@@ -39,13 +39,13 @@ export async function carregarConfigDeBackup(tx: Prisma.TransactionClient | type
 // Segredos
 // ---------------------------------------------------------------------------------------------
 
-/** Decifra um segredo da config. Lança `ErroDeBackup('SECRETS_KEY')` (sem o conteúdo) se a PAYMENT_SECRETS_KEY faltar ou não decifrar. */
+/** Decifra um segredo da config. Lança `ErroDeBackup('SECRETS_KEY')` (sem o conteúdo) se a chave-mestra (derivada do JWT_SECRET, ou o override PAYMENT_SECRETS_KEY) não decifrar — ex.: JWT_SECRET trocado. */
 export function lerSegredoDaConfig(ciphertext: string | null, campo: string): string | null {
   if (!ciphertext) return null
   try {
     return decryptPaymentSecret(ciphertext)
   } catch {
-    logger.error({ campo }, '[backup] não consegui decifrar um segredo da configuração (PAYMENT_SECRETS_KEY trocada ou ausente)')
+    logger.error({ campo }, '[backup] não consegui decifrar um segredo da configuração (JWT_SECRET trocado? a chave dos segredos é derivada dele)')
     throw new ErroDeBackup('Não foi possível decifrar os segredos do backup.', 'SECRETS_KEY')
   }
 }
@@ -53,8 +53,15 @@ export function lerSegredoDaConfig(ciphertext: string | null, campo: string): st
 /** A chave do backup, decifrada do banco. `ErroDeBackup('KEY'|'SECRETS_KEY')` se faltar, não decifrar ou a impressão digital não bater. */
 export function chaveDoBackupDaConfig(config: Pick<LinhaDeBackup, 'encryptionKeyCiphertext' | 'encryptionKeyFingerprint'>): { chave: Buffer; impressaoDigital: string } {
   if (!config.encryptionKeyCiphertext || !config.encryptionKeyFingerprint) throw new ErroDeBackup('Falta a chave de criptografia do backup.', 'KEY')
-  const hex = lerSegredoDaConfig(config.encryptionKeyCiphertext, 'encryptionKey')
-  const chave = hex ? parseBackupKey(hex) : null
+  // A CÓPIA da chave do backup guardada no banco é cifrada pela chave-mestra (derivada do JWT_SECRET). Se o JWT_SECRET mudou, ela não abre: isto é `KEY` ("gere outra chave"), não
+  // `SECRETS_KEY` — recadastrar o destino não resolve, o que resolve é gerar a chave de novo (a chave de backup é INDEPENDENTE do JWT_SECRET: as cópias antigas seguem abrindo com o .txt
+  // que o dono guardou). É erro tipado do agendador: o backup falha, o alerta sai e o worker segue de pé (nada aqui lança fora do try do `executarBackup`).
+  const hex = decifrarSegredoOuNull(config.encryptionKeyCiphertext)
+  if (hex === null) {
+    logger.error({ campo: 'encryptionKey' }, '[backup] a cópia da chave do backup guardada no sistema não pôde ser decifrada (JWT_SECRET trocado? a chave dos segredos é derivada dele) — gere a chave de novo em Admin > Backup')
+    throw new ErroDeBackup('A cópia da chave de backup guardada no sistema não pôde ser decifrada.', 'KEY')
+  }
+  const chave = parseBackupKey(hex)
   if (!chave || keyFingerprint(chave) !== config.encryptionKeyFingerprint) throw new ErroDeBackup('A chave de backup guardada no sistema não confere com a impressão digital registrada.', 'KEY')
   return { chave, impressaoDigital: config.encryptionKeyFingerprint }
 }
@@ -254,7 +261,7 @@ export async function atualizarConfigDeBackup(params: {
   const agora = params.agora ?? new Date()
   const temSegredoNovo = body.s3?.accessKey !== undefined || body.s3?.secretKey !== undefined || body.drive?.clientSecret !== undefined
   if (temSegredoNovo && !isPaymentSecretsKeyConfigured()) {
-    throw new AppError('O servidor não tem a chave de cifragem (PAYMENT_SECRETS_KEY) configurada: não é possível guardar credenciais.', 503, 'SECRETS_KEY_MISSING')
+    throw new AppError('O servidor não tem a chave de cifragem dos segredos utilizável (JWT_SECRET ausente/curto, ou PAYMENT_SECRETS_KEY inválida): não é possível guardar credenciais.', 503, 'SECRETS_KEY_MISSING')
   }
   const politica = politicaDeDestinoDoBackup()
   let enderecoNovo: string | undefined
@@ -420,7 +427,7 @@ export async function gerarChaveDoBackup(params: {
   const { actor, request } = params
   const agora = params.agora ?? new Date()
   if (!isPaymentSecretsKeyConfigured()) {
-    throw new AppError('O servidor não tem a chave de cifragem (PAYMENT_SECRETS_KEY) configurada: não é possível guardar a chave do backup.', 503, 'SECRETS_KEY_MISSING')
+    throw new AppError('O servidor não tem a chave de cifragem dos segredos utilizável (JWT_SECRET ausente/curto, ou PAYMENT_SECRETS_KEY inválida): não é possível guardar a chave do backup.', 503, 'SECRETS_KEY_MISSING')
   }
   const chave = generateBackupKey()
   const impressao = keyFingerprint(chave)

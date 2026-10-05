@@ -77,6 +77,8 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   payment_capture_sweep_scan_truncated: 'IMPORTANTE',
   payment_config_changed: 'IMPORTANTE', // alguém alterou a config do gateway (se não foi você, é sinal de invasão)
   payment_secrets_key_previous_invalid: 'IMPORTANTE',
+  payment_secrets_key_invalid: 'CRITICO', // PAYMENT_SECRETS_KEY (override) definida e invalida: chave-mestra indisponivel, nenhum segredo cifra nem decifra
+  secrets_undecryptable: 'CRITICO', // segredos salvos (gateway, e-mail/WhatsApp, backup, cartoes dos motoristas) nao decifram: JWT_SECRET trocado (ou override trocado) — precisam ser recadastrados
   payment_webhook_secret_weak: 'INFO',
   payment_webhook_secret_decrypt_failed: 'IMPORTANTE',
   payment_card_testing_suspected: 'IMPORTANTE', // carding: o bloqueio automático já agiu
@@ -161,8 +163,10 @@ export const ORIENTACAO_DOS_ALERTAS: Readonly<Record<string, string>> = {
   payment_gateway_ip_not_allowed: 'A Cielo bloqueou o IP do servidor: pedir a liberacao do IP de saida da VPS no suporte da Cielo.',
   payment_gateway_account_restriction: 'Restricao cadastral na conta Cielo: falar com o suporte da Cielo.',
   payment_gateway_environment_url_mismatch: 'URLs da Cielo incoerentes com o ambiente: conferir a tela do gateway. Pagamento fora do ar ate corrigir.',
-  payment_gateway_config_decrypt_failed: 'Nao foi possivel decifrar as credenciais: PAYMENT_SECRETS_KEY trocada/ausente. Pagamento fora do ar ate corrigir.',
-  payment_gateway_secrets_undecryptable: 'Segredos do gateway ilegiveis: conferir PAYMENT_SECRETS_KEY (e a chave anterior).',
+  payment_gateway_config_decrypt_failed: 'Nao foi possivel decifrar as credenciais salvas: o JWT_SECRET foi trocado (ou a PAYMENT_SECRETS_KEY, se usada). Volte ao valor antigo ou reenvie as credenciais na tela do gateway. Pagamento fora do ar ate corrigir.',
+  payment_gateway_secrets_undecryptable: 'Segredos do gateway ilegiveis: o JWT_SECRET foi trocado (a chave dos segredos e derivada dele). Volte ao valor antigo ou reenvie os segredos na tela do gateway.',
+  payment_secrets_key_invalid: 'A PAYMENT_SECRETS_KEY esta definida mas e invalida (precisa ser base64 de 32 bytes): corrija com `openssl rand -base64 32` ou remova a variavel para usar a chave derivada do JWT_SECRET. Enquanto isso nenhum segredo salva nem le.',
+  secrets_undecryptable: 'Segredos salvos que o servidor nao consegue mais ler (gateway Cielo, e-mail/WhatsApp, backup, cartoes dos motoristas): o JWT_SECRET foi trocado. Se tiver o valor antigo, volte a ele e tudo volta a funcionar; senao recadastre em Admin > Configuracoes (gateway, comunicacao, backup) e os motoristas precisam cadastrar o cartao de novo. Ver docs/DEPLOY-EASYPANEL.md, "Trocar o JWT_SECRET".',
   payment_gateway_config_load_failed: 'Falha ao ler a config do gateway no banco: conferir o banco. Pagamento fora do ar ate voltar.',
   payment_gateway_not_configured: 'Producao sem credencial Cielo: configurar na tela do gateway. Pix e cartao indisponiveis.',
   payment_fake_adapter_in_production: 'Adaptador FAKE ativo em producao (aprova qualquer cartao, nao cobra nada): remover PAYMENT_ALLOW_FAKE_ADAPTER.',

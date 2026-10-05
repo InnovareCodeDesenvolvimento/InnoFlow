@@ -148,7 +148,7 @@ export async function desconectarGoogle(adminId: string): Promise<void> {
       const token = lerSegredoDaConfig(config.driveOauthRefreshTokenCiphertext, 'driveRefreshToken')
       if (token) await revogarTokenDoGoogle(token)
     } catch {
-      // Sem PAYMENT_SECRETS_KEY não dá para revogar no Google; o token local é apagado de qualquer forma.
+      // Sem a chave dos segredos utilizável não dá para revogar no Google; o token local é apagado de qualquer forma.
     }
   }
   await prisma.backupConfig.update({

@@ -13,6 +13,8 @@ import { startVigiarDevolucoesAtrasadasWorker, scheduleVigiarDevolucoesAtrasadas
 import { startBackupWorker, scheduleBackupTick } from '../worker/jobs/backupJob'
 import { startVigiarPrazoChargebacksWorker, scheduleVigiarPrazoChargebacks } from '../worker/jobs/vigiarPrazoChargebacksJob'
 import { startNotificacoesWorker } from '../worker/jobs/notificacoesJob'
+import { prisma } from '../lib/prisma'
+import { verificarSegredosSalvos } from '../services/pagamentos/diagnosticoSegredos'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -83,5 +85,9 @@ scheduleBackupTick().catch((err) =>
 // L1.6 (Vega-G, 2026-10-06): e-mails ao motorista (recibo, cobranca falha, saldo baixo, Pix creditado, recarga pelo suporte, senha alterada, conta excluida). Fila `notificacoes`: o
 // fato enfileira DEPOIS do commit; aqui se decide, monta e envia (idempotente por NotificationLog; retry com backoff; alerta ao esgotar). Ver services/notificacoes/.
 startNotificacoesWorker()
+
+// Chave dos segredos derivada do JWT_SECRET (05/10/2026, como no InnoChat): se o JWT_SECRET foi trocado, os segredos salvos (gateway, e-mail/WhatsApp, backup) e os cartões dos motoristas deixam de
+// decifrar. Diagnóstico no boot (so leitura): emite UM alerta `secrets_undecryptable` com a orientacao. Nunca lanca nem derruba o worker.
+void verificarSegredosSalvos(prisma)
 
 logger.info('worker ok')

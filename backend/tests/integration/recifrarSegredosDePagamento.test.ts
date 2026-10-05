@@ -226,9 +226,9 @@ describe('rotação da PAYMENT_SECRETS_KEY — re-cifragem (serviço + script) c
       expect(r2.saida).toContain('re-cifrados: 0')
     })
 
-    it('argumento desconhecido (ex.: typo `--aply`) => código 2 e NADA é executado; chave atual ausente => código 2 com erro claro (sem segredo)', async () => {
+    it('argumento desconhecido (ex.: typo `--aply`) => código 2 e NADA é executado; chave-mestra INDISPONÍVEL (override PAYMENT_SECRETS_KEY inválido; MUDANÇA DELIBERADA: ausente já não indisponibiliza, a chave vem do JWT_SECRET) => código 2 com erro claro (sem segredo)', async () => {
       expect(rodar(['--aply'], chaves).codigo).toBe(2)
-      const semChave = rodar([], { PAYMENT_SECRETS_KEY: '', PAYMENT_SECRETS_KEY_PREVIOUS: CHAVE_A.toString('base64') })
+      const semChave = rodar([], { PAYMENT_SECRETS_KEY: 'isto-nao-e-uma-chave-base64-de-32-bytes', PAYMENT_SECRETS_KEY_PREVIOUS: CHAVE_A.toString('base64') })
       expect(semChave.codigo).toBe(2)
       expect(semChave.saida).toContain('PAYMENT_SECRETS_KEY')
       expect(semChave.saida).not.toContain(CHAVE_A.toString('base64'))

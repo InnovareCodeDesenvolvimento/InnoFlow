@@ -86,6 +86,7 @@ describe.skipIf(!temPg)('backup automático — serviço contra Postgres, Redis 
       }) as never)
     }
     chaveDoDono = m.bc.generateBackupKey()
+    jwtSecretOriginal = (await import('../../src/lib/env')).env.JWT_SECRET
   }, 180_000)
 
   afterAll(async () => {
@@ -134,11 +135,16 @@ describe.skipIf(!temPg)('backup automático — serviço contra Postgres, Redis 
     alertas.length = 0
     await configurar()
   })
-  afterEach(() => {
+  afterEach(async () => {
+    // Isolamento: um teste que trocou o JWT_SECRET (a chave dos segredos é derivada dele) NUNCA pode vazar para o seguinte, nem em ordem embaralhada.
+    const { env } = await import('../../src/lib/env')
+    env.JWT_SECRET = jwtSecretOriginal
+    m.sec.resetPaymentSecretsKeyCacheParaTeste()
     // Nenhum teste pode deixar processo/arquivo temporário para trás.
     expect(readdirSync(tmpBase)).toEqual([])
   })
 
+  let jwtSecretOriginal = ''
   const semEspera = async (_ms: number): Promise<void> => undefined
 
   function execEspiao(sobrescrever: Partial<Record<'pg_dump' | 'pg_restore', (args: string[], env: Record<string, string>, opcoes?: { timeoutMs?: number }) => Promise<string>>> = {}) {
@@ -258,12 +264,47 @@ describe.skipIf(!temPg)('backup automático — serviço contra Postgres, Redis 
       expect(alertasDe('backup_failed')[0]).toMatchObject({ motivo: 'KEY', operacao: 'SCHEDULED' })
     })
 
-    it('PAYMENT_SECRETS_KEY trocada (segredos do destino não decifram): SECRETS_KEY, sem gastar o dump', async () => {
+    it('chave-mestra trocada (segredos do destino não decifram — kid desconhecido): SECRETS_KEY, sem gastar o dump', async () => {
       await m.prisma.backupConfig.update({ where: { id: 1 }, data: { s3SecretKeyCiphertext: 'v1:deadbeef:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } })
       const espiao = execEspiao()
       await expect(rodar({ exec: espiao.fn })).rejects.toMatchObject({ codigo: 'SECRETS_KEY' })
       expect(espiao.chamadas).toEqual([])
       expect(await ultimaExecucao()).toMatchObject({ status: 'FAILED', errorCode: 'SECRETS_KEY' })
+    })
+
+    it('JWT_SECRET TROCADO (a chave dos segredos é derivada dele; MUDANÇA DELIBERADA, como no InnoChat): destino e cópia da chave viram ilegíveis — SECRETS_KEY, sem gastar o dump, SEM derrubar o worker (erro tipado, trava liberada); voltar ao JWT_SECRET antigo restabelece', async () => {
+      await configurar({})
+      const { env } = await import('../../src/lib/env')
+      const original = env.JWT_SECRET
+      const espiao = execEspiao()
+      try {
+        env.JWT_SECRET = 'jwt-secret-TROCADO-pelo-dono-do-sistema-0123456789-xyz'
+        await expect(rodar({ exec: espiao.fn })).rejects.toMatchObject({ codigo: 'SECRETS_KEY' })
+        expect(espiao.chamadas).toEqual([])
+        expect(s3f.objetos.size).toBe(0)
+        expect(await ultimaExecucao()).toMatchObject({ status: 'FAILED', errorCode: 'SECRETS_KEY', finishedAt: expect.any(Date) })
+        expect((await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })).runningSince).toBeNull()
+        const log = JSON.stringify(logs)
+        expect(log).not.toContain(original)
+        expect(log).not.toContain(env.JWT_SECRET)
+      } finally {
+        env.JWT_SECRET = original
+      }
+      // o JWT_SECRET antigo de volta: os segredos e a cópia da chave do backup decifram de novo (sem rodar outro pg_dump inteiro: um backup completo a mais, ao fim do teste, só aumenta a janela de interferência)
+      const config = await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })
+      expect(m.sec.decifrarSegredoOuNull(config.s3SecretKeyCiphertext)).toBe(SECRET)
+      expect((await import('../../src/services/backup/configBackup')).chaveDoBackupDaConfig(config).impressaoDigital).toBe(m.bc.keyFingerprint(chaveDoDono))
+    }, 120_000)
+
+    it('só a CÓPIA da chave do backup ilegível (destino recadastrado depois da troca do JWT_SECRET): KEY — "gere a chave de novo" —, sem gastar o dump nem derrubar o worker', async () => {
+      await configurar({})
+      // cópia cifrada por OUTRA chave-mestra (kid desconhecido): é o que sobra no banco depois de trocar o JWT_SECRET; o destino (S3) já foi recadastrado e decifra
+      await m.prisma.backupConfig.update({ where: { id: 1 }, data: { encryptionKeyCiphertext: 'v1:deadbeef:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } })
+      const espiao = execEspiao()
+      await expect(rodar({ exec: espiao.fn })).rejects.toMatchObject({ codigo: 'KEY' })
+      expect(espiao.chamadas).toEqual([])
+      expect(await ultimaExecucao()).toMatchObject({ status: 'FAILED', errorCode: 'KEY', finishedAt: expect.any(Date) })
+      expect((await m.prisma.backupConfig.findUniqueOrThrow({ where: { id: 1 } })).runningSince).toBeNull()
     })
 
     it('credencial do S3 recusada: CREDENTIAL (e o dump em claro NÃO fica no disco)', async () => {
