@@ -8,6 +8,11 @@ import { startCapturarSessaoCartaoWorker } from '../worker/jobs/capturarSessaoCa
 import { startVarrerPreAutorizacoesCartaoWorker, scheduleVarrerPreAutorizacoesCartaoScan } from '../worker/jobs/varrerPreAutorizacoesCartaoJob'
 import { startVigiarSessoesWorker, scheduleVigiarSessoesScan } from '../worker/jobs/vigiarSessoesJob'
 import { startManterParticoesWorker, scheduleManterParticoes, manterParticoesNoBoot } from '../worker/jobs/manterParticoesJob'
+import { startConfirmarEstornosPortalWorker, scheduleConfirmarEstornosPortal } from '../worker/jobs/confirmarEstornosPortalJob'
+import { startVigiarDevolucoesAtrasadasWorker, scheduleVigiarDevolucoesAtrasadas } from '../worker/jobs/vigiarDevolucoesAtrasadasJob'
+import { startBackupWorker, scheduleBackupTick } from '../worker/jobs/backupJob'
+import { startVigiarPrazoChargebacksWorker, scheduleVigiarPrazoChargebacks } from '../worker/jobs/vigiarPrazoChargebacksJob'
+import { startNotificacoesWorker } from '../worker/jobs/notificacoesJob'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -48,5 +53,35 @@ scheduleManterParticoes().catch((err) =>
   logger.error({ err }, '[worker] falha ao agendar a manutenção de partições — o worker segue de pé, mas sem manutenção periódica até reiniciar'),
 )
 void manterParticoesNoBoot()
+
+// L1.4 (Vega, 2026-10-06): vigia diária das devoluções de saldo de conta excluída pendentes há mais de 30 dias (alerta `payment_refund_pending_overdue`). Falhar ao agendar não derruba o worker.
+startVigiarDevolucoesAtrasadasWorker()
+scheduleVigiarDevolucoesAtrasadas().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar a vigia de devoluções atrasadas — o worker segue de pé, mas sem o alerta automático até reiniciar'),
+)
+
+// L1.8 (Vega, 2026-10-06): reconsulta, a cada REFUND_PORTAL_SCAN_INTERVAL_MS (30 min), as devoluções que o ADMIN registrou como feitas no PORTAL da Cielo (PENDING_CONFIRMATION) e confirma só o
+// que a consulta PROVA. Só leitura na Cielo; sem credencial a rodada é pulada. Falhar ao agendar não derruba o worker.
+startConfirmarEstornosPortalWorker()
+scheduleConfirmarEstornosPortal().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar a confirmação das devoluções no portal — o worker segue de pé, mas sem confirmação automática até reiniciar'),
+)
+
+// L1.8 (Vega-H, 2026-10-06): vigia diaria do PRAZO DE RESPOSTA dos chargebacks em aberto (alertas `chargeback_response_deadline_near`/`_overdue`, CRITICO). Falhar ao agendar nao derruba o worker.
+startVigiarPrazoChargebacksWorker()
+scheduleVigiarPrazoChargebacks().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar a vigia do prazo dos chargebacks — o worker segue de pe, mas sem o aviso automatico ate reiniciar'),
+)
+
+// Backup automatico do banco (Vega-F, 2026-10-06): tick a cada 10 min (roda o dump se for a hora, confere a copia 1x por semana, avisa se atrasou) + pedidos manuais da tela Admin > Backup.
+// A imagem do worker precisa do cliente do PostgreSQL (pg_dump/pg_restore). Falhar ao agendar nao derruba o worker.
+startBackupWorker()
+scheduleBackupTick().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar o tick do backup — o worker segue de pe, mas sem backup automatico ate reiniciar'),
+)
+
+// L1.6 (Vega-G, 2026-10-06): e-mails ao motorista (recibo, cobranca falha, saldo baixo, Pix creditado, recarga pelo suporte, senha alterada, conta excluida). Fila `notificacoes`: o
+// fato enfileira DEPOIS do commit; aqui se decide, monta e envia (idempotente por NotificationLog; retry com backoff; alerta ao esgotar). Ver services/notificacoes/.
+startNotificacoesWorker()
 
 logger.info('worker ok')

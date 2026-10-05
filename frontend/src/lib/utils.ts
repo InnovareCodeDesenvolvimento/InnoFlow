@@ -271,6 +271,12 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   LOGIN_SUCCESS: "Login",
   LOGIN_FAILED: "Falha de login",
   EXPORT: "Exportação",
+  PAYMENT_CREDIT: "Crédito de Pix",
+  PAYMENT_CONFIG_CHANGE: "Config. gateway",
+  PASSWORD_RESET: "Senha redefinida",
+  ACCOUNT_DELETION: "Exclusão de conta",
+  REFUND: "Estorno",
+  CHARGEBACK: "Chargeback",
   OTHER: "Outro",
 }
 

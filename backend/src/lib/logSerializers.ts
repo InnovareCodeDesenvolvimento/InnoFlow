@@ -90,7 +90,18 @@ export function serializarErro(err: unknown): unknown {
  */
 const PREFIXO_WEBHOOK_CIELO = '/api/webhooks/cielo/'
 
+/**
+ * O callback do "Conectar com Google" do backup (`/api/backup/google/callback?state=...&code=...`) carrega o `code` do OAuth e o `state` na QUERY: o `pino-http` logaria os dois em claro.
+ * São de uso único (e o `code` só troca com o client secret), mas log não é lugar de credencial: a query some, o caminho fica.
+ */
+const PREFIXO_CALLBACK_GOOGLE_BACKUP = '/api/backup/google/callback'
+
 export function mascararUrlComSegredo(url: string): string {
+  const j = url.toLowerCase().indexOf(PREFIXO_CALLBACK_GOOGLE_BACKUP)
+  if (j !== -1) {
+    const fim = j + PREFIXO_CALLBACK_GOOGLE_BACKUP.length
+    return url.length > fim ? `${url.slice(0, fim)}?***` : url
+  }
   const i = url.toLowerCase().indexOf(PREFIXO_WEBHOOK_CIELO)
   return i === -1 ? url : `${url.slice(0, i + PREFIXO_WEBHOOK_CIELO.length)}***`
 }

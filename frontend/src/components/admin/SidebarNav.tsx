@@ -24,6 +24,8 @@ function NavLinkItem({
       title={collapsed ? item.label : undefined}
       aria-label={collapsed ? item.label : undefined}
       aria-current={isActive ? "page" : undefined}
+      // Alvo do tour (`components/onboarding/tourScripts.ts`): `/admin/charge-points` -> `nav-charge-points`. Um nome por rota, o mesmo na sidebar e no drawer (só um está visível por vez).
+      data-tour={`nav-${item.href.replace("/admin/", "")}`}
       className={cn(
         "group relative flex min-h-11 items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-colors",
         collapsed && "justify-center px-0",

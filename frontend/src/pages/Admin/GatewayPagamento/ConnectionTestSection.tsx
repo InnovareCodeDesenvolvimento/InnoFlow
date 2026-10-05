@@ -53,7 +53,7 @@ function StepRow({ result, environment }: { result: PaymentGatewayTestStepResult
           )}
           {support && !isTestFailure(result.status) && result.status === "NOT_CONFIGURED" && <p className="text-xs text-ink-softer">{support}</p>}
           {(result.host || result.httpStatus !== null || result.durationMs > 0) && (
-            <p className="text-xs text-ink-softer">
+            <p className="text-xs text-ink-softer [overflow-wrap:anywhere]">
               {[result.host, result.httpStatus !== null ? `HTTP ${result.httpStatus}` : null, result.durationMs > 0 ? `${result.durationMs} ms` : null].filter(Boolean).join(" · ")}
             </p>
           )}

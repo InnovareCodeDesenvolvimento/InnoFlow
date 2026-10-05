@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client'
 import { SYSTEM_ACTOR } from '../../core/auditoria/systemActor'
+import { MARCADOR_TOKEN_CARTAO_DESTRUIDO } from '../../core/lgpd/exclusaoDeConta'
 import { ciphertextEstaNaChaveAtual, decryptPaymentSecret, encryptPaymentSecret, isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
 import { writeAuditLog } from '../auditoria/writeAuditLog'
 
@@ -7,8 +8,9 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
  * Re-cifra os segredos de pagamento com a chave ATUAL (`PAYMENT_SECRETS_KEY`) — o miolo da ROTAÇÃO de chave (F5.7). Usado SÓ pelo script administrativo
  * `backend/scripts/recifrarSegredosDePagamento.ts` (fora do HTTP: ninguém aciona isto por rota). Runbook em `docs/DEPLOY-EASYPANEL.md`.
  *
- * Alvos: `PaymentMethod.cieloCardTokenCiphertext` (todas as linhas, ativas ou não), as três colunas `*Ciphertext` de `PaymentGatewayConfig` e as duas de `NotificationChannelConfig`
- * (senha SMTP e apikey da Evolution — N-7: a MESMA chave cifra os segredos de comunicação; sem isto a rotação deixaria esses dois para trás, ilegíveis).
+ * Alvos: `PaymentMethod.cieloCardTokenCiphertext` (todas as linhas, ativas ou não — exceto as de conta excluída, com o marcador `DESTROYED`), `AccountDeletionRequest.refundPixKeyCiphertext` (chave Pix de devolução, L1.4), as três colunas `*Ciphertext` de `PaymentGatewayConfig` e as duas de `NotificationChannelConfig`
+ * (senha SMTP e apikey da Evolution — N-7: a MESMA chave cifra os segredos de comunicação; sem isto a rotação deixaria esses dois para trás, ilegíveis) e as cinco de `BackupConfig` (S3, Google e a cópia
+ * cifrada da chave do backup).
  *
  * Regras:
  *  - DRY-RUN por padrão (`apply: false` não grava NADA, só conta); `apply: true` grava.
@@ -23,6 +25,12 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
 export type AlvoRecifragem = 'PaymentMethod.cieloCardTokenCiphertext' | 'PaymentGatewayConfig.merchantKeyCiphertext' | 'PaymentGatewayConfig.sopClientSecretCiphertext' | 'PaymentGatewayConfig.webhookHeaderSecretCiphertext'
   | 'NotificationChannelConfig.smtpPasswordCiphertext'
   | 'NotificationChannelConfig.evolutionApiKeyCiphertext'
+  | 'BackupConfig.s3AccessKeyCiphertext'
+  | 'BackupConfig.s3SecretKeyCiphertext'
+  | 'BackupConfig.driveOauthClientSecretCiphertext'
+  | 'BackupConfig.driveOauthRefreshTokenCiphertext'
+  | 'BackupConfig.encryptionKeyCiphertext'
+  | 'AccountDeletionRequest.refundPixKeyCiphertext'
 
 export interface RelatorioAlvo {
   alvo: AlvoRecifragem
@@ -100,6 +108,9 @@ export async function recifrarSegredosDePagamento(params: { apply: boolean; pris
     })
     if (lote.length === 0) break
     for (const linha of lote) {
+      // Cartão de conta EXCLUÍDA (L1.4): o token foi destruído de propósito (marcador literal, não é ciphertext). Não é segredo a re-cifrar nem "ilegível" — pular sem contar,
+      // senão a rotação nunca chegaria a "ilegíveis: 0" depois da primeira exclusão de conta.
+      if (linha.cieloCardTokenCiphertext === MARCADOR_TOKEN_CARTAO_DESTRUIDO) continue
       cartoes.total += 1
       const r = avaliar(linha.cieloCardTokenCiphertext)
       if (r.situacao === 'JA_NA_ATUAL') cartoes.jaNaChaveAtual += 1
@@ -163,6 +174,63 @@ export async function recifrarSegredosDePagamento(params: { apply: boolean; pris
         else alvo.alteradosDuranteExecucao += 1
       }
     }
+  }
+
+  // --- BackupConfig (singleton id=1): credenciais do S3, segredo/refresh token do Google e a CÓPIA CIFRADA da chave do backup — cifradas com a MESMA chave. Sem isto a rotação deixaria o agendador
+  // sem poder cifrar/enviar o backup de madrugada (e a cópia da chave do backup ilegível). -------------------------------------------------------------------------------------------------
+  const backup = await prisma.backupConfig.findUnique({ where: { id: 1 } })
+  const colunasBackup = ['s3AccessKeyCiphertext', 's3SecretKeyCiphertext', 'driveOauthClientSecretCiphertext', 'driveOauthRefreshTokenCiphertext', 'encryptionKeyCiphertext'] as const
+  for (const coluna of colunasBackup) {
+    const alvo = novoAlvo(`BackupConfig.${coluna}`)
+    alvos.push(alvo)
+    const valor = backup?.[coluna]
+    if (!backup || !valor) continue
+    alvo.total += 1
+    const r = avaliar(valor)
+    if (r.situacao === 'JA_NA_ATUAL') alvo.jaNaChaveAtual += 1
+    else if (r.situacao === 'ILEGIVEL') alvo.ilegiveis += 1
+    else {
+      alvo.aRecifrar += 1
+      if (apply) {
+        // `updatedAt` explícito = o MESMO valor: re-cifrar não é uma alteração de configuração.
+        const { count } = await prisma.backupConfig.updateMany({ where: { id: 1, [coluna]: valor }, data: { [coluna]: r.novo!, updatedAt: backup.updatedAt } })
+        if (count === 1) alvo.recifrados += 1
+        else alvo.alteradosDuranteExecucao += 1
+      }
+    }
+  }
+
+  // --- AccountDeletionRequest.refundPixKeyCiphertext (L1.4): a chave Pix de devolução, cifrada com a MESMA chave. Só pedidos PENDING_REFUND têm valor (é apagada ao devolver); paginado por id. ---
+  const chavesPix = novoAlvo('AccountDeletionRequest.refundPixKeyCiphertext')
+  alvos.push(chavesPix)
+  let cursorPix: string | undefined
+  for (;;) {
+    const lote = await prisma.accountDeletionRequest.findMany({
+      where: { refundPixKeyCiphertext: { not: null } },
+      select: { id: true, refundPixKeyCiphertext: true },
+      orderBy: { id: 'asc' },
+      take: PAGINA,
+      ...(cursorPix ? { cursor: { id: cursorPix }, skip: 1 } : {}),
+    })
+    if (lote.length === 0) break
+    for (const linha of lote) {
+      const valor = linha.refundPixKeyCiphertext
+      if (!valor) continue
+      chavesPix.total += 1
+      const r = avaliar(valor)
+      if (r.situacao === 'JA_NA_ATUAL') chavesPix.jaNaChaveAtual += 1
+      else if (r.situacao === 'ILEGIVEL') chavesPix.ilegiveis += 1
+      else {
+        chavesPix.aRecifrar += 1
+        if (apply) {
+          const { count } = await prisma.accountDeletionRequest.updateMany({ where: { id: linha.id, refundPixKeyCiphertext: valor }, data: { refundPixKeyCiphertext: r.novo! } })
+          if (count === 1) chavesPix.recifrados += 1
+          else chavesPix.alteradosDuranteExecucao += 1
+        }
+      }
+    }
+    cursorPix = lote[lote.length - 1]!.id
+    if (lote.length < PAGINA) break
   }
 
   const totais = alvos.reduce(

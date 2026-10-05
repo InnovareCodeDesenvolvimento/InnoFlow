@@ -92,8 +92,12 @@ export interface CamposEvolution {
   minSeveridade: string
 }
 
-/** Valida e monta o canal de e-mail (política de destino do PAINEL). `null` + motivo em `avisos` se algo falta/é proibido. Não lança. */
-export function emailDeCampos(c: CamposEmail, politica: PoliticaDeDestino, avisos: string[], opcoes: { exigirDestinatarios?: boolean } = {}): ConfigEmail | null {
+/**
+ * Valida e monta o canal de e-mail (política de destino do PAINEL). `null` + motivo em `avisos` se algo falta/é proibido. Não lança.
+ * L1.6 (MUDANÇA DELIBERADA): o canal está "pronto" com servidor + remetente válidos. Os destinatários de ALERTA são OPCIONAIS (lista vazia = só o e-mail transacional ao motorista
+ * funciona; os alertas ao dono por e-mail simplesmente não saem — ver `montarCanais`). Antes, destinatário vazio desligava o canal inteiro e o e-mail ao motorista não saía.
+ */
+export function emailDeCampos(c: CamposEmail, politica: PoliticaDeDestino, avisos: string[]): ConfigEmail | null {
   if (!c.host) {
     avisos.push('e-mail ligado no painel, mas sem servidor SMTP (host)')
     return null
@@ -104,10 +108,6 @@ export function emailDeCampos(c: CamposEmail, politica: PoliticaDeDestino, aviso
     return null
   }
   const para = c.destinatarios.filter((e) => EMAIL_SIMPLES.test(e))
-  if (para.length === 0 && opcoes.exigirDestinatarios !== false) {
-    avisos.push('e-mail ligado no painel, mas sem destinatário válido')
-    return null
-  }
   const remetente = c.emailRemetente ?? (c.usuario && EMAIL_SIMPLES.test(c.usuario) ? c.usuario : null)
   if (!remetente) {
     avisos.push('e-mail ligado no painel, mas sem remetente (e-mail "de")')

@@ -1,14 +1,24 @@
 name: CI
 
+# Fluxo de publicacao (docs/FLUXO-DE-PUBLICACAO.md): o CI roda em push de QUALQUER branch e em PR, de modo que uma mudanca de
+# infraestrutura/Dockerfile e validada (inclusive o `docker build` das 4 imagens) numa branch (`staging`, `release/*`, `fix/*`...)
+# ANTES de entrar no `main`, que e a branch que o EasyPanel constroi. `main` so recebe merge com o job `ci-ok` verde (protecao de
+# branch a configurar no GitHub, ver o documento).
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
+# Minimo necessario: nenhum job escreve no repositorio nem em PR (os artefatos usam o token de execucao, que nao depende disto).
+permissions:
+  contents: read
+
+# Uma execucao nova da MESMA branch cancela a anterior (push em sequencia), mas o `main` nunca e cancelado: cada commit do main
+# precisa ter o seu veredito, e e o que o EasyPanel esta construindo.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   backend:
@@ -87,17 +97,32 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      # Os testes de integração do backup (backupApi/backupExecucao/backupJob) executam `pg_dump`/`pg_restore` de verdade. Sem o
+      # cliente eles FALHAM de propósito na CI (`CI=true`: um teste de backup que "passa" sem copiar nada não prova nada). Cliente 18 =
+      # o das imagens (copia o servidor 16 desta CI). O passo exporta BACKUP_PG_BIN_DIR, que o helper dos testes lê primeiro.
+      # Custo: ~20-40 s (apt do pgdg, com 3 tentativas e queda para o 16 do runner se o pgdg estiver fora do ar).
+      - name: Cliente do PostgreSQL 18 (pg_dump/pg_restore dos testes de backup)
+        uses: ./.github/actions/cliente-postgres-18
       - name: Lint
         run: npm run lint
       - name: Prisma generate
         run: npx prisma generate
+      # Typecheck ANTES de migrate/testes: não precisa de banco e é a falha mais barata de achar (15 s).
+      - name: Typecheck
+        run: npm run typecheck
       # Aplica as migrations REAIS (as do Cronos, com o SQL hand-escrito de
       # particionamento/triggers) contra um Postgres de verdade — não um
       # `db push` que ignoraria o que não cabe na DSL do Prisma.
       - name: Aplicar migrations no banco de teste
         run: npx prisma migrate deploy
-      - name: Typecheck
-        run: npm run typecheck
+      # Falha rápida e com mensagem clara se o cliente instalado não fala com o servidor 16 (versão do cliente < servidor, PATH errado):
+      # sem isto o erro só apareceria dentro de 3 arquivos de teste, no meio da suíte.
+      - name: pg_dump enxerga o banco de teste (cliente x servidor)
+        shell: bash
+        run: |
+          "$BACKUP_PG_BIN_DIR/pg_dump" --version
+          "$BACKUP_PG_BIN_DIR/pg_dump" --schema-only --dbname="$DATABASE_URL" --file=/dev/null
+          echo "ok: pg_dump copia o servidor da CI"
       # Auditoria de dependências: INFORMATIVA (não bloqueia). Vira anotação amarela no run; quem decide o que
       # corrigir é o dono/Órion — um CVE novo numa dependência transitiva não pode travar um deploy de segurança.
       - name: npm audit (informativo)
@@ -130,6 +155,7 @@ jobs:
   frontend:
     name: Frontend — lint, typecheck, build, test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -188,6 +214,9 @@ jobs:
   e2e:
     name: E2E — smoke (Playwright)
     runs-on: ubuntu-latest
+    # Medido localmente (CI=true, --workers=2, 312 testes contra os mocks, maquina de 24 nucleos): 13,8 min, 311 passaram + 1 "flaky"
+    # (passou no retry). O runner de 2-4 vCPU e mais lento: 45 e folga para isso e ainda trava uma suite pendurada (default do GitHub: 360).
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
@@ -199,6 +228,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Cache do binario do Chromium (~150 MB): sem ele cada execucao baixa de novo. Chave = lockfile (a versao do Playwright decide qual
+      # Chromium e). Cache perdido so custa o download; `install --with-deps` abaixo continua instalando as libs do sistema.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Run E2E (Playwright)
@@ -213,6 +248,7 @@ jobs:
   docker-compose:
     name: docker-compose.yml — configuração válida
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       # Só valida a estrutura/sintaxe (interpolação de env, referências entre
@@ -262,8 +298,10 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@v4
+      # `--progress=plain`: o log COMPLETO de cada passo (sem o resumo dobrado do BuildKit). Quando um build falha, o fim do log e o
+      # que importa (ver docs/FLUXO-DE-PUBLICACAO.md, "se o deploy falhar").
       - name: docker build
-        run: docker build -f backend/${{ matrix.file }} -t inno-backend-smoke backend
+        run: docker build --progress=plain -f backend/${{ matrix.file }} -t inno-backend-smoke backend
       - name: Imagem — Node 22, usuário não-root, sem devDependencies, Prisma no engine musl/openssl 3
         shell: bash
         run: |
@@ -278,6 +316,23 @@ jobs:
           docker run --rm --entrypoint sh "$img" -c '! test -e node_modules/.bin/vitest && ! test -e node_modules/.bin/eslint && ! test -e node_modules/typescript'
           docker run --rm --entrypoint sh "$img" -c 'node_modules/.bin/prisma -v' | tee prisma-v.txt
           grep -q 'linux-musl-openssl-3.0.x' prisma-v.txt || { echo "::error::Prisma nao detectou linux-musl-openssl-3.0.x (openssl ausente no runner?)"; exit 1; }
+      # Cliente do PostgreSQL das imagens (backup: job do worker e scripts/backup-db.sh): existe, e >= 17, roda como `node` (uid 1000,
+      # o USER final) e COPIA de verdade um servidor 16 (o do EasyPanel e o desta CI) -> pega "cliente mais velho que o servidor" e
+      # "o atalho /usr/bin/pg_dump nao veio" ANTES do deploy. O Dockerfile ja roda `pg_dump --version` depois do USER node; aqui e a
+      # prova contra um banco real. O service container `postgres` e 16 e as migrations ainda nao rodaram: schema vazio basta.
+      - name: Imagem — pg_dump/pg_restore/psql como `node`, cliente >= 17, copia o servidor 16
+        shell: bash
+        run: |
+          set -eu
+          img=inno-backend-smoke
+          docker run --rm --entrypoint sh "$img" -c 'id -un && pg_dump --version && pg_restore --version && psql --version' | tee pg-client.txt
+          grep -q '^node$' pg-client.txt || { echo "::error::as ferramentas do Postgres nao rodaram como o usuario node"; exit 1; }
+          major=$(awk '/^pg_dump/ { split($3, v, "."); print v[1]; exit }' pg-client.txt)
+          [ -n "$major" ] && [ "$major" -ge 17 ] || { echo "::error::pg_dump da imagem nao e 17+ (lido: '$major')"; cat pg-client.txt; exit 1; }
+          docker run --rm --network host --entrypoint sh \
+            -e PGURL=postgresql://postgres:postgres@127.0.0.1:5432/innoelektron_smoke "$img" \
+            -c 'pg_dump --schema-only --dbname="$PGURL" --file=/tmp/schema.sql && test -s /tmp/schema.sql && psql --dbname="$PGURL" -tAc "SHOW server_version_num"'
+          echo "ok: cliente $major copia o servidor da CI, como node"
       # O CMD REAL da imagem (`prisma migrate deploy && node dist/entrypoints/<x>.js`) como não-root, contra Postgres/Redis
       # de verdade. Prova que o migrate deploy roda sem root e que o entrypoint sobe só com as dependências de produção.
       - name: Smoke — CMD real da imagem sobe (migrate deploy + entrypoint)
@@ -306,7 +361,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: docker build
-        run: docker build -t inno-frontend-smoke frontend
+        run: docker build --progress=plain -t inno-frontend-smoke frontend
       # Sobe o nginx de verdade com o template + envsubst (API_UPSTREAM default do Dockerfile — o upstream não precisa
       # existir: o nginx resolve a cada requisição, e aqui só tocamos em estáticos). Prova que o template é válido na
       # versão da imagem e que os headers de segurança saem (as CSPs em si são conferidas nos testes/E2E, não aqui).
@@ -328,3 +383,205 @@ jobs:
           grep -qi "^content-security-policy: default-src 'none'" headers-cartao.txt || { echo "::error::CSP do cartao ausente"; exit 1; }
           curl -sI http://127.0.0.1:8080/ | grep -qi '^content-security-policy:' || { echo "::error::CSP da raiz ausente"; exit 1; }
           echo "ok: frontend sobe e serve"
+
+  # Backup: o dump VOLTA mesmo (ciclo completo em Postgres real, com as migrations de verdade).
+  # Backup que nunca foi restaurado é uma suposição, e testar uma vez à mão não basta: o schema muda toda semana e a restauração
+  # precisa continuar funcionando DEPOIS de cada migration. Por isso o ciclo roda a cada push: semear -> backup-db.sh CIFRADO ->
+  # (chave errada / adulterado / sem chave / banco em uso: recusam e NADA muda) -> DROP SCHEMA -> restore-db.sh -> conferir
+  # dados e contagens. Matriz de servidor 16 (o do EasyPanel hoje) e 18, sempre com o cliente 18 (o mesmo das imagens), o que
+  # cobre também o caso "cliente 18 contra servidor 16" (SET transaction_timeout). Os scripts rodam no `sh` do Ubuntu (dash),
+  # o mesmo tipo de shell POSIX do container Alpine (ash). Job independente: não segura os demais e roda em paralelo.
+  backup-restore:
+    name: Backup — o dump volta mesmo (Postgres ${{ matrix.pg }}, cifrado, ciclo completo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["16", "18"]
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: innoelektron_backup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d innoelektron_backup"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/innoelektron_backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+
+      # O cliente do runner precisa ser >= o servidor (senão o pg_dump recusa). Fixamos o 18, como nas imagens
+      # (postgresql18-client), e o colocamos na frente do PATH: o Ubuntu já traz um cliente mais antigo.
+      # Mesmo passo (acao local) do job `backend`: uma so receita, em um so lugar.
+      - name: Instala o cliente do Postgres 18
+        uses: ./.github/actions/cliente-postgres-18
+
+      - name: Os 3 Dockerfiles do backend trazem o mesmo cliente do Postgres
+        working-directory: .
+        run: |
+          for f in backend/Dockerfile backend/Dockerfile.ocpp backend/Dockerfile.worker; do
+            grep -q 'apk add --no-cache postgresql18-client || apk add --no-cache postgresql17-client' "$f" || { echo "::error::$f sem o cliente do Postgres (18 com queda para 17)"; exit 1; }
+          done
+          echo "ok"
+
+      - name: Cria o schema (as migrations de verdade) e confirma a versão do servidor
+        run: |
+          npx prisma migrate deploy
+          v="$(psql "$DATABASE_URL" -tAc 'SHOW server_version_num')"
+          case "$v" in ${{ matrix.pg }}*) echo "servidor $v" ;; *) echo "::error::servidor nao e ${{ matrix.pg }}.x ($v)"; exit 1 ;; esac
+          pg_dump --version
+
+      - name: Semeia dados conhecidos e tira o retrato do banco
+        run: |
+          node scripts/backup-smoke.mjs semear
+          node scripts/backup-smoke.mjs contagens > "$RUNNER_TEMP/contagens-antes.txt"
+          wc -l "$RUNNER_TEMP/contagens-antes.txt"
+
+      # O formato do arquivo é um contrato (docs/BACKUP-FORMATO.md): o vetor fixo do documento tem que abrir com o script, que
+      # não depende do projeto. O teste cruzado com o módulo do backend roda na suíte do job `backend`.
+      - name: O decifrador abre o vetor fixo do formato (docs/BACKUP-FORMATO.md)
+        run: |
+          printf 'CHAVE: 00010203-04050607-08090a0b-0c0d0e0f-10111213-14151617-18191a1b-1c1d1e1f\n' > "$RUNNER_TEMP/chave-vetor.txt"
+          node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from("494e4e4f424b5001630dcd29f807afc63f469e11d7319de26c83d30b7549b1767cb152053bf76f40d8972e6c8c365ccae02ed6a01ffe57701f4fb85a1ad88af5d8818c36d1d9b530ff06f45ed54619b1de9bfc0dcebca48622ad1288", "hex"))' "$RUNNER_TEMP/vetor.dump.enc"
+          node scripts/decrypt-backup.mjs "$RUNNER_TEMP/vetor.dump.enc" --info | grep -q 630dcd29
+          node scripts/decrypt-backup.mjs "$RUNNER_TEMP/vetor.dump.enc" --chave "$RUNNER_TEMP/chave-vetor.txt" --saida "$RUNNER_TEMP/vetor.dump"
+          test "$(cat "$RUNNER_TEMP/vetor.dump")" = "PGDMP-vetor-fixo-InnoFlow: dados de teste 0123456789"
+
+      # A chave é gerada na hora e nunca sai do runner.
+      - name: Gera a chave do backup (e uma chave errada)
+        run: |
+          printf 'CHAVE: %s\n' "$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')" > "$RUNNER_TEMP/chave.txt"
+          printf 'CHAVE: %s\n' "$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')" > "$RUNNER_TEMP/chave-errada.txt"
+          chmod 600 "$RUNNER_TEMP/chave.txt"
+
+      - name: Sem chave o backup RECUSA (cópia em claro é decisão explícita)
+        run: |
+          if sh scripts/backup-db.sh ./backups-sem-chave; then echo "::error::backup sem chave foi aceito"; exit 1; fi
+          if ls ./backups-sem-chave/* >/dev/null 2>&1; then echo "::error::o backup recusado deixou arquivo"; exit 1; fi
+
+      - name: Faz o backup cifrado
+        run: |
+          BACKUP_KEY_FILE="$RUNNER_TEMP/chave.txt" sh scripts/backup-db.sh ./backups
+          ls -l ./backups
+
+      - name: O arquivo saiu cifrado (sem dump em claro, ilegível sem a chave, sem texto da semente)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          if ls ./backups/*.dump >/dev/null 2>&1; then echo "::error::sobrou dump em claro"; exit 1; fi
+          if pg_restore --list "$ENC" >/dev/null 2>&1; then echo "::error::o arquivo cifrado é lido como dump"; exit 1; fi
+          if grep -aq "Eletroposto da Ação" "$ENC"; then echo "::error::texto da semente aparece no arquivo cifrado"; exit 1; fi
+          node scripts/decrypt-backup.mjs "$ENC" --info
+          node scripts/decrypt-backup.mjs "$ENC" --chave "$RUNNER_TEMP/chave.txt" --verificar
+          # nada do trabalho ficou para trás na pasta temporária
+          if ls "${TMPDIR:-/tmp}"/innoflow-backup.* >/dev/null 2>&1; then echo "::error::sobrou pasta temporária do backup"; exit 1; fi
+
+      # Recusas ANTES de destruir: com o banco ainda cheio, nada disto pode alterá-lo.
+      - name: Recusas com o banco ainda cheio (sem confirmar, banco em uso, chave errada, sem chave, adulterado, cortado, forjado)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          antes() { psql "$DATABASE_URL" -tAc 'SELECT count(*) FROM "Operator"'; }
+          N0="$(antes)"; test "$N0" -ge 1
+          expect_fail() { if "$@"; then echo "::error::deveria ter recusado: $*"; exit 1; fi; }
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --chave "$RUNNER_TEMP/chave.txt"
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt"
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave-errada.txt" --permitir-banco-em-uso
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --permitir-banco-em-uso
+          node -e 'const fs=require("fs");const b=fs.readFileSync(process.argv[1]);b[b.length>>1]^=1;fs.writeFileSync(process.argv[2],b)' "$ENC" ./backups/adulterado.dump.enc
+          expect_fail sh scripts/restore-db.sh ./backups/adulterado.dump.enc "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt" --permitir-banco-em-uso
+          head -c 5000 "$ENC" > ./backups/cortado.dump.enc
+          expect_fail sh scripts/restore-db.sh ./backups/cortado.dump.enc "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt" --permitir-banco-em-uso
+          # arquivo sem a marca de cifra (dump forjado) sem a flag --aceitar-sem-cifra
+          printf 'PGDMP-falso' > ./backups/forjado.dump
+          expect_fail sh scripts/restore-db.sh ./backups/forjado.dump "$DATABASE_URL" --confirmar --permitir-banco-em-uso
+          expect_fail node scripts/decrypt-backup.mjs "$ENC" --chave "$RUNNER_TEMP/chave-errada.txt" --saida "$RUNNER_TEMP/errada.dump"
+          test ! -e "$RUNNER_TEMP/errada.dump"
+          rm -f ./backups/adulterado.dump.enc ./backups/cortado.dump.enc ./backups/forjado.dump
+          test "$(antes)" = "$N0"
+          if ls "${TMPDIR:-/tmp}"/innoflow-restore.* >/dev/null 2>&1; then echo "::error::sobrou pasta temporária da restauração"; exit 1; fi
+          echo "ok: todas as recusas deixaram o banco intacto"
+
+      # Caminho do ensaio de DR (o normal): restaura num banco NOVO, sem flag nenhuma, e compara com o original.
+      - name: Ensaio de DR — restaura num banco novo (não precisa de --permitir-banco-em-uso)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          psql "$DATABASE_URL" -c 'CREATE DATABASE innoelektron_restaurado'
+          NOVO="postgresql://postgres:postgres@127.0.0.1:5432/innoelektron_restaurado"
+          sh scripts/restore-db.sh "$ENC" "$NOVO" --confirmar --chave "$RUNNER_TEMP/chave.txt"
+          DATABASE_URL="$NOVO" node scripts/backup-smoke.mjs conferir
+          DATABASE_URL="$NOVO" node scripts/backup-smoke.mjs contagens > "$RUNNER_TEMP/contagens-novo.txt"
+          diff "$RUNNER_TEMP/contagens-antes.txt" "$RUNNER_TEMP/contagens-novo.txt"
+          # restaurar DE NOVO por cima de um banco já cheio também tem que funcionar (tabelas particionadas incluídas)
+          sh scripts/restore-db.sh "$ENC" "$NOVO" --confirmar --chave "$RUNNER_TEMP/chave.txt"
+          DATABASE_URL="$NOVO" node scripts/backup-smoke.mjs conferir
+
+      # O DESASTRE, simulado: o banco some por completo. É contra isto que o backup existe, então é exatamente isto que o
+      # teste precisa provocar.
+      - name: Destrói o banco (DROP SCHEMA)
+        run: |
+          psql "$DATABASE_URL" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+          N="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
+          test "$N" = "0"
+
+      - name: Decifra e restaura em cima do banco destruído (--permitir-banco-em-uso)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt" --permitir-banco-em-uso
+
+      - name: Confere se os dados e as contagens voltaram idênticos
+        run: |
+          node scripts/backup-smoke.mjs conferir
+          node scripts/backup-smoke.mjs contagens > "$RUNNER_TEMP/contagens-depois.txt"
+          diff "$RUNNER_TEMP/contagens-antes.txt" "$RUNNER_TEMP/contagens-depois.txt"
+          echo "ok: $(wc -l < "$RUNNER_TEMP/contagens-depois.txt") itens idênticos antes e depois"
+
+      # As migrations ainda batem com o banco restaurado (o boot das 3 apps roda isto): tem que ser um no-op.
+      - name: prisma migrate deploy no banco restaurado não tem nada a aplicar
+        run: |
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/migrate.log" | tail -3
+          grep -q "No pending migrations" "$RUNNER_TEMP/migrate.log"
+
+  # Portão ÚNICO para a proteção de branch do `main` (docs/FLUXO-DE-PUBLICACAO.md). Exigir os 11 checks pelo nome é frágil: o nome
+  # das matrizes (docker-backend x3, backup-restore x2) muda se a matriz mudar, e um check renomeado que a proteção ainda "espera"
+  # trava o merge para sempre. Este job depende de TODOS e só passa se todos passaram: `skipped`/`cancelled` também reprovam (um job
+  # pulado por engano não pode virar "verde"). `if: always()` para rodar mesmo quando um dos jobs falhou e dar o veredito.
+  ci-ok:
+    name: CI verde (portão do main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ always() }}
+    needs: [backend, frontend, e2e, docker-compose, docker-backend, docker-frontend, backup-restore]
+    steps:
+      - name: Todos os jobs terminaram em success?
+        shell: bash
+        env:
+          RESULTADOS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTADOS" | node -e '
+            const needs = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            let ruim = 0;
+            for (const [job, v] of Object.entries(needs)) {
+              console.log(job.padEnd(16), v.result);
+              if (v.result !== "success") ruim++;
+            }
+            if (ruim) { console.error("::error::" + ruim + " job(s) do CI nao terminaram em success"); process.exit(1); }
+            console.log("ok: todos os jobs verdes");
+          '

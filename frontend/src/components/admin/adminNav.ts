@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, CreditCard, KeyRound, LayoutDashboard, Landmark, MapPin, Plug, ScrollText, TrendingUp, Vault, Wallet, WalletCards, Zap } from "lucide-react"
+import { Activity, CalendarDays, CreditCard, DatabaseBackup, KeyRound, Landmark, LayoutDashboard, MapPin, Plug, ScrollText, Settings, ShieldAlert, TrendingUp, UserX, Vault, Wallet, WalletCards, Zap } from "lucide-react"
 import type { NavGroup, NavItem } from "@/components/painel/navegacao"
 import { flattenNav, matchNavItem } from "@/components/painel/navegacao"
 import type { Role } from "@/types/api"
@@ -48,6 +48,8 @@ const BASE_NAV: NavGroup[] = [
  */
 const ADMIN_ONLY_ITEMS: NavItem[] = [
   { label: "Tokens de autenticação", href: "/admin/auth-tokens", icon: KeyRound, hint: "RFID e tokens de app da rede" },
+  { label: "Configurações", href: "/admin/configuracoes", icon: Settings, hint: "Dados da empresa, e-mail (SMTP), WhatsApp (Evolution API) e alertas da plataforma" },
+  { label: "Backups", href: "/admin/backups", icon: DatabaseBackup, hint: "Cópia do banco fora do servidor: destino, chave e histórico (admin)" },
   { label: "Auditoria", href: "/admin/auditoria", icon: ScrollText, hint: "Quem fez o quê, onde e como" },
 ]
 
@@ -57,6 +59,8 @@ const ADMIN_ONLY_ITEMS: NavItem[] = [
  */
 const ADMIN_ONLY_FINANCE_ITEMS: NavItem[] = [
   { label: "Gateway de pagamento", href: "/admin/gateway-pagamento", icon: Vault, hint: "Conta Cielo: credenciais, ambiente e meios de pagamento (admin)" },
+  { label: "Chargebacks", href: "/admin/chargebacks", icon: ShieldAlert, hint: "Contestações de cartão avisadas pela Cielo: prazo, dossiê e desfecho (admin)" },
+  { label: "Devoluções de saldo", href: "/admin/devolucoes-contas-excluidas", icon: UserX, hint: "Devoluções de contas excluídas (LGPD): devolver o saldo por Pix e registrar (admin)" },
 ]
 
 /** Navegação efetiva do painel, ajustada por papel: OPERATOR não vê o grupo "Rede" nem o "Gateway de pagamento" — as rotas nem respondem para ele (403). */

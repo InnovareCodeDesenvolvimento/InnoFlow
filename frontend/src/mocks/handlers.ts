@@ -55,10 +55,57 @@ import {
   sessionEpochOf,
   validateProfilePatch,
 } from "./profileData"
+import {
+  acceptConsents,
+  consumeLegalBump,
+  currentTermsVersion,
+  forcedDeletionFailure,
+  getConsentStatus,
+  legalConfig,
+  LEGAL_PRIVACY_VERSION,
+  pixKeyState,
+  recordDeletion,
+  recordSignupConsent,
+  registerExport,
+} from "./legalData"
+import { applyNotificationPatch, getMockNotificationPreferences, validateNotificationPatch } from "./notificationData"
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
+import { commandStatus, parseScenario, remoteStartPolicyDenied, startRemote } from "./remoteStartData"
 import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
+import { domainCheck, getCommunicationSettings, testCommunicationChannel, testSmtpConnection, updateCommunicationSettings } from "./communicationData"
+import { getCompanyProfile, updateCompanyProfile } from "./companyData"
+import {
+  disconnectGoogle,
+  generateBackupKey,
+  getBackupConfig,
+  getBackupRun,
+  getBackupStatus,
+  listBackupRuns,
+  runBackupNow,
+  startGoogle,
+  testBackupDestination,
+  updateBackupConfig,
+  verifyBackup,
+} from "./backupData"
+import {
+  cancelRefund,
+  confirmRefund,
+  createSessionRefund,
+  findMockPayment,
+  getChargeback,
+  getDossier,
+  getSessionRefunds,
+  listAccountDeletions,
+  listChargebacks,
+  matchesAcquirer,
+  refundAccountDeletion,
+  registerChargeback,
+  resolveChargeback,
+  unblockCard,
+  type MockResult,
+} from "./reversalsData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -110,6 +157,12 @@ function currentUser(req: Request): { userId: string; role: Role; operatorId: st
 
 function errorBody(error: string, code: string) {
   return { error, code }
+}
+
+/** Traduz o resultado dos mocks de estorno/chargeback/devolução (`reversalsData.ts`) em resposta HTTP: sucesso com o corpo, erro no envelope `{error, code, details?}` (+ `Retry-After`). */
+function mockResult<T>(result: MockResult<T>) {
+  if (result.ok) return HttpResponse.json(result.body as never, { status: result.status })
+  return HttpResponse.json({ error: result.message, code: result.code, ...(result.details !== undefined ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
 }
 
 /** Nunca devolve a senha — mesma regra do `toUserDTO` real (`auth.routes.ts`). */
@@ -270,6 +323,9 @@ function invalidBasicAuthSecret(secret: string | undefined, required: boolean) {
   return ok ? null : HttpResponse.json(errorBody("basicAuthSecret: de 16 a 40 caracteres (até 72 bytes).", "VALIDATION_ERROR"), { status: 400 })
 }
 
+/** Tokens de redefinição já consumidos (uso único), por vida da página. */
+const usedResetTokens = new Set<string>()
+
 export const handlers = [
   // ---- Auth -----------------------------------------------------------------
   // Limites de tentativa (contrato: 429 com `code`, ver `lib/authErrors.ts`).
@@ -295,7 +351,14 @@ export const handlers = [
   }),
 
   http.post("/api/auth/register", async ({ request }) => {
-    const body = (await request.json()) as { name: string; email: string; password: string; phone?: string }
+    const body = (await request.json()) as { name: string; email: string; password: string; phone?: string; acceptedTermsVersion?: string }
+    // L1.9: o aceite da versão VIGENTE é obrigatório (ausente = 400; versão antiga = 409). `mock:legal-bump=1` faz o 1º envio voltar 409 e sobe a versão.
+    if (!body.acceptedTermsVersion) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "acceptedTermsVersion", message: "Required" }] }, { status: 400 })
+    }
+    if (consumeLegalBump(body.acceptedTermsVersion) || body.acceptedTermsVersion !== currentTermsVersion()) {
+      return HttpResponse.json(errorBody("Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.", "TERMS_VERSION_OUTDATED"), { status: 409 })
+    }
     if (mockUsers.some((u) => u.email === body.email)) {
       return HttpResponse.json(errorBody("Já existe uma conta com este e-mail.", "EMAIL_TAKEN"), { status: 409 })
     }
@@ -309,6 +372,7 @@ export const handlers = [
       password: body.password,
     }
     mockUsers.push(newUser)
+    recordSignupConsent(newUser.id, body.acceptedTermsVersion)
     return HttpResponse.json({ token: fakeToken(newUser), user: toUserDTO(newUser) }, { status: 201 })
   }),
 
@@ -369,19 +433,29 @@ export const handlers = [
   }),
 
   http.post("/api/auth/google", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as { credential?: string }
+    const body = (await request.json().catch(() => ({}))) as { credential?: string; acceptedTermsVersion?: string }
     const credential = body.credential?.trim() ?? ""
     if (localStorage.getItem("mock:google-rate-limited") === "1") {
       return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429 })
     }
     if (!credential) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    // L1.9: o aceite só é exigido quando o Google vai CRIAR a conta ("novo", ou `mock:google-new=1` no botão do mock). Ausente = 400 `acceptedTermsVersion`; versão antiga = 409.
+    const createsAccount = credential === "novo" || (credential === "mock-google-credential" && localStorage.getItem("mock:google-new") === "1")
+    if (createsAccount) {
+      if (!body.acceptedTermsVersion) {
+        return HttpResponse.json({ error: "Aceite os Termos de Uso e a Política de Privacidade para criar a conta.", code: "VALIDATION_ERROR", details: [{ path: "acceptedTermsVersion", message: "obrigatório para criar a conta" }] }, { status: 400 })
+      }
+      if (consumeLegalBump(body.acceptedTermsVersion) || body.acceptedTermsVersion !== currentTermsVersion()) {
+        return HttpResponse.json(errorBody("Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.", "TERMS_VERSION_OUTDATED"), { status: 409 })
+      }
+    }
     if (credential === "bloqueado") {
       return HttpResponse.json(errorBody("Esta conta não pode entrar com o Google.", "GOOGLE_LOGIN_NOT_ALLOWED"), { status: 403 })
     }
     if (credential === "nao-verificado") {
       return HttpResponse.json(errorBody("E-mail do Google não verificado.", "GOOGLE_EMAIL_NOT_VERIFIED"), { status: 403 })
     }
-    if (credential === "novo") {
+    if (createsAccount) {
       const created: MockUser = {
         id: `user_google_${Date.now()}`,
         name: "Nova Conta Google",
@@ -392,6 +466,7 @@ export const handlers = [
         password: "",
       }
       mockUsers.push(created)
+      recordSignupConsent(created.id, body.acceptedTermsVersion as string)
       return HttpResponse.json({ token: fakeToken(created), user: toUserDTO(created) }, { status: 201 })
     }
     // L1.2: `localStorage["mock:google-as"]` = id do motorista em que o "Google (mock)" entra (ex.: a conta só-Google, sem senha).
@@ -456,6 +531,211 @@ export const handlers = [
     user.hasPassword = true
     bumpSessionEpoch(user.id)
     return HttpResponse.json({ token: fakeToken(user), user: toUserDTO(user) })
+  }),
+
+  // ---- Termos, consentimento e privacidade (L1.9 + L1.4) ------------------------------------------------------------------------------------------------
+  // Contrato: `PublicLegalConfig`, `MeConsentStatus`, `MeAccountDeletionRequest` em `types/api.ts`; personas e gatilhos em `mocks/legalData.ts`.
+  http.get("/api/public/legal", async () => {
+    const forced = localStorage.getItem("mock:legal-get")
+    if (forced === "slow") await delay(3000)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    return HttpResponse.json(legalConfig())
+  }),
+
+  http.get("/api/me/consents", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:consents-get")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    return HttpResponse.json(getConsentStatus(scope.user.userId))
+  }),
+
+  http.post("/api/me/consents", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:consents-post")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429") return HttpResponse.json(errorBody("Muitas requisições.", "RATE_LIMITED"), { status: 429 })
+    const body = (await request.json().catch(() => ({}))) as { termsVersion?: unknown; privacyVersion?: unknown }
+    if (typeof body.termsVersion !== "string" || typeof body.privacyVersion !== "string" || body.termsVersion === "" || body.privacyVersion === "") {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "termsVersion", message: "Required" }] }, { status: 400 })
+    }
+    if (consumeLegalBump(body.termsVersion) || body.termsVersion !== currentTermsVersion() || body.privacyVersion !== LEGAL_PRIVACY_VERSION) {
+      return HttpResponse.json(errorBody("Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.", "TERMS_VERSION_OUTDATED"), { status: 409 })
+    }
+    return HttpResponse.json(acceptConsents(scope.user.userId, body.termsVersion, body.privacyVersion), { status: 201 })
+  }),
+
+  // `GET /api/me/data-export`: arquivo JSON do titular. Limite real: 3 por dia (a 4ª na página é 429 `RATE_LIMITED_EXPORT`).
+  http.get("/api/me/data-export", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:export-fail")
+    if (forced === "slow") await delay(2500)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429" || forced === "429-header" || !registerExport(scope.user.userId)) {
+      return HttpResponse.json(errorBody("Limite de exportações do dia atingido.", "RATE_LIMITED_EXPORT"), { status: 429, headers: forced === "429-header" ? { "Retry-After": "7200" } : {} })
+    }
+    const user = mockUsers.find((u) => u.id === scope.user.userId)
+    if (!user) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const profile = getMockProfile(user)
+    const wallet = getMockWallet(user.id, 1, 100)
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+    return HttpResponse.json(
+      {
+        exportedAt: new Date().toISOString(),
+        profile: { id: user.id, name: user.name, email: user.email, phone: profile.phone, cpf: profile.cpfMasked ? "52998224725" : null, createdAt: profile.createdAt },
+        consents: [{ kind: "TERMS", version: getConsentStatus(user.id).termsVersion, acceptedAt: getConsentStatus(user.id).acceptedAt }],
+        sessions: [],
+        walletEntries: wallet.entries,
+        topups: [],
+        paymentMethods: [],
+        authTokens: [],
+        notifications: [],
+      },
+      { headers: { "Content-Disposition": `attachment; filename="innoflow-meus-dados-${day}.json"`, "Cache-Control": "no-store" } },
+    )
+  }),
+
+  // `POST /api/me/account/deletion`: ANONIMIZA a conta. Mesma ordem do backend: corpo estrito -> reautenticação (senha, ou ID token do Google p/ conta só-Google) -> estado (sessão
+  // ativa, pagamento em andamento, dívida) -> chave Pix (só com saldo). Depois do 200 o token deixa de valer (época da sessão) e o login com a senha antiga falha.
+  http.post("/api/me/account/deletion", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = forcedDeletionFailure()
+    if (forced === "slow") await delay(2500)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    const user = mockUsers.find((u) => u.id === scope.user.userId)
+    if (!user) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const allowed = ["confirmation", "currentPassword", "googleCredential", "refundPixKey"]
+    const extra = Object.keys(body).filter((k) => !allowed.includes(k))
+    if (body.confirmation !== "EXCLUIR" || extra.length > 0) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: extra[0] ?? "confirmation", message: "Invalid" }] }, { status: 400 })
+    }
+    // Reautenticação ANTES de qualquer consulta de estado.
+    if (forced === "RATE_LIMITED_ACCOUNT_DELETION") return HttpResponse.json(errorBody("Muitas tentativas de exclusão.", "RATE_LIMITED_ACCOUNT_DELETION"), { status: 429, headers: { "Retry-After": "600" } })
+    if (forced === "STEPUP_UNAVAILABLE") return HttpResponse.json(errorBody("Não foi possível confirmar sua senha agora.", "STEPUP_UNAVAILABLE"), { status: 503 })
+    if (forced === "INVALID_GOOGLE_TOKEN") return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    if (forced === "FORBIDDEN") return HttpResponse.json(errorBody("Não foi possível confirmar a sua identidade.", "FORBIDDEN"), { status: 403 })
+    if (mockHasPassword(user)) {
+      if (typeof body.currentPassword !== "string" || body.currentPassword === "") return HttpResponse.json(errorBody("Informe sua senha atual para excluir a conta.", "CURRENT_PASSWORD_REQUIRED"), { status: 400 })
+      if (body.currentPassword !== user.password) return HttpResponse.json(errorBody("Senha atual incorreta.", "INVALID_CURRENT_PASSWORD"), { status: 403 })
+    } else {
+      if (typeof body.googleCredential !== "string" || body.googleCredential === "") {
+        return HttpResponse.json({ error: "Confirme com a sua conta Google para excluir a conta.", code: "VALIDATION_ERROR", details: [{ path: "googleCredential", message: "obrigatório para conta sem senha" }] }, { status: 400 })
+      }
+      if (body.googleCredential === "invalido") return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    }
+    if (forced === "PAYMENT_SECRETS_KEY_MISSING") return HttpResponse.json(errorBody("Não foi possível processar a devolução do saldo agora.", "PAYMENT_SECRETS_KEY_MISSING"), { status: 503 })
+    const wallet = getMockWallet(user.id, 1, 1)
+    if (forced === "ACTIVE_SESSION" || getMockActiveSession(user.id)) return HttpResponse.json(errorBody("Há uma recarga em andamento.", "ACTIVE_SESSION"), { status: 409 })
+    if (forced === "PAYMENT_IN_PROGRESS") return HttpResponse.json(errorBody("Há um pagamento em andamento.", "PAYMENT_IN_PROGRESS"), { status: 409 })
+    if (forced === "OPEN_DEBT" || wallet.openDebtCents > 0) return HttpResponse.json(errorBody("Você tem uma dívida em aberto.", "OPEN_DEBT"), { status: 409 })
+    const key = pixKeyState(body.refundPixKey)
+    if (wallet.balanceCents > 0) {
+      if (forced === "REFUND_PIX_KEY_REQUIRED" || key === "ABSENT") return HttpResponse.json(errorBody("Informe a chave Pix para devolver o saldo.", "REFUND_PIX_KEY_REQUIRED"), { status: 400 })
+      if (key === "INVALID") return HttpResponse.json({ error: "Chave Pix inválida.", code: "VALIDATION_ERROR", details: [{ path: "refundPixKey", message: "chave Pix inválida" }] }, { status: 400 })
+    }
+    const status = wallet.balanceCents > 0 ? "DELETED_PENDING_REFUND" : "DELETED"
+    recordDeletion({ userId: user.id, balanceCentsAtRequest: wallet.balanceCents, status, refundPixKeyKind: wallet.balanceCents > 0 && typeof key === "object" ? key.kind : null })
+    user.name = "Conta excluída"
+    user.email = `excluido+${user.id}@anon.invalid`
+    user.password = ""
+    user.hasPassword = false
+    bumpSessionEpoch(user.id)
+    return HttpResponse.json({ status })
+  }),
+
+  // ---- Preferências de notificação (L1.6) ---------------------------------------------------------------------------------------------------------------
+  // `GET/PATCH /api/me/notification-preferences` (DRIVER). Regras e gatilhos em `mocks/notificationData.ts`.
+  http.get("/api/me/notification-preferences", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:notif-get")
+    if (forced === "slow") await delay(3000)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "403") return HttpResponse.json(errorBody("Acesso restrito a motoristas.", "FORBIDDEN"), { status: 403 })
+    if (forced === "empty") return HttpResponse.json(null)
+    return HttpResponse.json(getMockNotificationPreferences(scope.user.userId))
+  }),
+
+  http.patch("/api/me/notification-preferences", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:notif-patch")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429") return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED"), { status: 429 })
+    const body = await request.json().catch(() => null)
+    const issues = validateNotificationPatch(body)
+    if (issues) return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: issues }, { status: 400 })
+    return HttpResponse.json(applyNotificationPatch(scope.user.userId, body as Record<string, never>))
+  }),
+
+  // ---- Esqueci / redefinir senha (L1.3) -----------------------------------------------------------------------------------------------------------------
+  // `POST /api/auth/password/forgot` (pública): SEMPRE 202 `{ ok: true }` para e-mail bem formado - existindo a conta ou não, ADMIN ou não (o backend real não envia nada para ADMIN, e
+  // a resposta é a mesma). Gatilhos por e-mail para provar a tela sem esperar o limite de verdade:
+  //  - "ip-bloqueado@..."   -> 429 RATE_LIMITED_AUTH com Retry-After: 300 (o mesmo gatilho do login)
+  //  - "erro-servidor@..."  -> 500
+  //  - "sem-rede@..."       -> falha de rede (sem resposta)
+  //  - e-mail malformado    -> 400 VALIDATION_ERROR com details[].path = "email"
+  http.post("/api/auth/password/forgot", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { email?: unknown }
+    const email = typeof body.email === "string" ? body.email.trim() : ""
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 180) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "email", message: "Invalid email" }] }, { status: 400 })
+    }
+    if (email.startsWith("sem-rede@")) return HttpResponse.error()
+    if (email.startsWith("erro-servidor@")) return HttpResponse.json(errorBody("Erro interno.", "INTERNAL_ERROR"), { status: 500 })
+    if (email.startsWith("ip-bloqueado@")) {
+      return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429, headers: { "Retry-After": "300" } })
+    }
+    return HttpResponse.json({ ok: true }, { status: 202 })
+  }),
+
+  // `POST /api/auth/password/reset` (pública): 204 sem corpo e SEM sessão. Ordem do backend: corpo (VALIDATION_ERROR - o token NÃO é gasto) -> estado do token. O token é de 43 caracteres base64url; os
+  // gatilhos são pelo COMEÇO dele (o E2E completa com "A" até 43):
+  //  - "invalido..."     -> 400 RESET_TOKEN_INVALID (expirado/usado/inexistente: um código só)
+  //  - "limite..."      -> 429 RATE_LIMITED_AUTH com Retry-After: 300
+  //  - "indisponivel..." -> 503 SERVICE_UNAVAILABLE
+  //  - "quebrado..."    -> 500
+  //  - "semrede..."     -> falha de rede
+  //  - "motorista..."   -> OK e troca DE VERDADE a senha de motorista@ (para o E2E entrar com a nova no login) e derruba as sessões (`bumpSessionEpoch`)
+  //  - qualquer outro   -> OK sem tocar em conta nenhuma
+  // `localStorage["mock:reset-weak"]="1"` -> 400 VALIDATION_ERROR (newPassword) mesmo para senha que o cliente aceita.
+  // Uso único: o mesmo token duas vezes -> 400 RESET_TOKEN_INVALID na segunda (estado vive na página, como o resto dos mocks).
+  http.post("/api/auth/password/reset", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { token?: unknown; newPassword?: unknown }
+    // `mock:reset-weak=1` (localStorage): o servidor recusa a senha por um critério que o cliente não conhece (política mais dura que 10-72 bytes) - prova que a tela mantém o formulário.
+    if (!isValidNewPassword(body.newPassword) || localStorage.getItem("mock:reset-weak") === "1") {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "newPassword", message: "Senha inválida." }] }, { status: 400 })
+    }
+    const token = typeof body.token === "string" ? body.token : ""
+    if (token.startsWith("semrede")) return HttpResponse.error()
+    if (token.startsWith("quebrado")) return HttpResponse.json(errorBody("Erro interno.", "INTERNAL_ERROR"), { status: 500 })
+    if (token.startsWith("indisponivel")) return HttpResponse.json(errorBody("Serviço temporariamente indisponível. Tente novamente em instantes.", "SERVICE_UNAVAILABLE"), { status: 503 })
+    if (token.startsWith("limite")) {
+      return HttpResponse.json(errorBody("Muitas tentativas com link inválido. Tente novamente mais tarde.", "RATE_LIMITED_AUTH"), { status: 429, headers: { "Retry-After": "300" } })
+    }
+    if (token.startsWith("invalido") || usedResetTokens.has(token)) {
+      return HttpResponse.json(errorBody("Este link de redefinição é inválido ou expirou. Peça um novo.", "RESET_TOKEN_INVALID"), { status: 400 })
+    }
+    usedResetTokens.add(token)
+    if (token.startsWith("motorista")) {
+      const driver = mockUsers.find((u) => u.email === "motorista@innoelektron.com")
+      if (driver) {
+        driver.password = body.newPassword
+        bumpSessionEpoch(driver.id)
+      }
+    }
+    return new HttpResponse(null, { status: 204 })
   }),
 
   // ---- Sites públicos ---------------------------------------------------------
@@ -570,6 +850,10 @@ export const handlers = [
       serialNumber: body.serialNumber ?? null,
       firmwareVersion: body.firmwareVersion ?? null,
       active: true,
+      online: false, // acabou de ser cadastrado: ainda não falou com o servidor
+      lastSeenAt: null,
+      connectedAt: null,
+      disconnectedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -597,6 +881,33 @@ export const handlers = [
     if (!cp) return HttpResponse.json(errorBody("Charge point não encontrado.", "NOT_FOUND"), { status: 404 })
     cp.active = false
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  // L1.5 - recarga remota pelo ADMIN (espelho de `chargePoints.routes.ts`; cenários e ordem das checagens em `remoteStartData.ts`). ANTES da rota genérica abaixo: o MSW usa a primeira que casa.
+  http.post("/api/admin/charge-points/:id/commands/remote-start", async ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    if (remoteStartPolicyDenied(scope.user.role)) {
+      return HttpResponse.json(errorBody("Apenas administradores da plataforma podem iniciar recarga remota.", "FORBIDDEN"), { status: 403 })
+    }
+    const scenario = parseScenario(localStorage.getItem("mock:remote-start"))
+    if (scenario === "5xx") return HttpResponse.json(errorBody("Erro interno.", "INTERNAL_ERROR"), { status: 500 })
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const result = startRemote({ chargePointId: String(params.id), body, scenario, scope: scope.user })
+    if (!result.ok) return HttpResponse.json({ ...errorBody(result.message, result.code), ...(result.details ? { details: result.details } : {}) }, { status: result.status })
+    return HttpResponse.json(result.body, { status: result.status })
+  }),
+
+  // L1.5 - resultado do comando (só ADMIN, DL4). 404 `COMMAND_NOT_FOUND` para inexistente/expirado/fora de escopo.
+  http.get("/api/admin/commands/:correlationId", ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    if (remoteStartPolicyDenied(scope.user.role)) {
+      return HttpResponse.json(errorBody("Apenas administradores da plataforma podem iniciar recarga remota.", "FORBIDDEN"), { status: 403 })
+    }
+    const result = commandStatus(String(params.correlationId), scope.user)
+    if (!result.ok) return HttpResponse.json(errorBody(result.message, result.code), { status: result.status })
+    return HttpResponse.json(result.body)
   }),
 
   http.post("/api/admin/charge-points/:id/commands/:command", ({ request, params }) => {
@@ -964,6 +1275,23 @@ export const handlers = [
       provider: url.searchParams.get("provider") ?? undefined,
       status: url.searchParams.get("status") ?? undefined,
     }
+    // L1.8: achar a venda de um chargeback pelos identificadores da Cielo (igualdade exata). Só vendas de cartão têm esses dados.
+    const acquirer = {
+      tid: url.searchParams.get("tid") ?? undefined,
+      authorizationCode: url.searchParams.get("authorizationCode") ?? undefined,
+      proofOfSale: url.searchParams.get("proofOfSale") ?? undefined,
+    }
+
+    if (acquirer.tid || acquirer.authorizationCode || acquirer.proofOfSale) {
+      const full = buildPaymentsReport(toScope(scope.user), { ...period, ...filters, page: 1, pageSize: 100000 })
+      const matched = full.items.filter((row) => row.provider === "CIELO_CARD" && matchesAcquirer(row.id, acquirer))
+      const start = (pagination.page - 1) * pagination.pageSize
+      return HttpResponse.json({
+        ...full,
+        items: matched.slice(start, start + pagination.pageSize),
+        meta: { page: pagination.page, pageSize: pagination.pageSize, total: matched.length, totalPages: Math.max(1, Math.ceil(matched.length / pagination.pageSize)) },
+      })
+    }
 
     if (format === "csv") {
       const full = buildPaymentsReport(toScope(scope.user), { ...period, ...filters, page: 1, pageSize: 100000 })
@@ -1060,6 +1388,262 @@ export const handlers = [
     if ("error" in scope) return scope.error
     const outcome = testGatewayConnection(scope.user.userId, localStorage.getItem("mock:gateway-test"))
     return HttpResponse.json(outcome.body, { status: outcome.status })
+  }),
+
+  // ---- Comunicação / avisos ao dono: e-mail SMTP + WhatsApp Evolution (ADMIN only, N-7) ----------------
+  // Espelho de `docs/CONTRATO-COMUNICACAO-ADMIN.md` (regras, personas e gatilhos em `communicationData.ts`). Segredos NUNCA são devolvidos nem guardados.
+  http.get("/api/admin/communication-settings", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getCommunicationSettings(scope.user.userId)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.put("/api/admin/communication-settings", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateCommunicationSettings(scope.user.userId, body)
+    if (!result.ok) {
+      return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    }
+    return HttpResponse.json(result.dto)
+  }),
+
+  // Testes: SEM step-up (só enviam uma mensagem); `localStorage["mock:comunicacao-teste"]` escolhe o resultado (ver `testCommunicationChannel`).
+  http.post("/api/admin/communication-settings/test-email", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => ({}))
+    const outcome = testCommunicationChannel(scope.user.userId, "email", body, localStorage.getItem("mock:comunicacao-teste"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  // Teste de CONEXÃO SMTP (só handshake, sem enviar e-mail; estágio por gatilho de host ou `localStorage["mock:comunicacao-teste"]`) e verificação do domínio do remetente (SPF/DKIM/DMARC).
+  http.post("/api/admin/communication-settings/test-smtp-connection", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => ({}))
+    const outcome = testSmtpConnection(scope.user.userId, body, localStorage.getItem("mock:comunicacao-teste"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  http.get("/api/admin/communication-settings/domain-check", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const outcome = domainCheck(scope.user.userId, new URL(request.url).searchParams.get("selector"), localStorage.getItem("mock:comunicacao-dominio"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  // ---- Dados da empresa e versões dos Termos/Privacidade (ADMIN only; regras e personas em `companyData.ts`) ----------------
+  http.get("/api/admin/company-profile", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getCompanyProfile(scope.user.userId)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.put("/api/admin/company-profile", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateCompanyProfile(scope.user.userId, body)
+    if (!result.ok) {
+      return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    }
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/communication-settings/test-whatsapp", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => ({}))
+    const outcome = testCommunicationChannel(scope.user.userId, "whatsapp", body, localStorage.getItem("mock:comunicacao-teste"))
+    return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  // ---- Estorno, chargeback e devolução de conta excluída (ADMIN only, L1.8 / L1.4) -----------------
+  // Espelho de `paymentReversals.routes.ts`, `chargebacks.routes.ts` e `adminAccountDeletions.routes.ts` (regras, dados de demo e gatilhos em `reversalsData.ts`).
+  // Escritas com step-up de senha; mensagens do cliente sempre por `code`. O corpo (senha, motivo) nunca é logado.
+  http.get("/api/admin/sessions/:id/refunds", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(getSessionRefunds(String(params.id)))
+  }),
+
+  http.post("/api/admin/sessions/:id/refunds", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(createSessionRefund(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/refunds/:id/cancel", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(cancelRefund(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/refunds/:id/confirm", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(confirmRefund(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/payments/:intentId/chargebacks", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const intentId = String(params.intentId)
+    return mockResult(registerChargeback(intentId, await request.json().catch(() => null), findMockPayment(intentId)))
+  }),
+
+  http.get("/api/admin/chargebacks", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(listChargebacks(new URL(request.url)))
+  }),
+
+  // O dossiê vem ANTES de `/:id`: o MSW usa a primeira rota que casa.
+  http.get("/api/admin/chargebacks/:id/dossier", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(getDossier(String(params.id)))
+  }),
+
+  http.get("/api/admin/chargebacks/:id", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(getChargeback(String(params.id)))
+  }),
+
+  http.patch("/api/admin/chargebacks/:id", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(resolveChargeback(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/chargebacks/:id/unblock-card", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(unblockCard(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.get("/api/admin/account-deletions", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = listAccountDeletions(new URL(request.url))
+    const response = mockResult(result)
+    // A resposta traz chave Pix de titular: nunca em cache (igual ao servidor real).
+    response.headers.set("Cache-Control", "no-store")
+    return response
+  }),
+
+  http.post("/api/admin/account-deletions/:id/refund", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(refundAccountDeletion(String(params.id), await request.json().catch(() => null), scope.user.userId))
+  }),
+
+  // ---- Backup automático do banco (ADMIN only) ------------------------------------------------------
+  // Espelho de `docs/CONTRATO-BACKUP-ADMIN.md` (regras, personas e gatilhos em `backupData.ts`). Segredos e a chave do backup NUNCA são guardados nem devolvidos (a chave só em `POST /key`).
+  http.get("/api/admin/backup/config", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getBackupConfig(scope.user)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.put("/api/admin/backup/config", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateBackupConfig(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.get("/api/admin/backup/status", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getBackupStatus(scope.user, localStorage.getItem("mock:backup-estado"))
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/backup/key", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = generateBackupKey(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto, { status: 201, headers: { "Cache-Control": "no-store" } })
+  }),
+
+  // `localStorage["mock:backup-execucao"]` escolhe como o backup/conferência TERMINA (código de falha ou `ok`); `mock:backup-fila` = `off` derruba a fila (ver `backupData.ts`).
+  http.post("/api/admin/backup/run", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = runBackupNow(scope.user, { executionTrigger: localStorage.getItem("mock:backup-execucao"), queueTrigger: localStorage.getItem("mock:backup-fila") })
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto, { status: 202 })
+  }),
+
+  http.post("/api/admin/backup/verify", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = verifyBackup(scope.user, { executionTrigger: localStorage.getItem("mock:backup-execucao"), queueTrigger: localStorage.getItem("mock:backup-fila") })
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto, { status: 202 })
+  }),
+
+  http.post("/api/admin/backup/test-destination", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = testBackupDestination(scope.user, localStorage.getItem("mock:backup-teste"))
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.get("/api/admin/backup/runs", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const result = listBackupRuns(scope.user, {
+      page: Number(url.searchParams.get("page") ?? 1),
+      pageSize: Number(url.searchParams.get("pageSize") ?? 20),
+      trigger: url.searchParams.get("trigger") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+    })
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.get("/api/admin/backup/runs/:id", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getBackupRun(scope.user, String(params.id))
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/backup/google/start", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = startGoogle(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/backup/google/disconnect", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = disconnectGoogle(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------
@@ -1229,6 +1813,8 @@ export const handlers = [
     if ("error" in scope) return scope.error
     const url = new URL(request.url)
     const { page, pageSize } = parsePagination(url, 20)
+    // `mock:wallet-get=network` falha só a consulta de saldo (prova o erro do 1º passo da exclusão de conta, L1.4).
+    if (localStorage.getItem("mock:wallet-get") === "network") return HttpResponse.error()
     return HttpResponse.json(getMockWallet(scope.user.userId, page, pageSize))
   }),
 

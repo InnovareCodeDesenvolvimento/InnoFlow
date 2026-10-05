@@ -6,6 +6,8 @@ import type {
   CreateChargePointInput,
   PaginatedResponse,
   PaginationParams,
+  RemoteStartRequest,
+  RemoteStartResponse,
   UpdateChargePointInput,
 } from "@/types/api"
 
@@ -68,6 +70,15 @@ export const chargePointsService = {
     params: ResetCommandParams | UnlockCommandParams | ChangeAvailabilityParams | TriggerMessageParams | Record<string, never> = {},
   ): Promise<CommandDispatchResult> {
     const { data } = await api.post<CommandDispatchResult>(`/api/admin/charge-points/${id}/commands/${command}`, params)
+    return data
+  },
+
+  /**
+   * L1.5 — recarga remota pela administração (só ADMIN, DL4). 202 `{ correlationId, status: "PENDING", ... }`; o RESULTADO vem de
+   * `adminCommandsService.status(correlationId)`. Só carteira (sem cartão). `reason` obrigatório (10–200) — vai para a auditoria.
+   */
+  async remoteStart(id: string, payload: RemoteStartRequest): Promise<RemoteStartResponse> {
+    const { data } = await api.post<RemoteStartResponse>(`/api/admin/charge-points/${id}/commands/remote-start`, payload)
     return data
   },
 }

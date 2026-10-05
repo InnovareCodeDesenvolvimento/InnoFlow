@@ -11,6 +11,10 @@ criados no EasyPanel apontam para o repositório antigo**: repointe a origem
 git de cada um (api, ocpp-gateway, worker, frontend) para a URL nova, senão
 o deploy automático por push para de funcionar.
 
+**Publicação segura:** o EasyPanel constrói o `main`; mudanças de infraestrutura/Dockerfile entram por branch + PR com o CI verde
+(que já faz `docker build` das 4 imagens). Fluxo, proteção de branch e o checklist "se o deploy falhar":
+[`docs/FLUXO-DE-PUBLICACAO.md`](FLUXO-DE-PUBLICACAO.md).
+
 ## 0. Bancos gerenciados
 
 Crie no EasyPanel (como serviços de banco, não como App):
@@ -173,6 +177,41 @@ a senha em claro; por isso a porta 9000 **não** é publicada crua na internet. 
 proxy → container (rede interna do EasyPanel) segue em `ws://`/HTTP puro — é interno, não
 exposto.
 
+### Termos, privacidade e LGPD (L1.9 / L1.4) — envs e operação (06/10/2026)
+
+**Envs `LEGAL_*` — agora só RESERVA (06/10/2026).** O dono cadastra razão social, CNPJ, suporte, endereço, site, encarregado (DPO) e as **versões** dos Termos/Privacidade pelo painel (**Admin > Dados da empresa**, ver a subseção abaixo) e o **painel manda**; as envs só valem enquanto nada foi salvo lá. Não é preciso definir nenhuma. As 3 apps recebem as mesmas; todas opcionais — nada derruba o boot:
+
+| Env | Para quê | Default |
+|---|---|---|
+| `LEGAL_TERMS_VERSION` | versão VIGENTE dos Termos de Uso (≤ 32 caracteres) | `2026-10-05` |
+| `LEGAL_PRIVACY_VERSION` | versão VIGENTE da Política de Privacidade (≤ 32 caracteres) | `2026-10-05` |
+| `LEGAL_COMPANY_NAME` | razão social do controlador | vazio (`null`) |
+| `LEGAL_COMPANY_CNPJ` | CNPJ (só dígitos ou com pontuação; sai formatado; dígito verificador conferido) | vazio |
+| `LEGAL_SUPPORT_EMAIL` | e-mail de suporte (Decreto 7.962/2013: canal visível) | vazio |
+| `LEGAL_SUPPORT_PHONE` | telefone de suporte (texto livre, ≤ 30) | vazio |
+| `LEGAL_DPO_EMAIL` | e-mail do encarregado (DPO) | vazio |
+
+- Os dados da empresa **ainda não foram informados pelo dono**: enquanto vazios, `GET /api/public/legal` devolve `null` em cada campo (a tela mostra "em breve"/esconde o bloco; nada é inventado).
+  E-mail/CNPJ malformado é IGNORADO (campo sai vazio) e o log traz um aviso `[legal] variável LEGAL_* com valor inválido` com o NOME do campo.
+- **Suba `LEGAL_TERMS_VERSION`/`LEGAL_PRIVACY_VERSION` no MESMO deploy em que o texto novo vai ao ar.** O cadastro (e-mail e Google) só vale com `acceptedTermsVersion` = a vigente (senão 409
+  `TERMS_VERSION_OUTDATED`); quem já tem conta e aceitou a versão anterior passa a `upToDate=false` e vê o modal de reaceite no próximo login.
+- O aceite é prova gravada (`ConsentRecord`, append-only) com o IP da requisição (zerado se a conta for excluída).
+
+**Dados da empresa pelo painel (`/api/admin/company-profile`, migration `20261006140000_company_profile`).** Tabela `CompanyProfile` (singleton, sem segredo, sem step-up de senha; só ADMIN; limite de 10 salvamentos/min; auditoria `UPDATE`/`CompanyProfile`, fail-closed, com os **nomes** dos campos — razão social, CNPJ, site e versões entram com valor; e-mail/telefone de suporte, endereço e encarregado entram só como "alterado"). Contrato literal em `docs/CONTRATO-EMPRESA-ADMIN.md`.
+
+- **Painel > env.** Os **dados da empresa** são um grupo: enquanto o painel nunca salvou, valem as envs; no primeiro salvamento o painel **importa** o que a env já informava e passa a mandar em tudo (campo apagado no painel não volta pela env). As **versões** são por campo: vazio no painel = vale a env `LEGAL_*_VERSION` (ou o padrão `2026-10-05`).
+- **Mudar a versão é um ato deliberado.** Alterar a versão efetiva dos Termos ou da Privacidade exige `confirmVersionChange: true` no PUT (senão 409 `VERSION_CHANGE_NOT_CONFIRMED`, com o número de motoristas afetados): **todos** os motoristas passam a `upToDate=false`, veem o modal de reaceite no próximo acesso e o cadastro só vale com a versão nova. Troque a versão **no mesmo momento** em que o texto novo vai ao ar.
+- **Cache de 30 s por processo.** A API que salva vê a mudança na hora; o worker (rodapé dos e-mails) e outras réplicas da API em até 30 s. Uma réplica atrasada pode, no máximo, recusar um aceite com `TERMS_VERSION_OUTDATED` (o front recarrega e repete) — nunca grava um aceite errado. `GET /api/public/legal` tem `Cache-Control: public, max-age=30`.
+- **Banco fora do ar:** a rota pública e o rodapé dos e-mails caem na env (reserva); o aceite dos termos e a tela do admin respondem 503 `LEGAL_SETTINGS_UNAVAILABLE` (não se grava aceite contra uma versão que pode não ser a do banco).
+- **CNPJ** aceito numérico e **alfanumérico** (vigente desde jul/2026), com dígito verificador conferido; fica guardado sem pontuação e é exibido formatado.
+
+**Exclusão de conta e devolução do saldo (L1.4, DL2).** A exclusão é ANONIMIZAÇÃO (a pessoa some; sessões, extrato e pagamentos ficam sob um id pseudônimo por obrigação legal/fiscal). Quem exclui com
+saldo informa uma chave Pix (guardada **cifrada** com a `PAYMENT_SECRETS_KEY` — por isso a rotação da chave também a re-cifra; ver o runbook de rotação) e o ADMIN devolve **por fora** e registra em
+`POST /api/admin/account-deletions/:id/refund` (valor INTEGRAL, senha do ADMIN, comprovante) — o que lança o `TOPUP_REFUND` e **apaga a chave Pix**. Prazo máximo recomendado: **30 dias**; passou disso o
+worker (1x por dia) emite o alerta `payment_refund_pending_overdue` (IMPORTANTE: e-mail ao dono). Sem a `PAYMENT_SECRETS_KEY` a exclusão **com saldo** responde 503 `PAYMENT_SECRETS_KEY_MISSING` (nunca
+guarda a chave Pix em claro). O que sobrevive à anonimização e por quê: `AuditLog` antigo do titular (append-only; sai no expurgo por idade), `WebhookEvent`, sessões/extrato/pagamentos (5 anos), aceite dos
+termos (sem IP). O IP e o User-Agent de início das sessões são **zerados** na exclusão (decisão do dono, 06/10/2026).
+
 ### Gateway de pagamento (Cielo) — banco manda, env é reserva (F5.5, 02/10/2026)
 
 **👉 LEIA O GUIA COMPLETO:** [`docs/GO-LIVE-PAGAMENTOS.md`](GO-LIVE-PAGAMENTOS.md) — contém roteiro operacional para sandbox/produção, tabela de variáveis de ambiente, alertas a monitorar, plano de rollback, e lista de decisões do dono. **Esta seção é apenas resumo técnico de como as variáveis funcionam.**
@@ -286,7 +325,7 @@ antigo (sem prefixo, gravado até a F5.7) continua legível: tenta a atual e dep
    mudou desde a leitura e deixa uma linha na auditoria (ator `system`, ação `PAYMENT_CONFIG_CHANGE`,
    `actionDetail: secrets_reencrypted`). Código de saída **0** = concluído; **1** = há ilegíveis (ou valores
    alterados durante execução — rode de novo, o ilegível nunca é apagado); **2** = erro (chave ausente, argumento inválido).
-   Desde o N-7 o script também cobre a **senha SMTP** e a **apikey da Evolution** da tela de comunicação (alvos `NotificationChannelConfig.*`).
+   Desde o N-7 o script também cobre a **senha SMTP** e a **apikey da Evolution** da tela de comunicação (alvos `NotificationChannelConfig.*`) e, desde o backup automático, as **credenciais do S3**, o **segredo e o refresh token do Google** e a **cópia cifrada da chave do backup** (alvos `BackupConfig.*`) — sem isso, depois de remover a chave anterior o agendador não decifraria o destino de madrugada.
 5. Com **0 ilegíveis** e tudo na chave atual, **remova** `PAYMENT_SECRETS_KEY_PREVIOUS` e reinicie. Só então a chave antiga pode ser descartada.
 
 Se `PAYMENT_SECRETS_KEY_PREVIOUS` estiver inválida (não decodifica para 32 bytes), ela é ignorada e o log traz
@@ -861,6 +900,8 @@ ALERT_SMTP_PASS=<senha>
 ALERT_EMAIL_FROM=InnoFlow <alertas@seudominio.com.br>
 ```
 
+**O canal vale por servidor + remetente (desde a L1.6, 06/10/2026).** `ALERT_EMAIL_TO` (ou os destinatários do painel) é **opcional** e só decide se os **alertas ao dono** saem por e-mail. Sem destinatário o canal continua ativo para o e-mail **ao motorista** (redefinição de senha e avisos da seção 6.10) — antes isso não acontecia: o "esqueci minha senha" funcionava e nada saía. Com SMTP e remetente corretos e **nenhum** destinatário de alerta, a tela de Comunicação mostra o canal ativo com o aviso "só para mensagens ao motorista".
+
 Assunto: `[InnoFlow][CRITICO] payment_void_manual_review (production)`. Corpo em texto puro: alerta, severidade, ambiente, serviço, hora, o que aconteceu, **o que fazer** e o contexto seguro. Confira o spam na primeira vez e marque como "não é spam"; para boa entrega, use um remetente do seu próprio domínio com SPF/DKIM configurados no provedor.
 
 ### 6.5 Como validar (faça depois de configurar)
@@ -934,6 +975,7 @@ Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITI
 | `RETENTION_OCPP_MESSAGE_DAYS` | `365` | Prazo do log OCPP (mín. 30). |
 | `RETENTION_METER_SAMPLE_DAYS` | `365` | Prazo das leituras de medidor (mín. 30). |
 | `RETENTION_WEBHOOK_EVENT_DAYS` | `180` | Prazo das notificações de webhook já processadas (mín. 30). |
+| `RETENTION_NOTIFICATION_LOG_DAYS` | `365` | Prazo do `NotificationLog` — o log dos e-mails ao motorista, sem dado pessoal (mín. 30). L1.6/DL6. |
 
 ### 7.3 Política de retenção (decidida pelo dono em 05/10/2026, DL6)
 
@@ -941,6 +983,7 @@ Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITI
 |---|---|---|
 | `OcppMessage`, `MeterSample` | **12 meses** | `DETACH` + `DROP` de partição **inteira**, só quando o mês inteiro já passou do prazo (prazo efetivo = 12 meses + até 1 mês). Nunca `DELETE` linha a linha; nunca a DEFAULT. |
 | `WebhookEvent` (não particionada) | **180 dias** | `DELETE` em lotes de 1000, só eventos **já processados**; os não processados ficam (e há alerta). |
+| `NotificationLog` (não particionada, sem dado pessoal) | **12 meses** | `DELETE` em lotes de 1000 por `createdAt`, de qualquer estado (um `PENDING` com mais de 12 meses é lixo). Mesmas guardas: só com `RETENTION_ENABLED`, respeita o `RETENTION_DRY_RUN` (só conta) e o piso de 30 dias. Evento de log: `retention_notification_log_deleted`. |
 | `AuditLog` | **5 anos** | **Sem purga automática.** Não é particionada e começou em 09/2026: nada vence antes de 09/2031. O trigger só permite `DELETE` de linha > 24 meses. Antes de 2031 é preciso decidir/migrar para partição mensal (para o expurgo ser por partição inteira). |
 | `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession`, financeiro | **sem purga** | Append-only por trigger (UPDATE/DELETE/TRUNCATE). Expurgar exige decisão contábil/LGPD e intervenção manual de superusuário — fora do job, de propósito. |
 
@@ -995,3 +1038,56 @@ No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_cr
 - **Anti-SSRF:** em produção, host SMTP/URL da Evolution apontando para a rede interna, loopback ou metadados de nuvem são recusados (na gravação e de novo na hora de conectar, no IP já validado — um DNS que muda entre a checagem e a conexão não passa). **Resíduo documentado:** o bloqueio vale para o que o painel configura; as envs `ALERT_*` são confiáveis (definidas por quem faz o deploy) e podem apontar para a rede interna. Redirecionamentos HTTP nunca são seguidos.
 - **Auditoria:** cada salvar gera uma linha em "Auditoria" (`UPDATE` / `NotificationChannelConfig`) com antes/depois dos campos não secretos (segredo só como "alterado", destinatários só como contagem) e dispara o alerta `communication_config_changed` (IMPORTANTE) **pela configuração antiga** — se alguém trocar os destinatários, o aviso ainda chega ao dono de antes. Se não foi você: troque a senha do admin e a `PAYMENT_SECRETS_KEY`.
 - **Migration:** `20261005140000_notification_channel_config` (tabela nova `NotificationChannelConfig`, singleton, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).
+- **Teste de conexão SMTP (06/10/2026):** `POST /api/admin/communication-settings/test-smtp-connection` só faz o handshake (conectar, TLS, autenticar) e **não envia mensagem**. Responde sempre 200 com `{ ok, stage: CONNECT|TLS|AUTH|OK, code, message, authenticated, durationMs }` (erro como código; o texto cru do servidor nunca aparece). Mesmas proteções do teste de e-mail: 5 por minuto, anti-SSRF, anti-exfiltração (trocar servidor/usuário exige reenviar a senha) e auditoria `OTHER` sem segredo.
+- **Verificador de DNS do remetente (06/10/2026):** `GET /api/admin/communication-settings/domain-check?selector=<seletor DKIM>` consulta **SPF, DMARC e (com seletor) DKIM** do domínio do **e-mail remetente já configurado** — o domínio nunca vem do cliente e só é consultado se for um domínio público (nada de IP, `localhost` ou sufixo interno). Só lê TXT públicos pelo DNS do sistema (prazo de 4 s por consulta); falha do DNS vira `ERRO` naquele registro, nunca derruba. 6 por minuto por ADMIN. **Não configura nada:** SPF/DKIM/DMARC são registros no DNS do domínio (Registro.br, Cloudflare...). O valor exato de SPF e DKIM depende do provedor SMTP (o sistema manda pedir ao provedor e não inventa); só o DMARC traz um exemplo seguro (`v=DMARC1; p=none; rua=mailto:...`, que apenas monitora). Em produção o container precisa de saída DNS (UDP/TCP 53) para o resolvedor do sistema.
+
+### 6.10 E-mails ao motorista (L1.6, 06/10/2026)
+
+Além do alerta ao dono, o sistema manda e-mail **ao motorista**, pelo MESMO SMTP do painel (seção 6.4). Oito eventos, canal só e-mail (web push fica para a F7):
+
+| Evento | Quando | Desligável? |
+|---|---|---|
+| `SESSION_COMPLETED` | sessão fechada com valor > 0 e SEM dívida: resumo + link do recibo | **sim** — "recibo" (`sessionReceiptEmail`) |
+| `SESSION_CLOSED_BY_SERVER` | o carregador não confirmou o fim e o servidor encerrou (F5.9); sai sempre que isso acontece, mesmo com custo zero | **sim** — junto do recibo |
+| `SESSION_PAYMENT_FAILED` | a cobrança virou dívida (carteira sem saldo; captura do cartão negada ou parcial) | **não** (cobrança) |
+| `LOW_BALANCE` | SÓ no cruzamento do limiar: saldo antes ≥ limiar e depois < limiar (débito de sessão ou ajuste manual do ADMIN) | **sim** — `lowBalanceEnabled`; limiar `lowBalanceThresholdCents` 500–50000, padrão R$ 20,00 |
+| `TOPUP_CREDITED` | Pix creditado na carteira | não (comprovante de dinheiro que entrou; o contrato não tem chave) |
+| `REMOTE_START_BY_SUPPORT` | o ADMIN pediu recarga na conta do motorista (L1.5) | não (transparência; sem chave) |
+| `PASSWORD_CHANGED` | troca de senha **pela própria pessoa logada** (`POST /api/auth/password`) | **não** (segurança) |
+| `ACCOUNT_DELETED` | exclusão de conta (L1.4) | **não** |
+
+**Como funciona (resumo):** o fato (fechar sessão, creditar Pix, trocar senha...) enfileira um job na fila BullMQ **`notificacoes`** *depois* do commit, em segundo plano e com prazo de 3 s — falha de Redis/SMTP **nunca** derruba nem atrasa transação de dinheiro. O **worker** decide (preferência), monta o e-mail e envia. **O worker precisa estar no ar e com as mesmas variáveis de SMTP**: sem ele os avisos ficam na fila. A idempotência é a tabela `NotificationLog` (unique `userId+tipo+canal+fato`) + um lock no Redis por fato: o mesmo fato nunca vira dois e-mails, nem com o job reprocessado. Falhou o envio → o job reentra com backoff exponencial (6 tentativas: 30 s, 1, 2, 4, 8 min). Esgotou → a linha vira `FAILED` (com um **código** de motivo, nunca a mensagem do SMTP) e sai o alerta **`communication_notification_failed`** (IMPORTANTE) — abra Admin > Comunicação e use o teste de e-mail.
+
+**Variáveis:** nenhuma nova obrigatória. O link do e-mail usa `PUBLIC_APP_URL` (sem ela, em produção, o e-mail sai **sem botão/links** — nunca com link inventado; defina-a, é a mesma da redefinição de senha) e o rodapé usa `LEGAL_COMPANY_NAME`, `LEGAL_COMPANY_CNPJ`, `LEGAL_SUPPORT_EMAIL`, `LEGAL_SUPPORT_PHONE` (campo vazio = bloco omitido; nenhum CNPJ é inventado). A retenção do log é `RETENTION_NOTIFICATION_LOG_DAYS` (seção 7.2).
+
+**Privacidade:** o e-mail do `ACCOUNT_DELETED` (a conta já foi anonimizada) existe só no payload do job — apagado ao concluir e ao esgotar as tentativas. O `NotificationLog` não guarda corpo, endereço nem mensagem de erro. Os logs registram só ids, tipo e código. Sem pixel de rastreio nem número de cartão.
+
+**Limites conhecidos (honestos):**
+- **Redis fora no instante do fato PERDE o aviso** (não há rascunho em banco para um varredor refazer: o contexto de alguns tipos não está no banco). O fato em si (cobrança, dívida, saldo) fica íntegro e visível no app.
+- Se o processo morrer entre o SMTP aceitar a mensagem e o `UPDATE ... SENT` (milissegundos), o retry reenvia: é o preço de não perder aviso de cobrança/segurança.
+- **Entregabilidade NÃO foi provada em provedor real.** Sem SPF/DKIM/DMARC do domínio do remetente (`ALERT_EMAIL_FROM`) os e-mails caem em spam — configure no provedor antes de divulgar. Teste com um Gmail e um Outlook de verdade.
+- A troca de senha por **"esqueci minha senha"** continua usando o aviso próprio da L1.3 (fila local, sem retry); só a troca autenticada passa pela fila `notificacoes`.
+
+**Como validar:** (1) Admin > Comunicação > teste de e-mail; (2) com o worker no ar, troque a senha de um motorista de teste em `/app/perfil` e confira o aviso; (3) `SELECT type, status, "statusReason", attempts FROM "NotificationLog" ORDER BY "createdAt" DESC LIMIT 20;` — `SENT` = saiu; `PENDING` com `statusReason` = tentando de novo; `FAILED` = esgotou (alerta emitido); `SKIPPED` + `PREFERENCE_OFF` = a pessoa desligou aquele aviso. **Problemas comuns:** `statusReason = EMAIL_NOT_CONFIGURED` (canal sem servidor/remetente), `SMTP_CONNECTION_FAILED` (host/porta/firewall), `SMTP_AUTH_FAILED` (login/senha de app), `SMTP_REJECTED` (remetente/destinatário recusado).
+
+---
+
+## 8. Backups e restauração (resumo operacional)
+
+O passo a passo completo (o que é salvo e o que não é, RPO/RTO, restauração total no EasyPanel, restauração parcial, ensaio trimestral e checklist) está em **`docs/RUNBOOK-BACKUP-RESTAURACAO.md`**. O formato do arquivo cifrado, em `docs/BACKUP-FORMATO.md`. Aqui só o que pertence a este checklist de deploy:
+
+- **O agendador roda no `worker`**; a API só enfileira "fazer backup agora" / "conferir backup". As 3 imagens do backend (`Dockerfile`, `Dockerfile.ocpp`, `Dockerfile.worker`) trazem o cliente do Postgres (`postgresql18-client`, com queda para o 17: `pg_dump`, `pg_restore`, `psql`), que precisa ser da versão do Postgres do EasyPanel ou mais nova. Se você subir a versão do Postgres do serviço, confira que o cliente da imagem acompanha. Atualize os **3** Dockerfiles juntos.
+- O backup grava o dump em `/tmp` do container (gravável pelo usuário `node`; o diretório da aplicação não é). Precisa de espaço livre de ~2x o tamanho do dump por alguns instantes.
+- **Nenhuma variável de ambiente nova é obrigatória** para o backup: destino (S3/Drive), horário e retenção são configurados em Admin > Backup e ficam cifrados no banco. Opcionais: `BACKUP_PG_BIN_DIR` (pasta dos binários do Postgres, só para desenvolvimento) e `BACKUP_ALLOW_PRIVATE_HOSTS`.
+- **Guarde fora do EasyPanel:** a chave do backup (o `.txt` baixado em Admin > Backup) e a **`PAYMENT_SECRETS_KEY`**. Sem a segunda, restaurar o banco não devolve as credenciais da Cielo, o SMTP, a Evolution nem os cartões salvos. Detalhes na seção 4 do runbook.
+- Faça o **ensaio de restauração a cada trimestre** (runbook, seção 9) e depois de trocar de servidor/versão do Postgres.
+- **CI:** o job `backup-restore` (Postgres 16 e 18) prova o ciclo completo a cada push; é ele que avisa se uma migration nova quebrar a restauração.
+
+### 8.1 O backup do lado da aplicação (Admin > Backup)
+
+- **Variáveis que o backup usa** (nenhuma nova é obrigatória): `DATABASE_URL` no **worker** (é de onde o `pg_dump` lê; a senha vai ao `pg_dump` por variável de ambiente do processo filho, nunca em argumento nem em log); `PAYMENT_SECRETS_KEY` no **worker e na API** (o worker decifra as credenciais do destino e a cópia da chave do backup; a API as guarda — sem ela, salvar credencial responde 503 e o backup agendado falha com `SECRETS_KEY`); `JWT_SECRET` na API (assina o `state` do "Conectar com Google"). Para o Google Drive: `PUBLIC_API_BASE_URL` (a API monta o `redirect_uri` a cadastrar no app do Google Cloud: `https://<api>/api/backup/google/callback`) e `PUBLIC_APP_URL` (para onde o callback devolve o navegador, `.../admin/backup`). Opcionais de infraestrutura: `BACKUP_ALLOW_PRIVATE_HOSTS=true` (deixa o painel aceitar um S3 **da rede interna**, ex.: MinIO no mesmo projeto, `http://minio:9000`; sem isso, em produção, só https público — loopback e metadados de nuvem nunca) e `BACKUP_PG_BIN_DIR`.
+- **Primeira configuração (checklist):** Admin > Backup → escolher o destino e salvar → **Testar destino** → **Gerar chave** e guardá-la FORA do servidor (aparece uma vez) → ligar o automático → **Fazer backup agora** → **Conferir backup**. Ligar sem destino completo ou sem chave é recusado (409). Backup com destino e sem chave **falha** (`KEY`), de propósito: nada sai do servidor sem cifra.
+- **O que o backup NÃO leva (cópia separada, nunca no bucket do backup):** `PAYMENT_SECRETS_KEY` (sem ela as credenciais da Cielo, SMTP, Evolution, S3/Drive e os tokens de cartão que estão **no** banco, cifrados, ficam ilegíveis), `PAYMENT_SECRETS_KEY_PREVIOUS` enquanto durar uma rotação, `JWT_SECRET`, a **chave do backup** (o `.txt`) e **todas as chaves antigas** (cada cópia só abre com a chave que a cifrou), as envs da Cielo que ainda estejam só no ambiente (`CIELO_*`) e a senha do Postgres. **Redis não é salvo** (filas BullMQ, locks, contadores de tentativa/lockout, cache de resultado de comando, deduplicação de alertas): o que se perde são jobs em voo e contadores — o banco diz o que está pendente e os varredores do worker (captura de cartão, polling de Pix, watchdog de sessão, partições, o próprio agendador do backup) reprocessam; um pedido de "fazer backup agora" na fila pode precisar ser refeito.
+- **Dois níveis de proteção do que o dono já pagou:** o agendador (diário às 03h de Brasília, configurável; se falhar, tenta de novo depois de 1 h, até 3 tentativas por horário; janela de recuperação de 12 h se o worker estava fora no horário) e os **alertas**: `backup_failed` e `backup_verify_failed` (CRÍTICO: WhatsApp+e-mail), `backup_stale` (IMPORTANTE: sem cópia há mais de 36 h com o automático ligado, no máximo 1 a cada 12 h), `backup_config_changed` (IMPORTANTE: destino/chave/conta Google mexidos). Sem e-mail/WhatsApp configurados (Admin > Comunicação) os alertas só aparecem no log do worker/API (campo `alert`). **O agendador morre junto com o worker:** o `backup_stale` também é emitido pelo worker — monitore o próprio serviço `worker` no EasyPanel.
+- **Limites conhecidos:** o envio ao S3 é uma requisição só (**máx. 5 GiB** por arquivo cifrado; acima disso o backup falha com `TOO_BIG` — multipart ainda não existe); um destino por vez (S3 **ou** Drive); o Drive usa o escopo `drive.file` e o app do Google Cloud precisa estar **em produção** (em modo teste o acesso expira em 7 dias); o S3 e o Drive **reais** não foram exercitados em desenvolvimento (só servidores falsos que conferem o contrato HTTP), então faça **Testar destino**, um backup manual e **Conferir backup** logo no primeiro deploy.
+- **Migration:** `20261006120000_backup_automatico` (tabelas `BackupConfig`, singleton, e `BackupRun`, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).

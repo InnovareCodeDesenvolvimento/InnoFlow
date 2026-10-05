@@ -29,14 +29,27 @@ export interface GoogleUserRepository {
   /** Case-insensitive — devolve TODAS as contas cujo e-mail difere só na caixa (a regra de staff precisa enxergar todas). */
   findManyByEmail(email: string): Promise<UsuarioGoogle[]>
   linkGoogleSub(userId: string, sub: string): Promise<UsuarioGoogle>
-  /** User DRIVER (`passwordHash: null`) + Wallet, atomicamente. */
-  createDriverWithWallet(input: { name: string; email: string; googleSub: string }): Promise<UsuarioGoogle>
+  /** User DRIVER (`passwordHash: null`) + Wallet + (L1.9) aceite dos termos, atomicamente — conta sem carteira ou sem prova de aceite não existe. */
+  createDriverWithWallet(input: { name: string; email: string; googleSub: string; aceite?: AceiteOk }): Promise<UsuarioGoogle>
 }
+
+/** Aceite dos termos que acompanha a CRIAÇÃO da conta (L1.9): termos na versão aceita (já conferida como vigente), política de privacidade vigente, IP da requisição. */
+export interface AceiteOk {
+  status: 'OK'
+  termsVersion: string
+  privacyVersion: string
+  ip: string | null
+}
+
+/** O que a rota apurou sobre o aceite dos termos ANTES de chamar este fluxo (só importa se for CRIAR conta). `undefined` em `GoogleAuthDeps.aceite` = sem exigência (comportamento anterior; testes unitários). */
+export type AceiteParaCriacao = AceiteOk | { status: 'AUSENTE' } | { status: 'DESATUALIZADO' }
 
 export interface GoogleAuthDeps {
   /** Lança se o token for inválido por QUALQUER motivo (assinatura, `aud`, `iss`, `exp`, malformado, payload incompleto). */
   verifyIdToken(credential: string): Promise<IdentidadeGoogle>
   users: GoogleUserRepository
+  /** L1.9: quem já tem conta entra sem aceitar nada novo; só a CRIAÇÃO de conta exige o aceite. */
+  aceite?: AceiteParaCriacao
 }
 
 export type ResultadoGoogle =
@@ -46,6 +59,9 @@ export type ResultadoGoogle =
   | { status: 'STAFF_NOT_ALLOWED'; staff: UsuarioGoogle }
   | { status: 'ACCOUNT_MISMATCH' }
   | { status: 'INACTIVE' }
+  /** L1.9: o Google ia CRIAR uma conta e o aceite dos termos não veio (400) / não é a versão vigente (409). Nada foi gravado. */
+  | { status: 'TERMS_REQUIRED' }
+  | { status: 'TERMS_OUTDATED' }
   | { status: 'OK'; user: UsuarioGoogle; created: boolean; linked: boolean }
 
 const MAX_NAME_LENGTH = 120
@@ -102,7 +118,10 @@ export async function autenticarComGoogle(credential: string, deps: GoogleAuthDe
           return { status: 'OK', user, created: false, linked: true }
         }
         case 'CREATE': {
-          const user = await deps.users.createDriverWithWallet({ name: nomeParaConta(identity), email: identity.email, googleSub: identity.sub })
+          // Sem aceite dos termos não nasce conta (L1.9) — recusa ANTES de gravar qualquer coisa.
+          if (deps.aceite?.status === 'AUSENTE') return { status: 'TERMS_REQUIRED' }
+          if (deps.aceite?.status === 'DESATUALIZADO') return { status: 'TERMS_OUTDATED' }
+          const user = await deps.users.createDriverWithWallet({ name: nomeParaConta(identity), email: identity.email, googleSub: identity.sub, ...(deps.aceite ? { aceite: deps.aceite } : {}) })
           return { status: 'OK', user, created: true, linked: false }
         }
       }

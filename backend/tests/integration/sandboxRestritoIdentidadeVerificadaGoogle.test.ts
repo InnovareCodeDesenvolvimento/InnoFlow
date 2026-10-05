@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from 'supertest'
 import type { IdentidadeGoogle } from '../../src/core/auth/decidirAcaoGoogle'
 import { criarBancoProprio } from './helpers/bancoProprio'
+import { TERMOS_VIGENTES } from './helpers/termos'
 
 // Liga o login com Google ANTES de `env` ser lido e troca só o verificador do ID token (a lib do Google precisa de rede): TODO o resto (rota, decisão, repositório
 // Prisma, sessionValidator, guarda do sandbox, Postgres) é o código de verdade — o mesmo desenho de `googleAuthDb.test.ts`.
@@ -99,10 +100,10 @@ describe('ALTO-2 revalidado — sandbox restrito só vale para identidade VERIFI
     m.invalidarCacheConfigGateway()
   })
 
-  const registrar = (email: string, extra: Record<string, unknown> = {}) => request(app).post('/api/auth/register').send({ name: 'Quem Registrou', email, password: SENHA, ...extra })
+  const registrar = (email: string, extra: Record<string, unknown> = {}) => request(app).post('/api/auth/register').send({ name: 'Quem Registrou', email, password: SENHA, acceptedTermsVersion: TERMOS_VIGENTES, ...extra })
   const login = (email: string, password = SENHA) => request(app).post('/api/auth/login').send({ email, password })
   const credencial = (id: Partial<IdentidadeGoogle>) => Buffer.from(JSON.stringify(id)).toString('base64url')
-  const google = (id: Partial<IdentidadeGoogle>) => request(app).post('/api/auth/google').send({ credential: credencial(id) })
+  const google = (id: Partial<IdentidadeGoogle>) => request(app).post('/api/auth/google').send({ credential: credencial(id), acceptedTermsVersion: TERMOS_VIGENTES })
   const idGoogle = (email: string, sub: string, over: Partial<IdentidadeGoogle> = {}): IdentidadeGoogle => ({ sub, email, emailVerified: true, name: 'Google', ...over })
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` })
   const pix = (token: string) => request(app).post('/api/me/wallet/topups').set(auth(token)).send({ amountCents: 2000 })
@@ -145,6 +146,11 @@ describe('ALTO-2 revalidado — sandbox restrito só vale para identidade VERIFI
     const semConta = await registrar(variantes[0]!)
     expect(semConta.status).toBe(201)
     await esperaRestrito(semConta.body.token, 'variante em caixa alta sem conta prévia')
+    // L1.9: o cadastro agora grava `ConsentRecord` (append-only por trigger e RESTRICT no usuário): para "desfazer" o cadastro neste banco PRÓPRIO do teste, desliga os triggers só nesta transação.
+    await m.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica')
+      await tx.$executeRawUnsafe('DELETE FROM "ConsentRecord" WHERE "userId" IN (SELECT id FROM "User" WHERE lower(email) = lower($1))', testador)
+    })
     await m.prisma.wallet.deleteMany({ where: { user: { email: { equals: testador, mode: 'insensitive' } } } })
     await m.prisma.user.deleteMany({ where: { email: { equals: testador, mode: 'insensitive' } } })
 

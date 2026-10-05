@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Activity } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
@@ -27,6 +28,7 @@ import {
   reaisToCents,
   sessionStatusBadgeVariant,
 } from "@/lib/utils"
+import { readSessionParam, SESSION_QUERY_PARAM } from "@/lib/sessionDeepLink"
 import type { ChargingSessionStatus, SessionPaymentMethod } from "@/types/api"
 import { SessionDetailDialog } from "./SessionDetailDialog"
 
@@ -53,7 +55,20 @@ export default function SessoesPage() {
   const [paymentMethod, setPaymentMethod] = useState("")
   const [minAmountReais, setMinAmountReais] = useState("")
   const [page, setPage] = useState(1)
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  // O detalhe abre por clique na linha OU por link direto (`?sessao=<id>`, ex.: "Ver sessão" da recarga remota). O id da URL só vale no formato esperado e é apagado da
+  // URL ao fechar (senão um F5 reabriria o diálogo). Clique na linha continua sendo estado local: não suja o histórico.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [clickedSessionId, setClickedSessionId] = useState<string | null>(null)
+  const linkedSessionId = readSessionParam(searchParams.get(SESSION_QUERY_PARAM))
+  const selectedSessionId = clickedSessionId ?? linkedSessionId
+  const setSelectedSessionId = (id: string | null) => {
+    setClickedSessionId(id)
+    if (id === null && searchParams.has(SESSION_QUERY_PARAM)) {
+      const next = new URLSearchParams(searchParams)
+      next.delete(SESSION_QUERY_PARAM)
+      setSearchParams(next, { replace: true })
+    }
+  }
   const effectiveOperatorId = isAdmin ? operatorId || undefined : undefined
 
   const params = {

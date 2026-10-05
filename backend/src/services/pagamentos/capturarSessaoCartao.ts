@@ -11,6 +11,7 @@ import { identificadoresParaGravar } from '../../core/pagamentos/identificadores
 import { getPagamentoPort } from './pagamentoPortInstance'
 import { exigirAmbienteDoIntent } from './ambienteDoIntent'
 import { createQueue, CAPTURAR_SESSAO_CARTAO_QUEUE_NAME, type CapturarSessaoCartaoJobData } from '../../worker/queues'
+import { notificarFalhaDeCobranca } from '../notificacoes/gatilhos'
 
 /**
  * Captura o valor-alvo (`captureAmountCents`, gravado por
@@ -148,7 +149,9 @@ async function capturarSessaoCartaoSobLock(paymentIntentId: string, pagamentoPor
     throw new CapturaCartaoNaoDefinitivaError(paymentIntentId, resultadoCaptura.status)
   }
 
-  return prisma.$transaction(async (tx) => {
+  // L1.6: quem avisar (cobrança falha/parcial que virou dívida) só é conhecido DENTRO da transação; o aviso sai DEPOIS do commit (ver abaixo).
+  const avisoDeCobranca: { dados: { sessionId: string; userId: string } | null } = { dados: null }
+  const resultadoDaCaptura = await prisma.$transaction(async (tx) => {
     const lockedRows = await tx.$queryRaw<{ id: string; status: string; chargingSessionId: string | null }[]>(
       Prisma.sql`SELECT id, status, "chargingSessionId" FROM "PaymentIntent" WHERE id = ${paymentIntentId} FOR UPDATE`,
     )
@@ -180,6 +183,7 @@ async function capturarSessaoCartaoSobLock(paymentIntentId: string, pagamentoPor
         })
         debtId = debt.id
       }
+      if (debtId) avisoDeCobranca.dados = { sessionId: session.id, userId: session.userId }
       logger.info({ paymentIntentId, amountCapturedCents, shortfallCents, debtId }, '[capturarSessaoCartao] captura confirmada')
       return { paymentIntentId, status: 'CAPTURED' as const, amountCapturedCents, debtId, shortfallCents }
     }
@@ -196,9 +200,14 @@ async function capturarSessaoCartaoSobLock(paymentIntentId: string, pagamentoPor
       })
       debtId = debt.id
     }
+    if (debtId) avisoDeCobranca.dados = { sessionId: session.id, userId: session.userId }
     logger.warn({ paymentIntentId, totalCostCents, debtId }, '[capturarSessaoCartao] captura falhou — dívida integral criada')
     return { paymentIntentId, status: 'FAILED' as const, amountCapturedCents: 0, debtId, shortfallCents: totalCostCents }
   })
+
+  // L1.6: depois do commit, fire-and-forget (nunca derruba a captura nem o job). O e-mail de cobrança é SEMPRE enviado (DL5); o jobId e o NotificationLog impedem o 2º em reprocessamento.
+  if (resultadoDaCaptura && avisoDeCobranca.dados) notificarFalhaDeCobranca(avisoDeCobranca.dados)
+  return resultadoDaCaptura
 }
 
 /**

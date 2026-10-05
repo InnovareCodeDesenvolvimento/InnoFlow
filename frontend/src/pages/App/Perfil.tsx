@@ -1,8 +1,14 @@
+import { Route } from "lucide-react"
 import { MascotFace } from "@/components/brand/Mascot"
 import { ChangePasswordForm } from "@/components/perfil/ChangePasswordForm"
 import { ProfileAvatar } from "@/components/perfil/ProfileAvatar"
+import { NotificationsSection } from "@/components/perfil/NotificationsSection"
 import { ProfileDataForm } from "@/components/perfil/ProfileDataForm"
+import { PrivacySection } from "@/components/perfil/PrivacySection"
+import { ProfileSection } from "@/components/perfil/ProfileSection"
+import { useTour } from "@/components/onboarding/tourContext"
 import { AppBand } from "@/components/pwa/AppBand"
+import { Button } from "@/components/ui/Button"
 import { Card } from "@/components/ui/Card"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
@@ -45,6 +51,7 @@ function SectionSkeleton({ descriptionLines, fields, checkboxRow = false }: { de
  */
 export function Perfil() {
   const user = useAuthStore((s) => s.user)
+  const tour = useTour()
   const { data: profile, isLoading, isError, error, refetch } = useMeProfile()
   // Resposta vazia (200 sem corpo útil) também é falha de carregamento: sem perfil não há o que editar.
   const failed = isError || (!isLoading && !profile)
@@ -83,6 +90,15 @@ export function Perfil() {
           <>
             <ProfileDataForm profile={profile} />
             <ChangePasswordForm hasPassword={profile.hasPassword} />
+            <NotificationsSection />
+            <PrivacySection profile={profile} />
+            {tour.available && (
+              <ProfileSection icon={Route} title="Ajuda" description="Reveja o passo a passo do aplicativo, com o Inno, o mascote da InnoFlow.">
+                <Button type="button" variant="outline" size="touch" className="h-11 sm:h-11" onClick={tour.restart}>
+                  Rever tour
+                </Button>
+              </ProfileSection>
+            )}
             {/* Próximas seções entram aqui (uma `ProfileSection` por assunto), só quando a funcionalidade existir. */}
           </>
         )}

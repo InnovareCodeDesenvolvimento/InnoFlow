@@ -117,3 +117,33 @@ test.describe("documento isolado do cartão", () => {
     await foto(popup, "pub-cartao-isolado-formulario")
   })
 })
+
+test.describe("recuperação de senha (L1.3) - estados que não são só abrir a URL", () => {
+  const TOKEN = "motorista".padEnd(43, "A")
+
+  test("auth-esqueci-enviado (sucesso neutro, contagem do reenvio em 60 s com o relógio fixo)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto("/esqueci-senha", { waitUntil: "load" })
+    await page.getByLabel(/^E-mail/).fill("motorista@innoelektron.com")
+    await page.getByRole("button", { name: "Enviar link" }).click()
+    await expect(page.getByRole("heading", { level: 1, name: "Confira seu e-mail" })).toBeVisible()
+    await foto(page, "auth-esqueci-enviado")
+  })
+
+  test("auth-redefinir-formulario (token no fragmento já lido e apagado da URL)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto(`/redefinir-senha#t=${TOKEN}`, { waitUntil: "load" })
+    await expect(page.getByRole("heading", { level: 1, name: "Crie uma nova senha" })).toBeVisible()
+    await foto(page, "auth-redefinir-formulario")
+  })
+
+  test("auth-login-aviso-senha-alterada (chega do /redefinir-senha pelo estado da rota)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto(`/redefinir-senha#t=${TOKEN}`, { waitUntil: "load" })
+    await page.getByLabel(/^Nova senha/).fill("uma-senha-nova-123")
+    await page.getByLabel(/^Repita a nova senha/).fill("uma-senha-nova-123")
+    await page.getByRole("button", { name: "Redefinir senha" }).click()
+    await expect(page.getByText("Senha alterada. Entre com a nova senha.")).toBeVisible()
+    await foto(page, "auth-login-aviso-senha-alterada")
+  })
+})

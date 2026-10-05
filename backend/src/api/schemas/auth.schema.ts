@@ -9,6 +9,8 @@ export const registerSchema = z.object({
   email: z.string().trim().email().max(180),
   password: z.string().min(8).max(72),
   phone: z.string().trim().max(30).optional(),
+  // L1.9: a versão dos Termos que o titular aceitou (= `PublicLegalConfig.termsVersion` vigente; senão 409 `TERMS_VERSION_OUTDATED`). OBRIGATÓRIA — sem aceite não há cadastro (400).
+  acceptedTermsVersion: z.string().trim().min(1).max(32),
 })
 
 export const loginSchema = z.object({
@@ -26,17 +28,42 @@ export const googleAuthSchema = z.object({
   credential: z.string().min(1).max(4096),
 })
 
+// `POST /api/auth/google` (login E cadastro na mesma rota). L1.9: `acceptedTermsVersion` é OPCIONAL no schema porque quem já tem conta entra sem aceitar nada de novo; só é EXIGIDA
+// (e conferida contra a versão vigente) quando o Google vai CRIAR uma conta nova — decidido em `autenticarComGoogle` (400 `VALIDATION_ERROR` se faltar, 409 `TERMS_VERSION_OUTDATED` se antiga).
+// `POST /api/auth/google/link` segue com `googleAuthSchema` (sem o campo).
+export const googleSignInSchema = googleAuthSchema.extend({
+  acceptedTermsVersion: z.string().trim().min(1).max(32).optional(),
+})
+
 // `POST /api/auth/password`. `newPassword`: mínimo 10 (Órion) e máximo 72 BYTES — o bcrypt
 // TRUNCA em silêncio acima disso (senhas longas diferindo só depois do byte 72 valeriam igual).
+// A política de senha NOVA mora aqui, num lugar só: `POST /api/auth/password` e `POST /api/auth/password/reset` (L1.3) usam a MESMA regra.
+export const newPasswordSchema = z
+  .string()
+  .min(10)
+  .refine((p) => Buffer.byteLength(p, 'utf8') <= 72, { message: 'no máximo 72 bytes' })
+
 export const changePasswordSchema = z.object({
   currentPassword: z.string().max(200).optional(),
-  newPassword: z
-    .string()
-    .min(10)
-    .refine((p) => Buffer.byteLength(p, 'utf8') <= 72, { message: 'no máximo 72 bytes' }),
+  newPassword: newPasswordSchema,
+})
+
+// `POST /api/auth/password/forgot` (L1.3) — só o e-mail. Mesmo teto de 180 do cadastro. A resposta é 202 para qualquer e-mail BEM FORMADO (existente ou não).
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email().max(180),
+})
+
+// `POST /api/auth/password/reset` (L1.3). `token`: o formato real (43 caracteres) é conferido no serviço — token malformado vira `RESET_TOKEN_INVALID`, não `VALIDATION_ERROR`
+// (um código só para "este link não vale"); aqui só um teto que barra corpo gigante.
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1).max(200),
+  newPassword: newPasswordSchema,
 })
 
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>
+export type GoogleSignInInput = z.infer<typeof googleSignInSchema>
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>

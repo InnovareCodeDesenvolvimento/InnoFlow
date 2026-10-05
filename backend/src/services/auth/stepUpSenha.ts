@@ -21,8 +21,9 @@ import { executarStepUp, type PortasStepUp } from '../../core/auth/stepUp'
 const THROTTLE_TIMEOUT_MS = 500
 
 export class StepUpRateLimitedError extends AppError {
-  constructor(public readonly retryAfterSeconds: number) {
-    super('Muitas tentativas de confirmação de senha. Tente novamente mais tarde.', 429, 'RATE_LIMITED_PAYMENT_GATEWAY')
+  /** `codigoDeLimite`: o 429 do gateway é `RATE_LIMITED_PAYMENT_GATEWAY` (padrão); a exclusão de conta/devolução do saldo (L1.4) usa `RATE_LIMITED_ACCOUNT_DELETION` (contrato do frontend). */
+  constructor(public readonly retryAfterSeconds: number, codigoDeLimite = 'RATE_LIMITED_PAYMENT_GATEWAY') {
+    super('Muitas tentativas de confirmação de senha. Tente novamente mais tarde.', 429, codigoDeLimite)
     this.name = 'StepUpRateLimitedError'
   }
 }
@@ -61,8 +62,11 @@ const portasReais: PortasStepUp = {
   },
 }
 
-/** Lança `AppError` (403/429/401) se a senha não conferir; devolve normalmente se confere. */
-export async function exigirSenhaAtual(params: { userId: string; senhaInformada: string }, portas: PortasStepUp = portasReais): Promise<void> {
+/**
+ * Lança `AppError` (403/429/401) se a senha não conferir; devolve normalmente se confere.
+ * `codigoDeLimite`: código do 429 (padrão: o do gateway) — ver `StepUpRateLimitedError`.
+ */
+export async function exigirSenhaAtual(params: { userId: string; senhaInformada: string }, portas: PortasStepUp = portasReais, codigoDeLimite?: string): Promise<void> {
   const r = await executarStepUp(params, portas)
   switch (r.resultado) {
     case 'OK':
@@ -70,10 +74,29 @@ export async function exigirSenhaAtual(params: { userId: string; senhaInformada:
     case 'SENHA_INCORRETA':
       throw new AppError('Senha atual incorreta.', 403, 'INVALID_CURRENT_PASSWORD')
     case 'LIMITE_DE_TENTATIVAS':
-      throw new StepUpRateLimitedError(r.retryAfterSeconds)
+      throw new StepUpRateLimitedError(r.retryAfterSeconds, codigoDeLimite)
     case 'THROTTLE_INDISPONIVEL':
       throw new StepUpIndisponivelError()
     case 'USUARIO_INEXISTENTE':
       throw new AppError('Token inválido ou expirado.', 401, 'UNAUTHORIZED')
   }
+}
+
+/**
+ * Portas do step-up do TITULAR (motorista) na exclusão da própria conta (L1.4). Mesmo núcleo, mesmo Redis, mesma tranca — mas com alertas PRÓPRIOS: os `payment_gateway_stepup_*`
+ * são IMPORTANTES (e-mail ao dono: "alguém errou a senha do ADMIN na config do gateway") e um motorista digitando a senha errada não é um aviso ao dono. Aqui só o nome do alerta
+ * muda (classificados como INFO em `core/alertas/severidade.ts`); nunca a senha nem o hash.
+ */
+const portasDoTitular: PortasStepUp = {
+  ...portasReais,
+  alertar(alerta, campos) {
+    const nome = alerta === 'payment_gateway_stepup_failed' ? 'login_deletion_stepup_failed' : alerta === 'payment_gateway_stepup_locked' ? 'login_deletion_stepup_locked' : alerta === 'payment_gateway_stepup_unavailable' ? 'login_deletion_stepup_unavailable' : null
+    if (nome === null) return // reserva tardia devolvida: sem ruído para o titular
+    logger.warn({ alert: nome, ...campos }, '[stepup] confirmação de senha na exclusão de conta recusada')
+  },
+}
+
+/** Confere a senha ATUAL do próprio titular (exclusão de conta): 403 `INVALID_CURRENT_PASSWORD`, 429 `RATE_LIMITED_ACCOUNT_DELETION` (+ `Retry-After` na rota), 503 `STEPUP_UNAVAILABLE` (fail-closed). */
+export function exigirSenhaDoTitular(params: { userId: string; senhaInformada: string }): Promise<void> {
+  return exigirSenhaAtual(params, portasDoTitular, 'RATE_LIMITED_ACCOUNT_DELETION')
 }

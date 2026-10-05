@@ -130,14 +130,12 @@ function configurarEmail(fonte: FonteEnv, producao: boolean, avisos: string[]): 
   if (bruto.length === 0 && !host) return null // canal simplesmente não configurado
   const para = bruto.filter((e) => EMAIL_SIMPLES.test(e))
   if (para.length < bruto.length) avisos.push(`ALERT_EMAIL_TO: ${bruto.length - para.length} endereco(s) invalido(s) ignorado(s)`)
-  if (para.length === 0) {
-    avisos.push('e-mail desligado: ALERT_EMAIL_TO sem nenhum endereco valido')
-    return null
-  }
   if (!host) {
     avisos.push('e-mail desligado: ALERT_SMTP_HOST ausente')
     return null
   }
+  // L1.6 (MUDANÇA DELIBERADA): o canal SMTP vale pelo servidor + remetente. Os destinatários de ALERTA (`ALERT_EMAIL_TO`) são opcionais — sem eles o canal segue ativo para o e-mail
+  // TRANSACIONAL ao motorista (redefinição de senha, avisos), e só os alertas ao dono por e-mail deixam de sair (ver `montarCanais`).
   const usuario = texto(fonte, 'ALERT_SMTP_USER')
   const de = texto(fonte, 'ALERT_EMAIL_FROM') ?? (usuario && EMAIL_SIMPLES.test(usuario) ? usuario : undefined)
   if (!de || !REMETENTE.test(de)) {

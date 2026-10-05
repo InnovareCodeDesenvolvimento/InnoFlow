@@ -53,7 +53,8 @@ export function Header() {
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
 
-        <Link to="/" className="flex items-center gap-2">
+        {/* Abaixo de `sm` o nome "InnoFlow" some e o link ficava só com o ícone: sem nome acessível (axe `link-name`). O `aria-label` dá o nome em qualquer largura. */}
+        <Link to="/" className="flex items-center gap-2" aria-label="InnoFlow, início">
           <Logo tone="dark" size={36} showName={false} />
           <span className="hidden text-lg font-extrabold tracking-tight text-white sm:inline">InnoFlow</span>
         </Link>

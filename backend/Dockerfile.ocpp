@@ -14,7 +14,10 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
 RUN npx prisma generate
-RUN npm run build
+# Teto do heap do Node so neste passo (nao afeta `npm ci`/runtime). Medido: `tsc` do backend PASSA com 512 MB e ABORTA com 384
+# ("JavaScript heap out of memory", exit 134); o piso (~450 MB) sobe com o codigo e o padrao do V8 em container pequeno pode ficar
+# perto dele. 1536 MB = ~3x o piso; nao reserva memoria. Mesma regra do frontend/Dockerfile. Copie a mudanca aos 3 Dockerfiles.
+RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
 
 FROM node:22-alpine AS prod-deps
 RUN apk add --no-cache openssl
@@ -26,6 +29,9 @@ RUN npx prisma generate
 
 FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl
+# Cliente do PostgreSQL para o backup — ver o comentário completo no `Dockerfile`. Idêntico nos 3 arquivos.
+RUN (apk add --no-cache postgresql18-client || apk add --no-cache postgresql17-client) \
+  && pg_dump --version && pg_restore --version && psql --version
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
@@ -36,6 +42,9 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/scripts ./scripts
 
 USER node
+
+# O backup roda como `node`: confirma que o cliente executa sem root e que há onde gravar o dump temporário (/tmp).
+RUN pg_dump --version && pg_restore --version && psql --version && tmp="$(mktemp -d)" && test -w "$tmp" && rm -rf "$tmp"
 
 # `prisma migrate deploy &&` — ver explicação completa no `Dockerfile`
 # principal (achado real de produção, 17/09/2026). Seguro rodar concorrente

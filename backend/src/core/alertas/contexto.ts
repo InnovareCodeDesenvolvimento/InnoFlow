@@ -16,7 +16,7 @@
 export const CAMPOS_PERMITIDOS: ReadonlySet<string> = new Set([
   // identificadores técnicos (opacos)
   'paymentIntentId', 'intentId', 'paymentId', 'merchantOrderId', 'sessionId', 'chargePointId', 'ocppIdentity', 'connectorId',
-  'operatorId', 'userId', 'actorUserId',
+  'operatorId', 'userId', 'actorUserId', 'chargebackId',
   // códigos e estados
   'httpStatus', 'codigos', 'returnCode', 'status', 'statusBruto', 'statusPix', 'motivo', 'reason', 'escopo', 'scope', 'operacao', 'desfecho',
   'environment', 'intentEnvironment', 'effectiveEnvironment', 'severity', 'identityKnown', 'envVar', 'changedFields', 'campos',
@@ -25,7 +25,7 @@ export const CAMPOS_PERMITIDOS: ReadonlySet<string> = new Set([
   // contagens, tempos e limites
   'failures', 'falhas', 'tentativas', 'sweepAttempts', 'ageMinutes', 'quantidade', 'scanned', 'actionable', 'evaluated', 'batchSize', 'maxPages',
   'skippedBalanceGuard', 'maxMessages', 'windowSeconds', 'lockSeconds', 'limite', 'length', 'minRecommended', 'ocppTrustProxyHops',
-  'proximaTentativaEmSegundos',
+  'proximaTentativaEmSegundos', 'diasRestantes', 'diasDeAtraso',
   // valores monetários (centavos) — nunca dado de cartão
   'captureAmountCents', 'requestedCents', 'authorizedCents', 'esperadoCents', 'pagoCents', 'diferencaCents',
   // flags

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { GoogleTermsPrompt } from "@/components/auth/GoogleTermsPrompt"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { usePublicConfig } from "@/hooks/usePublicConfig"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorCode, getApiErrorStatus } from "@/services/api"
 import { clampGoogleButtonWidth, googleErrorMessageForCode, readGoogleEnabledHint, shouldShowGoogleButton, writeGoogleEnabledHint } from "@/lib/googleAuth"
 import { initGoogleIdentity, loadGoogleScript, releaseGoogleHandler, renderGoogleButton } from "@/lib/googleIdentity"
+import { isTermsOutdatedError, isTermsRequiredError } from "@/lib/termsAcceptance"
 import { cn } from "@/lib/utils"
 import type { User } from "@/types/api"
 
@@ -47,6 +49,7 @@ export function GoogleAuthSection({
   onCredential,
   mapError,
   showDivider = true,
+  termsVersion,
   className,
 }: {
   /** Login/cadastro: recebe o usuário que o `POST /api/auth/google` devolveu. */
@@ -59,6 +62,11 @@ export function GoogleAuthSection({
   mapError?: (err: unknown) => string
   /** `false` fora de Login/Cadastro (ex.: vincular o Google a uma conta já logada): sem o "ou continue com e-mail". */
   showDivider?: boolean
+  /**
+   * L1.9: versão dos Termos que a pessoa JÁ aceitou nesta tela (o cadastro tem a caixa de aceite): vai junto com a credencial. Sem ela, o servidor só pede o aceite se o Google for CRIAR a
+   * conta (400 `acceptedTermsVersion`) - aí a própria seção mostra o pedido de aceite e reenvia a MESMA credencial. Quem já tem conta entra direto, com ou sem isto.
+   */
+  termsVersion?: string | null
   className?: string
 }) {
   const { data: config, isLoading: configLoading } = usePublicConfig()
@@ -79,28 +87,36 @@ export function GoogleAuthSection({
   const [width, setWidth] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Credencial guardada (só em memória) enquanto a pessoa aceita os Termos: o servidor recusou por falta do aceite e a REENVIAMOS com a versão vigente.
+  const [pendingTerms, setPendingTerms] = useState<{ credential: string; outdated: boolean } | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
 
   const handleCredential = useCallback(
-    async (credential: string) => {
+    async (credential: string, acceptedVersion?: string) => {
       setError(null)
       setSubmitting(true)
       try {
         if (onCredential) {
           await onCredential(credential)
         } else {
-          const user = await googleLogin(credential)
+          const user = await googleLogin(credential, acceptedVersion ?? termsVersion ?? undefined)
+          setPendingTerms(null)
           onSuccess?.(user)
         }
       } catch (err) {
-        setError(mapError ? mapError(err) : googleErrorMessageForCode(getApiErrorCode(err), getApiErrorStatus(err)))
+        if (!onCredential && (isTermsRequiredError(err) || isTermsOutdatedError(err))) {
+          // Conta NOVA pelo Google sem o aceite (400) ou versão velha (409): pede o aceite aqui mesmo e reenvia (o pedido recarrega a versão vigente quando era a antiga).
+          setPendingTerms({ credential, outdated: isTermsOutdatedError(err) })
+        } else {
+          setError(mapError ? mapError(err) : googleErrorMessageForCode(getApiErrorCode(err), getApiErrorStatus(err)))
+        }
       } finally {
         setSubmitting(false)
       }
     },
-    [googleLogin, onSuccess, onCredential, mapError],
+    [googleLogin, onSuccess, onCredential, mapError, termsVersion],
   )
 
   // O GIS guarda o callback da PRIMEIRA `initialize` — o handler vivo passa
@@ -217,6 +233,15 @@ export function GoogleAuthSection({
         <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700">
           {error}
         </p>
+      )}
+
+      {pendingTerms && (
+        <GoogleTermsPrompt
+          outdated={pendingTerms.outdated}
+          submitting={submitting}
+          onAccept={(version) => void handleCredential(pendingTerms.credential, version)}
+          onCancel={() => setPendingTerms(null)}
+        />
       )}
 
       {USE_MOCK_GOOGLE && enabled && showDivider && (

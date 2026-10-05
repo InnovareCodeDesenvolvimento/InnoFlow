@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test"
-import { VIEWPORTS, TIMEZONE, LOCALE } from "./e2e-visual/constantes"
+import { VIEWPORTS, TIMEZONE, LOCALE, ONBOARDING_OFF } from "./e2e-visual/constantes"
 
 /**
  * Harness de REGRESSÃO VISUAL + contraste (axe) + linha de base — FORA da suíte E2E de 185 (`playwright.config.ts`,
@@ -52,6 +52,8 @@ export default defineConfig({
     timezoneId: TIMEZONE,
     reducedMotion: "reduce",
     colorScheme: "light",
+    // Onboarding desligado nos contextos novos (login pela UI): ver `ONBOARDING_OFF` em `e2e-visual/constantes.ts`.
+    storageState: { cookies: [], origins: [{ origin: new URL(baseURL).origin, localStorage: [ONBOARDING_OFF] }] },
     deviceScaleFactor: 1,
     hasTouch: false,
     // Sem trace/vídeo: cada captura é só pixel + a imagem de diff que o Playwright já anexa em falha.

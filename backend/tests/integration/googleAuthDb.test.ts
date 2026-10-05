@@ -25,6 +25,7 @@ import { redis } from '../../src/lib/redis'
 import { autenticarComGoogle } from '../../src/services/auth/autenticarComGoogle'
 import { prismaGoogleUserRepository } from '../../src/services/auth/prismaGoogleUserRepository'
 import { createTenant, createUser, settle, uniqueSuffix, waitFor, type TestTenant } from './helpers/fixtures'
+import { TERMOS_VIGENTES } from './helpers/termos'
 
 /**
  * Login/cadastro com Google contra Postgres REAL. O que a suíte unitária
@@ -217,7 +218,7 @@ describe('Google — banco e rota (Postgres real)', () => {
   describe('POST /api/auth/google (rota completa, verificador simulado)', () => {
     it('conta nova -> 201 com token e user DRIVER; segunda vez -> 200 (mesmo usuário)', async () => {
       const id = identity('rota-nova')
-      const first = await request(app).post('/api/auth/google').send({ credential: credentialOf(id) })
+      const first = await request(app).post('/api/auth/google').send({ credential: credentialOf(id), acceptedTermsVersion: TERMOS_VIGENTES })
       expect(first.status, JSON.stringify(first.body)).toBe(201)
       expect(first.body.user).toMatchObject({ role: 'DRIVER', email: id.email, operatorId: null })
       expect(typeof first.body.token).toBe('string')

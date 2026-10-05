@@ -258,6 +258,10 @@ enum AuditAction {
   EXPORT
   PAYMENT_CREDIT // crédito de Pix processado pelo worker (ator SYSTEM), F5
   PAYMENT_CONFIG_CHANGE // ADMIN altera PaymentGatewayConfig (segredos nunca em `changes`), F5
+  PASSWORD_RESET // redefinição de senha por e-mail (L1.3)
+  ACCOUNT_DELETION // exclusão/anonimização de conta pelo titular e registro do reembolso do saldo pelo ADMIN (L1.4)
+  REFUND // estorno de sessão registrado pelo ADMIN (L1.8)
+  CHARGEBACK // chargeback registrado/resolvido pelo ADMIN (L1.8)
   OTHER // rota não mapeada ainda gera linha (nunca silêncio) — decisão da Nova
 }
 
@@ -469,6 +473,11 @@ model User {
   // NULL = nunca revogado. Junto com `active`, é o que faz "desativar/trocar a senha" cortar
   // o token de 12h e o stream SSE (cache de ~30s no processo da API).
   sessionsValidAfter DateTime? @db.Timestamptz(3)
+  // LGPD (L1.4, 2026-10-05): exclusão = ANONIMIZAÇÃO, nunca DELETE (FKs para User são Restrict; WalletEntry/AuditLog são append-only). `deletedAt` preenchido
+  // significa "conta excluída e anonimizada": o CHECK user_deleted_is_anonymized garante no banco que name/email viraram o tombstone (email = excluido+<id>@anon.invalid,
+  // único por construção, o que LIBERA o e-mail/googleSub/cpf originais), credenciais e CPF/telefone são NULL, active=false e a sessão foi revogada. Só DRIVER.
+  // Irreversível (trigger): não há "ressuscitar". Um único timestamp de propósito — um `anonymizedAt` à parte poderia divergir de `deletedAt`.
+  deletedAt          DateTime? @db.Timestamptz(3)
 
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -480,6 +489,17 @@ model User {
   paymentMethods   PaymentMethod[]
   paymentIntents   PaymentIntent[]
   debts            Debt[]
+
+  // Lote 1 da F6 (relações inversas; nenhuma coluna nova além de deletedAt)
+  accountDeletionRequest         AccountDeletionRequest?  @relation("AccountDeletionSubject")
+  accountDeletionRefundsRecorded AccountDeletionRequest[] @relation("AccountDeletionRefundedBy")
+  notificationPreference         NotificationPreference?
+  notificationLogs               NotificationLog[]
+  consentRecords                 ConsentRecord[]
+  paymentReversals               PaymentReversal[]        @relation("PaymentReversalPayer")
+  paymentReversalsCreated        PaymentReversal[]        @relation("PaymentReversalCreatedBy")
+  paymentReversalsResolved       PaymentReversal[]        @relation("PaymentReversalResolvedBy")
+  paymentReversalsCardUnblocked  PaymentReversal[]        @relation("PaymentReversalCardUnblockedBy")
 
   @@index([operatorId])
 }
@@ -659,6 +679,12 @@ model ChargingSession {
 
   startedAt DateTime @db.Timestamptz(3) // timestamp do StartTransaction — sempre do payload, nunca now()
 
+  // Prova para o dossiê de chargeback (L1.8): IP e User-Agent da requisição `POST /api/me/sessions/start` (só sessões iniciadas pelo app; NULL nas demais e no legado).
+  // DADO PESSOAL (LGPD) com a mesma retenção da sessão; recomendado zerar na anonimização da conta (ver docs/MODELO-DADOS-LOTE1.md §3). Tamanhos folgados de propósito:
+  // o INSERT da sessão nunca pode falhar por causa de um campo de prova — a aplicação trunca (UA em 512) antes de gravar.
+  startIp        String? @db.VarChar(64)
+  startUserAgent String? @db.VarChar(512)
+
   // --- Janela de ociosidade (idle fee) ---
   // chargingEndedAt: quando o carro parou de fato de puxar energia
   // (StatusNotification Finishing/SuspendedEV no conector, ou MeterValues
@@ -747,9 +773,10 @@ model ChargingSession {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  meterSamples   MeterSample[]
-  paymentIntents PaymentIntent[]
-  debts          Debt[]
+  meterSamples     MeterSample[]
+  paymentIntents   PaymentIntent[]
+  debts            Debt[]
+  paymentReversals PaymentReversal[]
   // Índice parcial do watchdog (F5.9) NÃO aparece aqui — Prisma não expressa
   // WHERE em índice não-único. Vive só na migration 20261003120100:
   //   ix_charging_session_watchdog (status, "lastActivityAt")
@@ -989,8 +1016,9 @@ model PaymentIntent {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  debts         Debt[]
-  webhookEvents WebhookEvent[]
+  debts            Debt[]
+  webhookEvents    WebhookEvent[]
+  paymentReversals PaymentReversal[]
 
   @@index([operatorId])
   @@index([userId])
@@ -1044,6 +1072,10 @@ model WalletEntry {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   createdBy String? // userId do admin, se for ajuste manual
 
+  // Lote 1 (relações inversas 1:1): o estorno para carteira (REFUND) e o reembolso de conta excluída (TOPUP_REFUND) apontam para a sua entrada.
+  paymentReversal       PaymentReversal?
+  accountDeletionRefund AccountDeletionRequest?
+
   @@index([walletId, createdAt])
   // Relatório de financeiro (retaguarda, 2026-09-16) — soma débitos de
   // carteira por tipo (CHARGE_DEBIT) num período, sem depender de walletId.
@@ -1077,6 +1109,8 @@ model Debt {
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  paymentReversal PaymentReversal?
 
   @@index([userId, status])
   @@index([operatorId])
@@ -1191,6 +1225,111 @@ model NotificationChannelConfig {
 }
 
 // ------------------------------------------------------------
+// Backup automático do banco (porte do InnoChat) — configuração SINGLETON + histórico de execuções
+// ------------------------------------------------------------
+//
+// Formato do arquivo cifrado: docs/BACKUP-FORMATO.md. Contrato das rotas ADMIN: docs/CONTRATO-BACKUP-ADMIN.md.
+// BackupConfig é SINGLETON (id = 1, CHECK na migration). SEGREDOS (access/secret key do S3, client secret e refresh token do Google, cópia da chave do backup) ficam
+// CIFRADOS com a MESMA chave/formato dos segredos de pagamento (`PAYMENT_SECRETS_KEY`, `v1:<kid>:<base64>`) — nunca em claro, nunca em resposta/log/auditoria.
+// `encryptionKeyCiphertext` é a CÓPIA da chave do backup guardada só para o agendador cifrar de madrugada; a chave que vale (a do dono) é mostrada UMA vez na tela.
+// `runningSince` é a TRAVA (UPDATE condicional): quem consegue mudar a linha de null/expirada para agora é o dono da execução.
+enum BackupTrigger {
+  SCHEDULED
+  MANUAL
+  VERIFY // conferência da cópia mais recente (baixa, decifra, lê o índice) — NÃO é backup: não mexe em lastSuccessAt
+}
+
+enum BackupRunStatus {
+  QUEUED // pedido (botão "fazer agora"/"conferir") enfileirado para o worker, ainda não começou
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum BackupDestination {
+  S3
+  DRIVE
+}
+
+model BackupConfig {
+  id Int @id @default(1)
+
+  enabled        Boolean @default(false)
+  enabledAt      DateTime? @db.Timestamptz(3) // quando o automático foi ligado (âncora do alerta "nunca rodou"); nulo com ele desligado
+  hourLocal      Int     @default(3) // hora cheia em Brasília (UTC-3 fixo), 0..23
+  frequencyDays  Int     @default(1) // 1, 2 ou 7 (CHECK)
+  retentionCount Int     @default(7) // quantas cópias manter no destino (>= 1); nunca apaga a única/última
+  alertAfterHours Int    @default(36) // sem sucesso há mais que isto, com o automático ligado => alerta backup_stale
+
+  destination BackupDestination?
+
+  // S3-compatível (AWS, Cloudflare R2, Backblaze B2, MinIO...). Access key e secret key CIFRADAS.
+  s3Endpoint             String?
+  s3Region               String?
+  s3Bucket               String?
+  s3Prefix               String?
+  s3AccessKeyCiphertext  String?
+  s3SecretKeyCiphertext  String?
+
+  // Google Drive por OAuth (escopo drive.file: o app só enxerga o que ele mesmo criou; a pasta é criada pelo código).
+  driveOauthClientId               String?
+  driveOauthClientSecretCiphertext String?
+  driveOauthRefreshTokenCiphertext String?
+  driveOauthEmail                  String?
+  driveOauthFolderId               String?
+  driveOauthConnectedAt            DateTime? @db.Timestamptz(3)
+  driveOauthConnectedById          String? // id do ADMIN que conectou (snapshot, sem FK)
+  // `state` do fluxo OAuth em andamento (1 por vez): nonce de USO ÚNICO consumido por UPDATE condicional no callback.
+  oauthStateNonce      String?
+  oauthStateExpiresAt  DateTime? @db.Timestamptz(3)
+  oauthStateAdminId    String?
+
+  // Chave do backup (32 bytes, própria): só a impressão digital (8 hex) é pública; a cópia é cifrada.
+  encryptionKeyFingerprint String?
+  encryptionKeyCiphertext  String?
+  encryptionKeyCreatedAt   DateTime? @db.Timestamptz(3)
+  encryptionKeyShownAt     DateTime? @db.Timestamptz(3)
+
+  lastSuccessAt   DateTime? @db.Timestamptz(3) // último backup que SAIU do servidor (alimenta backup_stale)
+  lastAttemptAt   DateTime? @db.Timestamptz(3)
+  runningSince    DateTime? @db.Timestamptz(3) // trava; mais velha que 2 h = abandonada (processo morreu no meio)
+  lastStaleAlertAt DateTime? @db.Timestamptz(3) // reserva atômica do alerta backup_stale (1 a cada 12 h entre réplicas)
+
+  updatedById String? // snapshot do ADMIN que gravou por último
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// Uma linha por pedido/execução (backup agendado, manual ou conferência), SEMPRE gravada — o histórico existe para mostrar o que falhou, não só o que deu certo.
+// `errorCode` é um CÓDIGO (KEY, DUMP, NETWORK...), nunca texto livre: o detalhe técnico fica só no log do servidor (pg_dump/SDK podem citar host/usuário).
+model BackupRun {
+  id String @id @default(cuid())
+
+  trigger     BackupTrigger
+  status      BackupRunStatus   @default(QUEUED)
+  destination BackupDestination?
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3) // pedido (para QUEUED) ou início
+  startedAt  DateTime? @db.Timestamptz(3)
+  finishedAt DateTime? @db.Timestamptz(3)
+  durationMs Int?
+
+  fileName       String? // backup-innoflow-AAAA-MM-DD-HHhMMmSSs.dump.enc
+  objectKey      String? // chave no S3 / "drive:<id>/<nome>" no Drive
+  sizeBytes      BigInt? // tamanho do arquivo CIFRADO que subiu
+  checksumSha256 String? // SHA-256 (hex) do arquivo cifrado que subiu — a conferência semanal reconfere
+  tablesWithData Int?
+  encryptionKeyFingerprint String? // impressão digital da chave que cifrou (nulo = sem cifra)
+
+  errorCode String?
+  createdById String? // ADMIN que pediu (MANUAL/VERIFY manual); nulo no agendado
+
+  @@index([createdAt(sort: Desc)], map: "BackupRun_createdAt_idx")
+  @@index([trigger, createdAt(sort: Desc)], map: "BackupRun_trigger_createdAt_idx")
+  @@index([status])
+}
+
+// ------------------------------------------------------------
 // Auditoria (ADMIN-only)
 // ------------------------------------------------------------
 //
@@ -1273,4 +1412,280 @@ model AuditLog {
   @@index([entityType, entityId, occurredAt])
   @@index([action, occurredAt])
   @@index([targetOperatorId, occurredAt])
+}
+
+// ============================================================
+// LOTE 1 DA F6 (Cronos, 05/10/2026) — LGPD, notificações, estorno/chargeback, termos de uso.
+// Desenho, estados, invariantes e quem lê/escreve o quê: docs/MODELO-DADOS-LOTE1.md.
+// Migrations: 20261005150000_lote1_audit_action_values (só ADD VALUE) + 20261005150100_lote1_lgpd_notificacoes_estorno_termos.
+// Tudo o que o Prisma não expressa (CHECK, índices parciais, triggers) vive só no migration.sql, mesma convenção do resto do schema.
+// ============================================================
+
+// Devolução do saldo de uma conta excluída (DL2). Mesmos literais do contrato (`AccountDeletionRefundStatus` em types/api.ts).
+enum AccountDeletionRefundStatus {
+  NOT_REQUIRED // saldo zero na exclusão: nada a devolver
+  PENDING_REFUND // saldo > 0 e chave Pix guardada (cifrada): o ADMIN ainda vai fazer o Pix por fora
+  REFUNDED // o ADMIN fez o Pix e registrou (TOPUP_REFUND lançado, chave Pix apagada)
+}
+
+// Mesmos literais de `NOTIFICATION_TYPES` (types/api.ts).
+enum NotificationType {
+  SESSION_COMPLETED
+  SESSION_PAYMENT_FAILED
+  SESSION_CLOSED_BY_SERVER
+  LOW_BALANCE
+  TOPUP_CREDITED
+  REMOTE_START_BY_SUPPORT
+  PASSWORD_CHANGED
+  ACCOUNT_DELETED
+}
+
+// Nome com "Delivery" para não colidir com `NotificationChannelConfig` (N-7, avisos ao dono). Web push (F7) entra com ADD VALUE em migration própria.
+enum NotificationDeliveryChannel {
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING // reservado (linha criada) e ainda não entregue — inclui as tentativas que falharam e vão reentrar na fila
+  SENT // terminal
+  FAILED // esgotou as tentativas (statusReason obrigatório); pode voltar a PENDING por reenfileiramento manual
+  SKIPPED // terminal: o envio não era devido (preferência desligada, conta inativa...) — statusReason obrigatório
+}
+
+enum ConsentKind {
+  TERMS
+  PRIVACY
+}
+
+enum ConsentSource {
+  REGISTER // cadastro por e-mail/senha
+  GOOGLE_SIGNUP // cadastro por Google
+  REACCEPT // modal de reaceite de quem já tinha conta (POST /api/me/consents)
+}
+
+enum PaymentReversalKind {
+  REFUND
+  CHARGEBACK
+}
+
+// UM enum para o ciclo de vida dos dois tipos (o CHECK payment_reversal_shape amarra tipo x estado):
+//   REFUND:     PENDING_CONFIRMATION -> CONFIRMED | CANCELLED   (WALLET já nasce CONFIRMED)
+//   CHARGEBACK: OPEN -> WON | LOST | ACCEPTED
+// Mapeia para o contrato: RefundStatus = PENDING_CONFIRMATION|CONFIRMED; ChargebackOutcome = WON|LOST|ACCEPTED (OPEN = outcome null).
+enum PaymentReversalStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  CANCELLED
+  OPEN
+  WON
+  LOST
+  ACCEPTED
+}
+
+enum RefundDestination {
+  WALLET // crédito imediato na carteira (WalletEntry REFUND)
+  CARD_VIA_PORTAL // devolução feita pelo dono no portal da Cielo e registrada aqui (DL8)
+}
+
+// ------------------------------------------------------------
+// LGPD (L1.4) — a exclusão é ANONIMIZAÇÃO: `User.deletedAt` + este registro. Um por conta (userId único).
+// ------------------------------------------------------------
+//
+// A chave Pix da devolução é dado pessoal: guardada CIFRADA com a mesma `PAYMENT_SECRETS_KEY` dos demais segredos (formato `v1:<kid>:<base64>`, CHECK
+// account_deletion_pix_key_is_ciphertext recusa texto aberto) e APAGADA (NULL) quando o ADMIN registra o reembolso. `recifrarSegredos` precisa cobrir esta coluna.
+// `refundWalletEntryId` aponta o `WalletEntry TOPUP_REFUND` (negativo) que o ADMIN lançou — 1:1, UNIQUE.
+model AccountDeletionRequest {
+  id String @id @default(cuid())
+
+  userId String @unique
+  user   User   @relation("AccountDeletionSubject", fields: [userId], references: [id], onDelete: Restrict)
+
+  requestedAt           DateTime                    @default(now()) @db.Timestamptz(3)
+  // Saldo da carteira no instante do pedido, em centavos (>= 0). Congelado (trigger): é o teto do reembolso (AMOUNT_EXCEEDS_BALANCE).
+  balanceCentsAtRequest Int
+  refundStatus          AccountDeletionRefundStatus
+
+  refundPixKeyCiphertext String?
+  refundedAmountCents    Int?
+  refundProofReference   String?   @db.VarChar(120)
+  refundedAt             DateTime? @db.Timestamptz(3)
+
+  refundedByUserId String?
+  refundedBy       User?   @relation("AccountDeletionRefundedBy", fields: [refundedByUserId], references: [id], onDelete: Restrict)
+
+  refundWalletEntryId String?      @unique
+  refundWalletEntry   WalletEntry? @relation(fields: [refundWalletEntryId], references: [id], onDelete: Restrict)
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  // Fila do ADMIN (`status=PENDING_REFUND`): índice parcial ix_account_deletion_pending (requestedAt) WHERE refundStatus = 'PENDING_REFUND' — só na migration.
+}
+
+// ------------------------------------------------------------
+// Notificações (L1.6) — e-mail no lote 1
+// ------------------------------------------------------------
+
+// Preferências 1:1 com o usuário. Linha criada sob demanda (upsert no PATCH); sem linha = os defaults abaixo (iguais aos DEFAULTs do banco e às constantes
+// do contrato). DL5: NÃO existe coluna para desligar segurança/cobrança (PASSWORD_CHANGED, SESSION_PAYMENT_FAILED, ACCOUNT_DELETED) — o opt-out nem é persistível.
+model NotificationPreference {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  sessionReceiptEmail      Boolean @default(true)
+  lowBalanceEnabled        Boolean @default(true)
+  // Centavos; 500..50000 (CHECK). Default R$ 20,00.
+  lowBalanceThresholdCents Int     @default(2000)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// Outbox + idempotência dos e-mails. A unicidade (userId, type, channel, entityId) é o "o mesmo fato nunca vira dois e-mails": o worker reserva a linha com
+// INSERT ... ON CONFLICT DO NOTHING antes de enviar. SEM PII: nem corpo, nem endereço, nem mensagem de erro do SMTP (que costuma repetir o destinatário) —
+// `statusReason` só aceita código (CHECK: letras, dígitos, `_`, `.`, `-`). O endereço do ACCOUNT_DELETED vive só no payload do job (Redis), nunca aqui.
+// Retenção: 12 meses por `createdAt` (índice abaixo), nenhuma trava de append-only (é log operacional, não registro contábil).
+model NotificationLog {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  type     NotificationType
+  channel  NotificationDeliveryChannel @default(EMAIL)
+  // Id do FATO que gerou o aviso (sessão, intent, WalletEntry que cruzou o limiar...). O jobId do BullMQ é `${type}:${entityId}`.
+  entityId String                      @db.VarChar(128)
+
+  status            NotificationStatus @default(PENDING)
+  attempts          Int                @default(0)
+  statusReason      String?            @db.VarChar(64)
+  providerMessageId String?            @db.VarChar(255)
+
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  lastAttemptAt DateTime? @db.Timestamptz(3)
+  sentAt        DateTime? @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+  // Varredor de job perdido: ix_notification_log_pending (createdAt) WHERE status = 'PENDING' — só na migration.
+
+  @@unique([userId, type, channel, entityId])
+  @@index([createdAt])
+}
+
+// ------------------------------------------------------------
+// Termos de uso e privacidade (L1.9) — prova do aceite
+// ------------------------------------------------------------
+
+// Uma linha por (usuário, documento, versão). Append-only por trigger, com UMA exceção deliberada: o `ip` pode ser zerado (anonimização na exclusão da conta).
+// A versão VIGENTE dos termos é configuração (envs LEGAL_*), não tabela — ver docs/MODELO-DADOS-LOTE1.md §6.
+model ConsentRecord {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  kind       ConsentKind
+  version    String        @db.VarChar(32)
+  acceptedAt DateTime      @default(now()) @db.Timestamptz(3)
+  source     ConsentSource
+  ip         String?       @db.VarChar(64)
+
+  @@unique([userId, kind, version])
+}
+
+// ------------------------------------------------------------
+// Estorno e chargeback (L1.8) — razão de reversões (DL7/DL8)
+// ------------------------------------------------------------
+//
+// Informativo para a conciliação: o status do `PaymentIntent` continua CAPTURED. `PaymentIntent.amountRefundedCents` = Σ REFUND/CARD_VIA_PORTAL/CONFIRMED,
+// mantido por TRIGGER (não pelo código); o estorno para a carteira vive no WalletEntry REFUND (referenceType CHARGING_SESSION) e NÃO entra nessa soma.
+// Estorno: tipo REFUND, sempre com sessão; teto no banco = Σ estornos vivos <= ChargingSession.totalCostCents (trigger com lock na sessão — vale sob concorrência).
+// Chargeback: tipo CHARGEBACK, sempre com intent (um por intent); nasce OPEN e bloqueia o modo cartão do motorista enquanto OPEN/LOST/ACCEPTED (derivado, sem flag).
+// `dossierSnapshot` é a prova no momento do registro (sobrevive ao expurgo de partições do N-11) e é IMUTÁVEL; sem nome/e-mail/CPF. `dossierId` do contrato = `id`.
+// Linha nunca é apagada (trigger) e estados terminais não mudam mais.
+model PaymentReversal {
+  id String @id @default(cuid())
+
+  kind        PaymentReversalKind
+  status      PaymentReversalStatus
+  destination RefundDestination? // só REFUND
+
+  chargingSessionId String?
+  chargingSession   ChargingSession? @relation(fields: [chargingSessionId], references: [id], onDelete: Restrict)
+  paymentIntentId   String?
+  paymentIntent     PaymentIntent?   @relation(fields: [paymentIntentId], references: [id], onDelete: Restrict)
+
+  // Quem pagou (desnormalizado por trigger a partir da sessão/intent — a aplicação não decide). Serve ao bloqueio de cartão.
+  userId String
+  user   User   @relation("PaymentReversalPayer", fields: [userId], references: [id], onDelete: Restrict)
+
+  amountCents Int
+
+  reason           String?   @db.VarChar(500) // REFUND: obrigatório
+  portalReference  String?   @db.VarChar(120) // REFUND/CARD_VIA_PORTAL: referência no portal da Cielo
+  caseReference    String?   @db.VarChar(120) // CHARGEBACK: obrigatório
+  reasonCode       String?   @db.VarChar(40)
+  notifiedAt       DateTime? @db.Timestamptz(3) // CHARGEBACK: quando a Cielo avisou o dono
+  responseDeadline DateTime? @db.Timestamptz(3)
+
+  dossierSnapshot Json? // CHARGEBACK: obrigatório, objeto, <= 4 MiB, imutável
+
+  // WALLET: o WalletEntry REFUND lançado na mesma transação (1:1, UNIQUE). Nunca em CARD_VIA_PORTAL.
+  walletEntryId String?      @unique
+  walletEntry   WalletEntry? @relation(fields: [walletEntryId], references: [id], onDelete: Restrict)
+  // Dívida criada pelo ADMIN num chargeback perdido (debtPolicy CREATE_DEBT); só em LOST/ACCEPTED.
+  debtId        String?      @unique
+  debt          Debt?        @relation(fields: [debtId], references: [id], onDelete: Restrict)
+
+  createdByUserId String
+  createdBy       User     @relation("PaymentReversalCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  // Saída de PENDING_CONFIRMATION/OPEN. `resolvedByUserId` nulo = o job de conciliação confirmou sozinho; chargeback exige o ADMIN.
+  resolvedAt       DateTime? @db.Timestamptz(3)
+  resolvedByUserId String?
+  resolvedBy       User?     @relation("PaymentReversalResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: Restrict)
+
+  // DL7/P3 (aceita pelo dono em 06/10/2026): chargeback perdido (LOST/ACCEPTED) bloqueia o modo cartão, e o ADMIN pode DESBLOQUEAR MANUALMENTE, caso a caso. O bloqueio continua DERIVADO
+  // (sem flag): bloqueado = chargeback OPEN, OU LOST/ACCEPTED com `cardUnblockedAt` nulo. O desbloqueio NÃO apaga o registro nem mexe no dossiê/desfecho (o status segue LOST/ACCEPTED).
+  // Os três campos nascem juntos (CHECK payment_reversal_card_unblock) e, uma vez gravados, são imutáveis (trigger).
+  cardUnblockedAt       DateTime? @db.Timestamptz(3)
+  cardUnblockedByUserId String?
+  cardUnblockedBy       User?     @relation("PaymentReversalCardUnblockedBy", fields: [cardUnblockedByUserId], references: [id], onDelete: Restrict)
+  cardUnblockReason     String?   @db.VarChar(500)
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  // Só na migration: ux_payment_reversal_chargeback_per_intent (paymentIntentId) WHERE kind = 'CHARGEBACK'; ix_payment_reversal_card_block (userId) WHERE chargeback
+  // OPEN/LOST/ACCEPTED; ix_payment_reversal_pending_confirmation (createdAt) WHERE status = 'PENDING_CONFIRMATION'.
+
+  @@index([chargingSessionId])
+  @@index([paymentIntentId])
+}
+
+// ------------------------------------------------------------
+// Dados da empresa (controlador) cadastrados pelo painel ADMIN — L1.9 / pedido do dono (05/10/2026)
+// ------------------------------------------------------------
+//
+// Tabela SINGLETON (id = 1, CHECK na migration), mesmo desenho de NotificationChannelConfig: o painel manda, as envs `LEGAL_*` são a RESERVA. SEM segredos (tudo aparece na página
+// pública de termos/rodapé), então nada é cifrado. Vazio = NULL, nunca texto inventado. `cnpj` fica NORMALIZADO (14 caracteres, sem pontuação; dígitos verificadores conferidos na API).
+// `companyDataSavedAt` marca "o painel assumiu os DADOS da empresa" (preenchido a cada PUT que toca um campo da empresa): daí em diante a env NÃO completa campo vazio (limpar
+// o CNPJ no painel não pode fazê-lo reaparecer pela env). Já as VERSÕES são por campo: NULL = vale a env `LEGAL_*_VERSION` (ou o padrão do código). Ver `services/legal/dadosLegais.ts`.
+model CompanyProfile {
+  id Int @id @default(1)
+
+  legalName    String? // razão social
+  tradeName    String? // nome fantasia
+  cnpj         String? @db.VarChar(14)
+  supportEmail String?
+  supportPhone String?
+  address      String?
+  website      String?
+  dpoName      String? // encarregado (DPO): identidade e contato são públicos por força da LGPD (art. 41, §1º)
+  dpoEmail     String?
+
+  termsVersion   String? @db.VarChar(32)
+  privacyVersion String? @db.VarChar(32)
+
+  companyDataSavedAt DateTime? @db.Timestamptz(3)
+  updatedByUserId    String? // sem FK de propósito (mesmo critério do snapshot do ator no AuditLog)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 }

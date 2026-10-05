@@ -1,8 +1,11 @@
 import { useState } from "react"
-import { CreditCard } from "lucide-react"
+import { Link } from "react-router-dom"
+import { CreditCard, ShieldAlert } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
 import { Badge } from "@/components/ui/Badge"
+import { Button } from "@/components/ui/Button"
+import { buttonVariants } from "@/components/ui/buttonVariants"
 import { Select } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
@@ -16,7 +19,10 @@ import { useReportPeriod } from "@/hooks/useReportPeriod"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
 import { PAYMENT_INTENT_STATUS_LABELS, formatCents, formatDateTime, paymentStatusBadgeVariant } from "@/lib/utils"
-import { PAYMENT_INTENT_STATUSES, type PaymentIntentStatus, type PaymentProvider } from "@/types/api"
+import { PAYMENT_INTENT_STATUSES, type PaymentIntentStatus, type PaymentListRow, type PaymentProvider } from "@/types/api"
+import { canRegisterChargeback, EMPTY_ACQUIRER_FILTERS, type AcquirerFilterValues } from "@/lib/reversals"
+import { AcquirerFilters } from "./AcquirerFilters"
+import { RegisterChargebackDialog } from "./RegisterChargebackDialog"
 
 const PAGE_SIZE = 20
 
@@ -40,6 +46,9 @@ export default function PagamentosPage() {
   const [provider, setProvider] = useState("")
   const [status, setStatus] = useState("")
   const [page, setPage] = useState(1)
+  // Identificadores da Cielo (Tid/código de autorização/NSU): busca exata, aplicada ao enviar o formulário (L1.8 — achar a venda de um chargeback).
+  const [acquirer, setAcquirer] = useState<AcquirerFilterValues>(EMPTY_ACQUIRER_FILTERS)
+  const [chargebackRow, setChargebackRow] = useState<PaymentListRow | null>(null)
   const effectiveOperatorId = isAdmin ? operatorId || undefined : undefined
 
   const params = {
@@ -48,6 +57,9 @@ export default function PagamentosPage() {
     operatorId: effectiveOperatorId,
     provider: (provider || undefined) as PaymentProvider | undefined,
     status: (status || undefined) as PaymentIntentStatus | undefined,
+    tid: acquirer.tid || undefined,
+    authorizationCode: acquirer.authorizationCode || undefined,
+    proofOfSale: acquirer.proofOfSale || undefined,
     page,
     pageSize: PAGE_SIZE,
   }
@@ -59,7 +71,18 @@ export default function PagamentosPage() {
         title="Pagamentos"
         description="Tentativas de cobrança — cartão, Pix e carteira."
         icon={CreditCard}
-        actions={<ExportCsvButton path="/api/admin/reports/payments" params={{ ...params, page: undefined, pageSize: undefined }} filename={`pagamentos_${period.from}_${period.to}.csv`} />}
+        actions={
+          <>
+            {/* Chargebacks e devoluções são do ADMIN (o servidor devolve 403 ao OPERATOR): o atalho nem aparece para ele. */}
+            {isAdmin && (
+              <Link to="/admin/chargebacks" className={buttonVariants({ variant: "outline", size: "touch-sm" })}>
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                Chargebacks
+              </Link>
+            )}
+            <ExportCsvButton path="/api/admin/reports/payments" params={{ ...params, page: undefined, pageSize: undefined }} filename={`pagamentos_${period.from}_${period.to}.csv`} />
+          </>
+        }
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -72,6 +95,14 @@ export default function PagamentosPage() {
           <Select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="Todos os status" options={STATUS_OPTIONS} />
         </div>
       </div>
+
+      <AcquirerFilters
+        applied={acquirer}
+        onApply={(values) => {
+          setAcquirer(values)
+          setPage(1)
+        }}
+      />
 
       {isLoading && <TableSkeleton cols={6} />}
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os pagamentos.")} onRetry={() => refetch()} />}
@@ -91,6 +122,11 @@ export default function PagamentosPage() {
                 <TableHead>Provedor</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Valor</TableHead>
+                {isAdmin && (
+                  <TableHead>
+                    <span className="sr-only">Ações</span>
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -104,6 +140,15 @@ export default function PagamentosPage() {
                     <Badge variant={paymentStatusBadgeVariant(row.status)}>{PAYMENT_INTENT_STATUS_LABELS[row.status]}</Badge>
                   </TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">{formatCents(row.amountCapturedCents ?? row.amountRequestedCents)}</TableCell>
+                  {isAdmin && (
+                    <TableCell className="text-right">
+                      {canRegisterChargeback(row) && (
+                        <Button type="button" variant="outline" size="touch-sm" onClick={() => setChargebackRow(row)} aria-label={`Registrar chargeback — ${row.userName}, ${formatCents(row.amountCapturedCents)}`}>
+                          Registrar chargeback
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -112,6 +157,8 @@ export default function PagamentosPage() {
           <Pagination page={data.meta.page} totalPages={data.meta.totalPages} total={data.meta.total} pageSize={data.meta.pageSize} onPageChange={setPage} label="pagamentos" />
         </>
       )}
+
+      {chargebackRow && <RegisterChargebackDialog row={chargebackRow} onClose={() => setChargebackRow(null)} />}
     </div>
   )
 }

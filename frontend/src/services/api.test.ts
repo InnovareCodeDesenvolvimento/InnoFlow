@@ -73,6 +73,20 @@ describe("interceptor de resposta do api", () => {
     expect(hrefSetter).not.toHaveBeenCalled()
   })
 
+  it("401 INVALID_GOOGLE_TOKEN (reautenticação da exclusão de conta) é a credencial do Google recusada: não desloga", async () => {
+    failNextWith(401, { error: "Token do Google inválido.", code: "INVALID_GOOGLE_TOKEN" })
+    await expect(api.post("/api/me/account/deletion", {})).rejects.toMatchObject({ response: { status: 401 } })
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe("token-de-sessao-valida")
+    expect(hrefSetter).not.toHaveBeenCalled()
+  })
+
+  it("401 UNAUTHORIZED na MESMA rota da exclusão continua sendo sessão expirada", async () => {
+    failNextWith(401, { error: "Sessão expirada.", code: "UNAUTHORIZED" })
+    await expect(api.post("/api/me/account/deletion", {})).rejects.toBeDefined()
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
+    expect(hrefSetter).toHaveBeenCalledOnce()
+  })
+
   it("401 das rotas de acesso (senha errada no login) não expulsa ninguém", async () => {
     failNextWith(401, { error: "E-mail ou senha inválidos.", code: "INVALID_CREDENTIALS" })
     await expect(api.post("/api/auth/login", {})).rejects.toBeDefined()

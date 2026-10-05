@@ -5,12 +5,13 @@ import { DeadlineExceededError, withDeadline } from '../../lib/withDeadline'
 import { calcularCustoSessao, type CustoSessaoResultado, type TariffSnapshot } from '../../core/tarifacao/calcularCustoSessao'
 import { normalizarJanelaDeCobranca } from '../../core/tarifacao/janelaDeCobranca'
 import { alertarSessaoLimitado } from '../sessao/alertasSessao'
-import { liquidarSessao } from './liquidarSessao'
+import { liquidarSessao, notificarAposLiquidacao } from './liquidarSessao'
 import { prepararFechamentoCartao } from '../pagamentos/fecharSessaoCartao'
 import { cancelarPreAutorizacaoCartao } from '../pagamentos/cancelarPreAutorizacaoCartao'
 import { enqueueCapturarSessaoCartao } from '../pagamentos/capturarSessaoCartao'
 import { travarSessao, fotoAindaVale, type FotoDaSessao, type SessaoTravada } from '../sessao/travarSessao'
 import { emitSessionStopped, emitWalletUpdated } from '../../realtime/emit'
+import { notificarSessaoEncerrada } from '../notificacoes/gatilhos'
 
 export const ZERO_CUSTOS: CustoSessaoResultado = {
   energyCostCents: 0,
@@ -184,7 +185,7 @@ export function calcularFechamentoSessao(session: SessaoParaCalcularFechamento, 
  */
 export async function finalizarSessao(sessionId: string, final: FinalizarSessaoInput | ResolverFinalSessao, opcoes: FinalizarSessaoOpcoes = {}): Promise<FinalizarSessaoResultado> {
   type Aborto = { abortado: Extract<FinalizarSessaoResultado, { finalizada: false }>['motivo']; causa?: 'CUSTO_NAO_CALCULADO'; chargePointId?: string }
-  const resultado = await prisma.$transaction(async (tx): Promise<Aborto | { userId: string; chargePointId: string; operatorId: string; walletResultado: Awaited<ReturnType<typeof liquidarSessao>> | null; cardResultado: Awaited<ReturnType<typeof prepararFechamentoCartao>> | null }> => {
+  const resultado = await prisma.$transaction(async (tx): Promise<Aborto | { userId: string; chargePointId: string; operatorId: string; walletResultado: Awaited<ReturnType<typeof liquidarSessao>> | null; closureSource: SessionClosureSource; totalCostCents: number; cardResultado: Awaited<ReturnType<typeof prepararFechamentoCartao>> | null }> => {
     const travada = await travarSessao(tx, sessionId)
 
     if (travada.status === 'STOPPED') return { abortado: 'JA_ENCERRADA' } // corrida: outra chamada já finalizou entre o read e o lock
@@ -258,7 +259,7 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
     const walletResultado = session.paymentMode === 'CARD' ? null : await liquidarSessao(session.id, tx)
     const cardResultado = session.paymentMode === 'CARD' ? await prepararFechamentoCartao(tx, session.id, custos.totalCostCents) : null
 
-    return { userId: session.userId, chargePointId: session.chargePointId, operatorId: session.operatorId, walletResultado, cardResultado }
+    return { userId: session.userId, chargePointId: session.chargePointId, operatorId: session.operatorId, walletResultado, closureSource: entrada.closureSource ?? 'CHARGER', totalCostCents: custos.totalCostCents, cardResultado }
   })
 
   // Publicado DEPOIS do `$transaction` acima ter resolvido (= commit real) —
@@ -283,6 +284,11 @@ export async function finalizarSessao(sessionId: string, final: FinalizarSessaoI
       logger.error({ err, sessionId }, '[realtime] falha ao publicar wallet.updated (não bloqueante)'),
     )
   }
+
+  // L1.6 — avisos ao motorista (recibo ou 'encerrada pelo servidor'; cobrança com dívida; saldo baixo no cruzamento). DEPOIS do commit e fire-and-forget: nunca derrubam nem atrasam o
+  // fechamento (rede/SMTP/Redis fora = só o e-mail deixa de sair). Sessão que virou dívida NÃO manda recibo ('pago com a carteira' seria mentira): quem avisa é a cobrança pendente.
+  notificarSessaoEncerrada({ sessionId, userId: resultado.userId, closureSource: resultado.closureSource, totalCostCents: resultado.totalCostCents, temDivida: (resultado.walletResultado?.remainingDebtCents ?? 0) > 0 })
+  if (resultado.walletResultado) notificarAposLiquidacao(sessionId, resultado.walletResultado)
 
   // CARD: a chamada de rede de verdade acontece só AGORA (depois do commit) —
   // nunca bloqueia o ack ao carregador (o `StopTransaction` já respondeu

@@ -21,8 +21,14 @@ const Toaster = lazy(() => import("@/components/ui/Toaster").then((m) => ({ defa
 const RealtimeConnection = lazy(() => import("@/components/realtime/RealtimeConnection").then((m) => ({ default: m.RealtimeConnection })))
 const Home = lazy(() => import("@/pages/Public/Home").then((m) => ({ default: m.Home })))
 const Eletropostos = lazy(() => import("@/pages/Public/Eletropostos").then((m) => ({ default: m.Eletropostos })))
+// Documentos legais (L1.9): públicos, sem login. As duas rotas partilham UM chunk (`pages/Public/Legal`); o texto mora em `content/legal/*`.
+const Termos = lazy(() => import("@/pages/Public/Legal").then((m) => ({ default: m.Termos })))
+const Privacidade = lazy(() => import("@/pages/Public/Legal").then((m) => ({ default: m.Privacidade })))
 const Login = lazy(() => import("@/pages/Auth/Login").then((m) => ({ default: m.Login })))
 const Register = lazy(() => import("@/pages/Auth/Register").then((m) => ({ default: m.Register })))
+// Recuperação de senha (L1.3): públicas, sem layout. A rota de redefinição lê o token do FRAGMENTO da URL (`#t=`) e o apaga na montagem.
+const ForgotPassword = lazy(() => import("@/pages/Auth/ForgotPassword").then((m) => ({ default: m.ForgotPassword })))
+const ResetPassword = lazy(() => import("@/pages/Auth/ResetPassword").then((m) => ({ default: m.ResetPassword })))
 const AdminLayout = lazy(() => import("@/pages/Admin/Layout").then((m) => ({ default: m.AdminLayout })))
 const AdminSites = lazy(() => import("@/pages/Admin/Sites"))
 const AdminChargePoints = lazy(() => import("@/pages/Admin/ChargePoints"))
@@ -38,6 +44,16 @@ const AdminPagamentos = lazy(() => import("@/pages/Admin/Pagamentos"))
 const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
+// Configurações da plataforma (só ADMIN): casca com abas por SUBROTA, cada aba num chunk próprio (geral = dados da empresa; email, whatsapp e alertas = comunicação).
+const AdminConfiguracoes = lazy(() => import("@/pages/Admin/Configuracoes"))
+const ConfigGeral = lazy(() => import("@/pages/Admin/Configuracoes/GeralTab"))
+const ConfigEmail = lazy(() => import("@/pages/Admin/Configuracoes/EmailTab"))
+const ConfigWhatsapp = lazy(() => import("@/pages/Admin/Configuracoes/WhatsappTab"))
+const ConfigAlertas = lazy(() => import("@/pages/Admin/Configuracoes/AlertasTab"))
+const AdminBackups = lazy(() => import("@/pages/Admin/Backups"))
+// Estorno e chargeback (L1.8) e devoluções de contas excluídas (L1.4): dinheiro de terceiros, só ADMIN (UI e servidor).
+const AdminChargebacks = lazy(() => import("@/pages/Admin/Chargebacks"))
+const AdminDevolucoesContasExcluidas = lazy(() => import("@/pages/Admin/DevolucoesContasExcluidas"))
 
 // Catálogo do design system (`/__ds`): SÓ em dev. `import.meta.env.DEV` é substituído por `false` no build, a expressão colapsa para `null` e o
 // `import()` sai do bundle (e do precache do PWA) — conferido com grep no `dist/`. Ver `src/dev/DesignSystemCatalog.tsx`.
@@ -91,6 +107,18 @@ function LandingFallback() {
   )
 }
 
+/** `/admin/comunicacao` (rota antiga, favoritos e links) virou a aba E-mail de Configurações: redireciona preservando a query e o fragmento. */
+function ComunicacaoRedirect() {
+  const { search, hash } = useLocation()
+  return <Navigate to={{ pathname: "/admin/configuracoes/email", search, hash }} replace />
+}
+
+/** O callback do Google (`GET /api/backup/google/callback`) devolve o navegador a `/admin/backup?google=ok|erro&motivo=…`; a tela vive em `/admin/backups`. Preserva a query. */
+function BackupGoogleReturn() {
+  const { search } = useLocation()
+  return <Navigate to={{ pathname: "/admin/backups", search }} replace />
+}
+
 /** Toaster só fora da landing: ela nunca dispara toast, e o sonner pesa ~33 KB no caminho crítico. Ao navegar para outra rota monta na hora. */
 function AppToaster() {
   const onLanding = useLocation().pathname === "/"
@@ -130,6 +158,8 @@ export default function App() {
             {/* Auth (sem layout público) */}
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />
+            <Route path="/esqueci-senha" element={<ForgotPassword />} />
+            <Route path="/redefinir-senha" element={<ResetPassword />} />
 
             {/* PWA do motorista — landing pública pós-QR + área autenticada DRIVER-only */}
             <Route path="/c/:ocppIdentity" element={<ChargePointLanding />} />
@@ -180,6 +210,51 @@ export default function App() {
                   </RequireAuth>
                 }
               />
+              {/* Chargebacks avisados pela Cielo (L1.8) e fila de devolução do saldo de contas excluídas (L1.4): dinheiro, só ADMIN; o servidor confere de novo (403). */}
+              <Route
+                path="chargebacks"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminChargebacks />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="devolucoes-contas-excluidas"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminDevolucoesContasExcluidas />
+                  </RequireAuth>
+                }
+              />
+              {/* Configurações da PLATAFORMA (dados da empresa, e-mail SMTP, WhatsApp Evolution, alertas): só ADMIN; o servidor confere de novo (403). Abas por subrota; `/admin/configuracoes` abre a Geral. */}
+              <Route
+                path="configuracoes"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminConfiguracoes />
+                  </RequireAuth>
+                }
+              >
+                <Route index element={<Navigate to="geral" replace />} />
+                <Route path="geral" element={<ConfigGeral />} />
+                <Route path="email" element={<ConfigEmail />} />
+                <Route path="whatsapp" element={<ConfigWhatsapp />} />
+                <Route path="alertas" element={<ConfigAlertas />} />
+                {/* Aba que não existe: volta à Geral (um 404 de página inteira, com `<main>` e `<h1>` próprios, ficaria aninhado na casca do painel). */}
+                <Route path="*" element={<Navigate to="/admin/configuracoes/geral" replace />} />
+              </Route>
+              <Route path="comunicacao" element={<ComunicacaoRedirect />} />
+              {/* Backup automático do banco: configuração da PLATAFORMA, só ADMIN; o servidor confere de novo (403). `/admin/backup` (singular) é para onde o callback do Google devolve o navegador (`?google=ok|erro`): redireciona para a tela, preservando a query. */}
+              <Route
+                path="backups"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminBackups />
+                  </RequireAuth>
+                }
+              />
+              <Route path="backup" element={<BackupGoogleReturn />} />
               {/* AuditLog é ADMIN-only por decisão de produto (rastreabilidade da rede inteira, ver decisoes-audit-log.md). */}
               <Route
                 path="auditoria"
@@ -204,6 +279,8 @@ export default function App() {
             {/* Público (casca clara: Header + Footer) */}
             <Route element={<Layout />}>
               <Route path="eletropostos" element={<Eletropostos />} />
+              <Route path="termos" element={<Termos />} />
+              <Route path="privacidade" element={<Privacidade />} />
             </Route>
 
             {DesignSystemCatalog && <Route path="/__ds" element={<DesignSystemCatalog />} />}

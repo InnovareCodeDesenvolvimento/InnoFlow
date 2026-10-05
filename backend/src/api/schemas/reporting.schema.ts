@@ -61,6 +61,10 @@ export type SessionsReportQuery = z.infer<typeof sessionsReportQuerySchema>
 export const paymentsReportQuerySchema = baseReportQuerySchema.extend({
   provider: z.enum(['CIELO_CARD', 'CIELO_PIX', 'WALLET']).optional(),
   status: z.enum(['CREATED', 'AUTHORIZED', 'CAPTURE_PENDING', 'CAPTURED', 'CANCELLED', 'DENIED', 'VOIDED', 'FAILED', 'EXPIRED']).optional(),
+  // L1.8: identificadores da adquirente (Tid / código de autorização / NSU) para achar a venda de um chargeback. `VarChar(64)` no banco; vazio é "sem filtro" (o formulário manda string vazia).
+  tid: z.string().trim().max(64).transform((v) => (v === '' ? undefined : v)).optional(),
+  authorizationCode: z.string().trim().max(64).transform((v) => (v === '' ? undefined : v)).optional(),
+  proofOfSale: z.string().trim().max(64).transform((v) => (v === '' ? undefined : v)).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   ...formatQueryFragment,

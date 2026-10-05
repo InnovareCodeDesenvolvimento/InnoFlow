@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type RefObject } from "react"
 import { Send, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/Dialog"
 import { Input } from "@/components/ui/Input"
@@ -34,11 +34,14 @@ export function ChargePointCommandDialog({
   onOpenChange,
   chargePointId,
   command,
+  restoreFocusTo,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   chargePointId: string
   command: Extract<ChargePointCommandType, "unlock" | "change-availability" | "trigger-message"> | null
+  /** Para onde o foco volta ao fechar (o botão do menu da linha — o item do menu que abriu o diálogo já não existe). */
+  restoreFocusTo?: RefObject<HTMLElement | null>
 }) {
   const sendCommand = useSendChargePointCommand()
   const [connectorId, setConnectorId] = useState(1)
@@ -71,7 +74,15 @@ export function ChargePointCommandDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent widthClassName="sm:max-w-sm">
+      <DialogContent
+        widthClassName="sm:max-w-sm"
+        onCloseAutoFocus={(e) => {
+          if (restoreFocusTo?.current) {
+            e.preventDefault()
+            restoreFocusTo.current.focus()
+          }
+        }}
+      >
         <DialogHeader icon={Send}>
           <DialogTitle>{titles[command]}</DialogTitle>
           <DialogDescription>Comando enviado ao carregador via OCPP — sem confirmação em tempo real nesta fase.</DialogDescription>

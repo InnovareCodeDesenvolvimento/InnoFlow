@@ -1111,3 +1111,10 @@ Plano: docs/PLANO-FUNCIONALIDADES.md (Nova, 46efc03). Todas = recomendação da 
 - DL8: estorno de cartão pelo portal da Cielo + registro assistido no InnoFlow; por API só depois do sandbox.
 - LGPD = anonimização, nunca DELETE. Pendente do dono: CNPJ, razão social, e-mail de suporte e encarregado (DPO) — bloqueiam L1.9 (termos/privacidade) e o rodapé dos e-mails; SPF/DKIM/DMARC do domínio remetente (Vulcano + dono).
 - Estado: L1.1 entregue (5b75272); L1.7/N-11 (Cronos), L1.2/L1.5 backend + contrato (Vega-B), notificador de alertas e e-mail (Vega-A) em andamento.
+
+### Decisões P1–P4 do modelo de dados do lote 1 (05/10/2026)
+- **P1 ACEITA:** a exclusão de conta grava o evento `ACCOUNT_DELETION` já com o snapshot de ator anonimizado; a política de privacidade informa que registros de auditoria antigos são mantidos; o trigger append-only do AuditLog NÃO é alterado.
+- **P4 ACEITA:** prazo máximo de 30 dias (com alerta) para devolver o saldo pendente da conta excluída; devolução SEMPRE do saldo integral (sem reembolso parcial).
+- **P2 e P3: sem resposta do dono ainda.** Os agentes seguem o default recomendado (reversível): P2 zerar `startIp/startUserAgent` das sessões do titular na exclusão; P3 chargeback perdido bloqueia o cartão, com desbloqueio manual pelo ADMIN caso a caso.
+- **P2 ACEITA (05/10/2026):** a exclusão de conta zera `startIp`/`startUserAgent` das sessões do titular.
+- **P3 ACEITA (05/10/2026):** chargeback perdido bloqueia o cartão do motorista; o ADMIN pode desbloquear manualmente, caso a caso (coluna/ação de desbloqueio em `PaymentReversal`, expand puro — a implementar pelo Vega-E/Cronos se ainda não existir).

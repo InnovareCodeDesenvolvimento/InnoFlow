@@ -122,6 +122,8 @@ router.post(
         userId,
         payment: body.payment,
         clientIp: req.ip ?? null,
+        // L1.8: IP (respeita `trust proxy`) e User-Agent do app, para o dossiê de chargeback. Truncados e guardados em `services/sessao/origemDoInicio.ts`.
+        origemDoInicio: { ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null },
       })
 
       res.status(202).json({

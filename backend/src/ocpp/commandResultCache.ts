@@ -30,6 +30,11 @@ export interface CommandOwner {
   userId: string
   chargePointId: string
   operatorId: string
+  /**
+   * Só no REMOTE-START: o idTag VIRTUAL gerado no disparo (único por comando, nunca reaproveitado). É a chave segura para a consulta do staff achar a sessão que NASCEU deste comando
+   * (`ChargingSession.authToken.idTag`) sem adivinhar por motorista/horário. Vem do SERVIDOR; nunca sai na resposta da consulta.
+   */
+  idTag?: string
 }
 
 export interface CommandRecord {
@@ -38,28 +43,32 @@ export interface CommandRecord {
   /** `null` só em registro do formato ANTIGO (`userId|status`, anterior à L1.5; vive no máximo 2 min depois do deploy) — staff de operador NUNCA o enxerga. */
   chargePointId: string | null
   operatorId: string | null
+  /** Presente só em registro de remote-start gravado depois do 5º campo (ver `CommandOwner.idTag`); ausente nos demais e nos formatos antigos. */
+  idTag?: string
 }
 
 const STATUS_VALIDOS: ReadonlySet<string> = new Set<CommandRecordStatus>(['ACCEPTED', 'REJECTED', 'TIMEOUT', 'PENDING'])
 
 /**
- * Valor gravado: `<userId>|<status>|<chargePointId>|<operatorId>`. O resultado fica VINCULADO ao motorista (Órion, 19/09/2026) E ao escopo do operador (L1.5): sem isso,
+ * Valor gravado: `<userId>|<status>|<chargePointId>|<operatorId>` (+ `|<idTag>` no remote-start). O resultado fica VINCULADO ao motorista (Órion, 19/09/2026) E ao escopo do operador (L1.5): sem isso,
  * `GET /api/me/commands/:correlationId` respondia o status de QUALQUER correlationId para qualquer motorista logado (o UUID é imprevisível, mas vaza em log e em resposta 202 —
  * defesa em profundidade) e a consulta admin vazaria entre operadores. Os ids são cuids (sem `|`).
  */
 export function encodeCommandResult(owner: CommandOwner, status: CommandRecordStatus): string {
-  return `${owner.userId}|${status}|${owner.chargePointId}|${owner.operatorId}`
+  const base = `${owner.userId}|${status}|${owner.chargePointId}|${owner.operatorId}`
+  return owner.idTag ? `${base}|${owner.idTag}` : base
 }
 
-/** `null` = ausente ou malformado. Aceita também o formato antigo de 2 partes (`userId|status`). */
+/** `null` = ausente ou malformado. Aceita também o formato antigo de 2 partes (`userId|status`) e o de 5 partes (remote-start, com o idTag). */
 export function decodeCommandRecord(raw: string | null): CommandRecord | null {
   if (!raw) return null
   const parts = raw.split('|')
-  if (parts.length !== 2 && parts.length !== 4) return null
-  const [userId, status, chargePointId, operatorId] = parts
+  if (parts.length !== 2 && parts.length !== 4 && parts.length !== 5) return null
+  const [userId, status, chargePointId, operatorId, idTag] = parts
   if (!userId || !status || !STATUS_VALIDOS.has(status)) return null
-  if (parts.length === 4 && (!chargePointId || !operatorId)) return null
-  return { userId, status: status as CommandRecordStatus, chargePointId: chargePointId ?? null, operatorId: operatorId ?? null }
+  if (parts.length >= 4 && (!chargePointId || !operatorId)) return null
+  if (parts.length === 5 && !idTag) return null
+  return { userId, status: status as CommandRecordStatus, chargePointId: chargePointId ?? null, operatorId: operatorId ?? null, ...(idTag ? { idTag } : {}) }
 }
 
 /** `null` quando o valor é de OUTRO usuário, está malformado, não existe OU ainda está `PENDING` — a rota do motorista trata tudo como `PENDING` (indistinguível de "ainda em andamento": não confirma que o correlationId existe). */
@@ -74,11 +83,16 @@ export function decodeCommandResult(raw: string | null, userId: string): Command
  * próprio operador. Registro sem `operatorId` (formato antigo) NUNCA é visível a OPERATOR. `null` = "não existe" — fora do escopo é indistinguível de inexistente/expirado.
  */
 export function decodeCommandStatusForStaff(raw: string | null, scope: { operatorId?: string }): CommandRecordStatus | null {
+  return decodeCommandRecordForStaff(raw, scope)?.status ?? null
+}
+
+/** Mesma regra de escopo de `decodeCommandStatusForStaff`, mas devolve o REGISTRO inteiro (a consulta do staff precisa do idTag/charge point para achar a sessão). */
+export function decodeCommandRecordForStaff(raw: string | null, scope: { operatorId?: string }): CommandRecord | null {
   const record = decodeCommandRecord(raw)
   if (!record) return null
   // `in` (não `!== undefined`): um escopo `{ operatorId: undefined }` por bug do chamador falha FECHADO (não vê nada) em vez de virar "ADMIN vê tudo".
   if ('operatorId' in scope && record.operatorId !== scope.operatorId) return null
-  return record.status
+  return record
 }
 
 export async function recordCommandResult(correlationId: string, status: CommandRecordStatus, owner: CommandOwner): Promise<void> {
@@ -101,6 +115,11 @@ export async function getCommandResult(correlationId: string, userId: string): P
 /** Consulta do staff: `null` = 404 (inexistente, expirado ou fora do escopo — indistinguíveis). */
 export async function getCommandStatusForStaff(correlationId: string, scope: { operatorId?: string }): Promise<CommandRecordStatus | null> {
   return decodeCommandStatusForStaff(await redis.get(`${KEY_PREFIX}${correlationId}`), scope)
+}
+
+/** Consulta do staff com o registro inteiro (status + escopo + idTag do remote-start): `null` = 404, mesmas regras de `getCommandStatusForStaff`. */
+export async function getCommandRecordForStaff(correlationId: string, scope: { operatorId?: string }): Promise<CommandRecord | null> {
+  return decodeCommandRecordForStaff(await redis.get(`${KEY_PREFIX}${correlationId}`), scope)
 }
 
 /**

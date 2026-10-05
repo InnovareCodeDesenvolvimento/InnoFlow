@@ -13,12 +13,19 @@ import { AppError, errorHandler } from './middleware/errorHandler'
 import { adminRateLimit, publicRateLimit, webhookCieloRateLimit } from './middleware/rateLimit'
 import { auditTrail } from './middleware/auditTrail'
 import authRoutes from './routes/auth.routes'
+import passwordResetRoutes from './routes/passwordReset.routes'
 import publicSitesRoutes from './routes/publicSites.routes'
 import publicChargePointsRoutes from './routes/publicChargePoints.routes'
 import publicConfigRoutes from './routes/publicConfig.routes'
 import webhooksCieloRoutes from './routes/webhooksCielo.routes'
 import meRoutes from './routes/me.routes'
 import meProfileRoutes from './routes/meProfile.routes'
+import meDataExportRoutes from './routes/meDataExport.routes'
+import meAccountRoutes from './routes/meAccount.routes'
+import meConsentsRoutes from './routes/meConsents.routes'
+import meNotificationPreferencesRoutes from './routes/meNotificationPreferences.routes'
+import publicLegalRoutes from './routes/publicLegal.routes'
+import adminAccountDeletionsRoutes from './routes/adminAccountDeletions.routes'
 import adminSitesRoutes from './routes/sites.routes'
 import adminChargePointsRoutes from './routes/chargePoints.routes'
 import adminConnectorsRoutes from './routes/connectors.routes'
@@ -34,7 +41,11 @@ import adminAuditLogsRoutes from './routes/auditLogs.routes'
 import adminEventsRoutes from './routes/events.routes'
 import adminPaymentGatewayRoutes from './routes/paymentGateway.routes'
 import adminCommunicationSettingsRoutes from './routes/communicationSettings.routes'
+import adminCompanyProfileRoutes from './routes/companyProfile.routes'
 import adminCommandsRoutes from './routes/adminCommands.routes'
+import adminBackupRoutes, { backupGoogleCallbackRouter } from './routes/backup.routes'
+import { refundsRouter, sessionRefundsRouter } from './routes/paymentReversals.routes'
+import { chargebacksRouter, paymentChargebacksRouter } from './routes/chargebacks.routes'
 
 /**
  * Monta o app Express da API — auth JWT, isolamento multi-tenant e os CRUDs
@@ -71,6 +82,9 @@ export function createApp(): Express {
         logger.warn({ origin }, '[cors] origem bloqueada — fora da allowlist de CORS_ALLOWED_ORIGINS')
         callback(new AppError('Origem não permitida.', 403, 'CORS_FORBIDDEN'))
       },
+      // Só ISTO muda para o navegador: por padrão, em requisição entre domínios o JS só lê os cabeçalhos "seguros" (Content-Type etc.). `Retry-After` (429 do rate limit e do lockout) fica
+      // ilegível sem isto e o front não consegue mostrar "tente de novo em N s". Não afrouxa nada: não muda origem, métodos, cabeçalhos permitidos nem credenciais.
+      exposedHeaders: ['Retry-After'],
     }),
   )
   app.use(compression())
@@ -103,11 +117,18 @@ export function createApp(): Express {
   })
 
   app.use('/api/auth', authRoutes) // rate limit próprio (mais apertado) já aplicado nas rotas de login/registro
+  app.use('/api/auth/password', passwordResetRoutes) // público (L1.3): /forgot e /reset — rate limit próprio nas rotas; o POST autenticado /api/auth/password segue em authRoutes
   app.use('/api/sites', publicRateLimit, publicSitesRoutes) // público — app do motorista
   app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
   app.use('/api/public/config', publicRateLimit, publicConfigRoutes) // público — configuração da tela de login (Google client ID)
+  app.use('/api/public/legal', publicRateLimit, publicLegalRoutes) // público (L1.9) — versão vigente dos termos/privacidade e dados da empresa
+  app.use('/api/backup/google', publicRateLimit, backupGoogleCallbackRouter) // público, SEM JWT (o Google redireciona o navegador): callback do "Conectar com Google" do backup — a prova é o `state` assinado de uso único
   app.use('/api/webhooks/cielo', webhookCieloRateLimit, webhookJsonParser(), webhooksCieloRoutes) // público, SEM JWT (a Cielo não manda Bearer) — segredo próprio (pathToken + header estático), ver F5.2
   app.use('/api/me/profile', adminRateLimit, meProfileRoutes) // DRIVER only (L1.2) — ANTES de /api/me: o router do perfil responde por si; mesmo teto geral das demais /api/me/*
+  app.use('/api/me/data-export', adminRateLimit, meDataExportRoutes) // DRIVER only (L1.4) — exportação dos dados do titular (3/dia)
+  app.use('/api/me/account', adminRateLimit, meAccountRoutes) // DRIVER only (L1.4) — exclusão/anonimização da conta
+  app.use('/api/me/consents', adminRateLimit, meConsentsRoutes) // DRIVER only (L1.9) — aceite dos termos
+  app.use('/api/me/notification-preferences', adminRateLimit, meNotificationPreferencesRoutes) // DRIVER only (L1.6) — preferências de e-mail (recibo, saldo baixo, limiar)
   app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start e /wallet/topups é mais apertado, aplicado na própria rota
 
   // Log de auditoria (Nova, 2026-09-17) — montado ANTES de todo router
@@ -128,9 +149,17 @@ export function createApp(): Express {
   app.use('/api/admin/operators', adminRateLimit, adminOperatorsRoutes)
   app.use('/api/admin/sessions', adminRateLimit, adminSessionsRoutes)
   app.use('/api/admin/drivers', adminRateLimit, adminDriversRoutes)
+  // Estorno e chargeback (L1.8) — ADMIN-only por rota, step-up de senha nas escritas. `/sessions` é compartilhado com o router de parar sessão (OPERATOR+ADMIN): o que não casa lá cai aqui.
+  app.use('/api/admin/sessions', adminRateLimit, sessionRefundsRouter)
+  app.use('/api/admin/refunds', adminRateLimit, refundsRouter)
+  app.use('/api/admin/payments', adminRateLimit, paymentChargebacksRouter)
+  app.use('/api/admin/chargebacks', adminRateLimit, chargebacksRouter)
+  app.use('/api/admin/account-deletions', adminRateLimit, adminAccountDeletionsRoutes) // ADMIN-only (L1.4/DL2) — devolução manual do saldo de conta excluída
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
   app.use('/api/admin/payment-gateway', adminRateLimit, adminPaymentGatewayRoutes) // ADMIN-only (F5.5) — config da conta Cielo
+  app.use('/api/admin/company-profile', adminRateLimit, adminCompanyProfileRoutes) // ADMIN-only — dados da empresa (controlador, suporte, DPO) e versões dos termos
   app.use('/api/admin/communication-settings', adminRateLimit, adminCommunicationSettingsRoutes) // ADMIN-only (N-7) — e-mail (SMTP) e WhatsApp (Evolution API) dos avisos ao dono
+  app.use('/api/admin/backup', adminRateLimit, adminBackupRoutes) // ADMIN-only — backup automático do banco (config, chave, histórico, executar/conferir, Google Drive)
   app.use('/api/admin/commands', adminRateLimit, adminCommandsRoutes) // resultado de comando remoto (L1.5) — mesma política de papel do disparo (DL4)
   app.use('/api/admin/events', adminRateLimit, adminEventsRoutes) // SSE — teto por IP aqui; abertura por usuário e teto de streams dentro da rota
 

@@ -80,6 +80,10 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   payment_webhook_secret_weak: 'INFO',
   payment_webhook_secret_decrypt_failed: 'IMPORTANTE',
   payment_card_testing_suspected: 'IMPORTANTE', // carding: o bloqueio automático já agiu
+  payment_refund_portal_pending_overdue: 'IMPORTANTE', // devolução registrada como feita no portal da Cielo e a consulta ainda não a mostra (ou a venda saiu da janela de consulta)
+  payment_refund_portal_status_mismatch: 'IMPORTANTE', // a Cielo mostra a venda totalmente estornada, mas o registro no InnoFlow é parcial
+  chargeback_response_deadline_near: 'CRITICO', // chargeback em aberto com o prazo de resposta em até 3 dias: perder o prazo = perder a disputa (L1.8)
+  chargeback_response_deadline_overdue: 'CRITICO', // o prazo de resposta já venceu e o chargeback segue em aberto (avisa todo dia até o desfecho)
   payment_gateway_stepup_failed: 'IMPORTANTE', // senha de admin errada na confirmação da config do gateway
   payment_gateway_stepup_locked: 'IMPORTANTE',
   payment_gateway_stepup_unavailable: 'IMPORTANTE',
@@ -93,11 +97,23 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   ocpp_trust_proxy_hops_zero_in_production: 'IMPORTANTE',
   google_link_repeated_failures: 'IMPORTANTE',
   login_account_locked: 'INFO',
+  login_deletion_stepup_failed: 'INFO', // motorista errou a senha ao excluir a própria conta (ruído do titular, não do ADMIN)
+  login_deletion_stepup_locked: 'INFO',
+  login_deletion_stepup_unavailable: 'INFO',
+  payment_refund_pending_overdue: 'IMPORTANTE', // devolução de saldo de conta excluída pendente há mais de 30 dias (guarda a chave Pix cifrada de uma conta já anonimizada)
 
   // --- operação ----------------------------------------------------------------------------------------------------------------------
   session_watchdog_redis_unstable: 'IMPORTANTE',
   session_watchdog_scan_truncated: 'IMPORTANTE',
   communication_config_changed: 'IMPORTANTE', // alguém alterou para onde os avisos vão (se não foi você: sinal de invasão)
+  communication_notification_failed: 'IMPORTANTE', // e-mail ao motorista (recibo, cobrança, senha...) NÃO saiu depois de todas as tentativas: SMTP fora/mal configurado (L1.6)
+
+  // --- backup automático do banco (Vega-F) — services/backup/ -------------------------------------------------------------------------
+  backup_failed: 'CRITICO', // o backup AGENDADO falhou (ou foi abandonado): o banco está sem cópia nova — perder o banco é o único incidente sem volta
+  backup_verify_failed: 'CRITICO', // a conferência semanal da cópia mais recente reprovou: uma cópia que não abre não é backup
+  backup_stale: 'IMPORTANTE', // automático ligado e nenhuma cópia dentro do limite (padrão 36 h)
+  backup_config_changed: 'IMPORTANTE', // alguém mexeu em para onde o dump vai / na chave / na conta Google (se não foi você: sinal de invasão)
+  backup_prune_failed: 'INFO', // a retenção não conseguiu apagar cópias antigas (sobraram no destino); o backup em si deu certo
 
   // --- partições e retenção (N-11, Cronos) — services/manutencao/ ---------------------------------------------------------------------
   partition_horizon_low: 'IMPORTANTE', // < 2 meses de partições à frente: a criação automática não está funcionando
@@ -152,8 +168,16 @@ export const ORIENTACAO_DOS_ALERTAS: Readonly<Record<string, string>> = {
   payment_fake_adapter_in_production: 'Adaptador FAKE ativo em producao (aprova qualquer cartao, nao cobra nada): remover PAYMENT_ALLOW_FAKE_ADAPTER.',
   payment_config_changed: 'Alguem alterou a config do gateway. Se NAO foi voce, trocar a senha do admin e a chave de cifragem.',
   payment_card_testing_suspected: 'Padrao de teste de cartoes (carding): o bloqueio automatico ja agiu; conferir os IPs/usuarios e considerar bloquear no firewall.',
+  payment_refund_portal_pending_overdue: 'Devolucao no portal da Cielo registrada e ainda nao confirmada: conferir o extrato da Cielo; se o estorno foi feito (parcial ou venda antiga a consulta nao le), CONFIRMAR A MAO no painel com a referencia do comprovante; se nao foi, cancelar o registro. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
+  chargeback_response_deadline_near: 'Chargeback em aberto com o prazo de resposta chegando (campos chargebackId e diasRestantes): baixar o dossie (Admin > Pagamentos > chargeback) e responder no portal da Cielo antes do prazo. Depois, registrar o desfecho. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
+  chargeback_response_deadline_overdue: 'O prazo de resposta de um chargeback JA VENCEU e ele segue em aberto (campos chargebackId e diasDeAtraso): confirmar na Cielo se ainda aceita contestacao; se nao, registrar o desfecho (perdido/aceito) no painel para parar este aviso. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
+  payment_refund_portal_status_mismatch: 'A Cielo mostra a venda totalmente estornada mas o registro no InnoFlow e parcial: conferir o portal e ajustar o registro. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
   ocpp_auth_ip_flood: 'IP bloqueado por excesso de falhas de autenticacao OCPP: se for um carregador seu, confira a senha dele; senao, ignore ou bloqueie no firewall.',
   ocpp_foreign_transaction: 'Carregador usou o transactionId de outro: firmware com defeito ou tentativa de fraude; conferir o carregador.',
+  payment_refund_pending_overdue: 'Ha devolucao de saldo de conta excluida pendente ha mais de 30 dias: fazer o Pix para a chave informada e registrar a devolucao no painel (Contas excluidas).',
+  communication_notification_failed: 'Um e-mail ao motorista (recibo, cobranca pendente, senha...) nao saiu depois de todas as tentativas: conferir o SMTP em Admin > Comunicacao (botao de teste). O motivo esta no campo motivo; os ids, no log notification_job_failed.',
+  backup_failed: 'O backup do banco falhou: abra Admin > Backup (o historico mostra o codigo do erro), corrija e use Fazer backup agora. Enquanto isso o banco esta sem copia nova. Ver docs/DEPLOY-EASYPANEL.md, secao Backups.',
+  backup_verify_failed: 'A copia mais recente do backup nao passou na conferencia (adulterada, ilegivel ou chave diferente): faca um backup novo, confira de novo e NAO restaure a copia reprovada. Ver docs/DEPLOY-EASYPANEL.md, secao Backups.',
 }
 
 export const ORIENTACAO_PADRAO = 'Ver docs/GO-LIVE-PAGAMENTOS.md secao 6 (Alertas de Log) e os logs do EasyPanel (procure o campo alert).'

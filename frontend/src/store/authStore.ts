@@ -27,7 +27,7 @@ interface AuthState {
   login: (payload: LoginPayload) => Promise<User>
   register: (payload: RegisterPayload) => Promise<User>
   /** Login/cadastro com Google (ID token do GIS) — mesmo destino do login normal: token no localStorage + estado de auth. */
-  googleLogin: (credential: string) => Promise<User>
+  googleLogin: (credential: string, acceptedTermsVersion?: string) => Promise<User>
   logout: () => void
   /**
    * Troca a sessão INTEIRA (token + usuário) sem passar pelo login — usado depois de `POST /api/auth/password`, que revoga todos os tokens anteriores (inclusive
@@ -79,10 +79,11 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      googleLogin: async (credential) => {
+      googleLogin: async (credential, acceptedTermsVersion) => {
         set({ isLoading: true })
         try {
-          const { token, user } = await (await loadAuthService()).google({ credential })
+          // `acceptedTermsVersion` só é lido pelo servidor quando o Google vai CRIAR a conta (L1.9); quem já tem conta entra igual, com ou sem ele.
+          const { token, user } = await (await loadAuthService()).google(acceptedTermsVersion ? { credential, acceptedTermsVersion } : { credential })
           localStorage.setItem(TOKEN_STORAGE_KEY, token)
           set({ user, token, isAuthenticated: true, isLoading: false })
           return user

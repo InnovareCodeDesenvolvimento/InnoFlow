@@ -46,7 +46,24 @@ export const mockUsers: MockUser[] = [
   // (`sandboxRestricted:true`) e troca de ambiente bloqueada por pagamentos em andamento (409 `GATEWAY_HAS_INFLIGHT_PAYMENTS`).
   { id: "user_admin_gateway_ilegivel_segredos", name: "Sílvia Segredos", email: "gateway-ilegivel-segredos@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_sandbox_publico", name: "Sandra Sandbox", email: "gateway-sandbox-publico@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  // Admins de CENÁRIO da tela Comunicação (N-7) — o estado do mock vive por usuário (`mocks/communicationData.ts`); cada conta nasce num cenário determinístico para o E2E.
+  { id: "user_admin_comunicacao_pronta", name: "Cláudia Comunicação", email: "comunicacao-pronta@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_vazia", name: "Vera Vazia", email: "comunicacao-vazia@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_sem_chave", name: "Sérgio Sem-Chave", email: "comunicacao-sem-chave@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_ilegivel", name: "Iara Ilegível", email: "comunicacao-ilegivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_indisponivel", name: "Ítalo Indisponível", email: "comunicacao-indisponivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_comunicacao_rede_privada", name: "Rui Rede-Privada", email: "comunicacao-rede-privada@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_em_andamento", name: "Emílio Andamento", email: "gateway-em-andamento@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  // Admins de CENÁRIO da tela Backups — o estado do mock vive por usuário (`mocks/backupData.ts`); cada conta nasce num cenário determinístico para o E2E. `admin@` = primeiro uso (sem destino nem chave).
+  { id: "user_admin_backup_s3", name: "Beto Bucket", email: "backup-s3@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_drive", name: "Dora Drive", email: "backup-drive@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_drive_desconectado", name: "Davi Desconectado", email: "backup-drive-desconectado@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_atrasado", name: "Alice Atrasada", email: "backup-atrasado@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_nunca", name: "Nuno Nunca", email: "backup-nunca@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_andamento", name: "Ana Andamento", email: "backup-andamento@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_sem_chave", name: "Silas Sem-Chave", email: "backup-sem-chave@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_ilegivel", name: "Ilda Ilegível", email: "backup-ilegivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_indisponivel", name: "Ivan Indisponível", email: "backup-indisponivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
   // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).
   { id: "user_driver", name: "Carla Motorista", email: "motorista@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
@@ -89,7 +106,16 @@ export const mockUsers: MockUser[] = [
   { id: "user_driver_so_google", name: "Gael Google", email: "so-google@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "", hasPassword: false },
   // I-7: bloqueio TEMPORÁRIO por recusas em excesso (`TEMPORARILY_BLOCKED`, `blockedUntil` = ~47 min depois de a página carregar). Nasce com 1 cartão.
   { id: "user_driver_bloqueado", name: "Bruno Bloqueado", email: "bloqueado-cartao@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // L1.8: chargeback registrado pelo ADMIN - `cardEligibility` volta CHARGEBACK_BLOCKED e o cartão (cadastro, tokenização, iniciar com CARD) responde 403 `CARD_CHARGEBACK_BLOCKED`.
+  // Pix e carteira seguem normais. Nasce com 2 cartões (aparecem desabilitados). Conta separada de propósito: o estado do mock vive na página e os E2E de cartão dependem de elegível.
+  { id: "user_driver_chargeback", name: "Cléber Chargeback", email: "chargeback@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
   { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // L1.4/L1.9 (privacidade): personas da exclusão de conta e do aceite dos termos (ver o cabeçalho de `mocks/legalData.ts`). Contas separadas de propósito: a exclusão ANONIMIZA a conta no
+  // mock (o login com a senha antiga passa a falhar), então não pode ser feita em motorista que outro E2E usa.
+  { id: "user_driver_exclusao", name: "Edu Exclusão", email: "exclusao@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  { id: "user_driver_exclusao_zero", name: "Zeca Zero", email: "exclusao-zero@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  { id: "user_driver_exclusao_google", name: "Gui Google-Exclusão", email: "exclusao-google@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "", hasPassword: false },
+  { id: "user_driver_termos", name: "Téo Termos", email: "termos@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
 ]
 
 export const mockSites: Site[] = [
@@ -180,6 +206,13 @@ export const mockSites: Site[] = [
   },
 ]
 
+/** `Date.now() - ms` em ISO. Só alimenta `lastSeenAt`/`connectedAt`/`disconnectedAt` dos carregadores de demo; a tela usa o `online` pronto, nunca recalcula por estas datas. */
+const msAgo = (ms: number) => new Date(Date.now() - ms).toISOString()
+
+/**
+ * `online` é decisão do SERVIDOR (lote 1): aqui é um valor fixo por carregador. cp_1/cp_2/cp_3 online; cp_4 (Outlet Campinas, conector livre) CAIU há 2 h e cp_5 nunca
+ * reportou - são os que mostram o aviso "offline" no diálogo de iniciar recarga e recusam o POST com `CHARGE_POINT_OFFLINE`.
+ */
 export const mockChargePoints: ChargePoint[] = [
   {
     id: "cp_1",
@@ -191,6 +224,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-001",
     firmwareVersion: "1.4.2",
     active: true,
+    online: true,
+    lastSeenAt: msAgo(20_000),
+    connectedAt: msAgo(3 * 3_600_000),
+    disconnectedAt: null,
     createdAt: "2026-08-01T12:00:00.000Z",
     updatedAt: "2026-08-01T12:00:00.000Z",
   },
@@ -204,6 +241,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-002",
     firmwareVersion: "2.0.1",
     active: true,
+    online: true,
+    lastSeenAt: msAgo(20_000),
+    connectedAt: msAgo(3 * 3_600_000),
+    disconnectedAt: null,
     createdAt: "2026-08-02T12:00:00.000Z",
     updatedAt: "2026-08-02T12:00:00.000Z",
   },
@@ -217,6 +258,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-003",
     firmwareVersion: "1.4.2",
     active: true,
+    online: true,
+    lastSeenAt: msAgo(20_000),
+    connectedAt: msAgo(3 * 3_600_000),
+    disconnectedAt: null,
     createdAt: "2026-08-03T12:00:00.000Z",
     updatedAt: "2026-08-03T12:00:00.000Z",
   },
@@ -230,6 +275,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-004",
     firmwareVersion: "3.1.0",
     active: true,
+    online: false,
+    lastSeenAt: msAgo(2 * 3_600_000),
+    connectedAt: msAgo(5 * 3_600_000),
+    disconnectedAt: msAgo(2 * 3_600_000 - 60_000),
     createdAt: "2026-08-04T12:00:00.000Z",
     updatedAt: "2026-08-04T12:00:00.000Z",
   },
@@ -243,6 +292,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-005",
     firmwareVersion: "2.0.1",
     active: true,
+    online: false,
+    lastSeenAt: null,
+    connectedAt: null,
+    disconnectedAt: null,
     createdAt: "2026-08-05T12:00:00.000Z",
     updatedAt: "2026-08-05T12:00:00.000Z",
   },

@@ -1,5 +1,13 @@
 import { api } from "./api"
-import type { AuthResponse, ChangePasswordRequest, GoogleAuthRequest, LinkGoogleResponse } from "@/types/api"
+import type {
+  AuthResponse,
+  ChangePasswordRequest,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
+  GoogleAuthRequest,
+  LinkGoogleResponse,
+  ResetPasswordRequest,
+} from "@/types/api"
 
 export interface LoginPayload {
   email: string
@@ -11,6 +19,8 @@ export interface RegisterPayload {
   email: string
   password: string
   phone?: string
+  /** L1.9: versão vigente dos Termos (de `GET /api/public/legal`) que a pessoa aceitou. OBRIGATÓRIA - sem ela o servidor responde 400; versão antiga, 409 `TERMS_VERSION_OUTDATED`. */
+  acceptedTermsVersion: string
 }
 
 /**
@@ -55,5 +65,19 @@ export const authService = {
   async changePassword(payload: ChangePasswordRequest): Promise<AuthResponse> {
     const { data } = await api.post<AuthResponse>("/api/auth/password", payload)
     return data
+  },
+
+  /** `POST /api/auth/password/forgot` (pública) - SEMPRE 202 para e-mail bem formado, exista a conta ou não. Erros: ver `ForgotPasswordRequest`. */
+  async forgotPassword(payload: ForgotPasswordRequest): Promise<ForgotPasswordResponse> {
+    const { data } = await api.post<ForgotPasswordResponse>("/api/auth/password/forgot", payload)
+    return data
+  },
+
+  /**
+   * `POST /api/auth/password/reset` (pública) - 204 sem corpo e SEM sessão (não há auto-login). O token vai no CORPO, nunca na URL. Erros: ver `ResetPasswordErrorCode`.
+   * Rota pública: o servidor não olha o `Authorization` que o interceptor anexa se houver sessão velha no storage, e nunca responde 401 aqui.
+   */
+  async resetPassword(payload: ResetPasswordRequest): Promise<void> {
+    await api.post("/api/auth/password/reset", payload)
   },
 }

@@ -1,10 +1,14 @@
 import { api } from "./api"
 import type {
+  MeAccountDeletionRequest,
+  MeAccountDeletionResponse,
   MeActiveSessionResponse,
   MeCardTokenizationSessionResponse,
   MeCommandStatusResponse,
   MeCreatePaymentMethodRequest,
   MeCreateTopupRequest,
+  MeDataExport,
+  MeNotificationPreferences,
   MeProfile,
   MePaymentMethodDTO,
   MePaymentMethodsResponse,
@@ -17,6 +21,7 @@ import type {
   MeTopupDTO,
   MeWalletQuery,
   MeWalletResponse,
+  UpdateMeNotificationPreferencesRequest,
   UpdateMeProfileRequest,
 } from "@/types/api"
 
@@ -36,6 +41,36 @@ export const meService = {
   /** `PATCH /api/me/profile` (L1.2) - corpo estrito, ao menos um campo; devolve o DTO já atualizado. `null` em `phone`/`cpf` apaga. */
   async updateProfile(payload: UpdateMeProfileRequest): Promise<MeProfile> {
     const { data } = await api.patch<MeProfile>("/api/me/profile", payload)
+    return data
+  },
+
+  /**
+   * `GET /api/me/data-export` (L1.4) - a cópia dos dados do titular, para BAIXAR (a tela não a renderiza). Lido como JSON (e não como blob) de propósito: com `responseType: "blob"` o
+   * corpo do ERRO (429 `RATE_LIMITED_EXPORT`) também chegaria como Blob e o `code` não seria legível. Timeout maior que o padrão (a exportação é síncrona e pode ser grande).
+   */
+  async exportData(): Promise<MeDataExport> {
+    const { data } = await api.get<MeDataExport>("/api/me/data-export", { timeout: 60_000 })
+    return data
+  },
+
+  /**
+   * `POST /api/me/account/deletion` (L1.4) - ANONIMIZA a conta. Reautenticação obrigatória no corpo (`currentPassword` ou `googleCredential`). 200 `{ status }`; depois dele o token
+   * deixa de valer. Erros: ver `MeAccountDeletionErrorCode` e `lib/accountDeletion.ts`.
+   */
+  async deleteAccount(payload: MeAccountDeletionRequest): Promise<MeAccountDeletionResponse> {
+    const { data } = await api.post<MeAccountDeletionResponse>("/api/me/account/deletion", payload)
+    return data
+  },
+
+  /** `GET /api/me/notification-preferences` (L1.6) - sem linha salva volta o padrão (`true`, `true`, 2000). */
+  async getNotificationPreferences(): Promise<MeNotificationPreferences> {
+    const { data } = await api.get<MeNotificationPreferences>("/api/me/notification-preferences")
+    return data
+  },
+
+  /** `PATCH /api/me/notification-preferences` (L1.6) - só as 3 chaves, ao menos uma; devolve o objeto COMPLETO. */
+  async updateNotificationPreferences(payload: UpdateMeNotificationPreferencesRequest): Promise<MeNotificationPreferences> {
+    const { data } = await api.patch<MeNotificationPreferences>("/api/me/notification-preferences", payload)
     return data
   },
 

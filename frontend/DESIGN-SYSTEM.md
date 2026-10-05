@@ -36,6 +36,7 @@ Cores são triplas `R G B` em `:root` (para `rgb(var(--x) / <alpha>)`). Escopos 
 - **`brand/`** — `Logo`, `Mascot`/`MascotFace`, `BrandBackdrop`. **Duas cópias do `Mascot` de propósito** (landing × brand) para a landing não compartilhar chunk com o app; `Mascot.parity.test.ts` impede que divirjam. Imagens do `brand` importam com `?url`.
 - **`feedback/`** — `NotFound`, `RouteError` (boundary leve) + `RouteErrorView`, `LoadingScreen` (mascote só após 700 ms), `AccessDenied` (403 de marca).
 - **Shells** — público (`layout/Header|Footer|PageBand`), auth (`auth/AuthShell`), PWA (`pages/App/Layout` + `pwa/AppBand`; trilho lateral ≥ lg), Admin (`pages/Admin/Layout`, `admin/SidebarNav`; trilha no cabeçalho, **sem heading** — o h1 é o do `PageHeader`).
+- **Busca de motorista (Admin):** `hooks/useDriverSearch` (regra única: debounce, OPERATOR ≥ 3 letras, `minChars` por tela) + `admin/DriverSearchField` — usados por Carteiras e pelo diálogo "Iniciar recarga" (`chargePoints/remoteStart/`, só ADMIN). Escolha única em lista = `remoteStart/RadioRow` (radio nativo `sr-only` + cartão de 44 px; desabilitado escreve o motivo, sem opacidade).
 - **Admin:** raiz da página = `<div className="space-y-6">` sem `max-w-*` (largura = a do shell, igual em todas as telas), `painel/PageHeader`, `admin/AdminStates` (`AdminErrorState`, `AdminFirstUseState` = erro/vazio com mascote).
 - **Menu do Admin abaixo de `lg`:** `admin/AdminDrawer` — diálogo de verdade (Radix: `role="dialog"` nomeado "Menu", foco entra, Tab preso, resto `aria-hidden`, Esc fecha, foco volta a "Abrir menu"); novo painel lateral/menu em overlay deve ser Radix Dialog, nunca `div fixed`.
 - **Documento do cartão** (`src/pagamento-cartao/`): **CSS copiado e dedicado** (`--pc-*`), nunca importa nada do app (ver §8).
@@ -86,4 +87,64 @@ Orçamentos (A0 = linha de base de 03–04/10/2026): CSS global gzip **≤ +2500
 
 ## 9. Mapa rápido
 
-`src/index.css` (tokens, escopos, `@layer components`) · `tailwind.config.js` (cores, raios, sombras, animações) · `src/components/ui|brand|feedback` · `src/dev/DesignSystemCatalog.tsx` (catálogo, **só dev**, fora do build) · `e2e-visual/` (harness, réguas, baseline) · `src/test/vocabularioDeprecado.test.ts`, `adminSemLoops.test.ts`, `catalogoFora.test.ts` (guardas).
+`src/index.css` (tokens, escopos, `@layer components`) · `src/components/onboarding/` (tour + checklist, §10) · `tailwind.config.js` (cores, raios, sombras, animações) · `src/components/ui|brand|feedback` · `src/dev/DesignSystemCatalog.tsx` (catálogo, **só dev**, fora do build) · `e2e-visual/` (harness, réguas, baseline) · `src/test/vocabularioDeprecado.test.ts`, `adminSemLoops.test.ts`, `catalogoFora.test.ts` (guardas).
+
+
+## 10. Onboarding e tour (padrão para todos os sistemas InnoFlow/Innovare)
+
+Primeira visita = o mascote recebe a pessoa, aponta o que importa (balão + destaque do elemento) e some. Depois disso só aparece se ela pedir ("Rever tour"). Mora em `src/components/onboarding/`; nasceu no InnoChat (`inno-animated`, `inno-script`, `onboarding-tour`) e foi **adaptado** ao design system daqui (tokens, `Button`, `surface-dark`, mascote da InnoFlow), sem biblioteca nova.
+
+### 10.1 Peças
+
+| Arquivo | Papel |
+|---|---|
+| `tourScripts.ts` | **O roteiro** (único arquivo de texto): `TOUR_DEFINITIONS` (`driver`, `admin`, `operator`), `version`, passos, `TOUR_UI`. |
+| `checklistScript.ts` | Textos e ordem do checklist "Primeiros passos". |
+| `tourLogic.ts` · `tourGeometry.ts` · `tourDom.ts` | Puros/testáveis: filtro de passos, teclado, foco; posição do balão; achar/medir o alvo e rolar. |
+| `onboardingStorage.ts` | Persistência por usuário (localStorage, tudo em try/catch). |
+| `TourProvider.tsx` · `tourContext.ts` | Dono do estado de **uma área**; `useTour()` devolve `{ active, available, tourId, restart }` (inerte fora de um provider). |
+| `OnboardingTour.tsx` · `TourBalloon.tsx` · `TourMascot.tsx` · `tour.css` | O tour: **chunk lazy** (só baixa quando abre). |
+| `OnboardingChecklist.tsx` · `useAdminChecklist.ts` · `checklistLogic.ts` | Card "Primeiros passos" do Dashboard do ADMIN. |
+
+### 10.2 Como criar (ou mudar) passos
+
+1. **Alvo**: ponha `data-tour="nome"` no elemento **do shell** (menu, cabeçalho, barra de navegação), não de página: as páginas são lazy e podem não existir quando o tour abre. Convenção: `nav-<rota>` (gerado em `SidebarNav`), `app-nav-<rota>` (barra do PWA), `admin-*`/`app-*` para o resto. O mesmo nome pode existir em dois lugares (sidebar e drawer): o tour usa o primeiro **visível**.
+2. **Texto**: um objeto em `TOUR_DEFINITIONS[...].steps` com `id`, `kind` (`welcome` | `step` | `finish`), `target`, `title` e `body` (string ou função de `TourContext`). Frases curtas, pt-BR, o **rótulo real** do botão/menu, e **só o que existe** (o teste confere cada alvo contra o código). Sem `target` = balão centralizado.
+3. **Filtros declarativos, não `if` no componente**: `requiresNavHref` (o passo só entra se o menu do usuário tiver a rota; é como o OPERATOR perde os passos só-ADMIN e como o passo de "Backups" fica **inerte até a tela existir**), `wideOnly` (só com a sidebar visível, 1024 px ou mais), `targetNarrow`/`bodyNarrow` (outro alvo/redação abaixo de `lg`).
+4. **Mudou o roteiro de forma que vale reexibir?** Suba `version` da definição. Quem já concluiu a versão anterior vê o tour de novo; quem concluiu a atual, não.
+5. **Fallback**: alvo ausente, oculto (`display:none`, grupo recolhido) ou com menos de 60% à vista leva a balão **centralizado**, sem destaque. Nunca erro, nunca apontar para o vazio.
+6. **Novo sistema/área**: crie a definição, envolva o shell no `<TourProvider userId role nav>` (acima do shell), ponha os `data-tour` e um ponto de "Rever tour" (`useTour().restart`). Nada mais.
+
+### 10.3 Persistência (por usuário, **por dispositivo**)
+
+Chave `innoflow:tour:v1:<userId>:<tourId>` com `{ version, status: "completed" | "skipped", at }`. Abre sozinho **só** se não há registro ou ele é de versão anterior. Esc/Pular gravam `skipped`; concluir grava `completed`. `localStorage` indisponível (modo privado, bloqueado, cota) **não derruba** nada e o tour **não** abre sozinho (não dá para lembrar; incomodar a cada carregamento é pior).
+
+**Limitação documentada:** vale por aparelho/navegador. Outro aparelho, ou dados limpos, vê o tour de novo. **Proposta (não implementada, depende do backend):** `GET /api/me` devolver `onboarding: { <tourId>: { version, status, at } }` e `PUT /api/me/onboarding/:tourId` gravar; o cliente lê de lá e o localStorage vira cache otimista. Mesma ideia para "checklist dispensado".
+
+**Interruptor do aparelho** `innoflow:onboarding:off` = `"1"`: sem tour automático e sem o card do checklist neste navegador ("Rever tour" continua funcionando). Existe para quiosque/demonstração e para o **harness**: todo login de mock é uma 1ª visita, então `playwright.config.ts`, `playwright.visual.config.ts` e o `global-setup` do `e2e-visual` semeiam a chave (as specs `onboarding-*` a desligam com `storageState` vazio).
+
+### 10.4 Mascote e movimento
+
+A arte é **uma imagem sem camadas** (a mesma da landing), então a animação é feita por fora dela, só com CSS: respiração (`tm-breathe`), piscar (pálpebras sobre os olhos), LED (brilho lima do raio do fone e do conector), "olhar" (o corpo se inclina para o lado do alvo; o rosto da arte não é móvel) e aceno (balançada + pulinho a cada passo; pulinho maior no passo final). **Tudo só existe sob `@media (prefers-reduced-motion: no-preference)`**; com `reduce` fica a figura estática (o teste `tourCss.test.ts` garante que nenhuma `animation`/`transition` vale fora desse bloco). O mascote é decorativo (`aria-hidden`); o texto do balão carrega o sentido. Sempre sobre fundo **escuro** (o balão é `.surface-dark`), como manda a D3.
+
+### 10.5 Acessibilidade do tour
+
+Balão `role="dialog" aria-modal`, nomeado; região `aria-live="polite"` anuncia cada passo; `progressbar` com "Passo N de M". O resto do app fica `inert` enquanto aberto (nada por baixo recebe foco/clique/leitor de tela), **Tab fica preso** no balão, **Esc** pula, **setas** navegam, e o foco **volta** a quem o tinha (ex.: o item "Rever tour"). Botões de 44 px em qualquer largura. Texto sobre `surface` sólido (AA com folga). Reposiciona em rolagem, redimensionamento e mudança de tamanho do alvo; abaixo de 1024 px o menu do Admin é um drawer fechado, então o roteiro estreito aponta para o botão do menu e lista as áreas.
+
+### 10.6 Onde ficam "Rever tour" e a ajuda (sem mexer na regressão visual)
+
+Admin: o **nome do usuário** no rodapé da sidebar virou o gatilho de um menu ("Ajuda", "Rever tour") com a **mesma caixa de antes** (nenhum pixel novo), há um item no drawer do menu estreito, e um botão no card do checklist. Motorista: seção "Ajuda" em **Meu perfil**. Ajuda contextual "i" por tela (padrão do InnoChat, com catálogo): **não portada**; exigiria um ícone no `PageHeader` de todas as telas (muda toda a baseline do Admin). Fica como proposta.
+
+### 10.7 Checklist "Primeiros passos" (Dashboard do ADMIN)
+
+Itens derivados de dados que as telas **já consultam** (site, carregador, conector, tarifa, vínculo em vigor, gateway com algum meio ligado e pronto, canal de aviso ativo): **nenhum endpoint novo**. Consulta que falha deixa o item *desconhecido* (some do card): não se afirma pendência sem ter lido o dado. Só aparece com tudo lido e algo pendente; completo, dispensado ou com o interruptor ligado = nada na tela. O portão do componente não consulta nada; só o card (7 consultas, `meta.total` com `pageSize: 1`) as dispara.
+
+### 10.8 Como testar
+
+| O quê | Onde |
+|---|---|
+| roteiro (alvos existem no código, OPERATOR sem passo só-ADMIN, "Backups" inerte, textos), persistência/versão, geometria, lógica, fallback de DOM, reduced-motion (CSS), foco/teclado/saída, checklist | `npx vitest run src/components/onboarding` |
+| tour do motorista/painel em 375/768/1440, régua de geometria (balão na janela, destaque sobre o alvo, balão sem cobrir o alvo, nada cortado, alvos 44 px) com **controle negativo**, pular/voltar/Esc/foco, Rever tour, alvo oculto/ausente, persistência por usuário, axe por passo | `npx playwright test e2e/onboarding-tour.spec.ts` |
+| contraste do balão e capturas dos estados (revisão humana; não grava baseline) | `npx playwright test --config playwright.visual.config.ts verificacoes-onboarding` |
+
+Orçamentos: o CSS do onboarding é **arquivo próprio** (`tour.css`), no chunk lazy do tour e no do Dashboard, e não no CSS global (+2500 B gzip); o tour não entra no `modulepreload` do `index.html` (6).

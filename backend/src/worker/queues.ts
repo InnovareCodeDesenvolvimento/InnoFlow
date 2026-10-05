@@ -1,5 +1,6 @@
 import { Queue } from 'bullmq'
 import { createRedisConnection } from '../lib/redis'
+import type { TipoDeNotificacao } from '../core/notificacoes/politica'
 
 /**
  * Fábrica de filas BullMQ — cada chamador abre a conexão que precisa (mesmo
@@ -94,3 +95,37 @@ export const MANTER_PARTICOES_QUEUE_NAME = 'manter-particoes'
 
 /** Sem dado próprio — mesmo espírito de `VigiarSessoesJobData`. */
 export type ManterParticoesJobData = Record<string, never>
+
+/**
+ * Confirmação das devoluções feitas no PORTAL DA CIELO (L1.8) — job REPEATABLE (`upsertJobScheduler`, agendado em `entrypoints/worker.ts`), sem dado próprio: cada disparo
+ * reconsulta as devoluções `PENDING_CONFIRMATION` no momento em que roda. Baixa frequência (`REFUND_PORTAL_SCAN_INTERVAL_MS`). Ver `services/estornos/confirmarEstornosPortal.ts`.
+ */
+export const CONFIRMAR_ESTORNOS_PORTAL_QUEUE_NAME = 'confirmar-estornos-portal'
+
+/** Sem dado próprio — mesmo espírito de `ManterParticoesJobData`. */
+export type ConfirmarEstornosPortalJobData = Record<string, never>
+
+/**
+ * Notificações por e-mail ao motorista (L1.6) — enfileiradas DEPOIS do commit do fato (`services/notificacoes/enfileirarNotificacao.ts`), fire-and-forget com prazo; processadas pelo
+ * worker (`worker/jobs/notificacoesJob.ts`). `jobId` = `notif-<tipo>-<entidade>` (um fato nunca tem dois jobs vivos); a idempotência DURÁVEL é a linha de `NotificationLog`
+ * (unique userId+tipo+canal+entidade). O payload é só ids e valores em centavos — o ÚNICO dado pessoal possível é `destinatario`, do `ACCOUNT_DELETED` (a conta já foi anonimizada
+ * quando o aviso sai): vive só no job, e é apagado ao concluir (`removeOnComplete`) e ao esgotar as tentativas.
+ */
+export const NOTIFICACOES_QUEUE_NAME = 'notificacoes'
+
+export interface NotificacaoJobData {
+  tipo: TipoDeNotificacao
+  userId: string
+  /** Id do FATO que gerou o aviso (sessão, WalletEntry, intent, correlationId, requestId...). ≤ 128. */
+  entityId: string
+  /** Quando o fato aconteceu (ISO), para os avisos que citam a hora (senha alterada, recarga iniciada pelo suporte). */
+  ocorridoEm?: string
+  /** `REMOTE_START_BY_SUPPORT`: o carregador (o fato em si não tem linha no banco: o `correlationId` só vive 2 min no Redis). */
+  chargePointId?: string
+  /** `TOPUP_CREDITED`: números do crédito (o intent não guarda o quanto quitou de dívida). Só centavos. */
+  creditadoCents?: number
+  quitouDividaCents?: number
+  saldoCents?: number
+  /** `ACCOUNT_DELETED`: único dado pessoal do payload (ver acima). */
+  destinatario?: { email: string; nome: string }
+}

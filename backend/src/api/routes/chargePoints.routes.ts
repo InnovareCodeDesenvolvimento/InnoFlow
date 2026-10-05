@@ -15,6 +15,7 @@ import { requireRecargaRemotaPolicy } from '../middleware/recargaRemotaPolicy'
 import { validateBody, validateQuery } from '../middleware/validate'
 import { paginationMeta, paginationQuerySchema, type PaginationQuery } from '../schemas/pagination.schema'
 import { createChargePointSchema, updateChargePointSchema, type CreateChargePointInput, type UpdateChargePointInput } from '../schemas/chargePoint.schema'
+import { isChargePointOnline } from '../../core/estacoes/disponibilidade'
 import { diffEntity } from '../../core/auditoria/diffEntity'
 import { AUDIT_ALLOWLIST_BY_ENTITY } from '../lib/auditAllowlists'
 import {
@@ -25,6 +26,7 @@ import {
   unlockCommandSchema,
   type RemoteStartCommandInput,
 } from '../schemas/command.schema'
+import { notificarRecargaIniciadaPeloSuporte } from '../../services/notificacoes/gatilhos'
 
 const BCRYPT_ROUNDS = 10
 const COMMAND_TIMEOUT_MS = 35_000
@@ -33,10 +35,16 @@ const router = Router()
 
 router.use(authenticate, requireOperatorOrAdmin)
 
-/** NUNCA devolve `basicAuthSecretHash` — mesmo sendo hash, não tem por que sair da API. */
+/**
+ * NUNCA devolve `basicAuthSecretHash` — mesmo sendo hash, não tem por que sair da API.
+ *
+ * `online` (aditivo) é CALCULADO pelo servidor com a regra única `isChargePointOnline` (limiar de `lastSeenAt` + `disconnectedAt`) — o frontend NUNCA deve refazer essa conta
+ * a partir de `lastSeenAt` (relógio do navegador diverge do servidor). `lastSeenAt`/`connectedAt`/`disconnectedAt` já iam no JSON (colunas do modelo) e seguem iguais.
+ * Vale para TODAS as respostas que usam o DTO (lista, detalhe, criação, edição) — nas duas últimas `online` sai do próprio registro devolvido.
+ */
 function toChargePointDTO<T extends ChargePoint>(cp: T) {
   const { basicAuthSecretHash: _basicAuthSecretHash, ...rest } = cp
-  return rest
+  return { ...rest, online: isChargePointOnline(cp) }
 }
 
 router.get(
@@ -263,6 +271,9 @@ router.post(
       walletBalanceCents: resultado.walletBalanceCents,
       estimatedMaxCostCents: resultado.estimatedMaxCostCents,
     })
+
+    // L1.6: transparência — o motorista é avisado por e-mail de que o SUPORTE pediu uma recarga na conta dele (entityId = correlationId; fire-and-forget, depois da resposta).
+    notificarRecargaIniciadaPeloSuporte({ userId: user.id, correlationId: resultado.correlationId, chargePointId: req.params.id })
 
     // entityType/entityId já vêm certos do fallback (path começa com
     // `/api/admin/charge-points`, `:id` é o próprio charge point) — só

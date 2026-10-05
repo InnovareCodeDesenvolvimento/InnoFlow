@@ -84,6 +84,12 @@ export interface PublicClientConfig {
  */
 export interface GoogleAuthRequest {
   credential: string
+  /**
+   * L1.9 (IMPLEMENTADO, backend 40fb2ec): versão dos Termos que a pessoa aceitou (= `PublicLegalConfig.termsVersion` vigente). SÓ é exigida quando o Google vai CRIAR conta: ausente
+   * nesse caso = 400 `VALIDATION_ERROR` com `details[].path = "acceptedTermsVersion"` (a tela mostra o aceite e reenvia a MESMA credencial); versão antiga = 409 `TERMS_VERSION_OUTDATED`.
+   * Quem já tem conta entra sem mandar nada.
+   */
+  acceptedTermsVersion?: string
 }
 
 /**
@@ -180,6 +186,17 @@ export interface ChargePoint {
   serialNumber: string | null
   firmwareVersion: string | null
   active: boolean
+  /**
+   * Lote 1 (backend 3e0dbb3, `docs/CONTRATO-ADMIN-CARREGADORES-E-COMANDOS.md`): "o carregador está falando com a gente agora". Calculado pelo SERVIDOR
+   * (`isChargePointOnline`: `lastSeenAt` recente E sem queda registrada em `disconnectedAt`) - NÃO refazer no navegador (relógio do cliente, e ignoraria a queda).
+   */
+  online: boolean
+  /** ISO 8601; `null` = nunca reportou. Só informativo. */
+  lastSeenAt: string | null
+  /** Última conexão do WebSocket (relógio do servidor). */
+  connectedAt: string | null
+  /** Último fechamento do WebSocket. */
+  disconnectedAt: string | null
   createdAt: string
   updatedAt: string
   connectors?: Connector[]
@@ -803,7 +820,7 @@ export interface PaymentListRow {
 export interface PaymentsReportQuery extends ReportPeriodParams, PaginationParams {
   provider?: PaymentProvider
   status?: PaymentIntentStatus
-  /** planejado (L1.8): achar a venda de um chargeback pelos identificadores da adquirente (já gravados no intent). Ainda não aceitos pelo backend. */
+  /** L1.8 (entregue): achar a venda de um chargeback pelos identificadores da adquirente (igualdade exata). `proofOfSale` = NSU. */
   tid?: string
   authorizationCode?: string
   proofOfSale?: string
@@ -878,6 +895,11 @@ export type RemoteStartErrorCode =
  */
 export interface AdminCommandStatusResponse {
   status: MeCommandStatus
+  /**
+   * Só quando `status === "ACCEPTED"` E o comando é um remote-start (chave AUSENTE nos demais casos). `string` = a sessão nascida deste comando;
+   * `null` = o carregador aceitou, mas o `StartTransaction` (que cria a sessão) ainda não chegou - consultar de novo. O registro do comando vive 2 min (depois, 404).
+   */
+  sessionId?: string | null
 }
 export type AdminCommandStatusErrorCode = "COMMAND_NOT_FOUND" | "FORBIDDEN"
 
@@ -1296,7 +1318,7 @@ export interface MePaymentMethodDTO {
 export type CardEligibilityReason =
   | "GOOGLE_LOGIN_REQUIRED"
   | "TEMPORARILY_BLOCKED"
-  /** planejado (L1.8, DL7): o ADMIN registrou um chargeback deste motorista -> modo cartão bloqueado (Pix e carteira seguem). Ainda NÃO é enviado pelo backend. */
+  /** L1.8, DL7: o ADMIN registrou um chargeback deste motorista -> cartão bloqueado (Pix e carteira seguem; cartões salvos continuam na lista, sem uso). Vem ANTES de `GOOGLE_LOGIN_REQUIRED`; sem `blockedUntil`. O servidor também recusa com 403 `CARD_CHARGEBACK_BLOCKED` (cadastro, tokenização, iniciar sessão com CARD). */
   | "CHARGEBACK_BLOCKED"
 export interface CardEligibility {
   eligible: boolean
@@ -1384,6 +1406,13 @@ export const AUDIT_ACTIONS = [
   "LOGIN_SUCCESS",
   "LOGIN_FAILED",
   "EXPORT",
+  // Lote 1 (L1.3/L1.4/L1.8) + F5: espelham o enum `AuditAction` do Prisma e o `auditActionEnum` do backend (sem eles, filtrar por esses valores dava 400).
+  "PAYMENT_CREDIT",
+  "PAYMENT_CONFIG_CHANGE",
+  "PASSWORD_RESET",
+  "ACCOUNT_DELETION",
+  "REFUND",
+  "CHARGEBACK",
   "OTHER",
 ] as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]
@@ -1817,7 +1846,7 @@ export interface UpdateMeProfileRequest {
 }
 export type MeProfileErrorCode = "VALIDATION_ERROR" | "CPF_IN_USE" | "RATE_LIMITED_PROFILE" | "UNAUTHORIZED" | "FORBIDDEN"
 
-// ---- L1.3 — Esqueci / redefinição de senha — planejado (L1.3) ----------------------------------------------------------------------------------------
+// ---- L1.3 — Esqueci / redefinição de senha — entregue (backend 1996aad) ----------------------------------------------------------------------------------------
 
 /**
  * `POST /api/auth/password/forgot` (sem auth) -> **SEMPRE 202 `{ ok: true }`** — exista ou não a conta, ativa ou não, de qualquer papel (não vira oráculo de
@@ -1842,9 +1871,14 @@ export interface ResetPasswordRequest {
   token: string
   newPassword: string
 }
-export type ResetPasswordErrorCode = "VALIDATION_ERROR" | "RESET_TOKEN_INVALID" | "RATE_LIMITED_AUTH"
+/**
+ * 429 `RATE_LIMITED_AUTH` traz `Retry-After` (segundos) — legível também com a API em outro domínio desde o lote 1 (backend 3e0dbb3: `Access-Control-Expose-Headers: Retry-After`); só some se um proxy no meio o descartar.
+ * 503 `SERVICE_UNAVAILABLE`: o serviço de redefinição está sem o Redis/estado que precisa (fail-closed) — o token NÃO é gasto; tentar de novo vale.
+ * 400 `VALIDATION_ERROR` com `details[].path="newPassword"` (10 a 72 bytes): o token NÃO é gasto — a tela mantém o formulário.
+ */
+export type ResetPasswordErrorCode = "VALIDATION_ERROR" | "RESET_TOKEN_INVALID" | "RATE_LIMITED_AUTH" | "SERVICE_UNAVAILABLE"
 
-// ---- L1.4 — LGPD: exportação e exclusão de conta — planejado (L1.4) ----------------------------------------------------------------------------------
+// ---- L1.4 — LGPD: exportação e exclusão de conta — IMPLEMENTADO (L1.4; backend dd1e5b8 exportação, 52897ec exclusão) ------------------------------------------------
 
 /**
  * `GET /api/me/data-export` -> 200 `application/json` com `Content-Disposition: attachment; filename="innoflow-meus-dados-AAAAMMDD.json"`. Síncrono.
@@ -1898,6 +1932,19 @@ export type MeAccountDeletionErrorCode =
   | "PAYMENT_IN_PROGRESS"
   | "OPEN_DEBT"
   | "RATE_LIMITED_ACCOUNT_DELETION"
+  // Acrescentados com o backend real (nada renomeado): 503 sem a chave de cifragem do cofre (a chave Pix não pode ser guardada), 503 do throttle da senha fora do ar
+  // (fail-closed, nada é tentado), 503 Google sem Client ID no servidor, 403 conta sem como se reautenticar / não é DRIVER, 401 sessão inválida.
+  | "PAYMENT_SECRETS_KEY_MISSING"
+  | "STEPUP_UNAVAILABLE"
+  | "GOOGLE_NOT_CONFIGURED"
+  | "FORBIDDEN"
+  | "UNAUTHORIZED"
+
+/**
+ * `GET /api/me/data-export` - erros (a rota só existe para DRIVER): 429 `RATE_LIMITED_EXPORT` (3 por dia; traz `Retry-After`, legível entre domínios desde o lote 1),
+ * 401 sessão inválida, 403 não é DRIVER, 5xx. A resposta de sucesso é o arquivo `MeDataExport` (a tela baixa, não renderiza).
+ */
+export type MeDataExportErrorCode = "RATE_LIMITED_EXPORT" | "UNAUTHORIZED" | "FORBIDDEN"
 
 /** Estado da devolução do saldo de uma conta excluída (DL2). */
 export type AccountDeletionRefundStatus = "NOT_REQUIRED" | "PENDING_REFUND" | "REFUNDED"
@@ -1917,6 +1964,12 @@ export interface AdminAccountDeletionRow {
   refundPixKey: string | null
   refundedAt: string | null
   refundedByUserId: string | null
+  /** Aditivo (L1.4, entregue): idade do pedido em dias. */
+  ageDays: number
+  /** Aditivo: `true` quando passou do prazo recomendado de 30 dias e ainda é `PENDING_REFUND`. */
+  overdue: boolean
+  /** Aditivo: só presente (`true`) quando a chave guardada NÃO pôde ser decifrada (`PAYMENT_SECRETS_KEY` trocada/ausente) — `refundPixKey` vem `null`; falar com o titular por outro canal. */
+  refundPixKeyUnreadable?: true
 }
 export interface AdminAccountDeletionsQuery extends PaginationParams {
   status?: AccountDeletionRefundStatus
@@ -1933,6 +1986,22 @@ export interface AdminAccountDeletionRefundRequest {
   proofReference: string
   currentPassword: string
 }
+/**
+ * Erros de `GET/POST /api/admin/account-deletions*` (entregue, L1.4). A devolução é INTEGRAL: valor menor = 409 `PARTIAL_REFUND_NOT_ALLOWED`; maior = 409 `AMOUNT_EXCEEDS_BALANCE`;
+ * pedido sem saldo = 409 `REFUND_NOT_REQUIRED`; já devolvido = 409 `ALREADY_REFUNDED`. Senha: 403 `INVALID_CURRENT_PASSWORD`, 429 `RATE_LIMITED_ACCOUNT_DELETION` (+ `Retry-After`),
+ * 503 `STEPUP_UNAVAILABLE` (nada gravado). `PAYMENT_SECRETS_KEY_MISSING` (503) = o servidor não tem a chave de cifragem.
+ */
+export type AdminAccountDeletionErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CURRENT_PASSWORD"
+  | "NOT_FOUND"
+  | "ALREADY_REFUNDED"
+  | "REFUND_NOT_REQUIRED"
+  | "AMOUNT_EXCEEDS_BALANCE"
+  | "PARTIAL_REFUND_NOT_ALLOWED"
+  | "PAYMENT_SECRETS_KEY_MISSING"
+  | "STEPUP_UNAVAILABLE"
+  | "RATE_LIMITED_ACCOUNT_DELETION"
 
 // ---- L1.6 — Notificações ao motorista (e-mail) — planejado (L1.6) ------------------------------------------------------------------------------------
 
@@ -1977,7 +2046,7 @@ export type UpdateMeNotificationPreferencesRequest = Partial<MeNotificationPrefe
  * carteira, ou (b) devolução feita pelo dono NO PORTAL DA CIELO e registrada aqui (`CARD_VIA_PORTAL`, fica `PENDING_CONFIRMATION` até a confirmação).
  */
 export type RefundDestination = "WALLET" | "CARD_VIA_PORTAL"
-export type RefundStatus = "CONFIRMED" | "PENDING_CONFIRMATION"
+export type RefundStatus = "CONFIRMED" | "PENDING_CONFIRMATION" | "CANCELLED"
 
 /**
  * `POST /api/admin/sessions/:id/refunds` (ADMIN-only, step-up por senha) -> 201 `CreateSessionRefundResponse`. Erros: 400 `VALIDATION_ERROR`,
@@ -2002,6 +2071,69 @@ export type SessionRefundErrorCode =
   | "SESSION_NOT_FOUND"
   | "AMOUNT_EXCEEDS_REFUNDABLE"
   | "SESSION_NOT_BILLED"
+  /** 409 — `CARD_VIA_PORTAL` numa sessão que não foi paga com cartão (não há venda na Cielo para devolver). */
+  | "NO_CARD_PAYMENT"
+  /** 409 — `WALLET` e a conta do motorista foi excluída (LGPD): não há carteira para receber. */
+  | "DRIVER_ACCOUNT_DELETED"
+  /** 409 — `cancel` de devolução que não é do cartão pendente (confirmada, já cancelada ou na carteira). */
+  | "REFUND_NOT_CANCELLABLE"
+  /** 409 — `confirm` de devolução que não é do cartão pendente (outro ADMIN/job chegou antes, cancelada ou na carteira). */
+  | "REFUND_NOT_CONFIRMABLE"
+  | "STEPUP_UNAVAILABLE"
+  | "RATE_LIMITED"
+
+/**
+ * `GET /api/admin/sessions/:id/refunds` (ADMIN-only, ADITIVA, entregue) -> 200. Só ADMIN (OPERATOR = 403). Sessão não encerrada devolve `billedCents`/`refundableCents` = 0.
+ * `refundedCents` soma os estornos NÃO cancelados (pendentes no portal seguram o teto). Sem nome/e-mail do motorista: só ids.
+ */
+export interface SessionRefundDTO {
+  id: string
+  sessionId: string
+  paymentIntentId: string | null
+  destination: RefundDestination
+  status: RefundStatus
+  amountCents: number
+  /** Texto livre do ADMIN (10 a 500, sem nome do motorista). */
+  reason: string
+  /** No cartão confirmado à mão: a referência do COMPROVANTE do portal; antes disso, a referência do registro (se houve). */
+  portalReference: string | null
+  /** `true` = um ADMIN confirmou à mão; `false` = o job confirmou sozinho, está pendente/cancelado ou é carteira. */
+  confirmedManually: boolean
+  walletEntryId: string | null
+  createdAt: string
+  resolvedAt: string | null
+}
+export interface SessionRefundsResponse {
+  sessionId: string
+  billedCents: number
+  refundedCents: number
+  refundableCents: number
+  items: SessionRefundDTO[]
+}
+
+/** `POST /api/admin/refunds/:id/cancel` `{ currentPassword }` -> 200. Só devolução no cartão `PENDING_CONFIRMATION`; libera o teto. Erros: 403 `INVALID_CURRENT_PASSWORD`, 404 `NOT_FOUND`, 409 `REFUND_NOT_CANCELLABLE`. */
+export interface CancelRefundRequest {
+  currentPassword: string
+}
+export interface CancelRefundResponse {
+  refundId: string
+  status: "CANCELLED"
+}
+
+/**
+ * `POST /api/admin/refunds/:id/confirm` (ADMIN-only, step-up) -> 200. Confirmação MANUAL de uma devolução no cartão pendente (estorno parcial ou venda com mais de ~3 meses, que o job
+ * nunca confirma). `proofReference`: 5 a 120, só letras/números e `. _ - / # :` (sem espaço nem e-mail; recusa CPF com máscara e número de cartão). 409 `REFUND_NOT_CONFIRMABLE`.
+ */
+export interface ConfirmRefundRequest {
+  proofReference: string
+  currentPassword: string
+}
+export interface ConfirmRefundResponse {
+  refundId: string
+  status: "CONFIRMED"
+  confirmedManually: true
+  proofReference: string
+}
 
 export type ChargebackOutcome = "WON" | "LOST" | "ACCEPTED"
 
@@ -2044,11 +2176,66 @@ export interface ChargebackDTO {
   notifiedAt: string
   responseDeadline: string | null
   dossierId: string
+  // ---- aditivos (entregues, L1.8) ----
+  chargingSessionId: string | null
+  reasonCode: string | null
+  /** Estado bruto: `OPEN` enquanto não há desfecho (`outcome` é `null`). */
+  status: ChargebackStatus
+  /** Dívida criada pelo desfecho `CREATE_DEBT` (se houve). */
+  debtId: string | null
+  createdAt: string
+  resolvedAt: string | null
+  /** O motorista está sem o modo cartão POR ESTE chargeback agora (aberto, ou perdido/aceito ainda não desbloqueado). */
+  cardBlocked: boolean
+  /** Desbloqueio manual (P3): quando e por quê (texto do ADMIN, só na tela do ADMIN). `null` enquanto não houve. */
+  cardUnblockedAt: string | null
+  cardUnblockReason: string | null
 }
+export type ChargebackStatus = "OPEN" | ChargebackOutcome
+
+/** `GET /api/admin/chargebacks?outcome=&paymentIntentId=&page=&pageSize=` (ADMIN-only, ADITIVA) -> 200 `{ items, total, page, pageSize }` (NÃO `meta`). Mais recentes primeiro. */
+export interface ChargebacksListQuery extends PaginationParams {
+  outcome?: ChargebackStatus
+  paymentIntentId?: string
+}
+export interface ChargebacksListResponse {
+  items: ChargebackDTO[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+/**
+ * `POST /api/admin/chargebacks/:id/unblock-card` (ADMIN-only, step-up, ADITIVA) -> 200 `ChargebackDTO`. Só em `LOST`/`ACCEPTED` com o cartão ainda bloqueado; devolve o modo cartão sem
+ * apagar nada (registro, desfecho, dossiê e dívida ficam). Erros: 400, 403 `INVALID_CURRENT_PASSWORD`, 404 `NOT_FOUND`, 409 `CHARGEBACK_NOT_LOST`, 409 `CARD_ALREADY_UNBLOCKED`.
+ */
+export interface UnblockCardRequest {
+  /** 10 a 500, sem nome do motorista (o texto fica gravado). */
+  reason: string
+  currentPassword: string
+}
+
+/** Erros das rotas de chargeback (registro, desfecho, desbloqueio, dossiê). */
+export type ChargebackErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CURRENT_PASSWORD"
+  | "NOT_FOUND"
+  | "PAYMENT_NOT_FOUND"
+  /** 409 — a venda não tem valor capturado: não há o que contestar. */
+  | "PAYMENT_NOT_CAPTURED"
+  | "CHARGEBACK_ALREADY_REGISTERED"
+  | "CHARGEBACK_ALREADY_RESOLVED"
+  | "CHARGEBACK_NOT_LOST"
+  | "CARD_ALREADY_UNBLOCKED"
+  | "STEPUP_UNAVAILABLE"
+  | "RATE_LIMITED"
+
+/** Recusa DO MOTORISTA ao tentar pagar com cartão com chargeback ativo: 403 `CARD_CHARGEBACK_BLOCKED` (Pix e carteira seguem). Documentado aqui; quem trata é o PWA. */
+export type CardChargebackBlockedCode = "CARD_CHARGEBACK_BLOCKED"
 /** `GET /api/admin/chargebacks/:id/dossier` (ADMIN-only) -> JSON do snapshot (formato aberto; a Lyra só oferece o download). */
 export type ChargebackDossier = Record<string, unknown>
 
-// ---- L1.9 — Termos de uso, privacidade, aceite e contato — planejado (L1.9) --------------------------------------------------------------------------
+// ---- L1.9 — Termos de uso, privacidade, aceite e contato — IMPLEMENTADO (L1.9; backend 40fb2ec) ---------------------------------------------------------------
 
 /** `GET /api/public/legal` (sem auth) -> 200. Os dados da empresa dependem do dono (CNPJ, e-mail de suporte, encarregado/DPO) — podem vir `null` até ele mandar. */
 export interface PublicLegalConfig {
@@ -2065,8 +2252,8 @@ export interface PublicLegalConfig {
 
 /**
  * `POST /api/auth/register` e `POST /api/auth/google` passarão a exigir `acceptedTermsVersion` (= `PublicLegalConfig.termsVersion` vigente). Versão diferente =
- * 409 `TERMS_VERSION_OUTDATED` (a tela recarrega `GET /api/public/legal` e pede o aceite de novo); ausente = 400 `VALIDATION_ERROR`. Hoje o campo ainda NÃO é
- * exigido nem lido (planejado L1.9) — a Lyra pode já enviá-lo.
+ * 409 `TERMS_VERSION_OUTDATED` (a tela recarrega `GET /api/public/legal` e pede o aceite de novo); ausente = 400 `VALIDATION_ERROR` (`details[].path = "acceptedTermsVersion"`).
+ * `register`: SEMPRE exigido. `google`: só quando o Google cria a conta (ver `GoogleAuthRequest.acceptedTermsVersion`). O aceite cobre Termos E Privacidade (o servidor grava os dois).
  */
 export type TermsErrorCode = "TERMS_VERSION_OUTDATED"
 
@@ -2081,4 +2268,504 @@ export interface MeConsentStatus {
 export interface MeAcceptConsentsRequest {
   termsVersion: string
   privacyVersion: string
+}
+
+// ---- N-7 — Configurações de comunicação (e-mail SMTP e WhatsApp Evolution). ADMIN-ONLY --------------------------------------------------------------------
+// Copiado LITERALMENTE de `docs/CONTRATO-COMUNICACAO-ADMIN.md` (fonte da verdade: `backend/src/api/routes/communicationSettings.routes.ts`). NÃO renomear.
+// Rotas: GET/PUT `/api/admin/communication-settings`, POST `.../test-email` e `.../test-whatsapp`. Segredos NUNCA voltam; PUT exige `currentPassword` (step-up).
+
+export type NotificationSeverity = 'INFO' | 'IMPORTANTE' | 'CRITICO'
+
+/** `GET /api/admin/communication-settings` e resposta do `PUT`. SEGREDOS NUNCA VOLTAM. */
+export interface CommunicationSettingsDTO {
+  /** `database` = existe configuração salva no painel; `env` = tudo vem das variáveis de ambiente (reserva). */
+  source: 'database' | 'env'
+  email: {
+    /** De onde vale o canal AGORA: painel, env, ou nenhum. */
+    source: 'database' | 'env' | 'none'
+    /** Intenção: ligado (no painel) ou configurado pela env. */
+    enabled: boolean
+    /** O canal está funcionando agora (config completa e válida). `enabled && !active` = há problema: ver `warnings`. */
+    active: boolean
+    host: string | null
+    port: number | null
+    /** `true` = TLS direto (porta 465); `false` = STARTTLS (587). */
+    secure: boolean
+    user: string | null
+    /** Há senha SMTP salva. A senha NUNCA é devolvida (nem dica de caracteres). */
+    passwordSet: boolean
+    fromName: string | null
+    fromAddress: string | null
+    /** Destinatários dos avisos ao dono. */
+    recipients: string[]
+    minSeverity: NotificationSeverity
+  }
+  whatsapp: {
+    source: 'database' | 'env' | 'none'
+    enabled: boolean
+    active: boolean
+    /** Do painel é sempre `evolution`; da env pode ser `generic`. */
+    provider: 'evolution' | 'generic' | null
+    baseUrl: string | null
+    instance: string | null
+    apiKeySet: boolean
+    /** Últimos 4 caracteres da apikey, para o admin reconhecer a chave ("…a1b2"); `null` se não há/ não decifra / veio da env. */
+    apiKeyHint: string | null
+    apiVersion: 1 | 2
+    /** Só dígitos com DDI (ex.: "5511999999999"). */
+    recipients: string[]
+    minSeverity: NotificationSeverity
+  }
+  alerts: {
+    /** Janela de dedupe em minutos (mesmo alerta+contexto avisa no máximo 1x por janela). */
+    dedupeMinutes: number
+    dedupeSource: 'database' | 'env'
+    /** Piso global (env `ALERT_MIN_SEVERITY`, só leitura aqui): vale para qualquer canal além do mínimo de cada um. */
+    globalMinSeverity: NotificationSeverity
+    /** Teto de avisos por hora (env `ALERT_MAX_PER_HOUR`, só leitura aqui). */
+    maxPerHour: number
+  }
+  /** `PAYMENT_SECRETS_KEY` configurada no servidor. `false` => não dá para salvar senha/apikey (PUT responde 503 `SECRETS_KEY_MISSING`). */
+  secretsKeyConfigured: boolean
+  /** `true` = segredos salvos decifram; `false` = algum NÃO decifra (chave trocada/perdida: canal desligado até salvar o segredo de novo); `null` = não há segredo salvo no banco. */
+  secretsDecryptable: boolean | null
+  /** Informativo: o deploy liberou destinos de rede privada (`COMMUNICATION_ALLOW_PRIVATE_HOSTS`). Não é editável pelo painel. */
+  privateHostsAllowed: boolean
+  /** Problemas de configuração em PT-BR, sem segredo (ex.: "e-mail ligado no painel, mas sem destinatário válido"). Mostrar como alerta na tela. */
+  warnings: string[]
+  /** `null` se nada foi salvo ainda. */
+  updatedAt: string | null
+}
+
+/** `PUT /api/admin/communication-settings`. Campo ausente = "não mexer". `strict`: campo desconhecido é 400. */
+export interface UpdateCommunicationSettingsRequest {
+  email?: {
+    /** Liga/desliga o canal (o painel manda: `false` desliga mesmo que a env o configure). A 1ª gravação do grupo, sem `enabled`, nasce DESLIGADA. */
+    enabled?: boolean
+    /** Só o endereço (nome ou IP): sem `http://`, sem porta, sem caminho. */
+    host?: string
+    port?: number // 1..65535
+    secure?: boolean
+    /** `null` limpa. */
+    user?: string | null
+    /** SENHA nova (troca). Para apagar a salva use `clearSecrets`. */
+    password?: string
+    fromName?: string | null // máx. 80
+    fromAddress?: string
+    recipients?: string[] // até 10 e-mails; REPLACE (a lista inteira)
+    minSeverity?: NotificationSeverity
+  }
+  whatsapp?: {
+    enabled?: boolean
+    baseUrl?: string // URL da Evolution API (https em produção)
+    instance?: string // letras, números, ponto, hífen e sublinhado
+    /** apikey nova (troca). */
+    apiKey?: string
+    apiVersion?: 1 | 2
+    /** Até 10 números (aceita "+55 (11) 99999-9999"; o backend normaliza para só dígitos com DDI); REPLACE. */
+    recipients?: string[]
+    minSeverity?: NotificationSeverity
+  }
+  alerts?: {
+    /** 1..1440; `null` volta ao padrão da env (30). */
+    dedupeMinutes?: number | null
+  }
+  /** Apaga um segredo salvo. */
+  clearSecrets?: Array<'smtpPassword' | 'evolutionApiKey'>
+  /** OBRIGATÓRIA: a senha ATUAL do ADMIN logado (step-up). Nunca vai para log/auditoria. */
+  currentPassword: string
+}
+// Pelo menos UM entre email / whatsapp / alerts / clearSecrets; grupo vazio (`email: {}`) é 400.
+
+export type TestChannelErrorCode =
+  | 'DESTINATION_BLOCKED' // endereço aponta para rede interna/reservada
+  | 'SMTP_AUTH_FAILED'
+  | 'SMTP_CONNECTION_FAILED'
+  | 'SMTP_TLS_REQUIRED'
+  | 'SMTP_REJECTED'
+  | 'WHATSAPP_AUTH_FAILED' // 401/403: apikey errada
+  | 'WHATSAPP_INSTANCE_OR_URL_NOT_FOUND' // 404
+  | 'WHATSAPP_REJECTED' // outro 4xx (número, versão da API)
+  | 'WHATSAPP_REDIRECT' // a URL redireciona (não seguimos)
+  | 'WHATSAPP_PROVIDER_ERROR' // 5xx
+  | 'TIMEOUT'
+  | 'NETWORK_ERROR'
+  | 'INVALID_CONFIGURATION' // falta destinatário, host, remetente, segredo ilegível...
+
+/** `POST .../test-email` — corpo opcional. Sem `config`, testa a config SALVA (painel > env). */
+export interface TestEmailRequest {
+  /** Destinatário do teste; padrão: o 1º destinatário de alertas salvo. */
+  to?: string
+  /** Config AINDA NÃO SALVA para testar (não persiste nada). Mesmos nomes do PUT. */
+  config?: { host?: string; port?: number; secure?: boolean; user?: string | null; password?: string; fromName?: string | null; fromAddress?: string }
+}
+
+/** `POST .../test-whatsapp` */
+export interface TestWhatsappRequest {
+  /** Número do teste (só dígitos com DDI); padrão: o 1º destinatário salvo. */
+  to?: string
+  config?: { baseUrl?: string; instance?: string; apiKey?: string; apiVersion?: 1 | 2 }
+}
+
+/** Resposta dos dois testes. SEMPRE `200`: erro do provedor é o RESULTADO do teste (`ok: false`), não erro da rota. */
+export interface TestChannelResult {
+  channel: 'email' | 'whatsapp'
+  ok: boolean
+  testedAt: string
+  durationMs: number
+  /** Destinatário MASCARADO (`d***@dominio.com`, `5511*****9999`); `null` se não chegou a escolher. */
+  to: string | null
+  error: { code: TestChannelErrorCode; message: string } | null
+}
+
+/** Etapas do teste de conexão SMTP (`CONNECT` = TCP, `TLS` = negociação segura, `AUTH` = usuário/senha, `OK` = tudo passou). `stage` é a etapa em que PAROU. */
+export type SmtpConnectionStage = 'CONNECT' | 'TLS' | 'AUTH' | 'OK'
+
+/**
+ * `POST /api/admin/communication-settings/test-smtp-connection`. Contrato literal: `docs/CONTRATO-COMUNICACAO-ADMIN.md` (rota 9). Só conecta, negocia TLS e autentica; NÃO envia e-mail.
+ * Sempre 200 com o resultado (`DESTINATION_BLOCKED` e `INVALID_CONFIGURATION` também são RESULTADO, etapa `CONNECT`);
+ * 400 `SECRET_REQUIRED_FOR_NEW_DESTINATION` se `config` troca host/usuário sem reenviar a senha. Mesmo balde de 5/min do `test-email`.
+ */
+export interface TestSmtpConnectionRequest {
+  /** Sem `config`, testa a config SALVA. Mesmos nomes do PUT. */
+  config?: { host?: string; port?: number; secure?: boolean; user?: string | null; password?: string; fromName?: string | null; fromAddress?: string }
+}
+
+export interface TestSmtpConnectionResult {
+  ok: boolean
+  stage: SmtpConnectionStage
+  /** `null` no sucesso. */
+  code: TestChannelErrorCode | null
+  /** Texto fixo em PT-BR do servidor (`null` se `ok`); a tela escolhe o seu texto por `code`. */
+  message: string | null
+  /** `true` = fez login com usuário/senha; `false` = servidor usado sem autenticação (nada configurado). */
+  authenticated: boolean
+  testedAt: string
+  durationMs: number
+}
+
+export type DnsRecordStatus = 'OK' | 'ATENCAO' | 'AUSENTE' | 'ERRO'
+
+/** Um registro verificado (SPF, DKIM ou DMARC). `valorEncontrado` é TXT público do DNS, truncado. */
+export interface DnsRecordCheck {
+  status: DnsRecordStatus
+  /** Nome DNS consultado; `null` = não consultado (DKIM sem seletor). */
+  nomeConsultado: string | null
+  valorEncontrado: string | null
+  /** Texto em PT-BR, pronto para exibir. */
+  recomendacao: string
+}
+
+export interface DnsInstruction {
+  /** Nome (host) do registro a cadastrar no DNS. */
+  nome: string
+  tipo: 'TXT' | 'TXT ou CNAME'
+  /** Valor pronto para colar: só existe para o DMARC (SPF e DKIM dependem do provedor e vêm `null`). */
+  valorSugerido: string | null
+  texto: string
+}
+
+/**
+ * `GET /api/admin/communication-settings/domain-check?selector=` — diagnóstico de SPF/DKIM/DMARC do domínio do e-mail REMETENTE SALVO (o domínio nunca vem do cliente; só o seletor DKIM, opcional:
+ * letras, números e hífen, até 63). Contrato literal: `docs/CONTRATO-COMUNICACAO-ADMIN.md` (rota 10). Balde de 6/min;
+ * falha de DNS vira `ERRO` no registro (200). `Cache-Control: no-store`.
+ */
+export interface DomainCheckResponse {
+  /** `false` = não há e-mail remetente (ou o domínio dele não é público): nada foi consultado (veja `warnings`). */
+  senderConfigured: boolean
+  domain: string | null
+  smtpProvider: string | null
+  /** Pior resultado entre SPF, DMARC e (se houve seletor) DKIM; `null` quando nada foi consultado. */
+  overallStatus: DnsRecordStatus | null
+  spf: DnsRecordCheck | null
+  dkim: DnsRecordCheck | null
+  dmarc: DnsRecordCheck | null
+  warnings: string[]
+  instructions: { spf: DnsInstruction; dkim: DnsInstruction; dmarc: DnsInstruction } | null
+  note: string
+  checkedAt: string
+}
+
+// ---------------------------------------------------------------------------
+// Dados da empresa e versões dos Termos/Privacidade (Admin > Configurações > Geral). Contrato LITERAL: `docs/CONTRATO-EMPRESA-ADMIN.md` (copiado sem renomear, salvo o comentário).
+// ---------------------------------------------------------------------------
+
+/** `db` = o painel já assumiu o dado; `env` = nada salvo, valem as variáveis `LEGAL_*` do deploy (reserva). */
+export type LegalDataSource = 'db' | 'env'
+
+/** `GET/PUT /api/admin/company-profile` (ADMIN-only). Nada aqui é segredo: tudo aparece na página pública de termos, no rodapé e nos e-mails ao motorista. */
+export interface CompanyProfileDTO {
+  source: LegalDataSource
+  /** O que o dono DIGITOU (a razão social verdadeira, sem o "nome de exibição" com fallback do público). */
+  profile: {
+    legalName: string | null
+    tradeName: string | null
+    /** Formatado `00.000.000/0000-00` (ou alfanumérico, mesma máscara). O PUT aceita com ou sem pontuação. */
+    cnpj: string | null
+    supportEmail: string | null
+    supportPhone: string | null
+    address: string | null
+    website: string | null
+    dpoName: string | null
+    dpoEmail: string | null
+  }
+  versions: {
+    /** Versões VIGENTES agora (a que o motorista aceita). */
+    termsVersion: string
+    privacyVersion: string
+    termsSource: LegalDataSource
+    privacySource: LegalDataSource
+    /** A versão que vale se o campo do painel for limpo (`null`): a variável `LEGAL_*_VERSION` do deploy ou o padrão do código. */
+    envTermsVersion: string
+    envPrivacyVersion: string
+  }
+  /** Campos da ENV com valor inválido (ficam vazios na página pública). Só aparece enquanto `source = env`. */
+  invalidEnvFields: string[]
+  updatedAt: string | null
+}
+
+/**
+ * `PUT /api/admin/company-profile`. Campo AUSENTE = "não mexer"; `null` (ou texto vazio) = "limpar". `strict`: campo desconhecido é 400; ao menos um campo além de `confirmVersionChange`.
+ * SEM step-up de senha (não há segredo), mas cada PUT é auditado. Rate limit de 10/min por ADMIN (`RATE_LIMITED`).
+ */
+export interface UpdateCompanyProfileRequest {
+  legalName?: string | null // até 160
+  tradeName?: string | null // até 120
+  /** Com ou sem pontuação; o servidor valida os dígitos verificadores (numérico e alfanumérico) e normaliza. */
+  cnpj?: string | null
+  supportEmail?: string | null // até 180
+  supportPhone?: string | null // 8 a 30 caracteres: números, DDD e + ( ) - . espaço
+  address?: string | null // até 300
+  website?: string | null // https://… (o servidor completa o https://)
+  dpoName?: string | null // até 120
+  dpoEmail?: string | null
+  /** Até 32 caracteres: letras, números, ponto, hífen e sublinhado. `null` volta a valer a variável `LEGAL_*_VERSION`. */
+  termsVersion?: string | null
+  privacyVersion?: string | null
+  /** OBRIGATÓRIO (`true`) quando o PUT MUDA a versão efetiva dos Termos ou da Privacidade: todos os motoristas voltam a `upToDate=false` e aceitam de novo. */
+  confirmVersionChange?: boolean
+}
+
+export type CompanyProfileErrorCode =
+  | 'VALIDATION_ERROR' // 400 — details: [{ path: 'cnpj' | 'supportEmail' | ..., message }]; nada gravado
+  | 'VERSION_CHANGE_NOT_CONFIRMED' // 409 — details: [VersionChangeDetail]
+  | 'RATE_LIMITED' // 429 — 10 PUTs/min por ADMIN
+  | 'LEGAL_SETTINGS_UNAVAILABLE' // 503 — não deu para ler/gravar no banco
+
+/** `details[0]` do 409 `VERSION_CHANGE_NOT_CONFIRMED` (nada foi gravado): mostre "isto obriga N motoristas a aceitar de novo" e reenvie o MESMO PUT com `confirmVersionChange: true`. */
+export interface VersionChangeDetail {
+  field: 'confirmVersionChange'
+  reason: 'REQUIRED_TRUE'
+  currentTermsVersion: string
+  currentPrivacyVersion: string
+  newTermsVersion: string
+  newPrivacyVersion: string
+  /** Motoristas ativos que terão de aceitar de novo. */
+  driversAffected: number
+}
+
+export type CommunicationSettingsErrorCode =
+  | 'VALIDATION_ERROR' // 400 (details: [{ path, message }])
+  | 'INVALID_CURRENT_PASSWORD' // 403 — step-up
+  | 'RATE_LIMITED_PAYMENT_GATEWAY' // 429 — tentativas ERRADAS de senha demais (mesmo código/balde do gateway), header Retry-After
+  | 'RATE_LIMITED_COMMUNICATION_SETTINGS' // 429 — limite por minuto do PUT/testes
+  | 'STEPUP_UNAVAILABLE' // 503 — Redis do step-up fora (fail-closed): nada foi gravado
+  | 'SECRETS_KEY_MISSING' // 503 — servidor sem PAYMENT_SECRETS_KEY: não dá para guardar senha/apikey
+  | 'COMMUNICATION_SETTINGS_UNAVAILABLE' // 503 — não deu para ler a config no banco (só GET/testes)
+  | 'DESTINATION_NOT_ALLOWED' // 400 — details: [{ field: 'email.host' | 'whatsapp.baseUrl', reason: 'LOOPBACK' | 'REDE_PRIVADA' | 'NOME_INTERNO' | 'ENDERECO_DE_METADADOS' | 'ENDERECO_NAO_ROTEAVEL' | 'HOST_INVALIDO' | 'HTTPS_REQUIRED' | 'INVALID_URL' }]
+  | 'SECRET_REQUIRED_FOR_NEW_DESTINATION' // 400 — trocar host/usuário SMTP ou URL/instância da Evolution exige reenviar a senha/apikey (details: [{ field: 'email.password' | 'whatsapp.apiKey' | 'config.password' | 'config.apiKey' }])
+  | 'CHANNEL_INCOMPLETE' // 409 — não dá para LIGAR o canal: details: [{ channel: 'email' | 'whatsapp', problems: string[] }]; nada foi gravado
+
+// ---------------------------------------------------------------------------
+// Backup automático do banco (Admin > Backups). Contrato LITERAL: `docs/CONTRATO-BACKUP-ADMIN.md` (copiado sem renomear). Fonte do backend: `backend/src/api/routes/backup.routes.ts`.
+// ---------------------------------------------------------------------------
+
+export type BackupDestination = 'S3' | 'DRIVE'
+export type BackupTrigger = 'SCHEDULED' | 'MANUAL' | 'VERIFY'
+export type BackupRunStatus = 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
+
+/** Código do erro de uma execução (`BackupRunDTO.errorCode`). Nunca texto livre. */
+export type BackupErrorCode =
+  | 'CONFIG' // destino incompleto/recusado, DATABASE_URL ausente
+  | 'CREDENTIAL' // o destino recusou a credencial
+  | 'FOLDER' // bucket/pasta inexistente ou sem acesso
+  | 'QUOTA' // sem espaço no destino
+  | 'NETWORK' // rede/instabilidade do destino
+  | 'OAUTH_DISCONNECTED' // Google: acesso revogado — reconectar
+  | 'DUMP' // pg_dump/pg_restore falhou (cliente ausente na imagem, versão antiga...)
+  | 'DUMP_TIMEOUT' // pg_dump passou do prazo
+  | 'KEY' // chave do backup ausente/ilegível/diferente da do arquivo
+  | 'SECRETS_KEY' // PAYMENT_SECRETS_KEY ausente/mudou: segredos do destino não decifram
+  | 'TOO_BIG' // arquivo > 5 GiB (envio simples do S3)
+  | 'NO_BACKUP' // conferência: destino vazio
+  | 'VERIFY' // conferência reprovou (vazio, adulterado, sem marca, índice vazio)
+  | 'CHECKSUM' // SHA-256 do arquivo no destino não bate com o gravado no envio
+  | 'BUSY' // já havia um em andamento
+  | 'INTERRUPTED' // o processo morreu no meio
+  | 'NOT_PICKED_UP' // pedido manual que o worker nunca pegou (worker fora do ar)
+  | 'UNKNOWN'
+
+/** Pendências para LIGAR o automático (vazio = pode ligar). */
+export type BackupProblemToEnable = 'DESTINATION_INCOMPLETE' | 'KEY_MISSING' | 'SECRETS_KEY_MISSING' | 'SECRETS_UNREADABLE'
+
+/** `GET /api/admin/backup/config` e resposta do `PUT` e do `POST /google/disconnect`. SEGREDOS NUNCA VOLTAM. */
+export interface BackupConfigDTO {
+  enabled: boolean
+  /** Hora cheia em Brasília (UTC-3 fixo), 0..23. */
+  hourLocal: number
+  /** 1 = diário, 2 = dia sim dia não, 7 = semanal. */
+  frequencyDays: 1 | 2 | 7
+  /** Quantas cópias manter no destino (>= 1). Nunca apaga a única/última. */
+  retentionCount: number
+  /** Sem sucesso há mais que isto (h), com o automático ligado, dispara o alerta de atraso. 6..720. */
+  alertAfterHours: number
+  /** Destino ESCOLHIDO (manda sobre o que estiver preenchido). */
+  destination: BackupDestination | null
+  /** O destino escolhido está completo (S3: endereço+bucket+chave+segredo; Drive: conta conectada). */
+  destinationReady: boolean
+  s3: {
+    endpoint: string | null
+    region: string | null
+    bucket: string | null
+    prefix: string | null
+    /** Há chave de acesso / segredo salvos. NUNCA são devolvidos (nem dica de caracteres). */
+    accessKeySet: boolean
+    secretKeySet: boolean
+  }
+  drive: {
+    clientId: string | null
+    clientSecretSet: boolean
+    /** Conta Google conectada (fluxo OAuth concluído). "Client ID preenchido" NÃO é conectado. */
+    connected: boolean
+    connectedAt: string | null
+    accountEmail: string | null
+    /** O `redirect_uri` que o dono precisa cadastrar no app do Google Cloud (null se a API não sabe o próprio endereço: defina PUBLIC_API_BASE_URL). */
+    redirectUri: string | null
+  }
+  encryptionKey: {
+    exists: boolean
+    /** 8 hex: confere "é a chave certa?" sem revelar a chave. */
+    fingerprint: string | null
+    createdAt: string | null
+    shownAt: string | null
+  }
+  /** O servidor tem a PAYMENT_SECRETS_KEY (sem ela não dá para guardar credenciais nem a chave). */
+  secretsKeyConfigured: boolean
+  /** Os segredos salvos decifram agora (false = a PAYMENT_SECRETS_KEY mudou: recadastrar). */
+  secretsReadable: boolean
+  problemsToEnable: BackupProblemToEnable[]
+  updatedAt: string
+}
+
+/** Uma execução (backup agendado/manual ou conferência). */
+export interface BackupRunDTO {
+  id: string
+  trigger: BackupTrigger
+  status: BackupRunStatus
+  destination: BackupDestination | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  durationMs: number | null
+  /** Nome do arquivo no destino (`backup-innoflow-AAAA-MM-DD-HHhMMmSSs.dump.enc`). */
+  fileName: string | null
+  /** Chave do objeto no S3, ou `drive:<id>/<nome>` no Drive. Nulo em teste sem destino. */
+  objectKey: string | null
+  /** Tamanho do arquivo CIFRADO que subiu. */
+  sizeBytes: number | null
+  /** SHA-256 (hex) do arquivo cifrado que subiu. */
+  checksumSha256: string | null
+  tablesWithData: number | null
+  /** Impressão digital da chave que cifrou (nulo = execução de teste sem destino). */
+  keyFingerprint: string | null
+  /** CÓDIGO do erro (só quando `status === 'FAILED'`). */
+  errorCode: BackupErrorCode | null
+  /** Texto fixo, pronto para mostrar, derivado do código (nunca o stderr do pg_dump). */
+  errorMessage: string | null
+}
+
+/** `GET /api/admin/backup/status`. */
+export interface BackupStatusDTO {
+  lastSuccessAt: string | null
+  lastAttemptAt: string | null
+  /** Há um backup rodando agora (trava viva no banco). */
+  running: boolean
+  /** Atrasado: automático ligado e sem sucesso dentro de `alertAfterHours`. */
+  stale: boolean
+  /** Ligado e nunca saiu uma cópia. */
+  neverRan: boolean
+  /** Horas desde o último sucesso (null se nunca). */
+  ageHours: number | null
+  /** Próxima execução agendada (ISO, UTC), ou null com o automático desligado. */
+  nextRunAt: string | null
+  /** Pedido manual/conferência enfileirado ou rodando agora (para o spinner). */
+  activeRun: BackupRunDTO | null
+  lastBackupRun: BackupRunDTO | null
+  lastVerifyRun: BackupRunDTO | null
+}
+
+/** `PUT /api/admin/backup/config` — tudo opcional, campo ausente = "não mexer", `null` onde permitido = limpar. `.strict()`: campo desconhecido é 400. */
+export interface UpdateBackupConfigRequest {
+  enabled?: boolean
+  hourLocal?: number // 0..23
+  frequencyDays?: 1 | 2 | 7
+  retentionCount?: number // 1..365
+  alertAfterHours?: number // 6..720
+  destination?: BackupDestination | null
+  s3?: {
+    endpoint?: string // URL: https em produção; sem usuário/senha/query
+    region?: string | null // ex.: us-east-1, auto
+    bucket?: string
+    prefix?: string | null // pasta dentro do bucket
+    accessKey?: string // SÓ-ESCRITA
+    secretKey?: string // SÓ-ESCRITA
+  }
+  drive?: {
+    clientId?: string | null // trocar o Client ID DESCONECTA a conta (o escopo drive.file é por app)
+    clientSecret?: string // SÓ-ESCRITA
+  }
+  /** Apaga um segredo salvo. Para TROCAR, mande o valor novo no campo próprio. */
+  clearSecrets?: Array<'s3AccessKey' | 's3SecretKey' | 'driveClientSecret'>
+  /** Senha ATUAL do ADMIN logado. Obrigatória exceto quando o PUT só traz hourLocal/frequencyDays/alertAfterHours ou `enabled: false`. */
+  currentPassword?: string
+}
+
+/** `POST /api/admin/backup/key` → 201. A chave sai UMA vez: a tela deve oferecer o download do `fileText` e NÃO guardá-la. */
+export interface GenerateBackupKeyRequest {
+  currentPassword: string
+  /** Trocar uma chave que JÁ existe exige `replace: true` E `confirmation: 'GERAR NOVA CHAVE'` (exatamente). */
+  replace?: boolean
+  confirmation?: string
+  /** A impressão digital que a tela viu; se já mudou (outra pessoa gerou), 409 `BACKUP_KEY_CHANGED`. */
+  expectedFingerprint?: string | null
+}
+export interface GeneratedBackupKeyResponse {
+  /** A chave inteira, 8 grupos de 8 hex separados por hífen. */
+  key: string
+  fingerprint: string
+  /** `chave-backup-innoflow-<impressão digital>.txt` */
+  fileName: string
+  /** Conteúdo do .txt para download (tem a linha `CHAVE: ...` que os scripts leem). */
+  fileText: string
+  replaced: boolean
+}
+
+/** `POST /api/admin/backup/test-destination` → SEMPRE 200 com o RESULTADO (`ok:false` não é erro da rota). */
+export interface BackupTestDestinationResponse {
+  ok: boolean
+  destination: BackupDestination | null
+  message: string
+  error?: { code: BackupErrorCode; message: string }
+}
+
+/** `GET /api/admin/backup/runs?page=&pageSize=&trigger=&status=` (pageSize 1..100, padrão 20). */
+export interface BackupRunsResponse {
+  items: BackupRunDTO[]
+  meta: { page: number; pageSize: number; total: number; totalPages: number }
+}
+
+/** `POST /api/admin/backup/google/start` → 200. Navegue (`window.location`) para `url`. */
+export interface BackupGoogleStartResponse {
+  url: string
+  redirectUri: string | null
 }

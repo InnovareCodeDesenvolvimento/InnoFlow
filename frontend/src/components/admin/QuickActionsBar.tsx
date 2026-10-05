@@ -20,7 +20,7 @@ export function QuickActionsBar({ role, className }: { role: Role | undefined; c
   if (actions.length === 0) return null
 
   return (
-    <div className={cn("items-center gap-1.5", className)}>
+    <div className={cn("items-center gap-1.5", className)} data-tour="admin-quick-actions">
       {actions.map((action) => (
         <Link
           key={action.href}
@@ -51,6 +51,7 @@ export function QuickActionsDropdown({ role, className }: { role: Role | undefin
           )}
           aria-label="Atalhos rápidos"
           title="Atalhos rápidos"
+          data-tour="admin-quick-actions"
         >
           <Zap className="h-4 w-4" aria-hidden="true" />
         </button>

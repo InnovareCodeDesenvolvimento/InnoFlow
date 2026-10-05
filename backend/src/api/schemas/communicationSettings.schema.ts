@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 import { z } from 'zod'
+import { seletorDkimValido } from '../../core/comunicacao/dnsRemetente'
 
 /**
  * `PUT /api/admin/communication-settings` e `POST .../test-email|test-whatsapp` — contrato literal em `docs/CONTRATO-COMUNICACAO-ADMIN.md`.
@@ -74,5 +75,17 @@ const testeWhatsappConfig = whatsappSchema.pick({ baseUrl: true, instance: true,
 export const testEmailSchema = z.object({ to: emailTexto.optional(), config: testeEmailConfig.optional() }).strict()
 export const testWhatsappSchema = z.object({ to: z.string().trim().min(8).max(25).optional(), config: testeWhatsappConfig.optional() }).strict()
 
+/** Teste de CONEXÃO SMTP (só o handshake, sem enviar mensagem): sem destinatário; `config` não salva opcional, como no `test-email`. */
+export const testSmtpConnectionSchema = z.object({ config: testeEmailConfig.optional() }).strict()
+
+/** `GET .../domain-check?selector=`: o ÚNICO dado do cliente é o seletor DKIM (um rótulo DNS: letras, dígitos e hífen, até 63); vazio = não informado. Query desconhecida é 400. */
+export const domainCheckQuerySchema = z
+  .object({
+    selector: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().refine(seletorDkimValido, { message: 'Seletor inválido: use só letras, números e hífen (até 63 caracteres).' }).optional()),
+  })
+  .strict()
+
+export type DomainCheckQuery = z.infer<typeof domainCheckQuerySchema>
 export type TestEmailInput = z.infer<typeof testEmailSchema>
+export type TestSmtpConnectionInput = z.infer<typeof testSmtpConnectionSchema>
 export type TestWhatsappInput = z.infer<typeof testWhatsappSchema>

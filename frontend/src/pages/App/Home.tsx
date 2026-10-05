@@ -69,7 +69,7 @@ export function Home() {
       </AppBand>
 
       <div className="mx-auto max-w-md space-y-5 px-4 py-5">
-        <Card className="animate-enter flex items-center gap-3.5 p-4">
+        <Card className="animate-enter flex items-center gap-3.5 p-4" data-tour="home-qr">
           <IconBadge icon={QrCode} size="lg" />
           <div className="min-w-0">
             <p className="text-sm font-bold text-ink">Pronto para carregar?</p>

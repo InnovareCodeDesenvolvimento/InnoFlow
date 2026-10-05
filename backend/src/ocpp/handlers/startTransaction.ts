@@ -9,6 +9,7 @@ import { serializeTariffSnapshot } from '../../core/tarifacao/calcularCustoSessa
 import { defineOcppHandler } from './defineHandler'
 import { reconferirInicioWalletSobLock } from '../../services/carteira/saldoComprometido'
 import { emitSessionStarted } from '../../realtime/emit'
+import { aplicarOrigemDoInicio } from '../../services/sessao/origemDoInicio'
 
 /**
  * F4 (2026-09-17): repete a MESMA checagem do `Authorize` (o Authorize é
@@ -124,6 +125,10 @@ export const handleStartTransaction = defineOcppHandler('StartTransaction', star
   void emitSessionStarted({ operatorId: ctx.operatorId, userId, sessionId: session.id, chargePointId: chargePoint.id }).catch((err) =>
     logger.error({ err, sessionId: session.id }, '[realtime] falha ao publicar session.started (não bloqueante)'),
   )
+
+  // L1.8: IP/User-Agent do app (prova para o dossiê de chargeback) — EM SEGUNDO PLANO, depois de a sessão estar gravada: o carregador não espera por isto e uma falha aqui
+  // (Redis/banco) é engolida dentro da função — nunca derruba o início da sessão. Só sessões iniciadas pelo app têm origem guardada.
+  void aplicarOrigemDoInicio(session.id, data.idTag)
 
   return { transactionId: session.ocppTransactionId, idTagInfo: { status: 'Accepted' } }
 })

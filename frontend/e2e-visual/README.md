@@ -39,6 +39,9 @@ Imposto em `estabilizar.ts` e `playwright.visual.config.ts`:
 - Fuso e locale fixos; viewport fixa; `deviceScaleFactor: 1`.
 - Fonte Inter **pedida e verificada** antes da foto (sem isso, ~1 captura em 40 saía na fonte de reserva).
 - Tiles do OpenStreetMap trocados por um PNG sólido; qualquer outro host externo é abortado.
+- **Onboarding desligado**: todo login de mock é uma 1ª visita, e o tour do mascote (e o card "Primeiros passos" do Dashboard) abriria por cima de cada captura. O interruptor de aparelho
+  `innoflow:onboarding:off` = `"1"` (`ONBOARDING_OFF` em `constantes.ts`) é gravado no `storageState` de cada persona pelo `global-setup` e é o padrão dos contextos novos
+  (`playwright.visual.config.ts`). Os estados do próprio onboarding são verificados por `verificacoes-onboarding.visual.ts` (desliga o interruptor; não grava baseline).
 - Espera real por "assentar" (altura, nº de imagens e de nós iguais por ~1 s) e checagem de que o app MONTOU (a 1ª versão do harness gravou
   baseline em branco por falta dessa checagem).
 - **Foto da rota inteira**: os shells do Admin/PWA rolam por dentro (`h-screen` + `<main>`), então o harness cresce a viewport até o rolador

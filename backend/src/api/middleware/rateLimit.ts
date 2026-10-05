@@ -158,3 +158,30 @@ export const communicationSettingsWriteRateLimit = buildLimiter(60 * 1000, 10, '
  * 5/min por ADMIN (anti-abuso do servidor de e-mail do dono como relé, e anti-varredura de portas por quem tiver um token).
  */
 export const communicationSettingsTestRateLimit = buildLimiter(60 * 1000, 5, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `GET /api/admin/communication-settings/domain-check` — cada chamada faz até 3 consultas DNS de saída; 6/min por ADMIN (o diagnóstico é manual: o dono olha, ajusta o DNS no provedor
+ * e consulta de novo — e a propagação do DNS leva minutos, não segundos).
+ */
+export const domainCheckRateLimit = buildLimiter(60 * 1000, 6, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/** `PUT /api/admin/company-profile` — raro e feito por um humano: 10/min por ADMIN (por USUÁRIO, não por IP). Roda DEPOIS de `authenticate`/`requireRole('ADMIN')`. */
+export const companyProfileWriteRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * Escritas de estorno e chargeback (L1.8) — mexem em dinheiro de terceiros, são raras e feitas por um humano: 20/min por ADMIN (por USUÁRIO, não por IP). Roda DEPOIS de
+ * `authenticate`/`requireRole('ADMIN')`. Além disso a rota exige a senha do ADMIN (step-up, com throttle próprio) e o trigger do banco impõe o teto do estorno.
+ */
+export const paymentReversalWriteRateLimit = buildLimiter(60 * 1000, 20, 'RATE_LIMITED', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * `POST /api/auth/password/forgot` (L1.3, rota PÚBLICA) — 5 pedidos / 15 min por IP, contando TODOS (cada pedido, existente ou não, pode disparar e-mail). É o 429 `RATE_LIMITED_AUTH` do contrato;
+ * o limite por E-MAIL é silencioso e mora no serviço (continua 202). Em memória do processo, como o login.
+ */
+export const forgotPasswordRateLimit = buildLimiter(15 * 60 * 1000, 5, 'RATE_LIMITED_AUTH')
+
+/**
+ * `POST /api/auth/password/reset` (L1.3, PÚBLICA) — teto geral por IP contra martelo (20 / 15 min, todos os pedidos). O contador de tokens INVÁLIDOS por IP (mais apertado, em Redis)
+ * mora no serviço.
+ */
+export const resetPasswordRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_AUTH')

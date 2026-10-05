@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input"
 import { generateRandomSecret, WEBHOOK_SECRET_MIN, type DraftErrors, type GatewayDraft } from "@/lib/paymentGateway"
 import type { PaymentGatewayConfigDTO } from "@/types/api"
 import { CopyButton } from "./CopyButton"
-import { SecretField } from "./SecretField"
+import { SecretField } from "@/components/admin/SecretField"
 
 /**
  * Webhook da Cielo — NÃO USADO nesta instalação. A conta Cielo é COMPARTILHADA com o Parque (decisão do dono): o InnoFlow não recebe notificação da Cielo

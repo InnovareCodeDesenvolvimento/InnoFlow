@@ -140,6 +140,20 @@ const envSchema = z.object({
   // feature opcional (mesma lição de bug-env-eager-todos-entrypoints.md).
   GOOGLE_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
+  // L1.9 (06/10/2026) — termos de uso e política de privacidade: VERSÃO VIGENTE + dados públicos da empresa (controlador, suporte, encarregado/DPO).
+  // RESERVA desde o pedido do dono (06/10/2026): o painel (Admin > Dados da empresa, tabela `CompanyProfile`) MANDA; estas envs só valem enquanto nada foi salvo lá
+  // (`services/legal/dadosLegais.ts`). Seguem lidas aqui por serem o fallback e o padrão das versões — suba a env no MESMO deploy do texto novo se não usar o painel. Versões com default (o boot dos 3 entrypoints não pode
+  // depender de uma decisão jurídica do dono) e no máximo 32 caracteres (coluna `ConsentRecord.version`). Dados da empresa OPCIONAIS e SEM default: o dono ainda não informou CNPJ,
+  // razão social, e-mail de suporte nem DPO — vazio vira `null` em `GET /api/public/legal`, nunca placeholder inventado. Valor inválido (e-mail/CNPJ malformado) é IGNORADO com aviso
+  // no log (`core/legal/termos.ts`), nunca derruba o boot por causa de um campo cosmético.
+  LEGAL_TERMS_VERSION: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).max(32).default('2026-10-05')),
+  LEGAL_PRIVACY_VERSION: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).max(32).default('2026-10-05')),
+  LEGAL_COMPANY_NAME: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+  LEGAL_COMPANY_CNPJ: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(40).optional()),
+  LEGAL_SUPPORT_EMAIL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+  LEGAL_SUPPORT_PHONE: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+  LEGAL_DPO_EMAIL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+
   // F5.1 (30/09/2026) — cliente Cielo (gateway de pagamento real, ver
   // .claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md). Credenciais
   // OPCIONAIS de propósito (mesma lição de bug-env-eager-todos-entrypoints.md):
@@ -252,11 +266,28 @@ const envSchema = z.object({
   // repassa Host/X-Forwarded-*, mas uma env explícita não depende disso.
   PUBLIC_API_BASE_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
 
+  // L1.3 (05/10/2026) — origem PÚBLICA do FRONTEND (ex.: https://innoflow.innovarecode.com.br), usada para montar os links dos e-mails (redefinir senha).
+  // NUNCA derivada do header Host/X-Forwarded-Host da requisição (host header injection: quem pede o e-mail de outra pessoa poderia fazê-lo apontar para um domínio
+  // do atacante). OPCIONAL: sem ela cai na PRIMEIRA origem de `CORS_ALLOWED_ORIGINS` (já é o domínio do frontend, definido pelo dono); sem nenhuma utilizável
+  // (produção com localhost/http) o e-mail de link NÃO é enviado e o erro é logado. Só a ORIGEM é usada (caminho/query descartados).
+  PUBLIC_APP_URL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().url().optional()),
+  // L1.3 — teto GLOBAL de e-mails de redefinição realmente enviados por hora (todos os destinatários): o SMTP do dono não pode virar relé de spam para endereços alheios
+  // por quem varre e-mails de várias origens (o limite por e-mail e por IP já barra o martelo em UM endereço/UM IP). Conta só envios reais (e-mail inexistente não gasta).
+  PASSWORD_RESET_MAX_EMAILS_PER_HOUR: z.coerce.number().int().positive().default(500),
+
   // F5.4 (30/09/2026) — sessão de recarga cobrando de cartão (pré-auth +
   // captura parcial via PaymentIntent). Cadência do varredor de
   // pré-autorizações (`worker/jobs/varrerPreAutorizacoesCartaoJob.ts`) — mesmo
   // padrão/default de `TOPUP_PIX_EXPIRY_SCAN_INTERVAL_MS`.
   CARD_PREAUTH_SCAN_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  // L1.8 (estorno pelo portal da Cielo): o job confirmarEstornosPortal reconsulta, de tempos em tempos, as devoluções registradas pelo ADMIN (PENDING_CONFIRMATION). Baixa frequência de propósito
+  // (30 min): cada rodada faz UMA consulta de venda por pedido pendente numa conta Cielo COMPARTILHADA com o Parque, e o estorno no portal leva horas/dias para aparecer.
+  REFUND_PORTAL_SCAN_INTERVAL_MS: z.coerce.number().int().min(60_000).default(1_800_000),
+  // Janela (dias, contados da data da VENDA) em que a consulta de venda da Cielo ainda responde (~3 meses; 85 d deixa folga). Passada a janela o job PARA de reconsultar e só alerta
+  // (a confirmação passa a ser humana: conferir o extrato da Cielo e cancelar/registrar de novo).
+  REFUND_PORTAL_RECONSULT_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(85),
+  // Idade (horas) a partir da qual uma devolução ainda PENDING_CONFIRMATION vira alerta (o ADMIN registrou, a Cielo não mostra o estorno).
+  REFUND_PORTAL_PENDING_ALERT_HOURS: z.coerce.number().int().min(1).max(24 * 90).default(72),
   // Quanto tempo uma pré-autorização AUTHORIZED pode ficar sem `StartTransaction`
   // vinculado antes do varredor cancelá-la (VOIDED) — decisão do dono,
   // 2026-09-17, documentada em decisoes-f5-pagamento-cielo.md (mesma premissa
@@ -325,6 +356,8 @@ const envSchema = z.object({
   RETENTION_OCPP_MESSAGE_DAYS: z.coerce.number().int().min(30).default(365),
   RETENTION_METER_SAMPLE_DAYS: z.coerce.number().int().min(30).default(365),
   RETENTION_WEBHOOK_EVENT_DAYS: z.coerce.number().int().min(30).default(180),
+  // L1.6/DL6: log das notificações por e-mail ao motorista (NotificationLog) — 12 meses (365 d), DELETE em lotes por createdAt (a tabela não é particionada nem append-only). Mesmas guardas (ENABLED/DRY_RUN/piso 30).
+  RETENTION_NOTIFICATION_LOG_DAYS: z.coerce.number().int().min(30).default(365),
 
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem

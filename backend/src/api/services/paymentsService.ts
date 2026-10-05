@@ -213,10 +213,21 @@ function paymentIntentTenantConditions(scope: ReportingScope): Prisma.Sql[] {
   return conditions
 }
 
-function paymentsFilterConditions(filters: Pick<PaymentsReportQuery, 'provider' | 'status'>): Prisma.Sql[] {
+export type PaymentsReportFilters = Pick<PaymentsReportQuery, 'provider' | 'status' | 'tid' | 'authorizationCode' | 'proofOfSale'>
+
+/**
+ * `tid`/`authorizationCode`/`proofOfSale` (L1.8): achar a venda de um chargeback pelos identificadores da adquirente que o intent já guarda (C2.5). Igualdade EXATA (a Cielo os entrega
+ * inteiros no aviso do chargeback), valor sempre como parâmetro (nunca concatenado). Sem índice próprio (a tabela é pequena e o período já restringe pela data); se a busca passar a ser
+ * feita sem período curto numa base grande, pedir índice ao Cronos. Valem para ADMIN e OPERATOR, sempre DENTRO do escopo do operador (`paymentIntentTenantConditions`).
+ */
+function paymentsFilterConditions(filters: PaymentsReportFilters): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = []
-  if (filters.provider) conditions.push(Prisma.sql`pi.provider = ${filters.provider}`)
-  if (filters.status) conditions.push(Prisma.sql`pi.status = ${filters.status}`)
+  // CAST explícito para o enum: sem ele o Postgres recusa `enum = text` (o parâmetro do $queryRaw vai como texto) e a rota respondia 500 a QUALQUER `provider`/`status` — bug que existia antes do L1.8.
+  if (filters.provider) conditions.push(Prisma.sql`pi.provider = ${filters.provider}::"PaymentProvider"`)
+  if (filters.status) conditions.push(Prisma.sql`pi.status = ${filters.status}::"PaymentIntentStatus"`)
+  if (filters.tid) conditions.push(Prisma.sql`pi."cieloTid" = ${filters.tid}`)
+  if (filters.authorizationCode) conditions.push(Prisma.sql`pi."cieloAuthorizationCode" = ${filters.authorizationCode}`)
+  if (filters.proofOfSale) conditions.push(Prisma.sql`pi."cieloProofOfSale" = ${filters.proofOfSale}`)
   return conditions
 }
 
@@ -230,7 +241,7 @@ const PAYMENTS_FROM = Prisma.sql`
 export async function getPaymentsReportPage(
   scope: ReportingScope,
   window: PeriodWindow,
-  filters: Pick<PaymentsReportQuery, 'provider' | 'status'>,
+  filters: PaymentsReportFilters,
   page: number,
   pageSize: number,
 ): Promise<{ items: PaymentListRow[]; total: number }> {

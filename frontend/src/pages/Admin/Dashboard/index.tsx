@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/Badge"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Skeleton, TableSkeleton } from "@/components/ui/Skeleton"
+import { OnboardingChecklist } from "@/components/onboarding/OnboardingChecklist"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
 import { OperatorFilterSelect } from "@/components/relatorios/OperatorFilterSelect"
 import { SiteFilterSelect } from "@/components/relatorios/SiteFilterSelect"
@@ -39,6 +40,7 @@ import {
 export default function DashboardPage() {
   const role = useAuthStore((s) => s.user?.role)
   const isAdmin = role === "ADMIN"
+  const userId = useAuthStore((s) => s.user?.id)
 
   const period = useReportPeriod("30d")
   const [operatorId, setOperatorId] = useState("")
@@ -74,6 +76,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
+
+      {/* Primeiros passos (só ADMIN): some sozinho quando tudo está configurado ou quando o usuário o dispensa — ver `components/onboarding/OnboardingChecklist`. */}
+      {isAdmin && <OnboardingChecklist userId={userId} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <PeriodSelector preset={period.preset} from={period.from} to={period.to} onPresetChange={period.setPreset} onCustomChange={period.setCustom} />

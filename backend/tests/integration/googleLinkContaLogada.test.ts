@@ -25,6 +25,7 @@ import { logger } from '../../src/lib/logger'
 import { identidadeEhTestador } from '../../src/core/pagamentos/configGateway'
 import { prismaVinculoGoogleRepository } from '../../src/services/auth/vincularGoogleAContaLogada'
 import { createUser, uniqueSuffix } from './helpers/fixtures'
+import { TERMOS_VIGENTES } from './helpers/termos'
 
 /**
  * `POST /api/auth/google/link` (I-7) contra Postgres + Redis REAIS: vincula o Google à conta LOGADA sem trocar de conta, sem zerar a senha e sem revogar a sessão.
@@ -49,7 +50,7 @@ describe('POST /api/auth/google/link — vínculo do Google à conta logada (Pos
   /** Motorista só-senha, criado pela API pública (token de verdade). */
   async function motoristaSoSenha() {
     const email = `link-${++n}-${Math.random().toString(36).slice(2, 7)}-${suffix}@example.com`
-    const reg = await request(app).post('/api/auth/register').send({ name: 'Motorista Link', email, password: SENHA })
+    const reg = await request(app).post('/api/auth/register').send({ name: 'Motorista Link', email, password: SENHA, acceptedTermsVersion: TERMOS_VIGENTES })
     expect(reg.status, JSON.stringify(reg.body)).toBe(201)
     return { email, token: reg.body.token as string, id: reg.body.user.id as string, auth: { Authorization: `Bearer ${reg.body.token}` } }
   }

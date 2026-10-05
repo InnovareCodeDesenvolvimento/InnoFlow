@@ -15,6 +15,9 @@ import { TopupAmountPicker } from "@/components/carteira/TopupAmountPicker"
 import { TopupPendingCard } from "@/components/carteira/TopupPendingCard"
 import { TopupSuccessCard } from "@/components/carteira/TopupSuccessCard"
 import { useCreateTopup, useMeTopup, useMeWallet } from "@/hooks/useMeSessions"
+import { useMePaymentMethods } from "@/hooks/useMePaymentMethods"
+import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
+import { isChargebackIssue, issueFromEligibility } from "@/lib/cardEligibility"
 import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
 import { createTopupErrorMessage } from "@/lib/topupAmount"
 import { isGatewayDisabledError, PIX_GATEWAY_DISABLED_MESSAGE } from "@/lib/paymentMethodDisabled"
@@ -35,6 +38,9 @@ export function CarteiraAdicionar() {
   const [topupId, setTopupId] = useState<string | null>(null)
 
   const walletQuery = useMeWallet({ pageSize: 1 })
+  // L1.8: com chargeback o CARTÃO está barrado e o Pix segue - o aviso (texto da API) aparece acima do formulário. Consulta secundária: falha/demora só some com o aviso, nunca trava o Pix.
+  const paymentMethodsQuery = useMePaymentMethods()
+  const cardIssue = issueFromEligibility(paymentMethodsQuery.data?.cardEligibility)
   const createTopup = useCreateTopup()
   const topupQuery = useMeTopup(topupId)
   const topup = topupQuery.data
@@ -130,6 +136,8 @@ export function CarteiraAdicionar() {
                 </Link>
               </div>
             )}
+
+            {!walletQuery.isLoading && !walletQuery.isError && cardIssue && isChargebackIssue(cardIssue) && <CardEligibilityNotice issue={cardIssue} className="mb-5" />}
 
             {!walletQuery.isLoading && !walletQuery.isError && !pixUnavailable && (
               <TopupAmountPicker
