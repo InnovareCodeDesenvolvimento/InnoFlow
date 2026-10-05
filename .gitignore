@@ -22,3 +22,7 @@ test-results/
 frontend/e2e-visual/.auth/
 frontend/e2e-visual/.relatorio/
 frontend/e2e-visual/.resultados/
+
+# Apresentação (frontend/apresentacao/): capturas intermediárias e HTML gerado são locais (regerar com `node apresentacao/gerar.mjs`); os PDFs finais em saida/ SÃO versionados
+frontend/apresentacao/capturas/
+frontend/apresentacao/saida/html/
