@@ -23,6 +23,10 @@ export default defineConfig({
       // N-7: o notificador dos avisos ao dono leria a configuração do banco (NotificationChannelConfig) no 1º alerta de CADA suíte — nos testes só vale a env (quem testa o painel
       // liga de volta com `COMMUNICATION_DISABLE_DB_CONFIG=false` ANTES de importar o logger).
       COMMUNICATION_DISABLE_DB_CONFIG: 'true',
+      // L1.9: versões VIGENTES dos termos fixas nos testes (os testes de cadastro/Google/reaceite mandam `acceptedTermsVersion` = esta). Valor próprio, diferente do default de produção, para um
+      // teste nunca passar "por acaso" com a versão do default; `tests/integration/helpers/termos.ts` repete o valor.
+      LEGAL_TERMS_VERSION: 'termos-teste-1',
+      LEGAL_PRIVACY_VERSION: 'privacidade-teste-1',
     },
     coverage: {
       provider: 'v8',

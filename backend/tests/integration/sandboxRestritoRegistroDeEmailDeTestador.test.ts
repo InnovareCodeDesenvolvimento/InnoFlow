@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import request from 'supertest'
 import { criarBancoProprio } from './helpers/bancoProprio'
+import { TERMOS_VIGENTES } from './helpers/termos'
 
 /**
  * QA da Íris (F5.8, rodada Vega-2) — o RISCO RESIDUAL do ALTO-2 que o Vega admite ("cadastro por e-mail/senha não confirma o e-mail"), medido de verdade
@@ -73,7 +74,7 @@ describe('ALTO-2 — risco residual: e-mail de testador não é provado (registe
     m.invalidarCacheConfigGateway()
   })
 
-  const registrar = (email: string) => request(app).post('/api/auth/register').send({ name: 'Quem Registrou', email, password: 'Senha-Forte-123' })
+  const registrar = (email: string) => request(app).post('/api/auth/register').send({ name: 'Quem Registrou', email, password: 'Senha-Forte-123', acceptedTermsVersion: TERMOS_VIGENTES })
   const pix = (token: string) => request(app).post('/api/me/wallet/topups').set({ Authorization: `Bearer ${token}` }).send({ amountCents: 2000 })
 
   it('CONTROLE: motorista comum (e-mail fora da lista) leva 409 SANDBOX_RESTRICTED e o testador legítimo (e-mail IGUAL, identidade verificada pelo Google) passa', async () => {

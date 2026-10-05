@@ -26,6 +26,7 @@ import { env } from '../../src/lib/env'
 import { issueToken } from '../../src/lib/jwt'
 import { identidadeEhTestador } from '../../src/core/pagamentos/configGateway'
 import { createTenant, createUser, uniqueSuffix } from './helpers/fixtures'
+import { TERMOS_VIGENTES } from './helpers/termos'
 
 /**
  * Íris (rodada 3) — REVALIDAÇÃO INDEPENDENTE de `POST /api/auth/google/link` (bf4149f). Os testes da Vega cobrem o caminho principal; aqui os cantos que ela não pisou:
@@ -164,7 +165,7 @@ describe('google/link — revalidação independente (Postgres + Redis reais)', 
     const m = await motorista()
     const g = googleDe(m.email)
     expect((await vincular(m, g)).status).toBe(200)
-    const viaGoogle = await request(app).post('/api/auth/google').send({ credential: credencial(g) })
+    const viaGoogle = await request(app).post('/api/auth/google').send({ credential: credencial(g), acceptedTermsVersion: TERMOS_VIGENTES })
     expect(viaGoogle.status, JSON.stringify(viaGoogle.body)).toBe(200)
     expect(viaGoogle.body.user.id).toBe(m.id)
     expect(await prisma.user.count({ where: { email: { equals: m.email, mode: 'insensitive' } } })).toBe(1)

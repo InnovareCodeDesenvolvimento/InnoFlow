@@ -9,6 +9,8 @@ export const registerSchema = z.object({
   email: z.string().trim().email().max(180),
   password: z.string().min(8).max(72),
   phone: z.string().trim().max(30).optional(),
+  // L1.9: a versão dos Termos que o titular aceitou (= `PublicLegalConfig.termsVersion` vigente; senão 409 `TERMS_VERSION_OUTDATED`). OBRIGATÓRIA — sem aceite não há cadastro (400).
+  acceptedTermsVersion: z.string().trim().min(1).max(32),
 })
 
 export const loginSchema = z.object({
@@ -24,6 +26,13 @@ export const loginSchema = z.object({
 // mas inválido é 401 `INVALID_GOOGLE_TOKEN`, decidido pelo verificador.
 export const googleAuthSchema = z.object({
   credential: z.string().min(1).max(4096),
+})
+
+// `POST /api/auth/google` (login E cadastro na mesma rota). L1.9: `acceptedTermsVersion` é OPCIONAL no schema porque quem já tem conta entra sem aceitar nada de novo; só é EXIGIDA
+// (e conferida contra a versão vigente) quando o Google vai CRIAR uma conta nova — decidido em `autenticarComGoogle` (400 `VALIDATION_ERROR` se faltar, 409 `TERMS_VERSION_OUTDATED` se antiga).
+// `POST /api/auth/google/link` segue com `googleAuthSchema` (sem o campo).
+export const googleSignInSchema = googleAuthSchema.extend({
+  acceptedTermsVersion: z.string().trim().min(1).max(32).optional(),
 })
 
 // `POST /api/auth/password`. `newPassword`: mínimo 10 (Órion) e máximo 72 BYTES — o bcrypt
@@ -51,10 +60,10 @@ export const resetPasswordSchema = z.object({
   newPassword: newPasswordSchema,
 })
 
-
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>
+export type GoogleSignInInput = z.infer<typeof googleSignInSchema>
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>

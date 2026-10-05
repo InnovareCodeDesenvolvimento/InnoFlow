@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
-import { UniqueViolationError, type GoogleUserRepository, type UsuarioGoogle } from './autenticarComGoogle'
+import { aceitesDoCadastro } from '../legal/consentimento'
+import { UniqueViolationError, type AceiteOk, type GoogleUserRepository, type UsuarioGoogle } from './autenticarComGoogle'
 
 /**
  * Adaptador Prisma do repositório usado por `autenticarComGoogle`. Só o
@@ -56,13 +57,21 @@ export const prismaGoogleUserRepository: GoogleUserRepository = {
     }
   },
 
-  async createDriverWithWallet(input: { name: string; email: string; googleSub: string }): Promise<UsuarioGoogle> {
+  async createDriverWithWallet(input: { name: string; email: string; googleSub: string; aceite?: AceiteOk }): Promise<UsuarioGoogle> {
     try {
-      // Create ANINHADO = atômico (User + Wallet na mesma transação implícita)
-      // — o `/register` faz 2 creates soltos e pode deixar motorista sem
-      // carteira se o 2º falhar; aqui não.
+      // Create ANINHADO = atômico (User + Wallet + aceite dos termos na mesma transação implícita) — conta sem carteira ou sem prova de aceite não existe.
       const row = await prisma.user.create({
-        data: { role: 'DRIVER', name: input.name, email: input.email, googleSub: input.googleSub, passwordHash: null, wallet: { create: {} } },
+        data: {
+          role: 'DRIVER',
+          name: input.name,
+          email: input.email,
+          googleSub: input.googleSub,
+          passwordHash: null,
+          wallet: { create: {} },
+          ...(input.aceite
+            ? { consentRecords: { create: aceitesDoCadastro({ termsVersion: input.aceite.termsVersion, privacyVersion: input.aceite.privacyVersion, origem: 'GOOGLE_SIGNUP', ip: input.aceite.ip }) } }
+            : {}),
+        },
         select: USER_SELECT,
       })
       return toUsuario(row)

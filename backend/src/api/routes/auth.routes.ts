@@ -12,7 +12,8 @@ import { authenticate } from '../middleware/auth'
 import { sessionValidator } from '../lib/sessionValidatorInstance'
 import { loginThrottle } from '../lib/loginThrottleInstance'
 import { validateBody } from '../middleware/validate'
-import { changePasswordSchema, googleAuthSchema, loginSchema, registerSchema, type ChangePasswordInput, type GoogleAuthInput, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
+import { changePasswordSchema, googleAuthSchema, googleSignInSchema, loginSchema, registerSchema, type ChangePasswordInput, type GoogleAuthInput, type GoogleSignInInput, type LoginInput, type RegisterInput } from '../schemas/auth.schema'
+import { aceitesDoCadastro, exigirVersaoVigenteDosTermos, ipDoAceite, versoesVigentes } from '../../services/legal/consentimento'
 import { writeAuditLog } from '../../services/auditoria/writeAuditLog'
 import { autenticarComGoogle } from '../../services/auth/autenticarComGoogle'
 import { createGoogleTokenVerifier } from '../../services/auth/googleTokenVerifier'
@@ -118,7 +119,10 @@ router.post(
   registerRateLimit,
   validateBody(registerSchema),
   asyncHandler(async (req, res) => {
-    const { name, email, password, phone } = req.body as RegisterInput
+    const { name, email, password, phone, acceptedTermsVersion } = req.body as RegisterInput
+
+    // L1.9: sem aceite da versão VIGENTE dos termos não há cadastro (409 `TERMS_VERSION_OUTDATED`; ausente = 400 pelo schema). ANTES de tocar o banco/bcrypt.
+    exigirVersaoVigenteDosTermos(acceptedTermsVersion)
 
     // Em QUALQUER caixa: `User.email` é único COM caixa, então `DONO@x.com` e `dono@x.com` coexistiriam como contas distintas — e a lista de testadores do
     // sandbox (F5.8, ALTO-2) e a regra de staff do login com Google comparam sem caixa. Mesma resposta do duplicado exato (não cria enumeração nova).
@@ -128,10 +132,18 @@ router.post(
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
 
+    // Create ANINHADO = atômico: usuário + carteira + prova do aceite (termos na versão aceita, privacidade na vigente) numa transação só — conta sem carteira ou sem aceite não existe.
     const user = await prisma.user.create({
-      data: { name, email, phone, passwordHash, role: 'DRIVER' },
+      data: {
+        name,
+        email,
+        phone,
+        passwordHash,
+        role: 'DRIVER',
+        wallet: { create: {} },
+        consentRecords: { create: aceitesDoCadastro({ termsVersion: acceptedTermsVersion, privacyVersion: versoesVigentes().privacyVersion, origem: 'REGISTER', ip: req.ip }) },
+      },
     })
-    await prisma.wallet.create({ data: { userId: user.id } })
 
     const token = issueToken(user)
     res.status(201).json({ token, user: toUserDTO({ ...user, hasPassword: true }) })
@@ -213,15 +225,26 @@ router.post(
 router.post(
   '/google',
   googleAuthRateLimit,
-  validateBody(googleAuthSchema),
+  validateBody(googleSignInSchema),
   asyncHandler(async (req, res) => {
     const clientId = env.GOOGLE_CLIENT_ID
     if (!clientId) throw new AppError('Login com Google não está configurado.', 503, 'GOOGLE_NOT_CONFIGURED')
 
-    const { credential } = req.body as GoogleAuthInput
-    const resultado = await autenticarComGoogle(credential, { verifyIdToken: createGoogleTokenVerifier(clientId), users: prismaGoogleUserRepository })
+    const { credential, acceptedTermsVersion } = req.body as GoogleSignInInput
+    // L1.9: o aceite só é EXIGIDO se o Google for CRIAR uma conta (quem já tem conta entra sem aceitar nada novo) — `autenticarComGoogle` decide; aqui só o que veio no corpo.
+    const aceite =
+      acceptedTermsVersion === undefined
+        ? ({ status: 'AUSENTE' } as const)
+        : acceptedTermsVersion !== versoesVigentes().termsVersion
+          ? ({ status: 'DESATUALIZADO' } as const)
+          : ({ status: 'OK', termsVersion: acceptedTermsVersion, privacyVersion: versoesVigentes().privacyVersion, ip: ipDoAceite(req.ip) } as const)
+    const resultado = await autenticarComGoogle(credential, { verifyIdToken: createGoogleTokenVerifier(clientId), users: prismaGoogleUserRepository, aceite })
 
     switch (resultado.status) {
+      case 'TERMS_REQUIRED':
+        throw new AppError('Aceite os Termos de Uso e a Política de Privacidade para criar a conta.', 400, 'VALIDATION_ERROR', [{ path: 'acceptedTermsVersion', message: 'obrigatório para criar a conta' }])
+      case 'TERMS_OUTDATED':
+        throw new AppError('Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.', 409, 'TERMS_VERSION_OUTDATED')
       case 'INVALID_TOKEN':
         throw new AppError('Token do Google inválido.', 401, 'INVALID_GOOGLE_TOKEN')
       case 'EMAIL_NOT_VERIFIED':

@@ -140,6 +140,19 @@ const envSchema = z.object({
   // feature opcional (mesma lição de bug-env-eager-todos-entrypoints.md).
   GOOGLE_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
+  // L1.9 (06/10/2026) — termos de uso e política de privacidade: VERSÃO VIGENTE + dados públicos da empresa (controlador, suporte, encarregado/DPO). Config de ambiente, não tabela
+  // (docs/MODELO-DADOS-LOTE1.md §6): a versão só muda junto com o TEXTO, que é deploy do frontend — suba a env no MESMO deploy. Versões com default (o boot dos 3 entrypoints não pode
+  // depender de uma decisão jurídica do dono) e no máximo 32 caracteres (coluna `ConsentRecord.version`). Dados da empresa OPCIONAIS e SEM default: o dono ainda não informou CNPJ,
+  // razão social, e-mail de suporte nem DPO — vazio vira `null` em `GET /api/public/legal`, nunca placeholder inventado. Valor inválido (e-mail/CNPJ malformado) é IGNORADO com aviso
+  // no log (`core/legal/termos.ts`), nunca derruba o boot por causa de um campo cosmético.
+  LEGAL_TERMS_VERSION: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).max(32).default('2026-10-05')),
+  LEGAL_PRIVACY_VERSION: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).max(32).default('2026-10-05')),
+  LEGAL_COMPANY_NAME: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+  LEGAL_COMPANY_CNPJ: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(40).optional()),
+  LEGAL_SUPPORT_EMAIL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+  LEGAL_SUPPORT_PHONE: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+  LEGAL_DPO_EMAIL: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(400).optional()),
+
   // F5.1 (30/09/2026) — cliente Cielo (gateway de pagamento real, ver
   // .claude/agent-memory/nova/decisoes-f5-pagamento-cielo.md). Credenciais
   // OPCIONAIS de propósito (mesma lição de bug-env-eager-todos-entrypoints.md):

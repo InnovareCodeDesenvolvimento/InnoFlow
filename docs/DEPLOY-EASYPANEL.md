@@ -173,6 +173,33 @@ a senha em claro; por isso a porta 9000 **não** é publicada crua na internet. 
 proxy → container (rede interna do EasyPanel) segue em `ws://`/HTTP puro — é interno, não
 exposto.
 
+### Termos, privacidade e LGPD (L1.9 / L1.4) — envs e operação (06/10/2026)
+
+**Envs `LEGAL_*` (as 3 apps recebem as mesmas; só a `api` as usa de fato).** Todas opcionais — nada derruba o boot:
+
+| Env | Para quê | Default |
+|---|---|---|
+| `LEGAL_TERMS_VERSION` | versão VIGENTE dos Termos de Uso (≤ 32 caracteres) | `2026-10-05` |
+| `LEGAL_PRIVACY_VERSION` | versão VIGENTE da Política de Privacidade (≤ 32 caracteres) | `2026-10-05` |
+| `LEGAL_COMPANY_NAME` | razão social do controlador | vazio (`null`) |
+| `LEGAL_COMPANY_CNPJ` | CNPJ (só dígitos ou com pontuação; sai formatado; dígito verificador conferido) | vazio |
+| `LEGAL_SUPPORT_EMAIL` | e-mail de suporte (Decreto 7.962/2013: canal visível) | vazio |
+| `LEGAL_SUPPORT_PHONE` | telefone de suporte (texto livre, ≤ 30) | vazio |
+| `LEGAL_DPO_EMAIL` | e-mail do encarregado (DPO) | vazio |
+
+- Os dados da empresa **ainda não foram informados pelo dono**: enquanto vazios, `GET /api/public/legal` devolve `null` em cada campo (a tela mostra "em breve"/esconde o bloco; nada é inventado).
+  E-mail/CNPJ malformado é IGNORADO (campo sai vazio) e o log traz um aviso `[legal] variável LEGAL_* com valor inválido` com o NOME do campo.
+- **Suba `LEGAL_TERMS_VERSION`/`LEGAL_PRIVACY_VERSION` no MESMO deploy em que o texto novo vai ao ar.** O cadastro (e-mail e Google) só vale com `acceptedTermsVersion` = a vigente (senão 409
+  `TERMS_VERSION_OUTDATED`); quem já tem conta e aceitou a versão anterior passa a `upToDate=false` e vê o modal de reaceite no próximo login.
+- O aceite é prova gravada (`ConsentRecord`, append-only) com o IP da requisição (zerado se a conta for excluída).
+
+**Exclusão de conta e devolução do saldo (L1.4, DL2).** A exclusão é ANONIMIZAÇÃO (a pessoa some; sessões, extrato e pagamentos ficam sob um id pseudônimo por obrigação legal/fiscal). Quem exclui com
+saldo informa uma chave Pix (guardada **cifrada** com a `PAYMENT_SECRETS_KEY` — por isso a rotação da chave também a re-cifra; ver o runbook de rotação) e o ADMIN devolve **por fora** e registra em
+`POST /api/admin/account-deletions/:id/refund` (valor INTEGRAL, senha do ADMIN, comprovante) — o que lança o `TOPUP_REFUND` e **apaga a chave Pix**. Prazo máximo recomendado: **30 dias**; passou disso o
+worker (1x por dia) emite o alerta `payment_refund_pending_overdue` (IMPORTANTE: e-mail ao dono). Sem a `PAYMENT_SECRETS_KEY` a exclusão **com saldo** responde 503 `PAYMENT_SECRETS_KEY_MISSING` (nunca
+guarda a chave Pix em claro). O que sobrevive à anonimização e por quê: `AuditLog` antigo do titular (append-only; sai no expurgo por idade), `WebhookEvent`, sessões/extrato/pagamentos (5 anos), aceite dos
+termos (sem IP). O IP e o User-Agent de início das sessões são **zerados** na exclusão (decisão do dono, 06/10/2026).
+
 ### Gateway de pagamento (Cielo) — banco manda, env é reserva (F5.5, 02/10/2026)
 
 **👉 LEIA O GUIA COMPLETO:** [`docs/GO-LIVE-PAGAMENTOS.md`](GO-LIVE-PAGAMENTOS.md) — contém roteiro operacional para sandbox/produção, tabela de variáveis de ambiente, alertas a monitorar, plano de rollback, e lista de decisões do dono. **Esta seção é apenas resumo técnico de como as variáveis funcionam.**
