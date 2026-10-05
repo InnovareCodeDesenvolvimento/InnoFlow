@@ -1,15 +1,14 @@
 import { useState } from "react"
-import { ChevronRight, Search, Users, WalletCards, Zap } from "lucide-react"
+import { ChevronRight, Users, WalletCards, Zap } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Badge } from "@/components/ui/Badge"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
-import { Input } from "@/components/ui/Input"
 import { Pagination } from "@/components/ui/Pagination"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
-import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { useDrivers } from "@/hooks/useDrivers"
+import { DriverSearchField } from "@/components/admin/DriverSearchField"
+import { useDriverSearch } from "@/hooks/useDriverSearch"
 import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
 import { formatCents, formatDate } from "@/lib/utils"
@@ -17,8 +16,6 @@ import type { DriverListRow } from "@/types/api"
 import { DriverWalletDrawer } from "./DriverWalletDrawer"
 
 const PAGE_SIZE = 20
-/** Regra do backend (`drivers.routes.ts`): OPERATOR só lista buscando, com pelo menos 3 caracteres. */
-const OPERATOR_MIN_SEARCH = 3
 
 /**
  * Admin → Carteiras: saldo e extrato dos motoristas da REDE (conta de motorista
@@ -31,13 +28,12 @@ export default function CarteirasPage() {
   const role = useAuthStore((s) => s.user?.role)
   const isAdmin = role === "ADMIN"
 
-  const [searchInput, setSearchInput] = useState("")
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<DriverListRow | null>(null)
 
-  const search = useDebouncedValue(searchInput.trim(), 350)
-  const needsMoreChars = !isAdmin && search.length < OPERATOR_MIN_SEARCH
-  const { data, isLoading, isError, error, refetch, isFetching } = useDrivers({ search: search || undefined, page, pageSize: PAGE_SIZE }, !needsMoreChars)
+  // A regra de busca (debounce, mínimo do OPERATOR) é a do hook comum — a mesma do diálogo "Iniciar recarga".
+  const { searchInput, setSearchInput, search, needsMoreChars, minChars, query } = useDriverSearch({ isAdmin, page, pageSize: PAGE_SIZE })
+  const { data, isLoading, isError, error, refetch, isFetching } = query
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
@@ -50,18 +46,13 @@ export default function CarteirasPage() {
       />
 
       <div className="max-w-md">
-        <Input
-          type="search"
-          aria-label="Buscar motorista"
-          placeholder={isAdmin ? "Buscar por nome ou e-mail exato" : "Nome do motorista (mín. 3 letras)"}
-          autoComplete="off"
+        <DriverSearchField
           value={searchInput}
-          onChange={(e) => {
-            setSearchInput(e.target.value)
+          isAdmin={isAdmin}
+          onChange={(value) => {
+            setSearchInput(value)
             setPage(1)
           }}
-          leftIcon={<Search className="h-4 w-4" aria-hidden="true" />}
-          hint={isAdmin ? undefined : "Por segurança, operadores encontram motoristas pelo nome — a base inteira da rede não é listada."}
         />
       </div>
 
@@ -71,8 +62,8 @@ export default function CarteirasPage() {
           title="Busque um motorista"
           description={
             searchInput.trim().length === 0
-              ? `Digite pelo menos ${OPERATOR_MIN_SEARCH} letras do nome do motorista para consultar o saldo e o extrato.`
-              : `Faltam ${OPERATOR_MIN_SEARCH - search.length} ${OPERATOR_MIN_SEARCH - search.length === 1 ? "caractere" : "caracteres"} para buscar.`
+              ? `Digite pelo menos ${minChars} letras do nome do motorista para consultar o saldo e o extrato.`
+              : `Faltam ${minChars - search.length} ${minChars - search.length === 1 ? "caractere" : "caracteres"} para buscar.`
           }
         />
       )}

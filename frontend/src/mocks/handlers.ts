@@ -58,6 +58,7 @@ import {
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
+import { commandStatus, parseScenario, remoteStartPolicyDenied, startRemote } from "./remoteStartData"
 import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
@@ -597,6 +598,33 @@ export const handlers = [
     if (!cp) return HttpResponse.json(errorBody("Charge point não encontrado.", "NOT_FOUND"), { status: 404 })
     cp.active = false
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  // L1.5 - recarga remota pelo ADMIN (espelho de `chargePoints.routes.ts`; cenários e ordem das checagens em `remoteStartData.ts`). ANTES da rota genérica abaixo: o MSW usa a primeira que casa.
+  http.post("/api/admin/charge-points/:id/commands/remote-start", async ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    if (remoteStartPolicyDenied(scope.user.role)) {
+      return HttpResponse.json(errorBody("Apenas administradores da plataforma podem iniciar recarga remota.", "FORBIDDEN"), { status: 403 })
+    }
+    const scenario = parseScenario(localStorage.getItem("mock:remote-start"))
+    if (scenario === "5xx") return HttpResponse.json(errorBody("Erro interno.", "INTERNAL_ERROR"), { status: 500 })
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const result = startRemote({ chargePointId: String(params.id), body, scenario, scope: scope.user })
+    if (!result.ok) return HttpResponse.json({ ...errorBody(result.message, result.code), ...(result.details ? { details: result.details } : {}) }, { status: result.status })
+    return HttpResponse.json(result.body, { status: result.status })
+  }),
+
+  // L1.5 - resultado do comando (só ADMIN, DL4). 404 `COMMAND_NOT_FOUND` para inexistente/expirado/fora de escopo.
+  http.get("/api/admin/commands/:correlationId", ({ request, params }) => {
+    const scope = requireStaff(request)
+    if ("error" in scope) return scope.error
+    if (remoteStartPolicyDenied(scope.user.role)) {
+      return HttpResponse.json(errorBody("Apenas administradores da plataforma podem iniciar recarga remota.", "FORBIDDEN"), { status: 403 })
+    }
+    const result = commandStatus(String(params.correlationId), scope.user)
+    if (!result.ok) return HttpResponse.json(errorBody(result.message, result.code), { status: result.status })
+    return HttpResponse.json(result.body)
   }),
 
   http.post("/api/admin/charge-points/:id/commands/:command", ({ request, params }) => {
