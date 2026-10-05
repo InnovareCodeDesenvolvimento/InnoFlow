@@ -24,7 +24,7 @@ Cores são triplas `R G B` em `:root` (para `rgb(var(--x) / <alpha>)`). Escopos 
 
 - **Marca:** `primary` (petróleo, 50…950), `accent` (verde de estado/“Flow”), `night` `#061621`, `lime` `#61DB24`, `on-lime` (texto sobre lima), `brand-teal` (só decoração).
 - **Texto:** `ink` › `ink-soft` › `ink-softer` (texto secundário, AA) › `ink-subtle` (**só** ícone decorativo e placeholder — nunca texto).
-- **Estado:** `success|warning|danger|info` (50/100/600/700). `state-off` `#6B7280` é **fundo** de marcador “fora do ar”/interruptor desligado.
+- **Estado:** `success|warning|danger|info` (50/100/600/700). Folga de contraste medida: `accent`/`success` = `#1F7B25` (5,36:1 em branco), `warning-700` = `#A74C08` (5,12:1 sobre `warning-100`); `info-700` sobre `info-100` ainda é 4,79:1. `state-off` `#6B7280` é **fundo** de marcador “fora do ar”/interruptor desligado.
 - **Foco:** `--color-focus` (petróleo; lima em `.surface-dark`), `--color-on-focus`.
 - **Raios:** `rounded-control` 14 px (botão, campo — via `--field-radius`), `rounded-card` 20 px, `rounded-feature` 24 px (momento de marca, diálogo — `--dialog-radius`). Raios menores (`lg`/`xl`) só em peças internas (chips, telhas).
 - **Sombras:** `shadow-tinted` / `shadow-tinted-card` (tingidas de petróleo), `shadow-lime`/`-lg` (só do CTA lima). Camadas flutuantes (menu, sheet, skip-link) usam `shadow-lg` neutro.
@@ -37,6 +37,7 @@ Cores são triplas `R G B` em `:root` (para `rgb(var(--x) / <alpha>)`). Escopos 
 - **`feedback/`** — `NotFound`, `RouteError` (boundary leve) + `RouteErrorView`, `LoadingScreen` (mascote só após 700 ms), `AccessDenied` (403 de marca).
 - **Shells** — público (`layout/Header|Footer|PageBand`), auth (`auth/AuthShell`), PWA (`pages/App/Layout` + `pwa/AppBand`; trilho lateral ≥ lg), Admin (`pages/Admin/Layout`, `admin/SidebarNav`; trilha no cabeçalho, **sem heading** — o h1 é o do `PageHeader`).
 - **Admin:** `painel/PageHeader`, `admin/AdminStates` (`AdminErrorState`, `AdminFirstUseState` = erro/vazio com mascote).
+- **Menu do Admin abaixo de `lg`:** `admin/AdminDrawer` — diálogo de verdade (Radix: `role="dialog"` nomeado "Menu", foco entra, Tab preso, resto `aria-hidden`, Esc fecha, foco volta a "Abrir menu"); novo painel lateral/menu em overlay deve ser Radix Dialog, nunca `div fixed`.
 - **Documento do cartão** (`src/pagamento-cartao/`): **CSS copiado e dedicado** (`--pc-*`), nunca importa nada do app (ver §8).
 
 Classes utilitárias de marca (em `@layer components`): `.surface-dark`, `.surface-dark-rich`, `.glass`, `.glass-strong`, `.eyebrow`, `.brand-*`, `.press` (toque), `.card-elevated`. Animações (no Tailwind): `animate-enter`, `-pop`, `-sheet`, `-radar`, `-live` (+ `fade-in`/`scale-in` do Dialog). **`radar` e `live` são loops e só existem no PWA; o Admin não tem nenhum** (`src/test/adminSemLoops.test.ts`).

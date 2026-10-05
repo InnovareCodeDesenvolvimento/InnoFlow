@@ -70,7 +70,8 @@
    *   ~113–129 (folha ≈#279930 h125, corpo do "Flow" ≈#339F24 h113) — bem
    *   mais "verde-grama/lima" do que o hue 137 (mais "teal") estimado sem
    *   o arquivo. RAMPA RECALIBRADA para hue 123 (compromisso entre folha e
-   *   corpo do texto), s58%. -600 recalculado para 4.54:1 com branco (AA),
+   *   corpo do texto), s58%. -600 recalculado para 4.54:1 com branco (AA) e,
+   *   no acabamento pós-F-D, escurecido a #1F7B25 (5,36:1: 4,54 só passava em branco puro),
    *   -500 seguindo em ~3.4:1 (decorativo, mesmo papel de antes).
    * - brand-teal: pixel real do meio da espiral ≈ #025964, hue 187–195
    *   (bem mais ciano/azulado do que o #1C8C6E/h164 anterior). RECALIBRADO
@@ -97,14 +98,14 @@
     --color-primary-foreground: 255 255 255; /* #FFFFFF */
 
     /* ====== VERDE GRAMA/LIMA (accent — CTAs, "Flow") — hue ~123, recalibrado do pixel real ====== */
-    --color-accent: 36 136 41;             /* #248829 — DEFAULT = degrau 600 */
+    --color-accent: 31 123 37;             /* #1F7B25 — DEFAULT = degrau 600 (era #248829, 4,54:1: só passava em branco puro) */
     --color-accent-50: 243 252 243;        /* #F3FCF3 */
     --color-accent-100: 231 249 232;       /* #E7F9E8 */
     --color-accent-200: 199 240 201;       /* #C7F0C9 */
     --color-accent-300: 142 225 146;       /* #8EE192 */
     --color-accent-400: 86 210 92;         /* #56D25C — decorativo/grande, <4.5:1 com branco */
     --color-accent-500: 43 161 49;         /* #2BA131 — verde do "Flow"/folha; decorativo/grande (3.36:1 com branco) */
-    --color-accent-600: 36 136 41;         /* #248829 — AA com branco (4.54:1) */
+    --color-accent-600: 31 123 37;         /* #1F7B25 — 5,36:1 com branco, 5,13 sobre #F9FAFB (era #248829, 4,54:1) */
     --color-accent-700: 28 105 32;         /* #1C6920 — hover-darken (6.79:1) */
     --color-accent-foreground: 255 255 255; /* #FFFFFF */
 
@@ -113,16 +114,16 @@
     --color-accent-glow: 97 219 36;        /* #61DB24 — ponta lima do gradiente do "Flow"; só hover/glow/gradiente, nunca fundo de texto */
 
     /* ====== SEMÂNTICAS ====== */
-    --color-success: 36 136 41;            /* #248829 (mesmo tom do accent — verde já é "sucesso") */
+    --color-success: 31 123 37;            /* #1F7B25 (mesmo tom do accent — verde já é "sucesso") */
     --color-success-50: 243 252 243;       /* #F3FCF3 */
     --color-success-100: 231 249 232;      /* #E7F9E8 */
-    --color-success-600: 36 136 41;        /* #248829 */
+    --color-success-600: 31 123 37;        /* #1F7B25 */
     --color-success-700: 28 105 32;        /* #1C6920 */
     --color-warning: 217 119 6;            /* #D97706 */
     --color-warning-50: 255 251 235;       /* #FFFBEB */
     --color-warning-100: 254 243 199;      /* #FEF3C7 */
     --color-warning-600: 217 119 6;        /* #D97706 */
-    --color-warning-700: 180 83 9;         /* #B45309 */
+    --color-warning-700: 167 76 8;         /* #A74C08 — 5,12:1 sobre warning-100 (era #B45309, 4,51:1) */
     --color-danger: 220 38 38;             /* #DC2626 */
     --color-danger-50: 254 242 242;        /* #FEF2F2 */
     --color-danger-100: 254 226 226;       /* #FEE2E2 */

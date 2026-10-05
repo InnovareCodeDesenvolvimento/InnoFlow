@@ -1,9 +1,11 @@
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { Building2, ChevronRight, ExternalLink, LogOut, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react"
+import { Building2, ChevronRight, ExternalLink, LogOut, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
 import { SidebarNav } from "@/components/admin/SidebarNav"
+import { AdminDrawer } from "@/components/admin/AdminDrawer"
+import { useMediaQuery } from "@/hooks/useMediaQuery"
 import { QuickActionsBar, QuickActionsDropdown } from "@/components/admin/QuickActionsBar"
 import { matchNavItem } from "@/components/painel/navegacao"
 import { InnovareCodeBadge } from "@/components/painel/InnovareCodeBadge"
@@ -46,6 +48,11 @@ function AdminShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  // O drawer só existe abaixo de `lg` (1024 px). Se a janela crescer com ele aberto (girar o tablet), o diálogo ficaria invisível mas
+  // ainda travando foco/leitor de tela — fecha. Derivado no render, sem efeito com setState.
+  const isDesktop = useMediaQuery("(min-width: 1024px)")
+  const drawerVisible = drawerOpen && !isDesktop
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsedPref)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readOpenGroupsPref)
 
@@ -167,53 +174,18 @@ function AdminShell() {
         </div>
       </aside>
 
-      {/* Drawer mobile — sempre no modo expandido (accordion), nunca colapsa pra ícone (não há espaço apertado a economizar aqui, é sobreposto). */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="dialog-scrim absolute inset-0" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
-          <div className="surface-dark absolute inset-y-0 right-0 flex w-72 flex-col shadow-2xl">
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5">
-              <div className="min-w-0">
-                <span className="text-sm font-black uppercase tracking-widest text-white">Menu</span>
-                {contextLabel && (
-                  <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-semibold text-white/70">
-                    <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    {contextLabel}
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white"
-                aria-label="Fechar menu"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-            <nav className="flex-1 overflow-y-auto p-4" aria-label="Navegação do painel administrativo (mobile)">
-              <SidebarNav
-                nav={nav}
-                collapsed={false}
-                isActive={isActive}
-                isGroupOpen={isGroupOpen}
-                onToggleGroup={toggleGroup}
-                onNavigate={() => setDrawerOpen(false)}
-              />
-            </nav>
-            <div className="border-t border-white/10 p-4">
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white"
-              >
-                <LogOut className="h-4 w-4" aria-hidden="true" />
-                Sair do painel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Drawer mobile — diálogo acessível (Radix) sempre no modo expandido (accordion); ver `AdminDrawer`. */}
+      <AdminDrawer
+        open={drawerVisible}
+        onOpenChange={setDrawerOpen}
+        returnFocusTo={menuButtonRef}
+        contextLabel={contextLabel}
+        nav={nav}
+        isActive={isActive}
+        isGroupOpen={isGroupOpen}
+        onToggleGroup={toggleGroup}
+        onLogout={handleLogout}
+      />
 
       {/* Conteúdo — coluna de altura fixa (viewport inteira): header e footer
           não rolam, só o `main` do meio rola. `pl-*` acompanha a largura da
@@ -248,10 +220,12 @@ function AdminShell() {
             </Link>
             <button
               type="button"
+              ref={menuButtonRef}
               onClick={() => setDrawerOpen(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-ink-soft lg:hidden"
               aria-label="Abrir menu"
-              aria-expanded={drawerOpen}
+              aria-haspopup="dialog"
+              aria-expanded={drawerVisible}
             >
               <Menu className="h-4 w-4" aria-hidden="true" />
             </button>

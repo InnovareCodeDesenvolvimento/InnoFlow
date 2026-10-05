@@ -11,7 +11,7 @@ import { cva } from "class-variance-authority"
  * Hover sobe 1 px só com ponteiro (`hover: hover`) e o toque encolhe (`active:scale`) — feedback tátil, não efeito.
  */
 // O raio mora em CADA variante (não na base): `buttonVariants()` é usado direto em <Link> (sem tailwind-merge), então base + variante com raios arbitrários diferentes
-// competiriam pela ordem do CSS — e o `lime`/`glass` (raio de controle 14 px) perdia para o da base. `--field-radius`: 12 px (= rounded-lg) fora do PWA, 14 px no PWA.
+// competiriam pela ordem do CSS — e o `lime`/`glass` (raio de controle 14 px) perdia para o da base. `--field-radius` = `--radius-control` (14 px) no app inteiro desde a F-D (antes: 12 px fora do PWA).
 const lift = "[@media(hover:hover)]:hover:-translate-y-px active:scale-[0.97]"
 const motion = "transition-[transform,box-shadow,background-color,border-color,color] duration-150 ease-brand"
 

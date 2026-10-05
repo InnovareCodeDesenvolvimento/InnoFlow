@@ -8,6 +8,7 @@ import { cardVariants } from "@/components/ui/cardVariants"
 import { cn } from "@/lib/utils"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { MascotFace } from "@/components/brand/Mascot"
+import { Skeleton } from "@/components/ui/Skeleton"
 import { AppBand } from "@/components/pwa/AppBand"
 import { SessionTimer } from "@/components/sessao/SessionTimer"
 import { SessionPaymentMethodBadge } from "@/components/sessao/SessionPaymentMethodBadge"
@@ -130,7 +131,7 @@ export function Sessao() {
   // Momento de marca: a espera de uma resposta de hardware acontece na moldura escura (radar lima), os avisos de cartão/demora no miolo claro.
   if (awaitingStart) {
     return (
-      <div>
+      <div key="conectando">
         <AppBand className="pb-10 pt-10">
           <div className="flex flex-col items-center text-center">
             <span className="relative flex h-16 w-16 items-center justify-center">
@@ -164,11 +165,35 @@ export function Sessao() {
     )
   }
 
+  // ---- Ainda não sabemos -------------------------------------------------------
+  // Antes da 1ª resposta `session` é `null` e caía no "Nenhuma recarga em andamento" — mentira de ~0,7 s para quem TEM sessão, e o CLS 0,187 a 1440 px quando a resposta
+  // chegava depois do 1º quadro (o `<div>` raiz era REAPROVEITADO pelo React: centralizado de 448 px virava largura total). Agora: esqueleto com a forma e a altura do bloco
+  // real (faixa escura + painel de 301 px + botão; medido: 495 px sem aviso, 575 com o aviso de falha) e `key` por estado, para o React montar nós novos em vez de
+  // esticar o mesmo `<div>` de um layout para o outro.
+  if (activeQuery.isPending) {
+    return (
+      <div key="carregando">
+        <AppBand className="pb-7">
+          <p role="status" className="sr-only">
+            Carregando sua recarga…
+          </p>
+          <Skeleton className="h-4 w-40 rounded-md bg-white/10" />
+          <Skeleton className="h-5 w-56 rounded-md bg-white/10" />
+          <Skeleton className="mt-1.5 h-6 w-36 rounded-full bg-white/10" />
+          <Skeleton className="mt-4 h-[301px] rounded-feature bg-white/10" />
+        </AppBand>
+        <div className="mx-auto max-w-md px-4 pt-5">
+          <Skeleton className="h-12 w-full rounded-control" />
+        </div>
+      </div>
+    )
+  }
+
   // ---- Sem sessão ativa -------------------------------------------------------
   // Estado vazio de PRIMEIRO USO (D3): o mascote acompanha o convite a escanear o QR.
   if (!session) {
     return (
-      <div className="mx-auto max-w-md px-4 py-5">
+      <div key="vazia" className="mx-auto max-w-md px-4 py-5">
         <div className={cn(cardVariants({ variant: "inverse" }), "flex flex-col items-center gap-3 rounded-feature px-6 py-12 text-center")}>
           <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
             <MascotFace size={64} />
@@ -185,7 +210,7 @@ export function Sessao() {
   const energyKwh = (session.energyDeliveredWh / 1000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })
 
   return (
-    <div>
+    <div key="ativa">
       <AppBand className="pb-7">
         {activeQuery.isError && (
           <div role="status" className="mb-4 flex items-center gap-2 rounded-card bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-700">
