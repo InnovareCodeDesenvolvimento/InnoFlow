@@ -25,14 +25,14 @@ function NavLinkItem({
       aria-label={collapsed ? item.label : undefined}
       aria-current={isActive ? "page" : undefined}
       className={cn(
-        "pressable group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-colors",
+        "group relative flex min-h-11 items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-colors",
         collapsed && "justify-center px-0",
-        isActive
-          ? "bg-white/15 text-white shadow-[0_6px_16px_-8px_rgb(var(--color-accent-glow)/0.35)] ring-1 ring-white/20"
-          : "text-white/60 hover:bg-white/10 hover:text-white",
+        isActive ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/10 hover:text-white",
       )}
     >
-      <item.icon className={cn("h-[18px] w-[18px] shrink-0", isActive ? "text-white" : "text-white/50 group-hover:text-white/90")} aria-hidden="true" />
+      {/* Item ativo: traço lima de 3 px na borda esquerda + ícone lima (F-D, §3.6 do plano). Decorativo: o estado vai em `aria-current`. */}
+      {isActive && <span className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-lime" aria-hidden="true" />}
+      <item.icon className={cn("h-[18px] w-[18px] shrink-0", isActive ? "text-lime" : "text-white/60 group-hover:text-white/90")} aria-hidden="true" />
       {!collapsed && <span className="flex-1">{item.label}</span>}
     </Link>
   )
@@ -86,7 +86,7 @@ export function SidebarNav({
               type="button"
               onClick={() => onToggleGroup(group.title)}
               aria-expanded={open}
-              className="mb-1 flex w-full items-center justify-between rounded-lg px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/60 transition-colors hover:text-white/85"
+              className="mb-1 flex w-full items-center justify-between rounded-lg px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/70 transition-colors hover:text-white"
             >
               {group.title}
               <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", !open && "-rotate-90")} aria-hidden="true" />

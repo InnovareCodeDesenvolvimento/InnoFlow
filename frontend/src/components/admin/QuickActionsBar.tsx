@@ -27,7 +27,7 @@ export function QuickActionsBar({ role, className }: { role: Role | undefined; c
           to={action.href}
           title={`${action.label} — ${action.hint}`}
           aria-label={action.label}
-          className="pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-white text-ink-soft transition-colors hover:border-primary/40 hover:text-primary"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-soft transition-colors hover:border-primary/40 hover:text-primary"
         >
           <action.icon className="h-4 w-4" aria-hidden="true" />
         </Link>
@@ -46,7 +46,7 @@ export function QuickActionsDropdown({ role, className }: { role: Role | undefin
         <button
           type="button"
           className={cn(
-            "pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-white text-ink-soft transition-colors hover:border-primary/40 hover:text-primary",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-soft transition-colors hover:border-primary/40 hover:text-primary",
             className,
           )}
           aria-label="Atalhos rápidos"

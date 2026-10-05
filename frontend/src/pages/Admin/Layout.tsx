@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { Building2, ExternalLink, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ShieldAlert, X } from "lucide-react"
+import { Building2, ChevronRight, ExternalLink, LogOut, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
 import { SidebarNav } from "@/components/admin/SidebarNav"
@@ -8,7 +8,10 @@ import { QuickActionsBar, QuickActionsDropdown } from "@/components/admin/QuickA
 import { matchNavItem } from "@/components/painel/navegacao"
 import { InnovareCodeBadge } from "@/components/painel/InnovareCodeBadge"
 import { cn, operatorContextLabel, ROLE_LABELS } from "@/lib/utils"
-import logoIcon from "@/assets/logo-icon.png"
+import { Logo } from "@/components/brand/Logo"
+import { MascotFace } from "@/components/brand/Mascot"
+import { AccessDenied } from "@/components/feedback/AccessDenied"
+import { LoadingScreen } from "@/components/feedback/LoadingScreen"
 
 /**
  * Casca do painel administrativo — sidebar azul-marca fixa no desktop
@@ -97,21 +100,20 @@ function AdminShell() {
           navegador, não vai pro backend — pedido do dono). */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-20 hidden flex-col bg-primary-950 transition-[width] duration-200 lg:flex",
+          "surface-dark fixed inset-y-0 left-0 z-20 hidden flex-col transition-[width] duration-200 lg:flex",
           collapsed ? "w-20" : "w-64",
         )}
       >
         <div className={cn("flex h-16 items-center border-b border-white/10", collapsed ? "justify-center px-2" : "gap-2 px-5")}>
           {!collapsed && (
             <Link to="/" className="flex min-w-0 flex-1 items-center gap-2 font-black tracking-tight text-white" aria-label="Ir para o site público">
-              <img src={logoIcon} alt="" className="h-8 w-8 shrink-0" />
-              <span className="truncate">InnoFlow</span>
+              <Logo tone="dark" size={32} className="min-w-0" />
             </Link>
           )}
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
             aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
             title={collapsed ? "Expandir menu" : "Recolher menu"}
           >
@@ -126,7 +128,7 @@ function AdminShell() {
             </span>
             {contextLabel && (
               <p className="flex items-center gap-1.5 truncate text-xs font-semibold text-white/70" title={contextLabel}>
-                <Building2 className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />
+                <Building2 className="h-3.5 w-3.5 shrink-0 text-white/60" aria-hidden="true" />
                 {contextLabel}
               </p>
             )}
@@ -155,7 +157,7 @@ function AdminShell() {
             <button
               type="button"
               onClick={handleLogout}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/15 hover:text-white"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/15 hover:text-white"
               aria-label="Sair do painel"
               title="Sair"
             >
@@ -168,13 +170,13 @@ function AdminShell() {
       {/* Drawer mobile — sempre no modo expandido (accordion), nunca colapsa pra ícone (não há espaço apertado a economizar aqui, é sobreposto). */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-ink/50 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
-          <div className="absolute inset-y-0 right-0 flex w-72 flex-col bg-primary-950 shadow-2xl">
+          <div className="dialog-scrim absolute inset-0" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+          <div className="surface-dark absolute inset-y-0 right-0 flex w-72 flex-col shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5">
               <div className="min-w-0">
                 <span className="text-sm font-black uppercase tracking-widest text-white">Menu</span>
                 {contextLabel && (
-                  <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-semibold text-white/60">
+                  <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-semibold text-white/70">
                     <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     {contextLabel}
                   </p>
@@ -217,14 +219,16 @@ function AdminShell() {
           não rolam, só o `main` do meio rola. `pl-*` acompanha a largura da
           sidebar (expandida/colapsada) pra não sobrar nem faltar espaço. */}
       <div className={cn("flex h-screen flex-col transition-[padding] duration-200", collapsed ? "lg:pl-20" : "lg:pl-64")}>
-        <header className="z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border-subtle bg-background/85 px-4 backdrop-blur-md backdrop-saturate-150 sm:px-6">
-          <div className="hidden min-w-0 flex-1 lg:block">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-softer">Painel administrativo</p>
-            <h2 className="truncate text-lg font-black tracking-tight text-ink">{current?.label ?? "Administração"}</h2>
-          </div>
+        <header className="z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4 sm:px-6">
+          {/* Trilha, NÃO título: o h1 da página é o do `PageHeader` (a Nova achou o título repetido header x PageHeader). Texto em 12 px, sem heading. */}
+          <p className="hidden min-w-0 flex-1 items-center gap-1.5 truncate text-xs font-semibold text-ink-softer lg:flex">
+            <span>Painel administrativo</span>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-hidden="true" />
+            <span className="truncate text-ink">{current?.label ?? "Administração"}</span>
+          </p>
 
-          <Link to="/" className="lg:hidden font-black text-ink" aria-label="Ir para o site público">
-            InnoFlow
+          <Link to="/" className="lg:hidden" aria-label="Ir para o site público">
+            <Logo tone="light" size={28} />
           </Link>
 
           {/* Atalhos rápidos — faixa GLOBAL do header (pedido do dono, saiu da
@@ -237,7 +241,7 @@ function AdminShell() {
             <QuickActionsDropdown role={user?.role} className="lg:hidden" />
             <Link
               to="/eletropostos"
-              className="pressable hidden items-center gap-1.5 rounded-full border border-border bg-white px-3 py-2 text-xs font-semibold text-ink-softer transition-colors hover:border-primary/40 hover:text-primary sm:flex"
+              className="hidden min-h-9 items-center gap-1.5 rounded-full border border-border bg-surface px-3 text-xs font-semibold text-ink-softer transition-colors hover:border-primary/40 hover:text-primary sm:flex"
             >
               <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
               Ver site público
@@ -245,7 +249,7 @@ function AdminShell() {
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white text-ink-soft lg:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-ink-soft lg:hidden"
               aria-label="Abrir menu"
               aria-expanded={drawerOpen}
             >
@@ -259,8 +263,11 @@ function AdminShell() {
             conteúdo. Padding extra mantido de propósito (era a mitigação
             antiga para o selo fixo); com o rodapé próprio abaixo já não é
             estritamente necessário, mas não faz mal manter como respiro. */}
-        <main className="flex-1 overflow-y-auto p-4 pb-8 sm:p-6 sm:pb-10 lg:p-8 lg:pb-10">
-          <Outlet />
+        <main className="flex-1 scroll-pb-28 overflow-y-auto p-4 pb-8 sm:p-6 sm:pb-10 lg:p-8 lg:pb-10">
+          {/* As páginas são lazy: o fallback fica DENTRO do shell (sidebar e cabeçalho continuam), com o mascote só se a espera passar de 0,7 s. */}
+          <Suspense fallback={<LoadingScreen variant="inline" className="mx-0 min-h-[40svh]" art={<MascotFace size={48} />} />}>
+            <Outlet />
+          </Suspense>
         </main>
 
         {/* Rodapé do shell — fora da área de rolagem do `main`, então nunca
@@ -284,18 +291,7 @@ export function AdminLayout() {
   }
 
   if (user?.role !== "ADMIN" && user?.role !== "OPERATOR") {
-    return (
-      <div className="mx-auto max-w-md px-4 py-20 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-danger-100">
-          <ShieldAlert className="h-8 w-8 text-danger-600" aria-hidden="true" />
-        </div>
-        <p className="text-lg font-bold text-ink">Acesso restrito</p>
-        <p className="mb-5 mt-1 text-sm text-ink-softer">Esta área é exclusiva para administradores e operadores.</p>
-        <Link to="/" className="text-sm font-medium text-primary hover:underline">
-          Voltar ao início
-        </Link>
-      </div>
-    )
+    return <AccessDenied description="Esta área é exclusiva para administradores e operadores." />
   }
 
   return <AdminShell />
