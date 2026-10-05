@@ -10,7 +10,7 @@ export interface SwitchProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
  * Interruptor (WAI-ARIA `role="switch"`): um botão com `aria-checked`, ativável
  * por Espaço/Enter como qualquer botão. O nome acessível vem de quem usa
  * (`aria-labelledby`/`aria-label`). A área de toque é ampliada com um
- * pseudo-elemento (o trilho visual é 44×24, o alvo clicável passa de 44px).
+ * pseudo-elemento (o trilho visual é 44×24, o alvo clicável é 60×48).
  */
 const Switch = forwardRef<HTMLButtonElement, SwitchProps>(({ checked, onCheckedChange, className, disabled, ...props }, ref) => (
   <button
@@ -21,7 +21,7 @@ const Switch = forwardRef<HTMLButtonElement, SwitchProps>(({ checked, onCheckedC
     disabled={disabled}
     onClick={() => onCheckedChange(!checked)}
     className={cn(
-      "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent transition-colors before:absolute before:-inset-2 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+      "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent transition-colors before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
       // "desligado" em ink-softer (≈4,8:1 com branco): border-strong (#D1D5DB) some no fundo claro (1,5:1, reprova o 3:1 de componente de UI).
       checked ? "bg-accent" : "bg-state-off",
       className,

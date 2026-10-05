@@ -44,41 +44,42 @@ export function SecretField({
   actions?: ReactNode
   testId: string
 }) {
-  const headingId = useId()
+  const inputId = useId()
   const replacing = value !== undefined
 
   return (
     <div className="space-y-2" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span id={headingId} className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-soft">
+          {/* <label> de verdade (htmlFor): o nome acessível do campo vem dele quando o campo existe; antes era aria-labelledby num <span> e o axe acusava `label-title-only`. */}
+          <label htmlFor={inputId} className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-soft">
             <KeyRound className="h-3.5 w-3.5 text-ink-subtle" aria-hidden="true" />
             {name}
-          </span>
+          </label>
           {isSet && unreadable ? (
-            <Badge variant="danger" className="whitespace-nowrap" data-testid={`${testId}-chip`}>
+            <Badge variant="danger" data-testid={`${testId}-chip`}>
               <ShieldAlert className="h-3 w-3" aria-hidden="true" />
               Configurada (ilegível)
             </Badge>
           ) : isSet ? (
-            <Badge variant="success" className="whitespace-nowrap" data-testid={`${testId}-chip`}>
+            <Badge variant="success" data-testid={`${testId}-chip`}>
               <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
               Configurada
             </Badge>
           ) : (
-            <Badge variant="warning" className="whitespace-nowrap" data-testid={`${testId}-chip`}>
+            <Badge variant="warning" data-testid={`${testId}-chip`}>
               <CircleDashed className="h-3 w-3" aria-hidden="true" />
               Não configurada
             </Badge>
           )}
         </div>
         {replacing ? (
-          <Button type="button" variant="ghost" size="sm" onClick={() => onChange(undefined)}>
+          <Button type="button" variant="ghost" size="touch-sm" onClick={() => onChange(undefined)}>
             <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
             Cancelar
           </Button>
         ) : (
-          <Button type="button" variant="outline" size="sm" onClick={() => onChange("")} aria-label={`${isSet ? "Substituir" : "Informar"} ${name}`}>
+          <Button type="button" variant="outline" size="touch-sm" onClick={() => onChange("")} aria-label={`${isSet ? "Substituir" : "Informar"} ${name}`}>
             <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
             {isSet ? "Substituir" : "Informar"}
           </Button>
@@ -96,7 +97,7 @@ export function SecretField({
               spellCheck={false}
               data-lpignore="true"
               data-1p-ignore="true"
-              aria-labelledby={headingId}
+              id={inputId}
               placeholder={isSet ? "Digite o novo valor" : "Digite o valor"}
               value={value}
               onChange={(e) => onChange(e.target.value)}

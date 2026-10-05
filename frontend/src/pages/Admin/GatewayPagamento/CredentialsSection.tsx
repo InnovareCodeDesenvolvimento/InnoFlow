@@ -27,7 +27,7 @@ export function CredentialsSection({
   return (
     <Card data-testid="section-credentials">
       <CardHeader>
-        <CardTitle>Credenciais da Cielo</CardTitle>
+        <CardTitle as="h2">Credenciais da Cielo</CardTitle>
         <CardDescription>Da conta única da plataforma. Os segredos ficam guardados cifrados no servidor e nunca voltam para esta tela.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">

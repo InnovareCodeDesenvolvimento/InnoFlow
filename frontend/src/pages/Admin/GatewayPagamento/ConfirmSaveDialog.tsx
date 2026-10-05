@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react"
 import { ArrowRight, Check, ShieldCheck, TriangleAlert, X } from "lucide-react"
+import { Alert } from "@/components/ui/Alert"
 import { Button } from "@/components/ui/Button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/Dialog"
 import { Input } from "@/components/ui/Input"
@@ -78,10 +79,9 @@ export function ConfirmSaveDialog({
         </dl>
 
         {goesToProduction && (
-          <p role="alert" className="mt-4 flex items-start gap-2 rounded-lg bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>Depois de salvar, a plataforma passa a cobrar de verdade (cartões e Pix reais).</span>
-          </p>
+          <Alert tone="danger" size="sm" role="alert" icon={TriangleAlert} className="mt-4 text-sm font-medium">
+            <p>Depois de salvar, a plataforma passa a cobrar de verdade (cartões e Pix reais).</p>
+          </Alert>
         )}
 
         <form id={formId} onSubmit={handleSubmit} className="mt-4" noValidate>
@@ -103,11 +103,11 @@ export function ConfirmSaveDialog({
         </form>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+          <Button type="button" variant="outline" size="touch" onClick={onCancel} disabled={loading}>
             <X className="h-4 w-4" aria-hidden="true" />
             Cancelar
           </Button>
-          <Button type="submit" form={formId} variant={goesToProduction ? "destructive" : "default"} loading={loading} disabled={password.length === 0}>
+          <Button type="submit" form={formId} size="touch" variant={goesToProduction ? "destructive" : "default"} loading={loading} disabled={password.length === 0}>
             {!loading && <Check className="h-4 w-4" aria-hidden="true" />}
             Confirmar e salvar
           </Button>

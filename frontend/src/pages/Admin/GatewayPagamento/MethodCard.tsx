@@ -1,7 +1,8 @@
 import { useId } from "react"
 import { CheckCircle2, CircleAlert, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
-import { Card, CardContent } from "@/components/ui/Card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
+import { IconBadge } from "@/components/ui/IconBadge"
 import { Switch } from "@/components/ui/Switch"
 import { readinessSummary } from "@/lib/paymentGateway"
 import type { PaymentMethodReadiness } from "@/types/api"
@@ -17,7 +18,7 @@ import { RequirementList } from "./RequirementList"
 export function MethodCard({
   id,
   title,
-  icon: Icon,
+  icon,
   readiness,
   enabled,
   onEnabledChange,
@@ -41,29 +42,23 @@ export function MethodCard({
 
   return (
     <Card data-testid={`method-${id}`}>
-      <CardContent className="space-y-4 p-5 sm:p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="shadow-tinted flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
-              <Icon className="h-5 w-5" />
-            </span>
-            <h2 className="text-base font-bold text-ink">
-              {title}
-            </h2>
-          </div>
-          <Badge variant={readiness.ready ? "success" : "warning"} className="whitespace-nowrap" data-testid={`method-${id}-readiness`}>
-            {readiness.ready ? <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> : <CircleAlert className="h-3 w-3" aria-hidden="true" />}
-            {readinessSummary(readiness)}
-          </Badge>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <IconBadge icon={icon} size="md" tinted />
+          <CardTitle as="h2">{title}</CardTitle>
         </div>
+        <Badge variant={readiness.ready ? "success" : "warning"} data-testid={`method-${id}-readiness`}>
+          {readiness.ready ? <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> : <CircleAlert className="h-3 w-3" aria-hidden="true" />}
+          {readinessSummary(readiness)}
+        </Badge>
+      </CardHeader>
 
+      <CardContent className="space-y-4">
         {!readiness.ready && <RequirementList codes={readiness.missing} testId={`method-${id}-missing`} />}
 
-        <div className="flex items-start justify-between gap-4 rounded-xl border border-border-subtle bg-muted/50 p-3.5">
+        <div className="flex items-start justify-between gap-4 rounded-xl border border-border-subtle bg-muted/50 p-4">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-ink">
-              {enabled ? "Habilitado" : "Desabilitado"}
-            </p>
+            <p className="text-sm font-semibold text-ink">{enabled ? "Habilitado" : "Desabilitado"}</p>
             <p id={helpId} className="mt-0.5 text-xs text-ink-softer">
               {blocked ? "Só pode ser habilitado quando todos os itens acima estiverem resolvidos e salvos. " : ""}
               {offEffect}

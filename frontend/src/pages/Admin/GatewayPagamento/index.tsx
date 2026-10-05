@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from "react"
 import { CreditCard, Info, QrCode, RotateCcw, Save, TriangleAlert, Vault } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/painel/PageHeader"
+import { Alert } from "@/components/ui/Alert"
 import { Button } from "@/components/ui/Button"
+import { Card, CardContent } from "@/components/ui/Card"
 import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { cn } from "@/lib/utils"
+import type { PaymentGatewayConfigDTO } from "@/types/api"
 import { usePaymentGatewayConfig, useUpdatePaymentGateway } from "@/hooks/usePaymentGateway"
 import { getApiErrorMessage, getApiErrorStatus } from "@/services/api"
 import {
@@ -30,19 +34,25 @@ import { SourceBanner } from "./SourceBanner"
 import { SandboxRestrictedBanner, UnreadableSecretsAlert } from "./StatusBanners"
 import { WebhookSection } from "./WebhookSection"
 
+/** Esqueleto com a FORMA da tela pronta (banner de origem, 2 meios, ambiente, credenciais, teste, webhook): evita salto de layout quando os dados chegam. */
 function GatewaySkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-label="Carregando configuração do gateway">
-      <Skeleton className="h-16 w-full rounded-xl" />
+      <Skeleton className="h-14 w-full rounded-xl" />
       <div className="grid gap-4 md:grid-cols-2">
         <Skeleton className="h-56 w-full rounded-card" />
         <Skeleton className="h-56 w-full rounded-card" />
       </div>
+      <Skeleton className="h-56 w-full rounded-card" />
+      <Skeleton className="h-80 w-full rounded-card" />
+      <Skeleton className="h-40 w-full rounded-card" />
       <Skeleton className="h-48 w-full rounded-card" />
-      <Skeleton className="h-64 w-full rounded-card" />
     </div>
   )
 }
+
+const PAGE_TITLE = "Gateway de pagamento"
+const PAGE_DESCRIPTION = "Conta Cielo da plataforma: credenciais, ambiente e meios de pagamento."
 
 /**
  * Admin → Gateway de pagamento (F5.5). ADMIN-ONLY (a conta Cielo é única da
@@ -57,6 +67,32 @@ function GatewaySkeleton() {
  */
 export default function GatewayPagamentoPage() {
   const { data: dto, isLoading, isError, error, refetch } = usePaymentGatewayConfig()
+  const forbidden = getApiErrorStatus(error) === 403
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} icon={Vault} />
+
+      {isLoading && <GatewaySkeleton />}
+
+      {!isLoading && (isError || !dto) && (
+        <ErrorState
+          message={
+            forbidden
+              ? "Somente administradores podem ver e alterar o gateway de pagamento."
+              : (parseGatewayLoadError(error) ?? getApiErrorMessage(error, "Não foi possível carregar a configuração do gateway."))
+          }
+          onRetry={forbidden ? undefined : () => void refetch()}
+        />
+      )}
+
+      {!isLoading && !isError && dto && <GatewayEditor dto={dto} />}
+    </div>
+  )
+}
+
+/** O formulário em si. Só existe com o DTO carregado (o rascunho nasce vazio junto com ele) e devolve os blocos como irmãos, para herdarem o `space-y-6` da página. */
+function GatewayEditor({ dto }: { dto: PaymentGatewayConfigDTO }) {
   const mutation = useUpdatePaymentGateway()
 
   const [draft, setDraft] = useState<GatewayDraft>({})
@@ -72,32 +108,6 @@ export default function GatewayPagamentoPage() {
   }, [saveError])
 
   const patchDraft = (patch: Partial<GatewayDraft>) => setDraft((prev) => ({ ...prev, ...patch }))
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-4xl space-y-6">
-        <PageHeader title="Gateway de pagamento" description="Conta Cielo da plataforma: credenciais, ambiente e meios de pagamento." icon={Vault} />
-        <GatewaySkeleton />
-      </div>
-    )
-  }
-
-  if (isError || !dto) {
-    const forbidden = getApiErrorStatus(error) === 403
-    return (
-      <div className="mx-auto max-w-4xl space-y-6">
-        <PageHeader title="Gateway de pagamento" description="Conta Cielo da plataforma: credenciais, ambiente e meios de pagamento." icon={Vault} />
-        <ErrorState
-          message={
-            forbidden
-              ? "Somente administradores podem ver e alterar o gateway de pagamento."
-              : (parseGatewayLoadError(error) ?? getApiErrorMessage(error, "Não foi possível carregar a configuração do gateway."))
-          }
-          onRetry={forbidden ? undefined : () => void refetch()}
-        />
-      </div>
-    )
-  }
 
   const payload = buildUpdatePayload(dto, draft)
   const changes = describeChanges(dto, payload)
@@ -152,28 +162,23 @@ export default function GatewayPagamentoPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <PageHeader title="Gateway de pagamento" description="Conta Cielo da plataforma: credenciais, ambiente e meios de pagamento." icon={Vault} />
-
+    <>
       {dto.secretsDecryptable === false && <UnreadableSecretsAlert />}
       {dto.sandboxRestricted && <SandboxRestrictedBanner />}
 
       <SourceBanner source={dto.source} updatedAt={dto.updatedAt} />
 
       {saveError && (
-        <div ref={errorRef} role="alert" className="space-y-3 rounded-xl border border-danger-600/40 bg-danger-50 p-4 text-danger-700" data-testid="save-error" data-code={saveError.code}>
-          <p className="flex items-start gap-2 text-sm font-semibold">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0">{saveError.message}</span>
-          </p>
-          {saveError.draftKept && <p className="pl-6 text-xs font-medium">O que você preencheu continua na tela.</p>}
+        <Alert ref={errorRef} tone="danger" role="alert" icon={TriangleAlert} data-testid="save-error" data-code={saveError.code}>
+          <p className="font-semibold">{saveError.message}</p>
+          {saveError.draftKept && <p className="mt-1 text-xs font-medium">O que você preencheu continua na tela.</p>}
           {saveError.requirements.length > 0 && saveError.code === "GATEWAY_NOT_READY" && (
-            <div className="rounded-lg bg-white/70 p-3 text-ink">
+            <div className="mt-3 rounded-lg bg-surface p-3 text-ink">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-softer">O que falta</p>
               <RequirementList codes={saveError.requirements} testId="save-error-missing" />
             </div>
           )}
-        </div>
+        </Alert>
       )}
 
       <section aria-label="Meios de pagamento" className="space-y-3">
@@ -199,10 +204,9 @@ export default function GatewayPagamentoPage() {
             disabled={mutation.isPending}
           />
         </div>
-        <p className="flex items-start gap-2 text-xs text-ink-softer">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>A prontidão considera só o que já está salvo. Preencha e salve as credenciais primeiro; depois o interruptor do meio fica disponível.</span>
-        </p>
+        <Alert tone="muted" size="sm" icon={Info}>
+          <p>A prontidão considera só o que já está salvo. Preencha e salve as credenciais primeiro; depois o interruptor do meio fica disponível.</p>
+        </Alert>
       </section>
 
       <EnvironmentSection
@@ -219,9 +223,10 @@ export default function GatewayPagamentoPage() {
 
       <WebhookSection dto={dto} draft={draft} errors={errors} onChange={patchDraft} />
 
-      {/* Barra de salvar: gruda no fim da área de rolagem do shell (o <main> do admin), sempre ao alcance. */}
-      <div className="sticky bottom-0 z-10 -mx-4 border-t border-border bg-surface px-4 py-3 shadow-[0_-10px_24px_-18px_rgb(var(--color-primary)/0.4)] sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8" data-testid="save-bar">
-        <div className="mx-auto flex max-w-4xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      {/* Barra de salvar: um card como os outros. Com alteração pendente ela gruda no fim da área de rolagem do shell (o <main> do admin), sempre ao alcance;
+          sem alteração fica no fim da página, sem tapar conteúdo (a 375 px a barra grudada ocupava ~25% da tela mesmo sem nada a salvar). */}
+      <Card className={cn("z-10", dirty && "sticky bottom-0 shadow-tinted-card")} data-testid="save-bar">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <p className="text-sm text-ink-softer" aria-live="polite" data-testid="save-bar-status">
             {dirty ? (
               <>
@@ -239,13 +244,14 @@ export default function GatewayPagamentoPage() {
               "Nenhuma alteração pendente."
             )}
           </p>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
-            <Button type="button" variant="outline" onClick={handleDiscard} disabled={(!dirty && Object.keys(draft).length === 0) || mutation.isPending}>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <Button type="button" variant="outline" size="touch" onClick={handleDiscard} disabled={(!dirty && Object.keys(draft).length === 0) || mutation.isPending}>
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
               Descartar
             </Button>
             <Button
               type="button"
+              size="touch"
               onClick={() => {
                 setSaveError(null)
                 setPasswordError(null)
@@ -257,8 +263,8 @@ export default function GatewayPagamentoPage() {
               Salvar alterações
             </Button>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {productionDialogOpen && (
         <ConfirmProductionDialog
@@ -280,6 +286,6 @@ export default function GatewayPagamentoPage() {
           onConfirm={(currentPassword) => void handleSave(currentPassword)}
         />
       )}
-    </div>
+    </>
   )
 }

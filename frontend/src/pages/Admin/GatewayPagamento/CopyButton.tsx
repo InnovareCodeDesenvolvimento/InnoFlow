@@ -23,7 +23,7 @@ export function CopyButton({ value, label, disabled }: { value: string; label: s
   }
 
   return (
-    <Button type="button" variant="outline" onClick={() => void handleCopy()} disabled={disabled} aria-label={label} className="shrink-0">
+    <Button type="button" variant="outline" size="field" onClick={() => void handleCopy()} disabled={disabled} aria-label={label} className="shrink-0">
       {copied ? <Check className="h-4 w-4 text-success-700" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
       <span>{copied ? "Copiado" : "Copiar"}</span>
     </Button>

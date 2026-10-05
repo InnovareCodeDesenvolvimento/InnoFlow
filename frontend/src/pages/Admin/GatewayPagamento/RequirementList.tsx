@@ -1,4 +1,5 @@
 import { Server, SquarePen } from "lucide-react"
+import { InlineCode } from "@/components/ui/InlineCode"
 import { PAYMENT_SECRETS_KEY_COMMAND, requirementInfo, splitRequirements } from "@/lib/paymentGateway"
 
 /**
@@ -51,7 +52,7 @@ export function RequirementList({ codes, testId }: { codes: readonly string[]; t
                     {info.envVar && (
                       <>
                         {" "}
-                        — variável <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-ink">{info.envVar}</code>
+                        — variável <InlineCode>{info.envVar}</InlineCode>
                       </>
                     )}
                   </span>
@@ -64,8 +65,8 @@ export function RequirementList({ codes, testId }: { codes: readonly string[]; t
             {server.includes("PAYMENT_SECRETS_KEY") && (
               <>
                 {" "}
-                Para <code className="rounded bg-muted px-1 py-0.5 text-ink">PAYMENT_SECRETS_KEY</code>, gere o valor com{" "}
-                <code className="break-all rounded bg-muted px-1 py-0.5 text-ink">{PAYMENT_SECRETS_KEY_COMMAND}</code>.
+                Para <InlineCode>PAYMENT_SECRETS_KEY</InlineCode>, gere o valor com{" "}
+                <InlineCode>{PAYMENT_SECRETS_KEY_COMMAND}</InlineCode>.
               </>
             )}
           </p>

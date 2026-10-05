@@ -53,7 +53,7 @@ const DialogContent = forwardRef<
       >
         {children}
         <DialogPrimitive.Close
-          className="absolute right-4 top-4 rounded-lg p-1.5 text-ink-softer transition-colors hover:bg-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-ink-softer before:absolute before:-inset-2 before:content-[''] transition-colors hover:bg-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label="Fechar"
         >
           <X className="h-4 w-4" aria-hidden="true" />

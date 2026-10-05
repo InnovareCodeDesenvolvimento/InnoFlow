@@ -1,4 +1,5 @@
 import { Database, Info } from "lucide-react"
+import { Alert } from "@/components/ui/Alert"
 import { formatDateTime } from "@/lib/utils"
 import type { PaymentGatewayConfigDTO } from "@/types/api"
 
@@ -11,21 +12,19 @@ import type { PaymentGatewayConfigDTO } from "@/types/api"
 export function SourceBanner({ source, updatedAt }: Pick<PaymentGatewayConfigDTO, "source" | "updatedAt">) {
   if (source === "env") {
     return (
-      <div role="status" className="flex items-start gap-3 rounded-xl border border-info-600/30 bg-info-50 p-4 text-info-700" data-testid="source-banner-env">
-        <Info className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-        <p className="min-w-0 text-sm">
-          <span className="font-bold">Usando as variáveis do servidor.</span> Na primeira gravação, a configuração nasce com o ambiente atual e com
-          &quot;habilitado&quot; nos meios que já têm credencial no servidor — salvar não desliga o que já funcionava. Daí em diante, vale o que for salvo aqui.
+      <Alert tone="info" role="status" icon={Info} data-testid="source-banner-env">
+        <p>
+          <span className="font-bold">Usando as variáveis do servidor.</span> Na primeira gravação, a configuração nasce com o ambiente atual e com &quot;habilitado&quot; nos meios que já têm
+          credencial no servidor — salvar não desliga o que já funcionava. Daí em diante, vale o que for salvo aqui.
         </p>
-      </div>
+      </Alert>
     )
   }
   return (
-    <div role="status" className="flex items-start gap-3 rounded-xl border border-border bg-surface p-4 text-ink-soft" data-testid="source-banner-database">
-      <Database className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-      <p className="min-w-0 text-sm">
+    <Alert tone="neutral" role="status" icon={Database} iconClassName="text-primary" data-testid="source-banner-database">
+      <p>
         <span className="font-bold text-ink">Configuração salva nesta tela.</span> Última alteração em {formatDateTime(updatedAt)}.
       </p>
-    </div>
+    </Alert>
   )
 }

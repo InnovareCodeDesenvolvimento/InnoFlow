@@ -1,4 +1,5 @@
 import { FlaskConical, Info, Rocket, TriangleAlert } from "lucide-react"
+import { Alert } from "@/components/ui/Alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { cn } from "@/lib/utils"
 import { ENVIRONMENT_LABELS } from "@/lib/paymentGateway"
@@ -35,7 +36,7 @@ export function EnvironmentSection({
   return (
     <Card data-testid="section-environment">
       <CardHeader>
-        <CardTitle>Ambiente</CardTitle>
+        <CardTitle as="h2">Ambiente</CardTitle>
         <CardDescription>Em qual ambiente da Cielo a plataforma cobra.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -55,7 +56,7 @@ export function EnvironmentSection({
                 />
                 <span
                   className={cn(
-                    "flex min-h-11 items-start gap-3 rounded-xl border p-3.5 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2",
+                    "flex min-h-11 items-start gap-3 rounded-control border p-4 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2",
                     selected ? (danger ? "border-danger-600 bg-danger-50" : "border-primary bg-primary/5") : "border-border bg-surface hover:bg-muted",
                   )}
                 >
@@ -71,26 +72,22 @@ export function EnvironmentSection({
         </div>
 
         {isProduction ? (
-          <div role="status" className="flex items-start gap-3 rounded-xl border border-danger-600/40 bg-danger-50 p-4 text-danger-700" data-testid="environment-production-banner">
-            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-            <div className="min-w-0 text-sm">
-              <p className="font-bold">{pendingProduction ? "Produção selecionada — ainda não salva" : "Ambiente de PRODUÇÃO ativo"}</p>
-              <p className="mt-0.5">
-                {pendingProduction
-                  ? "Ao salvar, a plataforma passa a cobrar de verdade: cartões e Pix reais dos motoristas."
-                  : "A plataforma cobra de verdade: cartões e Pix reais dos motoristas. Confira tudo antes de mexer em credenciais."}
-              </p>
-            </div>
-          </div>
+          <Alert tone="danger" role="status" icon={TriangleAlert} data-testid="environment-production-banner">
+            <p className="font-bold">{pendingProduction ? "Produção selecionada — ainda não salva" : "Ambiente de PRODUÇÃO ativo"}</p>
+            <p className="mt-0.5">
+              {pendingProduction
+                ? "Ao salvar, a plataforma passa a cobrar de verdade: cartões e Pix reais dos motoristas."
+                : "A plataforma cobra de verdade: cartões e Pix reais dos motoristas. Confira tudo antes de mexer em credenciais."}
+            </p>
+          </Alert>
         ) : (
-          <p className="flex items-start gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-ink-softer" data-testid="environment-sandbox-note">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>
+          <Alert tone="muted" size="sm" icon={Info} data-testid="environment-sandbox-note">
+            <p>
               {savedValue === "production"
                 ? "Voltar para o sandbox encerra as cobranças reais — as credenciais de produção deixam de ser usadas."
                 : "Sandbox: as credenciais de teste da Cielo valem só aqui. Ao ir para produção você vai precisar das credenciais de produção."}
-            </span>
-          </p>
+            </p>
+          </Alert>
         )}
       </CardContent>
     </Card>

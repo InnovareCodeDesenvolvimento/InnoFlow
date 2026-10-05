@@ -37,6 +37,10 @@ export const buttonVariants = cva(
         sm: "h-8 px-3 text-xs",
         lg: "h-12 px-6 text-base",
         icon: "h-9 w-9 shrink-0",
+        // Alvo de toque: 44 px abaixo de `sm` (640), o tamanho normal do Admin de `sm` para cima. `touch` = `default`, `touch-sm` = `sm`, `field` = ao lado de um `Input` (mesma altura do campo: 46 px com fonte 16, 42 com 14).
+        touch: "h-11 px-4 py-2 sm:h-10",
+        "touch-sm": "h-11 px-3 text-xs sm:h-8",
+        field: "h-[2.875rem] px-4 py-2 sm:h-[2.625rem]",
       },
     },
     defaultVariants: {

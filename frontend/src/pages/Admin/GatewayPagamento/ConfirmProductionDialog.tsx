@@ -45,11 +45,11 @@ export function ConfirmProductionDialog({ onConfirm, onCancel }: { onConfirm: ()
             hint="Isso só seleciona o ambiente. Nada muda até você salvar."
           />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onCancel}>
+            <Button type="button" variant="outline" size="touch" onClick={onCancel}>
               <X className="h-4 w-4" aria-hidden="true" />
               Cancelar
             </Button>
-            <Button type="submit" variant="destructive" disabled={!matches}>
+            <Button type="submit" variant="destructive" size="touch" disabled={!matches}>
               <Rocket className="h-4 w-4" aria-hidden="true" />
               Selecionar produção
             </Button>

@@ -1,4 +1,6 @@
 import { ShieldAlert, TriangleAlert } from "lucide-react"
+import { Alert } from "@/components/ui/Alert"
+import { InlineCode } from "@/components/ui/InlineCode"
 
 /**
  * Avisos PERMANENTES do estado do servidor (F5.7). Não são dispensáveis nem
@@ -13,13 +15,12 @@ import { ShieldAlert, TriangleAlert } from "lucide-react"
  */
 export function UnreadableSecretsAlert() {
   return (
-    <div role="alert" className="flex items-start gap-3 rounded-xl border border-danger-600/40 bg-danger-50 p-4 text-danger-700" data-testid="secrets-unreadable-alert">
-      <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-      <p className="min-w-0 text-sm">
-        <span className="font-bold">Segredos salvos ilegíveis.</span> O servidor não consegue decifrar os segredos salvos — a PAYMENT_SECRETS_KEY foi trocada ou o dado está corrompido. O gateway está indisponível
-        (503). Reenvie os 3 segredos — MerchantKey, Client Secret do cadastro de cartão e segredo do webhook — para restabelecer.
+    <Alert tone="danger" role="alert" icon={ShieldAlert} data-testid="secrets-unreadable-alert">
+      <p>
+        <span className="font-bold">Segredos salvos ilegíveis.</span> O servidor não consegue decifrar os segredos salvos — a PAYMENT_SECRETS_KEY foi trocada ou o dado está corrompido. O gateway está
+        indisponível (503). Reenvie os 3 segredos — MerchantKey, Client Secret do cadastro de cartão e segredo do webhook — para restabelecer.
       </p>
-    </div>
+    </Alert>
   )
 }
 
@@ -30,13 +31,11 @@ export function UnreadableSecretsAlert() {
  */
 export function SandboxRestrictedBanner() {
   return (
-    <div role="status" className="flex items-start gap-3 rounded-xl border border-warning-600/40 bg-warning-50 p-4 text-warning-700" data-testid="sandbox-restricted-banner">
-      <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-      <p className="min-w-0 text-sm">
-        <span className="font-bold">Ambiente SANDBOX em servidor de produção:</span> só os e-mails da lista de testadores (variável{" "}
-        <code className="break-all rounded bg-white/70 px-1 py-0.5 text-xs">PAYMENT_SANDBOX_TESTER_EMAILS</code> no EasyPanel) conseguem usar Pix e cartão. Os outros motoristas veem
-        &quot;indisponível no momento&quot;.
+    <Alert tone="warning" role="status" icon={TriangleAlert} data-testid="sandbox-restricted-banner">
+      <p>
+        <span className="font-bold">Ambiente SANDBOX em servidor de produção:</span> só os e-mails da lista de testadores (variável <InlineCode>PAYMENT_SANDBOX_TESTER_EMAILS</InlineCode> no
+        EasyPanel) conseguem usar Pix e cartão. Os outros motoristas veem &quot;indisponível no momento&quot;.
       </p>
-    </div>
+    </Alert>
   )
 }

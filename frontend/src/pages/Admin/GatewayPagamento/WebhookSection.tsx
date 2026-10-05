@@ -1,6 +1,8 @@
-import { Dices, TriangleAlert, Webhook } from "lucide-react"
+import { Dices, Info, Webhook } from "lucide-react"
+import { Alert } from "@/components/ui/Alert"
 import { Button } from "@/components/ui/Button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
+import { InlineCode } from "@/components/ui/InlineCode"
 import { Input } from "@/components/ui/Input"
 import { generateRandomSecret, WEBHOOK_SECRET_MIN, type DraftErrors, type GatewayDraft } from "@/lib/paymentGateway"
 import type { PaymentGatewayConfigDTO } from "@/types/api"
@@ -8,11 +10,13 @@ import { CopyButton } from "./CopyButton"
 import { SecretField } from "./SecretField"
 
 /**
- * Webhook da Cielo. A URL e o nome do header são só leitura (com copiar); o
- * segredo do header é só de escrita como os outros — com um atalho para
- * GERAR um aleatório e MOSTRÁ-LO (único momento em que um segredo aparece em
- * texto: o admin precisa copiar e cadastrar no Site da Cielo ANTES de salvar,
- * porque depois de salvo ele nunca mais volta).
+ * Webhook da Cielo — NÃO USADO nesta instalação. A conta Cielo é COMPARTILHADA com o Parque (decisão do dono): o InnoFlow não recebe notificação da Cielo
+ * (o Pix é creditado por consulta periódica), e a URL de notificação do Site Cielo pertence ao Parque. Cadastrar uma URL lá a SOBRESCREVERIA. Por isso a
+ * seção NUNCA instrui a cadastrar nada: quando o servidor ainda devolve URL/segredo (variável de ambiente ou segredo antigo), os dados continuam aqui, só
+ * para consulta e limpeza, sob um aviso permanente.
+ *
+ * A URL e o nome do header são só leitura (com copiar); o segredo do header é só de escrita como os outros — com um atalho para GERAR um aleatório e MOSTRÁ-LO
+ * (único momento em que um segredo aparece em texto: o admin precisa copiar ANTES de salvar, porque depois de salvo ele nunca mais volta).
  */
 export function WebhookSection({
   dto,
@@ -25,8 +29,8 @@ export function WebhookSection({
   errors: DraftErrors
   onChange: (patch: Partial<GatewayDraft>) => void
 }) {
-  // Webhook não usado (conta Cielo compartilhada): nada configurado e nada a cadastrar - situação normal, não pendência. Se ALGO já está configurado
-  // (URL ou segredo), a seção completa continua aparecendo para o admin terminar ou limpar.
+  // Nada configurado e nada a cadastrar: situação normal desta conta compartilhada, não pendência. Se ALGO já está configurado (URL ou segredo),
+  // os campos continuam aparecendo (somente para consulta) para o admin conferir ou limpar.
   const notInUse = dto.webhookInUse === false && !dto.webhookUrl && !dto.webhookHeaderSecretSet && draft.webhookHeaderSecret === undefined
   const revealed = !!draft.webhookSecretRevealed && !!draft.webhookHeaderSecret
   const secretValue = draft.webhookHeaderSecret
@@ -41,16 +45,15 @@ export function WebhookSection({
     return (
       <Card data-testid="section-webhook">
         <CardHeader>
-          <CardTitle>Webhook</CardTitle>
+          <CardTitle as="h2">Webhook</CardTitle>
         </CardHeader>
         <CardContent>
-          <p role="status" className="flex items-start gap-2 text-sm text-ink-soft" data-testid="webhook-not-in-use">
-            <Webhook className="mt-0.5 h-4 w-4 shrink-0 text-ink-softer" aria-hidden="true" />
-            <span className="min-w-0">
-              <span className="font-semibold text-ink">Webhook não usado (conta compartilhada).</span> O Pix é creditado por consulta periódica à Cielo, então não há URL nem header para cadastrar no Site da
-              Cielo.
-            </span>
-          </p>
+          <Alert tone="warning" role="status" icon={Webhook} data-testid="webhook-not-in-use">
+            <p>
+              <span className="font-bold">Webhook não usado (conta compartilhada).</span> O Pix é creditado por consulta periódica à Cielo, então não há URL nem header para cadastrar.
+            </p>
+            <p className="mt-1 font-semibold">Não cadastre URL de notificação no Site Cielo: ela substituiria a URL do Parque, que usa esta mesma conta.</p>
+          </Alert>
         </CardContent>
       </Card>
     )
@@ -59,12 +62,17 @@ export function WebhookSection({
   return (
     <Card data-testid="section-webhook">
       <CardHeader>
-        <CardTitle>Webhook</CardTitle>
-        <CardDescription>
-          Cadastre a URL e o header abaixo no Site da Cielo, para a plataforma ser avisada de pagamentos Pix e de mudanças de status.
-        </CardDescription>
+        <CardTitle as="h2">Webhook</CardTitle>
+        <CardDescription>Dados que o servidor ainda guarda para o webhook — somente para consulta ou para limpar. O InnoFlow não usa webhook nesta conta.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <Alert tone="warning" role="status" icon={Webhook} data-testid="webhook-shared-account-warning">
+          <p>
+            <span className="font-bold">Webhook não usado nesta conta compartilhada.</span> O Pix é creditado por consulta periódica à Cielo.
+          </p>
+          <p className="mt-1 font-semibold">Não cadastre URL de notificação no Site Cielo: ela substituiria a URL do Parque, que usa esta mesma conta.</p>
+        </Alert>
+
         <div className="space-y-1.5">
           {dto.webhookUrl ? (
             <label htmlFor="webhook-url" className="block text-sm font-medium text-ink-soft">
@@ -76,17 +84,16 @@ export function WebhookSection({
           {dto.webhookUrl ? (
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <Input id="webhook-url" readOnly value={dto.webhookUrl} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs sm:text-xs" />
+                <Input id="webhook-url" readOnly value={dto.webhookUrl} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
               </div>
               <CopyButton value={dto.webhookUrl} label="Copiar URL do webhook" />
             </div>
           ) : (
-            <div role="status" className="flex items-start gap-2 rounded-lg border border-warning-600/30 bg-warning-50 px-3 py-2.5 text-sm text-warning-700" data-testid="webhook-url-missing">
-              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0">
-                A URL ainda não pode ser gerada: falta a variável <code className="break-all rounded bg-white/70 px-1 py-0.5 text-xs">CIELO_WEBHOOK_PATH_TOKEN</code> no servidor (EasyPanel). Defina e reinicie a API.
-              </span>
-            </div>
+            <Alert tone="muted" size="sm" role="status" icon={Info} data-testid="webhook-url-missing">
+              <p>
+                Nenhuma URL gerada: a variável <InlineCode>CIELO_WEBHOOK_PATH_TOKEN</InlineCode> não está definida no servidor. Nesta conta compartilhada é o esperado.
+              </p>
+            </Alert>
           )}
         </div>
 
@@ -96,7 +103,7 @@ export function WebhookSection({
           </label>
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
-              <Input id="webhook-header-name" readOnly value={dto.webhookHeaderName} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs sm:text-xs" />
+              <Input id="webhook-header-name" readOnly value={dto.webhookHeaderName} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
             </div>
             <CopyButton value={dto.webhookHeaderName} label="Copiar nome do header" />
           </div>
@@ -112,14 +119,14 @@ export function WebhookSection({
             onChange={handleSecretChange}
             revealed={revealed}
             error={errors.webhookHeaderSecret}
-            hint={`Mínimo de ${WEBHOOK_SECRET_MIN} caracteres (o gerador abaixo já atende). Este valor é o que a Cielo vai enviar no header ${dto.webhookHeaderName}.`}
+            hint={`Mínimo de ${WEBHOOK_SECRET_MIN} caracteres (o gerador abaixo já atende). Este valor é o que a Cielo enviaria no header ${dto.webhookHeaderName}.`}
             actions={revealed ? <CopyButton value={secretValue ?? ""} label="Copiar segredo gerado" /> : undefined}
           />
 
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size="touch-sm"
             onClick={() => onChange({ webhookHeaderSecret: generateRandomSecret(), webhookSecretRevealed: true })}
           >
             <Dices className="h-4 w-4" aria-hidden="true" />
@@ -127,12 +134,12 @@ export function WebhookSection({
           </Button>
 
           {revealed && (
-            <p role="status" className="flex items-start gap-2 rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700" data-testid="webhook-secret-generated-note">
-              <Webhook className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                Copie este segredo e cadastre no Site da Cielo <strong>antes de salvar</strong>. Depois de salvo ele nunca mais é exibido — se perder, será preciso gerar outro.
-              </span>
-            </p>
+            <Alert tone="warning" size="sm" role="status" icon={Webhook} data-testid="webhook-secret-generated-note">
+              <p>
+                Copie este segredo <strong>antes de salvar</strong>. Depois de salvo ele nunca mais é exibido — se perder, será preciso gerar outro. Não o cadastre no Site Cielo: a conta é
+                compartilhada com o Parque.
+              </p>
+            </Alert>
           )}
         </div>
       </CardContent>

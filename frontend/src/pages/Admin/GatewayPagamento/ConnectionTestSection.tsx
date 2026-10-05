@@ -1,4 +1,6 @@
-import { CircleCheck, CircleMinus, CircleX, Loader2, PlugZap, TriangleAlert } from "lucide-react"
+import { CircleCheck, CircleMinus, CircleX, Loader2, PlugZap, TriangleAlert, type LucideIcon } from "lucide-react"
+import { Alert } from "@/components/ui/Alert"
+import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { useTestPaymentGatewayConnection } from "@/hooks/usePaymentGateway"
@@ -13,48 +15,39 @@ import {
   testVerdict,
   type TestStatusTone,
 } from "@/lib/paymentGatewayTest"
-import { cn, formatDateTime } from "@/lib/utils"
+import { formatDateTime } from "@/lib/utils"
 import type { PaymentGatewayEnvironment, PaymentGatewayTestStepResult } from "@/types/api"
 
-const TONE_CLASSES: Record<TestStatusTone, { box: string; badge: string }> = {
-  success: { box: "border-success-600/30 bg-success-50", badge: "bg-success-100 text-success-700" },
-  danger: { box: "border-danger-600/40 bg-danger-50", badge: "bg-danger-100 text-danger-700" },
-  warning: { box: "border-warning-600/40 bg-warning-50", badge: "bg-warning-100 text-warning-700" },
-  neutral: { box: "border-border bg-muted/40", badge: "bg-muted text-muted-foreground" },
-}
-
-function StepIcon({ tone, skipped }: { tone: TestStatusTone; skipped: boolean }) {
-  if (tone === "success") return <CircleCheck className="h-5 w-5 text-success-600" aria-hidden="true" />
-  if (tone === "neutral") return <CircleMinus className={cn("h-5 w-5", skipped ? "text-ink-subtle" : "text-ink-softer")} aria-hidden="true" />
-  if (tone === "warning") return <TriangleAlert className="h-5 w-5 text-warning-600" aria-hidden="true" />
-  return <CircleX className="h-5 w-5 text-danger-600" aria-hidden="true" />
+/** Tom do passo (`TestStatusTone`, do contrato de textos) -> tom do `Alert`/`Badge` do design system e ícone do passo. */
+const TONE: Record<TestStatusTone, { alert: "success" | "danger" | "warning" | "muted"; badge: "success" | "danger" | "warning" | "neutral"; icon: LucideIcon }> = {
+  success: { alert: "success", badge: "success", icon: CircleCheck },
+  danger: { alert: "danger", badge: "danger", icon: CircleX },
+  warning: { alert: "warning", badge: "warning", icon: TriangleAlert },
+  neutral: { alert: "muted", badge: "neutral", icon: CircleMinus },
 }
 
 function StepRow({ result, environment }: { result: PaymentGatewayTestStepResult; environment: PaymentGatewayEnvironment }) {
   const info = TEST_STATUS_INFO[result.status]
   const labels = TEST_STEP_LABELS[result.step]
   const support = testSupportText(result.status, environment)
-  const tone = TONE_CLASSES[info.tone]
+  const tone = TONE[info.tone]
 
   return (
-    <li className={cn("rounded-xl border p-3.5", tone.box)} data-testid={`test-step-${result.step}`} data-status={result.status}>
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 shrink-0">
-          <StepIcon tone={info.tone} skipped={result.status === "SKIPPED"} />
-        </span>
-        <div className="min-w-0 flex-1 space-y-1.5">
+    <li data-testid={`test-step-${result.step}`} data-status={result.status}>
+      <Alert tone={tone.alert} icon={tone.icon} iconClassName={result.status === "SKIPPED" ? "text-ink-softer" : undefined}>
+        <div className="space-y-1.5">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <p className="text-sm font-bold text-ink">{labels.title}</p>
-            <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide", tone.badge)} data-testid="test-step-status">
+            <Badge variant={tone.badge} data-testid="test-step-status">
               {info.label}
-            </span>
+            </Badge>
           </div>
           <p className="text-xs text-ink-softer">{labels.hint}</p>
           <p className="break-words text-sm text-ink-soft" data-testid="test-step-message">
             {result.message}
           </p>
           {support && isTestFailure(result.status) && (
-            <p className="rounded-lg bg-white/70 px-3 py-2 text-xs font-medium text-ink" data-testid="test-step-support">
+            <p className="rounded-lg bg-surface px-3 py-2 text-xs font-medium text-ink" data-testid="test-step-support">
               {support}
             </p>
           )}
@@ -65,7 +58,7 @@ function StepRow({ result, environment }: { result: PaymentGatewayTestStepResult
             </p>
           )}
         </div>
-      </div>
+      </Alert>
     </li>
   )
 }
@@ -84,18 +77,17 @@ export function ConnectionTestSection({ hasUnsavedCredentials }: { hasUnsavedCre
   return (
     <Card data-testid="section-connection-test">
       <CardHeader>
-        <CardTitle>Testar conexão</CardTitle>
+        <CardTitle as="h2">Testar conexão</CardTitle>
         <CardDescription>Confere agora, na Cielo, se as credenciais salvas funcionam. Não cobra nada e não altera nada.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {hasUnsavedCredentials && (
-          <p role="status" className="flex items-start gap-2 rounded-lg bg-warning-50 px-3 py-2 text-xs font-medium text-warning-700" data-testid="test-unsaved-note">
-            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>O teste usa o que está SALVO, não o que você digitou e ainda não salvou. Salve as alterações antes de testar.</span>
-          </p>
+          <Alert tone="warning" size="sm" role="status" icon={TriangleAlert} className="font-medium" data-testid="test-unsaved-note">
+            <p>O teste usa o que está SALVO, não o que você digitou e ainda não salvou. Salve as alterações antes de testar.</p>
+          </Alert>
         )}
 
-        <Button type="button" variant="outline" onClick={() => test.mutate()} loading={test.isPending}>
+        <Button type="button" variant="outline" size="touch" onClick={() => test.mutate()} loading={test.isPending}>
           {!test.isPending && <PlugZap className="h-4 w-4" aria-hidden="true" />}
           {test.isPending ? "Testando…" : result ? "Testar de novo" : "Testar conexão"}
         </Button>
@@ -109,27 +101,23 @@ export function ConnectionTestSection({ hasUnsavedCredentials }: { hasUnsavedCre
           )}
 
           {test.isError && (
-            <p role="alert" className="flex items-start gap-2 rounded-lg bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700" data-testid="test-request-error">
-              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0">{testRequestErrorMessage(test.error)}</span>
-            </p>
+            <Alert tone="danger" size="sm" role="alert" icon={TriangleAlert} className="font-medium" data-testid="test-request-error">
+              <p>{testRequestErrorMessage(test.error)}</p>
+            </Alert>
           )}
 
           {result && verdict && !test.isPending && (
             <div className="space-y-3" data-testid="test-result" data-verdict={verdict}>
-              <div
-                className={cn(
-                  "flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5",
-                  TONE_CLASSES[verdict === "ok" ? "success" : verdict === "failed" ? "danger" : "neutral"].box,
-                )}
-              >
-                <p className="text-sm font-bold text-ink" data-testid="test-verdict">
-                  {TEST_VERDICT_TEXT[verdict]}
-                </p>
-                <p className="text-xs text-ink-softer">
-                  Ambiente: <span className="font-semibold text-ink-soft">{ENVIRONMENT_LABELS[result.environment]}</span> · {formatDateTime(result.testedAt)}
-                </p>
-              </div>
+              <Alert tone={TONE[verdict === "ok" ? "success" : verdict === "failed" ? "danger" : "neutral"].alert}>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <p className="text-sm font-bold text-ink" data-testid="test-verdict">
+                    {TEST_VERDICT_TEXT[verdict]}
+                  </p>
+                  <p className="text-xs text-ink-softer">
+                    Ambiente: <span className="font-semibold text-ink-soft">{ENVIRONMENT_LABELS[result.environment]}</span> · {formatDateTime(result.testedAt)}
+                  </p>
+                </div>
+              </Alert>
               <ol className="space-y-2" aria-label="Resultado por passo">
                 {result.steps.map((step) => (
                   <StepRow key={step.step} result={step} environment={result.environment} />
