@@ -212,11 +212,22 @@ jobs:
         run: npm audit --audit-level=high || echo "::warning title=npm audit (frontend)::vulnerabilidades high/critical encontradas - informativo, nao bloqueia. Rode 'npm audit' em frontend/."
 
   e2e:
-    name: E2E — smoke (Playwright)
+    name: E2E — smoke (Playwright, parte ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    # Medido localmente (CI=true, --workers=2, 312 testes contra os mocks, maquina de 24 nucleos): 13,8 min, 311 passaram + 1 "flaky"
-    # (passou no retry). O runner de 2-4 vCPU e mais lento: 45 e folga para isso e ainda trava uma suite pendurada (default do GitHub: 360).
-    timeout-minutes: 45
+    # Medido localmente em 05/10/2026 (CI=true, --workers=2, 610 testes contra os mocks, maquina de 24 nucleos com a CPU em parte disputada):
+    # 27 min, 609 passaram + 1 "flaky". Na epoca em que este comentario nasceu eram 312 testes e 13,8 min: a suite dobrou. Um runner de 2-4 vCPU e
+    # mais lento e o `timeout-minutes: 45` de antes provavelmente nao fechava (NAO medido no runner de verdade).
+    # Por isso a suite e dividida em 3 PARTES (`--shard=N/3`, com `fullyParallel` o Playwright reparte por TESTE, nao por arquivo, entao as
+    # partes saem equilibradas): cada uma deve levar ~1/3 do tempo (a conta, NAO medida por parte) e tem folga de sobra no timeout de 60 (que ainda trava uma
+    # suite pendurada; default do GitHub: 360). Cada parte sobe o proprio servidor Vite (webServer do playwright.config.ts) e os testes nao
+    # compartilham estado (o estado do mock vive na pagina), entao a ordem/particao nao importa.
+    # O `ci-ok` depende de `e2e` como um todo: o resultado da matriz e `success` so se as 3 partes passaram (uma falha/cancelada reprova).
+    timeout-minutes: 60
+    strategy:
+      # Sem fail-fast: se uma parte quebra, as outras terminam e mostram TUDO que falhou de uma vez (em vez de cancelar e esconder).
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     defaults:
       run:
         working-directory: frontend
@@ -236,13 +247,18 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
-      - name: Run E2E (Playwright)
-        run: npm run test:e2e
+      - name: Run E2E (Playwright, parte ${{ matrix.shard }}/${{ strategy.job-total }})
+        # `github` anota as falhas no PR; `blob` e o formato que da para MESCLAR as partes num relatorio so (ver o passo de upload).
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=github,blob
+      # O relatorio de cada parte (blob, inclui traces das falhas que passaram no retry). Para ver tudo junto: baixe os 3 artefatos
+      # `playwright-blob-*` na mesma pasta e rode `npx playwright merge-reports --reporter=html <pasta>` dentro de `frontend/`.
+      # (Antes este passo subia `playwright-report/`, que o reporter `github` nunca gera: o artefato saia vazio.)
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report
-          path: frontend/playwright-report
+          name: playwright-blob-${{ matrix.shard }}
+          path: frontend/blob-report
+          if-no-files-found: warn
           retention-days: 7
 
   docker-compose:
@@ -561,7 +577,7 @@ jobs:
 
   # Portão ÚNICO para a proteção de branch do `main` (docs/FLUXO-DE-PUBLICACAO.md). Exigir os 11 checks pelo nome é frágil: o nome
   # das matrizes (docker-backend x3, backup-restore x2) muda se a matriz mudar, e um check renomeado que a proteção ainda "espera"
-  # trava o merge para sempre. Este job depende de TODOS e só passa se todos passaram: `skipped`/`cancelled` também reprovam (um job
+  # trava o merge para sempre (o `e2e` tambem e matriz, 3 partes: o `needs.e2e.result` ja agrega as 3). Este job depende de TODOS e só passa se todos passaram: `skipped`/`cancelled` também reprovam (um job
   # pulado por engano não pode virar "verde"). `if: always()` para rodar mesmo quando um dos jobs falhou e dar o veredito.
   ci-ok:
     name: CI verde (portão do main)

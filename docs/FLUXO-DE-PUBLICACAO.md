@@ -43,7 +43,7 @@ gh pr merge --squash                   # só depois de verde
 |---|---|---|
 | `backend` | lint, typecheck, `prisma migrate deploy` real, suíte inteira (unit + integração) com Postgres 16 e Redis 7 reais, **cliente `pg_dump` 18** instalado para os testes de backup | migration quebrada, regressão, backup que não copia o servidor |
 | `frontend` | lint, `npm run build` (tsc -b + 2 vite build), guardas do bundle (sem MSW, cartão isolado SAQ A-EP), testes unitários | erro de tipos, bundle do cartão contaminado |
-| `e2e` | Playwright (smoke + fluxos do PWA e do admin contra mocks) | fluxo de tela quebrado |
+| `e2e` (x3 partes: `--shard=N/3`) | Playwright (smoke + fluxos do PWA e do admin contra mocks, ~610 testes divididos em 3 partes; relatório de cada parte no artefato `playwright-blob-N`) | fluxo de tela quebrado |
 | `docker-compose` | `docker compose config` | YAML/variáveis do compose |
 | `docker-backend` (x3: `Dockerfile`, `.ocpp`, `.worker`) | **`docker build` da imagem**, Node 22, usuário `node`, sem devDependencies, engine do Prisma musl, **`pg_dump`/`pg_restore`/`psql` como `node` copiando um Postgres 16**, e o CMD real subindo (migrate deploy + entrypoint) | Dockerfile que não builda, cliente PG ausente/velho, boot quebrado |
 | `docker-frontend` | **`docker build` da imagem** (a mesma etapa de build do EasyPanel), nginx 1.30 sobe, `/health` 200, CSP presente | build do frontend na imagem, template do nginx inválido |

@@ -8,6 +8,7 @@ coverage/
 *.log
 *.tsbuildinfo
 playwright-report/
+blob-report/
 test-results/
 
 # Estado de sessao do Atlas/Painel de Tarefas — nunca versionar
