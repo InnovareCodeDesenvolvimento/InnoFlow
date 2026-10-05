@@ -143,10 +143,10 @@ async function medirJanela(page: Page, scrollY: number, acumulado: Map<string, T
         .map(recortar)
         .filter((q): q is [number, number, number, number] => q !== null)
       if (!rects.length) continue
-      // Oclusão: o texto rolado para baixo do cabeçalho/navegação FIXOS tem caixa dentro da janela mas não está (todo) visível. Os 4 cantos da caixa (1 px para dentro) e o centro têm de
+      // Oclusão: o texto rolado para baixo do cabeçalho/navegação FIXOS tem caixa dentro da janela mas não está (todo) visível. Os 4 cantos da caixa (MEIO px para dentro: com 1 px, um texto com a 1ª linha de pixels sob o cabeçalho sticky passava como "não coberto" e o fundo do cabeçalho entrava na conta — falso positivo medido em /app/perfil a 375) e o centro têm de
       // cair no próprio texto (ou em pai/filho dele); senão a caixa está cortada por outro elemento e só vale a medição de uma rolagem em que ela esteja inteira.
       const cobertura = rects.every(([qx, qy, qw, qh]) =>
-        [[qx + 1, qy + 1], [qx + qw - 1, qy + 1], [qx + 1, qy + qh - 1], [qx + qw - 1, qy + qh - 1], [qx + qw / 2, qy + qh / 2]].every(([px, py]) => {
+        [[qx + 0.5, qy + 0.5], [qx + qw - 0.5, qy + 0.5], [qx + 0.5, qy + qh - 0.5], [qx + qw - 0.5, qy + qh - 0.5], [qx + qw / 2, qy + qh / 2]].every(([px, py]) => {
           const topo = document.elementFromPoint(px, py)
           return !!topo && (el.contains(topo) || topo.contains(el))
         }),
