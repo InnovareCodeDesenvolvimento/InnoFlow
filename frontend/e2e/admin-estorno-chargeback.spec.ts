@@ -11,7 +11,6 @@ import { expect, test, type Page } from "@playwright/test"
 
 const PASSWORD = "senha1234"
 const nbsp = String.fromCharCode(160)
-const money = (s: string | null) => (s ?? "").split(nbsp).join(" ")
 
 async function login(page: Page, email = "admin@innoelektron.com") {
   await page.goto("/login")
@@ -36,7 +35,9 @@ async function openLateStopSession(page: Page) {
 }
 
 const refunds = (page: Page) => page.getByTestId("admin-refunds")
-const amounts = async (page: Page) => money(await refunds(page).locator("dl").first().textContent())
+// Bloco Cobrado/Estornado/Estornável. SEMPRE por `await expect(amounts(page)).toHaveText(...)` (auto-retry): logo após o toast o refetch da sessão ainda pode não ter chegado,
+// e uma leitura única (`expect(await ...textContent())`) pegava o valor de ANTES (flake ~1 em 6). o valor vem com nbsp (U+00A0) entre "R$" e o número e o regex NÃO é normalizado: use `R\$\s`, nunca `R\$ ` (espaço comum).
+const amounts = (page: Page) => refunds(page).locator("dl").first()
 
 test.describe("ADMIN — estorno de sessão (Sessões > detalhe > Devoluções)", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
@@ -45,7 +46,7 @@ test.describe("ADMIN — estorno de sessão (Sessões > detalhe > Devoluções)"
     await login(page)
     await openLateStopSession(page)
     await expect(refunds(page).getByRole("heading").or(refunds(page).getByText("Devoluções", { exact: true })).first()).toBeVisible()
-    expect(await amounts(page)).toMatch(/Cobrado\s*R\$ 37,82\s*Estornado\s*R\$ 19,00\s*Estornável\s*R\$ 18,82/)
+    await expect(amounts(page)).toHaveText(/Cobrado\s*R\$\s37,82\s*Estornado\s*R\$\s19,00\s*Estornável\s*R\$\s18,82/)
 
     const items = refunds(page).getByTestId("refund-item")
     await expect(items).toHaveCount(4)
@@ -109,7 +110,7 @@ test.describe("ADMIN — estorno de sessão (Sessões > detalhe > Devoluções)"
     await expect(confirm).toHaveCount(0)
     await expect(page.getByRole("dialog", { name: /Estornar sessão/ })).toHaveCount(0)
 
-    expect(await amounts(page)).toMatch(/Estornado\s*R\$ 24,00\s*Estornável\s*R\$ 13,82/)
+    await expect(amounts(page)).toHaveText(/Estornado\s*R\$\s24,00\s*Estornável\s*R\$\s13,82/)
     await expect(refunds(page).getByTestId("refund-item")).toHaveCount(5)
     await expect(refunds(page).getByTestId("refund-item").first()).toContainText("Cortesia por demora no atendimento")
   })
@@ -134,7 +135,7 @@ test.describe("ADMIN — estorno de sessão (Sessões > detalhe > Devoluções)"
     await expect(page.getByText("Devolução registrada.")).toBeVisible()
     const items = refunds(page).getByTestId("refund-item")
     await expect(items.filter({ hasText: "Aguardando confirmação" })).toHaveCount(2)
-    expect(await amounts(page)).toMatch(/Estornado\s*R\$ 27,00\s*Estornável\s*R\$ 10,82/)
+    await expect(amounts(page)).toHaveText(/Estornado\s*R\$\s27,00\s*Estornável\s*R\$\s10,82/)
   })
 
   test("confirmar à mão: referência inválida é barrada; válida confirma e marca 'confirmada à mão'", async ({ page }) => {
@@ -173,7 +174,7 @@ test.describe("ADMIN — estorno de sessão (Sessões > detalhe > Devoluções)"
     await confirm.getByLabel("Sua senha atual").fill(PASSWORD)
     await confirm.getByRole("button", { name: "Cancelar registro" }).click()
     await expect(page.getByText(/Registro cancelado/)).toBeVisible()
-    expect(await amounts(page)).toMatch(/Estornado\s*R\$ 9,00\s*Estornável\s*R\$ 28,82/)
+    await expect(amounts(page)).toHaveText(/Estornado\s*R\$\s9,00\s*Estornável\s*R\$\s28,82/)
     await expect(refunds(page).getByTestId("refund-item").filter({ hasText: "Cancelado" })).toHaveCount(2)
   })
 
@@ -224,7 +225,7 @@ test.describe("ADMIN — estorno de sessão (Sessões > detalhe > Devoluções)"
     await expect(confirm).toHaveCount(0)
     await expect(form.getByRole("alert").first()).toContainText("A conta deste motorista foi excluída")
     await form.getByRole("button", { name: "Cancelar" }).click()
-    expect(await amounts(page)).toMatch(/Estornado\s*R\$ 19,00/) // nada foi registrado em nenhum dos erros
+    await expect(amounts(page)).toHaveText(/Estornado\s*R\$\s19,00/) // nada foi registrado em nenhum dos erros
   })
 
   test("OPERATOR não vê o bloco de devoluções (ADMIN-only)", async ({ page }) => {
@@ -277,6 +278,8 @@ test.describe("ADMIN — Pagamentos: busca pela Cielo e registro de chargeback",
     await page.getByRole("button", { name: "Buscar venda da Cielo" }).click()
     await page.locator("#acquirer-filters").getByLabel("Tid").fill("10069930690000999001")
     await page.locator("#acquirer-filters").getByRole("button", { name: "Buscar" }).click()
+    // Espera a lista FILTRADA (cabeçalho + 1 venda) ANTES de clicar: sem isso o clique pegava a lista de antes do refetch (11 botões -> strict mode violation, flake ~1 em 10).
+    await expect(page.getByRole("row")).toHaveCount(2)
     await page.getByRole("button", { name: /Registrar chargeback/ }).click()
     const dialog = page.getByRole("dialog", { name: "Registrar chargeback" })
     await dialog.getByLabel(/Referência do caso na Cielo/).fill("CASO-NOVO-1")
@@ -288,8 +291,9 @@ test.describe("ADMIN — Pagamentos: busca pela Cielo e registro de chargeback",
   test("registrar: valida o formulário, bloqueia o cartão (aviso) e oferece o dossiê para baixar", async ({ page }) => {
     await login(page)
     await page.getByRole("navigation", { name: "Navegação do painel administrativo" }).getByRole("link", { name: "Pagamentos" }).click()
-    // A 1ª venda de cartão capturada da lista (a demo `demo_pi_stuck_1` já tem chargeback).
-    await page.getByRole("button", { name: /Registrar chargeback/ }).first().click()
+    // A 1ª venda de cartão capturada da lista QUE NÃO É a do Tiago Travado: a demo `demo_pi_stuck_1` já tem chargeback e nasce em "agora - 200 min"; sem outra venda de cartão mais
+    // recente do que isso (as demais são sorteadas por horário do dia) ela vira a 1ª da lista e o 2º passo falhava com o 409 "já existe" (determinístico de madrugada / UTC).
+    await page.getByRole("button", { name: /^Registrar chargeback — (?!Tiago Travado)/ }).first().click()
     const dialog = page.getByRole("dialog", { name: "Registrar chargeback" })
     await expect(dialog.getByText(/o modo cartão deste motorista é bloqueado na hora/)).toBeVisible()
     // Sem pedir senha (contrato): NÃO há campo de senha neste diálogo.
