@@ -1,8 +1,8 @@
 # Contraste AA — estado atual (axe-core `color-contrast`)
 
-Gerado por `scripts/relatorio-contraste.mjs` a partir de `npm run test:contraste`. 105 medições (rota × viewport).
+Gerado por `scripts/relatorio-contraste.mjs` a partir de `npm run test:contraste`. 108 medições (rota × viewport).
 
-- Nós **reprovados**: 0 · nós **aprovados**: 3257 · nós **que o axe NÃO conseguiu avaliar** (fundo em degradê/imagem/vidro): 937.
+- Nós **reprovados**: 0 · nós **aprovados**: 3386 · nós **que o axe NÃO conseguiu avaliar** (fundo em degradê/imagem/vidro): 952.
 - **Garante:** nenhum texto avaliado pelo axe, fora dos reprovados abaixo, tem razão < 4,5:1 (3:1 para texto grande). **Não garante:** os `incompletos` (principalmente a landing escura e o vidro) não foram avaliados.
 
 ## Combinações reprovadas (agrupadas)
@@ -19,10 +19,10 @@ Gerado por `scripts/relatorio-contraste.mjs` a partir de `npm run test:contraste
 
 | Motivo (messageKey do axe) | Nós | Onde (rota: nós, as 6 maiores) |
 |---|---:|---|
-| bgGradient | 666 | pub-landing: 124, adm-dashboard: 39, pwa-travado-sessao-faulted: 33, adm-movimento-diario: 25, pub-eletropostos: 22, pwa-inicio: 22 |
+| bgGradient | 678 | pub-landing: 124, adm-dashboard: 39, pwa-travado-sessao-faulted: 33, adm-movimento-diario: 25, pub-eletropostos: 22, pwa-inicio: 22 |
 | pseudoContent | 156 | pub-landing: 156 |
 | bgOverlap | 66 | pub-landing: 47, pub-eletropostos: 14, adm-dashboard: 5 |
-| shortTextContent | 24 | pwa-mapa: 10, adm-auth-tokens: 1, adm-carteiras: 1, adm-charge-points: 1, adm-connectors: 1, adm-dashboard: 1 |
+| shortTextContent | 27 | pwa-mapa: 10, pwa-perfil: 3, adm-auth-tokens: 1, adm-carteiras: 1, adm-charge-points: 1, adm-connectors: 1 |
 | elmPartiallyObscuring | 12 | auth-cadastro: 3, auth-login: 3, pub-qr-carregador: 3, pub-qr-conector: 2, pub-landing: 1 |
 | sem-motivo | 6 | adm-auditoria: 3, adm-movimento-diario: 1, adm-pagamentos: 1, adm-sessoes: 1 |
 | elmPartiallyObscured | 5 | pwa-mapa: 5 |
@@ -62,6 +62,7 @@ Gerado por `scripts/relatorio-contraste.mjs` a partir de `npm run test:contraste
 | pwa-historico-vazio | 0 / 3 | 0 / 3 | 0 / 3 |
 | pwa-inicio | 0 / 11 | 0 / 6 | 0 / 6 |
 | pwa-mapa | 0 / 7 | 0 / 2 | 0 / 13 |
+| pwa-perfil | 0 / 5 | 0 / 5 | 0 / 5 |
 | pwa-recibo-fechada-pelo-servidor | 0 / 4 | 0 / 4 | 0 / 4 |
 | pwa-recibo-stop-nao-confirmado-cartao | 0 / 5 | 0 / 5 | 0 / 5 |
 | pwa-recibo-stop-nao-confirmado-carteira | 0 / 4 | 0 / 4 | 0 / 4 |
