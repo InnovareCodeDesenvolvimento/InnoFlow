@@ -9,7 +9,8 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
  * `backend/scripts/recifrarSegredosDePagamento.ts` (fora do HTTP: ninguém aciona isto por rota). Runbook em `docs/DEPLOY-EASYPANEL.md`.
  *
  * Alvos: `PaymentMethod.cieloCardTokenCiphertext` (todas as linhas, ativas ou não — exceto as de conta excluída, com o marcador `DESTROYED`), `AccountDeletionRequest.refundPixKeyCiphertext` (chave Pix de devolução, L1.4), as três colunas `*Ciphertext` de `PaymentGatewayConfig` e as duas de `NotificationChannelConfig`
- * (senha SMTP e apikey da Evolution — N-7: a MESMA chave cifra os segredos de comunicação; sem isto a rotação deixaria esses dois para trás, ilegíveis).
+ * (senha SMTP e apikey da Evolution — N-7: a MESMA chave cifra os segredos de comunicação; sem isto a rotação deixaria esses dois para trás, ilegíveis) e as cinco de `BackupConfig` (S3, Google e a cópia
+ * cifrada da chave do backup).
  *
  * Regras:
  *  - DRY-RUN por padrão (`apply: false` não grava NADA, só conta); `apply: true` grava.
@@ -24,6 +25,11 @@ import { writeAuditLog } from '../auditoria/writeAuditLog'
 export type AlvoRecifragem = 'PaymentMethod.cieloCardTokenCiphertext' | 'PaymentGatewayConfig.merchantKeyCiphertext' | 'PaymentGatewayConfig.sopClientSecretCiphertext' | 'PaymentGatewayConfig.webhookHeaderSecretCiphertext'
   | 'NotificationChannelConfig.smtpPasswordCiphertext'
   | 'NotificationChannelConfig.evolutionApiKeyCiphertext'
+  | 'BackupConfig.s3AccessKeyCiphertext'
+  | 'BackupConfig.s3SecretKeyCiphertext'
+  | 'BackupConfig.driveOauthClientSecretCiphertext'
+  | 'BackupConfig.driveOauthRefreshTokenCiphertext'
+  | 'BackupConfig.encryptionKeyCiphertext'
   | 'AccountDeletionRequest.refundPixKeyCiphertext'
 
 export interface RelatorioAlvo {
@@ -164,6 +170,30 @@ export async function recifrarSegredosDePagamento(params: { apply: boolean; pris
       if (apply) {
         // `updatedAt` explícito = o MESMO valor: re-cifrar não é uma alteração de configuração.
         const { count } = await prisma.notificationChannelConfig.updateMany({ where: { id: 1, [coluna]: valor }, data: { [coluna]: r.novo!, updatedAt: comunicacao.updatedAt } })
+        if (count === 1) alvo.recifrados += 1
+        else alvo.alteradosDuranteExecucao += 1
+      }
+    }
+  }
+
+  // --- BackupConfig (singleton id=1): credenciais do S3, segredo/refresh token do Google e a CÓPIA CIFRADA da chave do backup — cifradas com a MESMA chave. Sem isto a rotação deixaria o agendador
+  // sem poder cifrar/enviar o backup de madrugada (e a cópia da chave do backup ilegível). -------------------------------------------------------------------------------------------------
+  const backup = await prisma.backupConfig.findUnique({ where: { id: 1 } })
+  const colunasBackup = ['s3AccessKeyCiphertext', 's3SecretKeyCiphertext', 'driveOauthClientSecretCiphertext', 'driveOauthRefreshTokenCiphertext', 'encryptionKeyCiphertext'] as const
+  for (const coluna of colunasBackup) {
+    const alvo = novoAlvo(`BackupConfig.${coluna}`)
+    alvos.push(alvo)
+    const valor = backup?.[coluna]
+    if (!backup || !valor) continue
+    alvo.total += 1
+    const r = avaliar(valor)
+    if (r.situacao === 'JA_NA_ATUAL') alvo.jaNaChaveAtual += 1
+    else if (r.situacao === 'ILEGIVEL') alvo.ilegiveis += 1
+    else {
+      alvo.aRecifrar += 1
+      if (apply) {
+        // `updatedAt` explícito = o MESMO valor: re-cifrar não é uma alteração de configuração.
+        const { count } = await prisma.backupConfig.updateMany({ where: { id: 1, [coluna]: valor }, data: { [coluna]: r.novo!, updatedAt: backup.updatedAt } })
         if (count === 1) alvo.recifrados += 1
         else alvo.alteradosDuranteExecucao += 1
       }
