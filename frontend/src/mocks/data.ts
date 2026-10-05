@@ -107,6 +107,12 @@ export const mockUsers: MockUser[] = [
   // I-7: bloqueio TEMPORÁRIO por recusas em excesso (`TEMPORARILY_BLOCKED`, `blockedUntil` = ~47 min depois de a página carregar). Nasce com 1 cartão.
   { id: "user_driver_bloqueado", name: "Bruno Bloqueado", email: "bloqueado-cartao@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
+  // L1.4/L1.9 (privacidade): personas da exclusão de conta e do aceite dos termos (ver o cabeçalho de `mocks/legalData.ts`). Contas separadas de propósito: a exclusão ANONIMIZA a conta no
+  // mock (o login com a senha antiga passa a falhar), então não pode ser feita em motorista que outro E2E usa.
+  { id: "user_driver_exclusao", name: "Edu Exclusão", email: "exclusao@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  { id: "user_driver_exclusao_zero", name: "Zeca Zero", email: "exclusao-zero@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  { id: "user_driver_exclusao_google", name: "Gui Google-Exclusão", email: "exclusao-google@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "", hasPassword: false },
+  { id: "user_driver_termos", name: "Téo Termos", email: "termos@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
 ]
 
 export const mockSites: Site[] = [

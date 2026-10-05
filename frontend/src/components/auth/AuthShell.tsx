@@ -4,6 +4,7 @@ import { Check } from "lucide-react"
 import { BrandBackdrop } from "@/components/brand/BrandBackdrop"
 import { Logo } from "@/components/brand/Logo"
 import { Mascot, MascotFace } from "@/components/brand/Mascot"
+import { LEGAL_PATHS } from "@/lib/legalPaths"
 
 /**
  * Casca de Login e Cadastro (design system unificado, F-B): MOLDURA ESCURA de marca + miolo claro, igual à regra da landing (escuro emoldura, claro é
@@ -63,7 +64,7 @@ export function AuthShell({ children, below }: { children: ReactNode; /** Linha 
       </aside>
 
       {/* `main`: o miolo do acesso é a região principal da página (sem landmark, o axe reprova `landmark-one-main` em Login, Cadastro e na recuperação de senha). Mesmo box de antes: só a tag mudou. */}
-      <main className="flex flex-col bg-background">
+      <main className="relative flex flex-col bg-background">
         {/* Faixa de marca — só mobile/tablet (< lg). */}
         <div className="surface-dark surface-dark-rich relative shrink-0 overflow-hidden px-4 pb-16 pt-8 text-center lg:hidden">
           <BrandBackdrop />
@@ -82,6 +83,15 @@ export function AuthShell({ children, below }: { children: ReactNode; /** Linha 
           {children}
           {below}
         </div>
+        {/* Links legais (L1.9): posicionados DENTRO do respiro de 48 px do fim da coluna (`pb-12`), então não empurram nem recentralizam o formulário (o card fica onde sempre esteve). Alvo de 44 px. */}
+        <nav aria-label="Documentos legais" className="absolute inset-x-0 bottom-0 z-10 flex h-11 items-center justify-center gap-x-5 text-xs text-ink-softer">
+          <Link to={LEGAL_PATHS.termos} className="inline-flex min-h-11 items-center px-1 font-medium underline-offset-2 hover:text-ink hover:underline">
+            Termos de Uso
+          </Link>
+          <Link to={LEGAL_PATHS.privacidade} className="inline-flex min-h-11 items-center px-1 font-medium underline-offset-2 hover:text-ink hover:underline">
+            Política de Privacidade
+          </Link>
+        </nav>
       </main>
     </div>
   )

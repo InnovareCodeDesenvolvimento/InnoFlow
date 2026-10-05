@@ -605,13 +605,16 @@ const walletByDriver = new Map<string, WalletState>()
 
 /** `user_driver_devedor` (ver `mocks/data.ts`) nasce com dívida em aberto — prova em tela o aviso "os primeiros R$X quitam a dívida" da tela de recarga Pix sem mexer no motorista usado pelo E2E de sessão. */
 const DEBT_DEMO_DRIVER_ID = "user_driver_devedor"
+/** L1.4: motorista com saldo ZERO e extrato vazio (a exclusão de conta não pede chave Pix). */
+const ZERO_BALANCE_DRIVER_ID = "user_driver_exclusao_zero"
 
 function getWalletState(driverId: string): WalletState {
   if (!walletByDriver.has(driverId)) {
     const seedAt = new Date(Date.now() - 86_400_000).toISOString()
     const isDebtDemo = driverId === DEBT_DEMO_DRIVER_ID
+    const isZeroBalance = driverId === ZERO_BALANCE_DRIVER_ID
     walletByDriver.set(driverId, {
-      balanceCents: isDebtDemo ? 0 : 5000,
+      balanceCents: isDebtDemo || isZeroBalance ? 0 : 5000,
       openDebtCents: isDebtDemo ? 3850 : 0,
       entries: isDebtDemo
         ? [
@@ -626,7 +629,9 @@ function getWalletState(driverId: string): WalletState {
               createdAt: seedAt,
             },
           ]
-        : [
+        : isZeroBalance
+          ? []
+          : [
             {
               id: "we_seed",
               type: "TOPUP_PIX",

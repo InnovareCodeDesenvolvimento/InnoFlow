@@ -55,6 +55,20 @@ import {
   sessionEpochOf,
   validateProfilePatch,
 } from "./profileData"
+import {
+  acceptConsents,
+  consumeLegalBump,
+  currentTermsVersion,
+  forcedDeletionFailure,
+  getConsentStatus,
+  legalConfig,
+  LEGAL_PRIVACY_VERSION,
+  pixKeyState,
+  recordDeletion,
+  recordSignupConsent,
+  registerExport,
+} from "./legalData"
+import { applyNotificationPatch, getMockNotificationPreferences, validateNotificationPatch } from "./notificationData"
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
@@ -336,7 +350,14 @@ export const handlers = [
   }),
 
   http.post("/api/auth/register", async ({ request }) => {
-    const body = (await request.json()) as { name: string; email: string; password: string; phone?: string }
+    const body = (await request.json()) as { name: string; email: string; password: string; phone?: string; acceptedTermsVersion?: string }
+    // L1.9: o aceite da versão VIGENTE é obrigatório (ausente = 400; versão antiga = 409). `mock:legal-bump=1` faz o 1º envio voltar 409 e sobe a versão.
+    if (!body.acceptedTermsVersion) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "acceptedTermsVersion", message: "Required" }] }, { status: 400 })
+    }
+    if (consumeLegalBump(body.acceptedTermsVersion) || body.acceptedTermsVersion !== currentTermsVersion()) {
+      return HttpResponse.json(errorBody("Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.", "TERMS_VERSION_OUTDATED"), { status: 409 })
+    }
     if (mockUsers.some((u) => u.email === body.email)) {
       return HttpResponse.json(errorBody("Já existe uma conta com este e-mail.", "EMAIL_TAKEN"), { status: 409 })
     }
@@ -350,6 +371,7 @@ export const handlers = [
       password: body.password,
     }
     mockUsers.push(newUser)
+    recordSignupConsent(newUser.id, body.acceptedTermsVersion)
     return HttpResponse.json({ token: fakeToken(newUser), user: toUserDTO(newUser) }, { status: 201 })
   }),
 
@@ -410,19 +432,29 @@ export const handlers = [
   }),
 
   http.post("/api/auth/google", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as { credential?: string }
+    const body = (await request.json().catch(() => ({}))) as { credential?: string; acceptedTermsVersion?: string }
     const credential = body.credential?.trim() ?? ""
     if (localStorage.getItem("mock:google-rate-limited") === "1") {
       return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429 })
     }
     if (!credential) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    // L1.9: o aceite só é exigido quando o Google vai CRIAR a conta ("novo", ou `mock:google-new=1` no botão do mock). Ausente = 400 `acceptedTermsVersion`; versão antiga = 409.
+    const createsAccount = credential === "novo" || (credential === "mock-google-credential" && localStorage.getItem("mock:google-new") === "1")
+    if (createsAccount) {
+      if (!body.acceptedTermsVersion) {
+        return HttpResponse.json({ error: "Aceite os Termos de Uso e a Política de Privacidade para criar a conta.", code: "VALIDATION_ERROR", details: [{ path: "acceptedTermsVersion", message: "obrigatório para criar a conta" }] }, { status: 400 })
+      }
+      if (consumeLegalBump(body.acceptedTermsVersion) || body.acceptedTermsVersion !== currentTermsVersion()) {
+        return HttpResponse.json(errorBody("Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.", "TERMS_VERSION_OUTDATED"), { status: 409 })
+      }
+    }
     if (credential === "bloqueado") {
       return HttpResponse.json(errorBody("Esta conta não pode entrar com o Google.", "GOOGLE_LOGIN_NOT_ALLOWED"), { status: 403 })
     }
     if (credential === "nao-verificado") {
       return HttpResponse.json(errorBody("E-mail do Google não verificado.", "GOOGLE_EMAIL_NOT_VERIFIED"), { status: 403 })
     }
-    if (credential === "novo") {
+    if (createsAccount) {
       const created: MockUser = {
         id: `user_google_${Date.now()}`,
         name: "Nova Conta Google",
@@ -433,6 +465,7 @@ export const handlers = [
         password: "",
       }
       mockUsers.push(created)
+      recordSignupConsent(created.id, body.acceptedTermsVersion as string)
       return HttpResponse.json({ token: fakeToken(created), user: toUserDTO(created) }, { status: 201 })
     }
     // L1.2: `localStorage["mock:google-as"]` = id do motorista em que o "Google (mock)" entra (ex.: a conta só-Google, sem senha).
@@ -497,6 +530,152 @@ export const handlers = [
     user.hasPassword = true
     bumpSessionEpoch(user.id)
     return HttpResponse.json({ token: fakeToken(user), user: toUserDTO(user) })
+  }),
+
+  // ---- Termos, consentimento e privacidade (L1.9 + L1.4) ------------------------------------------------------------------------------------------------
+  // Contrato: `PublicLegalConfig`, `MeConsentStatus`, `MeAccountDeletionRequest` em `types/api.ts`; personas e gatilhos em `mocks/legalData.ts`.
+  http.get("/api/public/legal", async () => {
+    const forced = localStorage.getItem("mock:legal-get")
+    if (forced === "slow") await delay(3000)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    return HttpResponse.json(legalConfig())
+  }),
+
+  http.get("/api/me/consents", ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:consents-get")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    return HttpResponse.json(getConsentStatus(scope.user.userId))
+  }),
+
+  http.post("/api/me/consents", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:consents-post")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429") return HttpResponse.json(errorBody("Muitas requisições.", "RATE_LIMITED"), { status: 429 })
+    const body = (await request.json().catch(() => ({}))) as { termsVersion?: unknown; privacyVersion?: unknown }
+    if (typeof body.termsVersion !== "string" || typeof body.privacyVersion !== "string" || body.termsVersion === "" || body.privacyVersion === "") {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "termsVersion", message: "Required" }] }, { status: 400 })
+    }
+    if (consumeLegalBump(body.termsVersion) || body.termsVersion !== currentTermsVersion() || body.privacyVersion !== LEGAL_PRIVACY_VERSION) {
+      return HttpResponse.json(errorBody("Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.", "TERMS_VERSION_OUTDATED"), { status: 409 })
+    }
+    return HttpResponse.json(acceptConsents(scope.user.userId, body.termsVersion, body.privacyVersion), { status: 201 })
+  }),
+
+  // `GET /api/me/data-export`: arquivo JSON do titular. Limite real: 3 por dia (a 4ª na página é 429 `RATE_LIMITED_EXPORT`).
+  http.get("/api/me/data-export", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:export-fail")
+    if (forced === "slow") await delay(2500)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429" || forced === "429-header" || !registerExport(scope.user.userId)) {
+      return HttpResponse.json(errorBody("Limite de exportações do dia atingido.", "RATE_LIMITED_EXPORT"), { status: 429, headers: forced === "429-header" ? { "Retry-After": "7200" } : {} })
+    }
+    const user = mockUsers.find((u) => u.id === scope.user.userId)
+    if (!user) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const profile = getMockProfile(user)
+    const wallet = getMockWallet(user.id, 1, 100)
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+    return HttpResponse.json(
+      {
+        exportedAt: new Date().toISOString(),
+        profile: { id: user.id, name: user.name, email: user.email, phone: profile.phone, cpf: profile.cpfMasked ? "52998224725" : null, createdAt: profile.createdAt },
+        consents: [{ kind: "TERMS", version: getConsentStatus(user.id).termsVersion, acceptedAt: getConsentStatus(user.id).acceptedAt }],
+        sessions: [],
+        walletEntries: wallet.entries,
+        topups: [],
+        paymentMethods: [],
+        authTokens: [],
+        notifications: [],
+      },
+      { headers: { "Content-Disposition": `attachment; filename="innoflow-meus-dados-${day}.json"`, "Cache-Control": "no-store" } },
+    )
+  }),
+
+  // `POST /api/me/account/deletion`: ANONIMIZA a conta. Mesma ordem do backend: corpo estrito -> reautenticação (senha, ou ID token do Google p/ conta só-Google) -> estado (sessão
+  // ativa, pagamento em andamento, dívida) -> chave Pix (só com saldo). Depois do 200 o token deixa de valer (época da sessão) e o login com a senha antiga falha.
+  http.post("/api/me/account/deletion", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = forcedDeletionFailure()
+    if (forced === "slow") await delay(2500)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    const user = mockUsers.find((u) => u.id === scope.user.userId)
+    if (!user) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const allowed = ["confirmation", "currentPassword", "googleCredential", "refundPixKey"]
+    const extra = Object.keys(body).filter((k) => !allowed.includes(k))
+    if (body.confirmation !== "EXCLUIR" || extra.length > 0) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: extra[0] ?? "confirmation", message: "Invalid" }] }, { status: 400 })
+    }
+    // Reautenticação ANTES de qualquer consulta de estado.
+    if (forced === "RATE_LIMITED_ACCOUNT_DELETION") return HttpResponse.json(errorBody("Muitas tentativas de exclusão.", "RATE_LIMITED_ACCOUNT_DELETION"), { status: 429, headers: { "Retry-After": "600" } })
+    if (forced === "STEPUP_UNAVAILABLE") return HttpResponse.json(errorBody("Não foi possível confirmar sua senha agora.", "STEPUP_UNAVAILABLE"), { status: 503 })
+    if (forced === "INVALID_GOOGLE_TOKEN") return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    if (forced === "FORBIDDEN") return HttpResponse.json(errorBody("Não foi possível confirmar a sua identidade.", "FORBIDDEN"), { status: 403 })
+    if (mockHasPassword(user)) {
+      if (typeof body.currentPassword !== "string" || body.currentPassword === "") return HttpResponse.json(errorBody("Informe sua senha atual para excluir a conta.", "CURRENT_PASSWORD_REQUIRED"), { status: 400 })
+      if (body.currentPassword !== user.password) return HttpResponse.json(errorBody("Senha atual incorreta.", "INVALID_CURRENT_PASSWORD"), { status: 403 })
+    } else {
+      if (typeof body.googleCredential !== "string" || body.googleCredential === "") {
+        return HttpResponse.json({ error: "Confirme com a sua conta Google para excluir a conta.", code: "VALIDATION_ERROR", details: [{ path: "googleCredential", message: "obrigatório para conta sem senha" }] }, { status: 400 })
+      }
+      if (body.googleCredential === "invalido") return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
+    }
+    if (forced === "PAYMENT_SECRETS_KEY_MISSING") return HttpResponse.json(errorBody("Não foi possível processar a devolução do saldo agora.", "PAYMENT_SECRETS_KEY_MISSING"), { status: 503 })
+    const wallet = getMockWallet(user.id, 1, 1)
+    if (forced === "ACTIVE_SESSION" || getMockActiveSession(user.id)) return HttpResponse.json(errorBody("Há uma recarga em andamento.", "ACTIVE_SESSION"), { status: 409 })
+    if (forced === "PAYMENT_IN_PROGRESS") return HttpResponse.json(errorBody("Há um pagamento em andamento.", "PAYMENT_IN_PROGRESS"), { status: 409 })
+    if (forced === "OPEN_DEBT" || wallet.openDebtCents > 0) return HttpResponse.json(errorBody("Você tem uma dívida em aberto.", "OPEN_DEBT"), { status: 409 })
+    const key = pixKeyState(body.refundPixKey)
+    if (wallet.balanceCents > 0) {
+      if (forced === "REFUND_PIX_KEY_REQUIRED" || key === "ABSENT") return HttpResponse.json(errorBody("Informe a chave Pix para devolver o saldo.", "REFUND_PIX_KEY_REQUIRED"), { status: 400 })
+      if (key === "INVALID") return HttpResponse.json({ error: "Chave Pix inválida.", code: "VALIDATION_ERROR", details: [{ path: "refundPixKey", message: "chave Pix inválida" }] }, { status: 400 })
+    }
+    const status = wallet.balanceCents > 0 ? "DELETED_PENDING_REFUND" : "DELETED"
+    recordDeletion({ userId: user.id, balanceCentsAtRequest: wallet.balanceCents, status, refundPixKeyKind: wallet.balanceCents > 0 && typeof key === "object" ? key.kind : null })
+    user.name = "Conta excluída"
+    user.email = `excluido+${user.id}@anon.invalid`
+    user.password = ""
+    user.hasPassword = false
+    bumpSessionEpoch(user.id)
+    return HttpResponse.json({ status })
+  }),
+
+  // ---- Preferências de notificação (L1.6) ---------------------------------------------------------------------------------------------------------------
+  // `GET/PATCH /api/me/notification-preferences` (DRIVER). Regras e gatilhos em `mocks/notificationData.ts`.
+  http.get("/api/me/notification-preferences", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:notif-get")
+    if (forced === "slow") await delay(3000)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "403") return HttpResponse.json(errorBody("Acesso restrito a motoristas.", "FORBIDDEN"), { status: 403 })
+    if (forced === "empty") return HttpResponse.json(null)
+    return HttpResponse.json(getMockNotificationPreferences(scope.user.userId))
+  }),
+
+  http.patch("/api/me/notification-preferences", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:notif-patch")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429") return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED"), { status: 429 })
+    const body = await request.json().catch(() => null)
+    const issues = validateNotificationPatch(body)
+    if (issues) return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: issues }, { status: 400 })
+    return HttpResponse.json(applyNotificationPatch(scope.user.userId, body as Record<string, never>))
   }),
 
   // ---- Esqueci / redefinir senha (L1.3) -----------------------------------------------------------------------------------------------------------------
@@ -1593,6 +1772,8 @@ export const handlers = [
     if ("error" in scope) return scope.error
     const url = new URL(request.url)
     const { page, pageSize } = parsePagination(url, 20)
+    // `mock:wallet-get=network` falha só a consulta de saldo (prova o erro do 1º passo da exclusão de conta, L1.4).
+    if (localStorage.getItem("mock:wallet-get") === "network") return HttpResponse.error()
     return HttpResponse.json(getMockWallet(scope.user.userId, page, pageSize))
   }),
 

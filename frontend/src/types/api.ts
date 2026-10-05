@@ -84,6 +84,12 @@ export interface PublicClientConfig {
  */
 export interface GoogleAuthRequest {
   credential: string
+  /**
+   * L1.9 (IMPLEMENTADO, backend 40fb2ec): versão dos Termos que a pessoa aceitou (= `PublicLegalConfig.termsVersion` vigente). SÓ é exigida quando o Google vai CRIAR conta: ausente
+   * nesse caso = 400 `VALIDATION_ERROR` com `details[].path = "acceptedTermsVersion"` (a tela mostra o aceite e reenvia a MESMA credencial); versão antiga = 409 `TERMS_VERSION_OUTDATED`.
+   * Quem já tem conta entra sem mandar nada.
+   */
+  acceptedTermsVersion?: string
 }
 
 /**
@@ -1856,7 +1862,7 @@ export interface ResetPasswordRequest {
  */
 export type ResetPasswordErrorCode = "VALIDATION_ERROR" | "RESET_TOKEN_INVALID" | "RATE_LIMITED_AUTH" | "SERVICE_UNAVAILABLE"
 
-// ---- L1.4 — LGPD: exportação e exclusão de conta — planejado (L1.4) ----------------------------------------------------------------------------------
+// ---- L1.4 — LGPD: exportação e exclusão de conta — IMPLEMENTADO (L1.4; backend dd1e5b8 exportação, 52897ec exclusão) ------------------------------------------------
 
 /**
  * `GET /api/me/data-export` -> 200 `application/json` com `Content-Disposition: attachment; filename="innoflow-meus-dados-AAAAMMDD.json"`. Síncrono.
@@ -1910,6 +1916,19 @@ export type MeAccountDeletionErrorCode =
   | "PAYMENT_IN_PROGRESS"
   | "OPEN_DEBT"
   | "RATE_LIMITED_ACCOUNT_DELETION"
+  // Acrescentados com o backend real (nada renomeado): 503 sem a chave de cifragem do cofre (a chave Pix não pode ser guardada), 503 do throttle da senha fora do ar
+  // (fail-closed, nada é tentado), 503 Google sem Client ID no servidor, 403 conta sem como se reautenticar / não é DRIVER, 401 sessão inválida.
+  | "PAYMENT_SECRETS_KEY_MISSING"
+  | "STEPUP_UNAVAILABLE"
+  | "GOOGLE_NOT_CONFIGURED"
+  | "FORBIDDEN"
+  | "UNAUTHORIZED"
+
+/**
+ * `GET /api/me/data-export` - erros (a rota só existe para DRIVER): 429 `RATE_LIMITED_EXPORT` (3 por dia; traz `Retry-After`, mas o CORS não o expõe fora do mesmo domínio),
+ * 401 sessão inválida, 403 não é DRIVER, 5xx. A resposta de sucesso é o arquivo `MeDataExport` (a tela baixa, não renderiza).
+ */
+export type MeDataExportErrorCode = "RATE_LIMITED_EXPORT" | "UNAUTHORIZED" | "FORBIDDEN"
 
 /** Estado da devolução do saldo de uma conta excluída (DL2). */
 export type AccountDeletionRefundStatus = "NOT_REQUIRED" | "PENDING_REFUND" | "REFUNDED"
@@ -2200,7 +2219,7 @@ export type CardChargebackBlockedCode = "CARD_CHARGEBACK_BLOCKED"
 /** `GET /api/admin/chargebacks/:id/dossier` (ADMIN-only) -> JSON do snapshot (formato aberto; a Lyra só oferece o download). */
 export type ChargebackDossier = Record<string, unknown>
 
-// ---- L1.9 — Termos de uso, privacidade, aceite e contato — planejado (L1.9) --------------------------------------------------------------------------
+// ---- L1.9 — Termos de uso, privacidade, aceite e contato — IMPLEMENTADO (L1.9; backend 40fb2ec) ---------------------------------------------------------------
 
 /** `GET /api/public/legal` (sem auth) -> 200. Os dados da empresa dependem do dono (CNPJ, e-mail de suporte, encarregado/DPO) — podem vir `null` até ele mandar. */
 export interface PublicLegalConfig {
@@ -2217,8 +2236,8 @@ export interface PublicLegalConfig {
 
 /**
  * `POST /api/auth/register` e `POST /api/auth/google` passarão a exigir `acceptedTermsVersion` (= `PublicLegalConfig.termsVersion` vigente). Versão diferente =
- * 409 `TERMS_VERSION_OUTDATED` (a tela recarrega `GET /api/public/legal` e pede o aceite de novo); ausente = 400 `VALIDATION_ERROR`. Hoje o campo ainda NÃO é
- * exigido nem lido (planejado L1.9) — a Lyra pode já enviá-lo.
+ * 409 `TERMS_VERSION_OUTDATED` (a tela recarrega `GET /api/public/legal` e pede o aceite de novo); ausente = 400 `VALIDATION_ERROR` (`details[].path = "acceptedTermsVersion"`).
+ * `register`: SEMPRE exigido. `google`: só quando o Google cria a conta (ver `GoogleAuthRequest.acceptedTermsVersion`). O aceite cobre Termos E Privacidade (o servidor grava os dois).
  */
 export type TermsErrorCode = "TERMS_VERSION_OUTDATED"
 

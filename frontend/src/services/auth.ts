@@ -19,6 +19,8 @@ export interface RegisterPayload {
   email: string
   password: string
   phone?: string
+  /** L1.9: versão vigente dos Termos (de `GET /api/public/legal`) que a pessoa aceitou. OBRIGATÓRIA - sem ela o servidor responde 400; versão antiga, 409 `TERMS_VERSION_OUTDATED`. */
+  acceptedTermsVersion: string
 }
 
 /**

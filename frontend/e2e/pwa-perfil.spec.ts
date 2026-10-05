@@ -60,12 +60,13 @@ for (const viewport of [
       await openProfile(page)
 
       await expect(nome(page)).toHaveValue("Carla Motorista")
-      const email = page.getByLabel("E-mail")
+      const email = page.getByLabel("E-mail", { exact: true })
       await expect(email).toHaveValue("motorista@innoelektron.com")
       await expect(email).toHaveAttribute("readonly", "")
       await expect(page.getByText("O e-mail não pode ser alterado por aqui.")).toBeVisible()
-      // Sem funcionalidade que não existe: nada de exclusão de conta, exportação ou notificações.
-      await expect(page.getByText(/excluir conta|exportar|notificações|privacidade/i)).toHaveCount(0)
+      // Seções de L1.6 e L1.4/L1.9 (cobertas em `privacidade-lgpd.spec.ts`): aqui só a presença e a ordem na pilha.
+      await expect(page.getByRole("heading", { level: 2, name: "Notificações" })).toBeVisible()
+      await expect(page.getByRole("heading", { level: 2, name: "Privacidade e dados" })).toBeVisible()
       // Cabeçalho marca a página atual e a barra inferior segue sem aba ativa nova.
       await expect(page.getByRole("link", { name: /^Meu perfil/ })).toHaveAttribute("aria-current", "page")
       expect(await noHorizontalScroll(page)).toBe(0)

@@ -9,6 +9,7 @@ import { MascotFace } from "@/components/brand/Mascot"
 import { ProfileAvatar } from "@/components/perfil/ProfileAvatar"
 import { firstName } from "@/lib/profileDisplay"
 import { LoadingScreen } from "@/components/feedback/LoadingScreen"
+import { ConsentReacceptGate } from "@/components/legal/ConsentReacceptGate"
 import { TourProvider } from "@/components/onboarding/TourProvider"
 
 /**
@@ -84,6 +85,9 @@ function AppShell() {
           <Outlet />
         </Suspense>
       </main>
+
+      {/* Novo aceite dos Termos (L1.9): só abre se `GET /api/me/consents` disser `upToDate=false`; aviso leve, "Agora não" dispensa na aba. */}
+      <ConsentReacceptGate />
 
       <nav
         className="surface-dark fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-night/95 bg-none pb-[env(safe-area-inset-bottom)] lg:inset-x-auto lg:bottom-0 lg:left-0 lg:top-14 lg:w-24 lg:border-r lg:border-t-0 lg:pb-0"

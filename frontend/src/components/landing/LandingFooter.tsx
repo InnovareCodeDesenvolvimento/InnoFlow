@@ -55,9 +55,20 @@ export function LandingFooter() {
       </div>
 
       <div className="mx-auto mt-12 flex max-w-[1400px] flex-col items-start justify-between gap-5 border-t border-white/10 px-4 pt-6 sm:flex-row sm:items-center sm:px-6 lg:px-8">
-        <p className="text-xs text-white/65">
-          © {new Date().getFullYear()} InnoFlow. Todos os direitos reservados. <span className="tabular-nums">{VERSAO_EXIBIDA}</span>
-        </p>
+        <div className="flex flex-col gap-1 sm:gap-2">
+          {/* Caminhos literais (e não `lib/legalPaths`): importar o módulo compartilhado criava um chunk a mais no `modulepreload` do index.html (6 -> 7), o caminho crítico da landing. */}
+          <nav aria-label="Documentos legais" className="flex flex-wrap gap-x-5">
+            <Link to="/termos" className="inline-flex min-h-9 items-center text-sm font-medium text-white/80 hover:text-white">
+              Termos de Uso
+            </Link>
+            <Link to="/privacidade" className="inline-flex min-h-9 items-center text-sm font-medium text-white/80 hover:text-white">
+              Política de Privacidade
+            </Link>
+          </nav>
+          <p className="text-xs text-white/65">
+            © {new Date().getFullYear()} InnoFlow. Todos os direitos reservados. <span className="tabular-nums">{VERSAO_EXIBIDA}</span>
+          </p>
+        </div>
         <a
           href={DESENVOLVEDORA_URL}
           target="_blank"

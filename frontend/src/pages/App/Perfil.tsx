@@ -2,7 +2,9 @@ import { Route } from "lucide-react"
 import { MascotFace } from "@/components/brand/Mascot"
 import { ChangePasswordForm } from "@/components/perfil/ChangePasswordForm"
 import { ProfileAvatar } from "@/components/perfil/ProfileAvatar"
+import { NotificationsSection } from "@/components/perfil/NotificationsSection"
 import { ProfileDataForm } from "@/components/perfil/ProfileDataForm"
+import { PrivacySection } from "@/components/perfil/PrivacySection"
 import { ProfileSection } from "@/components/perfil/ProfileSection"
 import { useTour } from "@/components/onboarding/tourContext"
 import { AppBand } from "@/components/pwa/AppBand"
@@ -88,6 +90,8 @@ export function Perfil() {
           <>
             <ProfileDataForm profile={profile} />
             <ChangePasswordForm hasPassword={profile.hasPassword} />
+            <NotificationsSection />
+            <PrivacySection profile={profile} />
             {tour.available && (
               <ProfileSection icon={Route} title="Ajuda" description="Reveja o passo a passo do aplicativo, com o mascote da InnoFlow.">
                 <Button type="button" variant="outline" size="touch" className="h-11 sm:h-11" onClick={tour.restart}>

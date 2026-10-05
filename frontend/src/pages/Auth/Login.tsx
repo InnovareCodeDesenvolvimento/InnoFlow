@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
+import { useQueryClient } from "@tanstack/react-query"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { CheckCircle2, LogIn } from "lucide-react"
@@ -10,6 +11,7 @@ import { AuthShell } from "@/components/auth/AuthShell"
 import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { Card } from "@/components/ui/Card"
 import { useAuthStore } from "@/store/authStore"
+import { accountDeletedNotice, readAccountDeletedFlash } from "@/lib/accountDeletion"
 import { authErrorMessage } from "@/lib/authErrors"
 import { isPasswordResetFlash, PASSWORD_RESET_NOTICE } from "@/lib/passwordReset"
 import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
@@ -25,9 +27,21 @@ export function Login() {
 
   // Aviso de "senha alterada" (L1.3): chega no ESTADO DA ROTA vindo de /redefinir-senha, vai para estado local e o estado da rota é apagado já na chegada (`history.state`
   // sobrevive ao F5; sem a limpeza o aviso voltaria a cada recarga). Não há auto-login: a pessoa entra com a senha nova.
+  // Mesmo mecanismo para "conta excluída" (L1.4): depois da exclusão o token deixa de valer e a tela de perfil manda para cá com o desfecho (`DELETED` | `DELETED_PENDING_REFUND`).
   const [passwordResetNotice] = useState(() => isPasswordResetFlash(location.state))
+  const [accountDeleted] = useState(() => readAccountDeletedFlash(location.state))
+  const queryClient = useQueryClient()
+  const logout = useAuthStore((s) => s.logout)
+  // Conta excluída: o token já não vale. Quem excluiu NÃO limpa a sessão antes de navegar (o `AppLayout` a mandaria para um `/login?redirect=` sem o aviso); a limpeza do estado
+  // da sessão e do cache acontece aqui, já fora do app do motorista.
   useEffect(() => {
-    if (isPasswordResetFlash(location.state)) navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+    if (accountDeleted) {
+      logout()
+      queryClient.clear()
+    }
+  }, [accountDeleted, logout, queryClient])
+  useEffect(() => {
+    if (isPasswordResetFlash(location.state) || readAccountDeletedFlash(location.state) !== null) navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
   }, [location.state, location.pathname, location.search, navigate])
 
   const {
@@ -78,6 +92,12 @@ export function Login() {
         {passwordResetNotice && (
           <AuthAlert tone="success" icon={CheckCircle2} role="status" className="mt-4">
             {PASSWORD_RESET_NOTICE}
+          </AuthAlert>
+        )}
+
+        {accountDeleted && (
+          <AuthAlert tone="success" icon={CheckCircle2} role="status" className="mt-4">
+            {accountDeletedNotice(accountDeleted)}
           </AuthAlert>
         )}
 

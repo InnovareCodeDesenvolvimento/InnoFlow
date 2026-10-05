@@ -21,6 +21,9 @@ const Toaster = lazy(() => import("@/components/ui/Toaster").then((m) => ({ defa
 const RealtimeConnection = lazy(() => import("@/components/realtime/RealtimeConnection").then((m) => ({ default: m.RealtimeConnection })))
 const Home = lazy(() => import("@/pages/Public/Home").then((m) => ({ default: m.Home })))
 const Eletropostos = lazy(() => import("@/pages/Public/Eletropostos").then((m) => ({ default: m.Eletropostos })))
+// Documentos legais (L1.9): públicos, sem login. As duas rotas partilham UM chunk (`pages/Public/Legal`); o texto mora em `content/legal/*`.
+const Termos = lazy(() => import("@/pages/Public/Legal").then((m) => ({ default: m.Termos })))
+const Privacidade = lazy(() => import("@/pages/Public/Legal").then((m) => ({ default: m.Privacidade })))
 const Login = lazy(() => import("@/pages/Auth/Login").then((m) => ({ default: m.Login })))
 const Register = lazy(() => import("@/pages/Auth/Register").then((m) => ({ default: m.Register })))
 // Recuperação de senha (L1.3): públicas, sem layout. A rota de redefinição lê o token do FRAGMENTO da URL (`#t=`) e o apaga na montagem.
@@ -256,6 +259,8 @@ export default function App() {
             {/* Público (casca clara: Header + Footer) */}
             <Route element={<Layout />}>
               <Route path="eletropostos" element={<Eletropostos />} />
+              <Route path="termos" element={<Termos />} />
+              <Route path="privacidade" element={<Privacidade />} />
             </Route>
 
             {DesignSystemCatalog && <Route path="/__ds" element={<DesignSystemCatalog />} />}

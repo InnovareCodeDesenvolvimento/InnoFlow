@@ -52,7 +52,10 @@ api.interceptors.response.use(
     const sentToken = String(error?.config?.headers?.Authorization ?? "").replace(/^Bearer /, "")
     const currentToken = localStorage.getItem(TOKEN_STORAGE_KEY)
     const isStaleToken = sentToken !== "" && currentToken !== null && sentToken !== currentToken
-    if (error?.response?.status === 401 && !isAuthRoute && !isStaleToken) {
+    // `INVALID_GOOGLE_TOKEN` é a credencial do GOOGLE recusada (reautenticação da exclusão de conta, `POST /api/me/account/deletion`), não a sessão do app: a sessão segue válida e
+    // a tela precisa mostrar o erro. Só ESTE código passa; um 401 `UNAUTHORIZED` na mesma rota continua sendo sessão expirada.
+    const isGoogleCredentialRejected = error?.response?.data?.code === "INVALID_GOOGLE_TOKEN"
+    if (error?.response?.status === 401 && !isAuthRoute && !isStaleToken && !isGoogleCredentialRejected) {
       localStorage.removeItem(TOKEN_STORAGE_KEY)
       if (!window.location.pathname.startsWith("/login")) {
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)
