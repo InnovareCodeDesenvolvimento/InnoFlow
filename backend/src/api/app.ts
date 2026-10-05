@@ -41,6 +41,7 @@ import adminEventsRoutes from './routes/events.routes'
 import adminPaymentGatewayRoutes from './routes/paymentGateway.routes'
 import adminCommunicationSettingsRoutes from './routes/communicationSettings.routes'
 import adminCommandsRoutes from './routes/adminCommands.routes'
+import adminBackupRoutes, { backupGoogleCallbackRouter } from './routes/backup.routes'
 import { refundsRouter, sessionRefundsRouter } from './routes/paymentReversals.routes'
 import { chargebacksRouter, paymentChargebacksRouter } from './routes/chargebacks.routes'
 
@@ -116,6 +117,7 @@ export function createApp(): Express {
   app.use('/api/public/charge-points', publicRateLimit, publicChargePointsRoutes) // público — landing do QR do PWA (F6)
   app.use('/api/public/config', publicRateLimit, publicConfigRoutes) // público — configuração da tela de login (Google client ID)
   app.use('/api/public/legal', publicRateLimit, publicLegalRoutes) // público (L1.9) — versão vigente dos termos/privacidade e dados da empresa
+  app.use('/api/backup/google', publicRateLimit, backupGoogleCallbackRouter) // público, SEM JWT (o Google redireciona o navegador): callback do "Conectar com Google" do backup — a prova é o `state` assinado de uso único
   app.use('/api/webhooks/cielo', webhookCieloRateLimit, webhookJsonParser(), webhooksCieloRoutes) // público, SEM JWT (a Cielo não manda Bearer) — segredo próprio (pathToken + header estático), ver F5.2
   app.use('/api/me/profile', adminRateLimit, meProfileRoutes) // DRIVER only (L1.2) — ANTES de /api/me: o router do perfil responde por si; mesmo teto geral das demais /api/me/*
   app.use('/api/me/data-export', adminRateLimit, meDataExportRoutes) // DRIVER only (L1.4) — exportação dos dados do titular (3/dia)
@@ -150,6 +152,7 @@ export function createApp(): Express {
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
   app.use('/api/admin/payment-gateway', adminRateLimit, adminPaymentGatewayRoutes) // ADMIN-only (F5.5) — config da conta Cielo
   app.use('/api/admin/communication-settings', adminRateLimit, adminCommunicationSettingsRoutes) // ADMIN-only (N-7) — e-mail (SMTP) e WhatsApp (Evolution API) dos avisos ao dono
+  app.use('/api/admin/backup', adminRateLimit, adminBackupRoutes) // ADMIN-only — backup automático do banco (config, chave, histórico, executar/conferir, Google Drive)
   app.use('/api/admin/commands', adminRateLimit, adminCommandsRoutes) // resultado de comando remoto (L1.5) — mesma política de papel do disparo (DL4)
   app.use('/api/admin/events', adminRateLimit, adminEventsRoutes) // SSE — teto por IP aqui; abertura por usuário e teto de streams dentro da rota
 
