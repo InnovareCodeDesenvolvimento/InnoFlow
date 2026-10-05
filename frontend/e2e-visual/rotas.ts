@@ -20,6 +20,7 @@ export interface Rota {
  * (recibo) tornado capturável pelos recibos PRÉ-SEMEADOS do motorista `travado@` (F5.9, `src/mocks/meData.ts`). O recibo "Recarga
  * concluída" e a sessão ao vivo saem do fluxo real em `estados.visual.ts`.
  */
+const PENDENTE_BACKUPS_REDESENHO = "Admin > Backups será REFEITO no layout do InnoChat (pedido do dono, 05/10/2026): não fixar a tela atual como verdade. Gravar a baseline quando o redesenho for classificado."
 const PENDENTE_CARD_375 = "Defeito medido a 375 px: o título do cabeçalho do card fica espremido pelos selos (h2 com 0 a 109 px de largura num card de 303); ver verificacoes-lote1.visual.ts. Regravar e remover esta marca quando a Lyra corrigir."
 
 export const ROTAS: Rota[] = [
@@ -79,7 +80,7 @@ export const ROTAS: Rota[] = [
   { id: "adm-configuracoes-email", path: "/admin/configuracoes/email", persona: "admin", pronto: { heading: "Configurações · E-mail" }, pendente: { larguras: ["375"], motivo: PENDENTE_CARD_375 } },
   { id: "adm-configuracoes-whatsapp", path: "/admin/configuracoes/whatsapp", persona: "admin", pronto: { heading: "Configurações · WhatsApp" }, pendente: { larguras: ["375"], motivo: PENDENTE_CARD_375 } },
   { id: "adm-configuracoes-alertas", path: "/admin/configuracoes/alertas", persona: "admin", pronto: { heading: "Configurações · Alertas" } },
-  { id: "adm-backups", path: "/admin/backups", persona: "admin", pronto: { heading: "Backups" } },
+  { id: "adm-backups", path: "/admin/backups", persona: "admin", pronto: { heading: "Backups" }, pendente: { larguras: ["375", "768", "1440"], motivo: PENDENTE_BACKUPS_REDESENHO } },
   { id: "adm-chargebacks", path: "/admin/chargebacks", persona: "admin", pronto: { heading: "Chargebacks" } },
   { id: "adm-devolucoes-contas-excluidas", path: "/admin/devolucoes-contas-excluidas", persona: "admin", pronto: { heading: "Devoluções de contas excluídas" } },
 ]

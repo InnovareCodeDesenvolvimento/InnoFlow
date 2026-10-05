@@ -193,7 +193,7 @@ test.describe("tour do Inno (1ª visita; interruptor de aparelho DESLIGADO de pr
     await page.getByRole("button", { name: "Vamos lá" }).click()
     await page.waitForTimeout(400)
     await esperarBalao(page)
-    await foto(page, "onb-painel-menu", { soJanela: true })
+    // `onb-painel-menu` (passo "O menu do painel") NÃO é fotografado: o texto do passo lista "Backups", tela que vai ser refeita (05/10/2026). Volta junto com a baseline do Backups.
     await page.getByRole("button", { name: "Próximo" }).click()
     await page.waitForTimeout(400)
     await esperarBalao(page)
@@ -218,6 +218,7 @@ test.describe("Backups com a conta já configurada (S3 pronto)", () => {
   // storageState PADRÃO do projeto (só o interruptor do onboarding ligado a "off"): senão o tour da 1ª visita abre por cima da tela.
 
   test("adm-backups-s3-pronto", async ({ page }) => {
+    test.fixme(true, "Admin > Backups será REFEITO no layout do InnoChat (pedido do dono, 05/10/2026): sem baseline até o redesenho ser classificado.")
     await prepararPagina(page)
     await entrarPelaUI(page, "backup-s3@innoelektron.com", /^\/admin/)
     await page.goto("/admin/backups", { waitUntil: "load" })
