@@ -2394,3 +2394,197 @@ export type CommunicationSettingsErrorCode =
   | 'DESTINATION_NOT_ALLOWED' // 400 — details: [{ field: 'email.host' | 'whatsapp.baseUrl', reason: 'LOOPBACK' | 'REDE_PRIVADA' | 'NOME_INTERNO' | 'ENDERECO_DE_METADADOS' | 'ENDERECO_NAO_ROTEAVEL' | 'HOST_INVALIDO' | 'HTTPS_REQUIRED' | 'INVALID_URL' }]
   | 'SECRET_REQUIRED_FOR_NEW_DESTINATION' // 400 — trocar host/usuário SMTP ou URL/instância da Evolution exige reenviar a senha/apikey (details: [{ field: 'email.password' | 'whatsapp.apiKey' | 'config.password' | 'config.apiKey' }])
   | 'CHANNEL_INCOMPLETE' // 409 — não dá para LIGAR o canal: details: [{ channel: 'email' | 'whatsapp', problems: string[] }]; nada foi gravado
+
+// ---------------------------------------------------------------------------
+// Backup automático do banco (Admin > Backups). Contrato LITERAL: `docs/CONTRATO-BACKUP-ADMIN.md` (copiado sem renomear). Fonte do backend: `backend/src/api/routes/backup.routes.ts`.
+// ---------------------------------------------------------------------------
+
+export type BackupDestination = 'S3' | 'DRIVE'
+export type BackupTrigger = 'SCHEDULED' | 'MANUAL' | 'VERIFY'
+export type BackupRunStatus = 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
+
+/** Código do erro de uma execução (`BackupRunDTO.errorCode`). Nunca texto livre. */
+export type BackupErrorCode =
+  | 'CONFIG' // destino incompleto/recusado, DATABASE_URL ausente
+  | 'CREDENTIAL' // o destino recusou a credencial
+  | 'FOLDER' // bucket/pasta inexistente ou sem acesso
+  | 'QUOTA' // sem espaço no destino
+  | 'NETWORK' // rede/instabilidade do destino
+  | 'OAUTH_DISCONNECTED' // Google: acesso revogado — reconectar
+  | 'DUMP' // pg_dump/pg_restore falhou (cliente ausente na imagem, versão antiga...)
+  | 'DUMP_TIMEOUT' // pg_dump passou do prazo
+  | 'KEY' // chave do backup ausente/ilegível/diferente da do arquivo
+  | 'SECRETS_KEY' // PAYMENT_SECRETS_KEY ausente/mudou: segredos do destino não decifram
+  | 'TOO_BIG' // arquivo > 5 GiB (envio simples do S3)
+  | 'NO_BACKUP' // conferência: destino vazio
+  | 'VERIFY' // conferência reprovou (vazio, adulterado, sem marca, índice vazio)
+  | 'CHECKSUM' // SHA-256 do arquivo no destino não bate com o gravado no envio
+  | 'BUSY' // já havia um em andamento
+  | 'INTERRUPTED' // o processo morreu no meio
+  | 'NOT_PICKED_UP' // pedido manual que o worker nunca pegou (worker fora do ar)
+  | 'UNKNOWN'
+
+/** Pendências para LIGAR o automático (vazio = pode ligar). */
+export type BackupProblemToEnable = 'DESTINATION_INCOMPLETE' | 'KEY_MISSING' | 'SECRETS_KEY_MISSING' | 'SECRETS_UNREADABLE'
+
+/** `GET /api/admin/backup/config` e resposta do `PUT` e do `POST /google/disconnect`. SEGREDOS NUNCA VOLTAM. */
+export interface BackupConfigDTO {
+  enabled: boolean
+  /** Hora cheia em Brasília (UTC-3 fixo), 0..23. */
+  hourLocal: number
+  /** 1 = diário, 2 = dia sim dia não, 7 = semanal. */
+  frequencyDays: 1 | 2 | 7
+  /** Quantas cópias manter no destino (>= 1). Nunca apaga a única/última. */
+  retentionCount: number
+  /** Sem sucesso há mais que isto (h), com o automático ligado, dispara o alerta de atraso. 6..720. */
+  alertAfterHours: number
+  /** Destino ESCOLHIDO (manda sobre o que estiver preenchido). */
+  destination: BackupDestination | null
+  /** O destino escolhido está completo (S3: endereço+bucket+chave+segredo; Drive: conta conectada). */
+  destinationReady: boolean
+  s3: {
+    endpoint: string | null
+    region: string | null
+    bucket: string | null
+    prefix: string | null
+    /** Há chave de acesso / segredo salvos. NUNCA são devolvidos (nem dica de caracteres). */
+    accessKeySet: boolean
+    secretKeySet: boolean
+  }
+  drive: {
+    clientId: string | null
+    clientSecretSet: boolean
+    /** Conta Google conectada (fluxo OAuth concluído). "Client ID preenchido" NÃO é conectado. */
+    connected: boolean
+    connectedAt: string | null
+    accountEmail: string | null
+    /** O `redirect_uri` que o dono precisa cadastrar no app do Google Cloud (null se a API não sabe o próprio endereço: defina PUBLIC_API_BASE_URL). */
+    redirectUri: string | null
+  }
+  encryptionKey: {
+    exists: boolean
+    /** 8 hex: confere "é a chave certa?" sem revelar a chave. */
+    fingerprint: string | null
+    createdAt: string | null
+    shownAt: string | null
+  }
+  /** O servidor tem a PAYMENT_SECRETS_KEY (sem ela não dá para guardar credenciais nem a chave). */
+  secretsKeyConfigured: boolean
+  /** Os segredos salvos decifram agora (false = a PAYMENT_SECRETS_KEY mudou: recadastrar). */
+  secretsReadable: boolean
+  problemsToEnable: BackupProblemToEnable[]
+  updatedAt: string
+}
+
+/** Uma execução (backup agendado/manual ou conferência). */
+export interface BackupRunDTO {
+  id: string
+  trigger: BackupTrigger
+  status: BackupRunStatus
+  destination: BackupDestination | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  durationMs: number | null
+  /** Nome do arquivo no destino (`backup-innoflow-AAAA-MM-DD-HHhMMmSSs.dump.enc`). */
+  fileName: string | null
+  /** Chave do objeto no S3, ou `drive:<id>/<nome>` no Drive. Nulo em teste sem destino. */
+  objectKey: string | null
+  /** Tamanho do arquivo CIFRADO que subiu. */
+  sizeBytes: number | null
+  /** SHA-256 (hex) do arquivo cifrado que subiu. */
+  checksumSha256: string | null
+  tablesWithData: number | null
+  /** Impressão digital da chave que cifrou (nulo = execução de teste sem destino). */
+  keyFingerprint: string | null
+  /** CÓDIGO do erro (só quando `status === 'FAILED'`). */
+  errorCode: BackupErrorCode | null
+  /** Texto fixo, pronto para mostrar, derivado do código (nunca o stderr do pg_dump). */
+  errorMessage: string | null
+}
+
+/** `GET /api/admin/backup/status`. */
+export interface BackupStatusDTO {
+  lastSuccessAt: string | null
+  lastAttemptAt: string | null
+  /** Há um backup rodando agora (trava viva no banco). */
+  running: boolean
+  /** Atrasado: automático ligado e sem sucesso dentro de `alertAfterHours`. */
+  stale: boolean
+  /** Ligado e nunca saiu uma cópia. */
+  neverRan: boolean
+  /** Horas desde o último sucesso (null se nunca). */
+  ageHours: number | null
+  /** Próxima execução agendada (ISO, UTC), ou null com o automático desligado. */
+  nextRunAt: string | null
+  /** Pedido manual/conferência enfileirado ou rodando agora (para o spinner). */
+  activeRun: BackupRunDTO | null
+  lastBackupRun: BackupRunDTO | null
+  lastVerifyRun: BackupRunDTO | null
+}
+
+/** `PUT /api/admin/backup/config` — tudo opcional, campo ausente = "não mexer", `null` onde permitido = limpar. `.strict()`: campo desconhecido é 400. */
+export interface UpdateBackupConfigRequest {
+  enabled?: boolean
+  hourLocal?: number // 0..23
+  frequencyDays?: 1 | 2 | 7
+  retentionCount?: number // 1..365
+  alertAfterHours?: number // 6..720
+  destination?: BackupDestination | null
+  s3?: {
+    endpoint?: string // URL: https em produção; sem usuário/senha/query
+    region?: string | null // ex.: us-east-1, auto
+    bucket?: string
+    prefix?: string | null // pasta dentro do bucket
+    accessKey?: string // SÓ-ESCRITA
+    secretKey?: string // SÓ-ESCRITA
+  }
+  drive?: {
+    clientId?: string | null // trocar o Client ID DESCONECTA a conta (o escopo drive.file é por app)
+    clientSecret?: string // SÓ-ESCRITA
+  }
+  /** Apaga um segredo salvo. Para TROCAR, mande o valor novo no campo próprio. */
+  clearSecrets?: Array<'s3AccessKey' | 's3SecretKey' | 'driveClientSecret'>
+  /** Senha ATUAL do ADMIN logado. Obrigatória exceto quando o PUT só traz hourLocal/frequencyDays/alertAfterHours ou `enabled: false`. */
+  currentPassword?: string
+}
+
+/** `POST /api/admin/backup/key` → 201. A chave sai UMA vez: a tela deve oferecer o download do `fileText` e NÃO guardá-la. */
+export interface GenerateBackupKeyRequest {
+  currentPassword: string
+  /** Trocar uma chave que JÁ existe exige `replace: true` E `confirmation: 'GERAR NOVA CHAVE'` (exatamente). */
+  replace?: boolean
+  confirmation?: string
+  /** A impressão digital que a tela viu; se já mudou (outra pessoa gerou), 409 `BACKUP_KEY_CHANGED`. */
+  expectedFingerprint?: string | null
+}
+export interface GeneratedBackupKeyResponse {
+  /** A chave inteira, 8 grupos de 8 hex separados por hífen. */
+  key: string
+  fingerprint: string
+  /** `chave-backup-innoflow-<impressão digital>.txt` */
+  fileName: string
+  /** Conteúdo do .txt para download (tem a linha `CHAVE: ...` que os scripts leem). */
+  fileText: string
+  replaced: boolean
+}
+
+/** `POST /api/admin/backup/test-destination` → SEMPRE 200 com o RESULTADO (`ok:false` não é erro da rota). */
+export interface BackupTestDestinationResponse {
+  ok: boolean
+  destination: BackupDestination | null
+  message: string
+  error?: { code: BackupErrorCode; message: string }
+}
+
+/** `GET /api/admin/backup/runs?page=&pageSize=&trigger=&status=` (pageSize 1..100, padrão 20). */
+export interface BackupRunsResponse {
+  items: BackupRunDTO[]
+  meta: { page: number; pageSize: number; total: number; totalPages: number }
+}
+
+/** `POST /api/admin/backup/google/start` → 200. Navegue (`window.location`) para `url`. */
+export interface BackupGoogleStartResponse {
+  url: string
+  redirectUri: string | null
+}

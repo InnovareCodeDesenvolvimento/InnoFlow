@@ -29,7 +29,8 @@ frontend/apresentacao/saida/html/
 
 # Backups do banco (scripts/backup-db.sh): o dump tem dados de todos os motoristas; chave do backup tambem nunca versionada
 backend/backups/
-backups/
+# so a pasta da RAIZ (dumps locais); sem a barra inicial ela ignorava tambem frontend/src/pages/Admin/Backups/ (a tela do Admin)
+/backups/
 *.dump
 *.dump.enc
 chave-backup-*.txt

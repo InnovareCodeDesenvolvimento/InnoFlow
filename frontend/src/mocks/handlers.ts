@@ -62,6 +62,19 @@ import { commandStatus, parseScenario, remoteStartPolicyDenied, startRemote } fr
 import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
 import { getCommunicationSettings, testCommunicationChannel, updateCommunicationSettings } from "./communicationData"
 import {
+  disconnectGoogle,
+  generateBackupKey,
+  getBackupConfig,
+  getBackupRun,
+  getBackupStatus,
+  listBackupRuns,
+  runBackupNow,
+  startGoogle,
+  testBackupDestination,
+  updateBackupConfig,
+  verifyBackup,
+} from "./backupData"
+import {
   cancelRefund,
   confirmRefund,
   createSessionRefund,
@@ -1310,6 +1323,107 @@ export const handlers = [
     const scope = requireAdmin(request)
     if ("error" in scope) return scope.error
     return mockResult(refundAccountDeletion(String(params.id), await request.json().catch(() => null), scope.user.userId))
+  }),
+
+  // ---- Backup automático do banco (ADMIN only) ------------------------------------------------------
+  // Espelho de `docs/CONTRATO-BACKUP-ADMIN.md` (regras, personas e gatilhos em `backupData.ts`). Segredos e a chave do backup NUNCA são guardados nem devolvidos (a chave só em `POST /key`).
+  http.get("/api/admin/backup/config", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getBackupConfig(scope.user)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.put("/api/admin/backup/config", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = updateBackupConfig(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.get("/api/admin/backup/status", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getBackupStatus(scope.user, localStorage.getItem("mock:backup-estado"))
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/backup/key", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = generateBackupKey(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto, { status: 201, headers: { "Cache-Control": "no-store" } })
+  }),
+
+  // `localStorage["mock:backup-execucao"]` escolhe como o backup/conferência TERMINA (código de falha ou `ok`); `mock:backup-fila` = `off` derruba a fila (ver `backupData.ts`).
+  http.post("/api/admin/backup/run", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = runBackupNow(scope.user, { executionTrigger: localStorage.getItem("mock:backup-execucao"), queueTrigger: localStorage.getItem("mock:backup-fila") })
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto, { status: 202 })
+  }),
+
+  http.post("/api/admin/backup/verify", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = verifyBackup(scope.user, { executionTrigger: localStorage.getItem("mock:backup-execucao"), queueTrigger: localStorage.getItem("mock:backup-fila") })
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto, { status: 202 })
+  }),
+
+  http.post("/api/admin/backup/test-destination", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = testBackupDestination(scope.user, localStorage.getItem("mock:backup-teste"))
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.get("/api/admin/backup/runs", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const url = new URL(request.url)
+    const result = listBackupRuns(scope.user, {
+      page: Number(url.searchParams.get("page") ?? 1),
+      pageSize: Number(url.searchParams.get("pageSize") ?? 20),
+      trigger: url.searchParams.get("trigger") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+    })
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.get("/api/admin/backup/runs/:id", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = getBackupRun(scope.user, String(params.id))
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code }, { status: result.status })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/backup/google/start", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = startGoogle(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
+  }),
+
+  http.post("/api/admin/backup/google/disconnect", async ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const body = await request.json().catch(() => null)
+    const result = disconnectGoogle(scope.user, body)
+    if (!result.ok) return HttpResponse.json({ error: result.message, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
+    return HttpResponse.json(result.dto)
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------

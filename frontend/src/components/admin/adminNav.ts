@@ -1,4 +1,4 @@
-import { Activity, BellRing, CalendarDays, CreditCard, KeyRound, Landmark, LayoutDashboard, MapPin, Plug, ScrollText, ShieldAlert, TrendingUp, UserX, Vault, Wallet, WalletCards, Zap } from "lucide-react"
+import { Activity, BellRing, CalendarDays, CreditCard, DatabaseBackup, KeyRound, Landmark, LayoutDashboard, MapPin, Plug, ScrollText, ShieldAlert, TrendingUp, UserX, Vault, Wallet, WalletCards, Zap } from "lucide-react"
 import type { NavGroup, NavItem } from "@/components/painel/navegacao"
 import { flattenNav, matchNavItem } from "@/components/painel/navegacao"
 import type { Role } from "@/types/api"
@@ -49,6 +49,7 @@ const BASE_NAV: NavGroup[] = [
 const ADMIN_ONLY_ITEMS: NavItem[] = [
   { label: "Tokens de autenticação", href: "/admin/auth-tokens", icon: KeyRound, hint: "RFID e tokens de app da rede" },
   { label: "Comunicação", href: "/admin/comunicacao", icon: BellRing, hint: "Avisos ao dono por e-mail (SMTP) e WhatsApp (Evolution API)" },
+  { label: "Backups", href: "/admin/backups", icon: DatabaseBackup, hint: "Cópia do banco fora do servidor: destino, chave e histórico (admin)" },
   { label: "Auditoria", href: "/admin/auditoria", icon: ScrollText, hint: "Quem fez o quê, onde e como" },
 ]
 

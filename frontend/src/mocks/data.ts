@@ -54,6 +54,16 @@ export const mockUsers: MockUser[] = [
   { id: "user_admin_comunicacao_indisponivel", name: "Ítalo Indisponível", email: "comunicacao-indisponivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_comunicacao_rede_privada", name: "Rui Rede-Privada", email: "comunicacao-rede-privada@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_admin_gateway_em_andamento", name: "Emílio Andamento", email: "gateway-em-andamento@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  // Admins de CENÁRIO da tela Backups — o estado do mock vive por usuário (`mocks/backupData.ts`); cada conta nasce num cenário determinístico para o E2E. `admin@` = primeiro uso (sem destino nem chave).
+  { id: "user_admin_backup_s3", name: "Beto Bucket", email: "backup-s3@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_drive", name: "Dora Drive", email: "backup-drive@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_drive_desconectado", name: "Davi Desconectado", email: "backup-drive-desconectado@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_atrasado", name: "Alice Atrasada", email: "backup-atrasado@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_nunca", name: "Nuno Nunca", email: "backup-nunca@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_andamento", name: "Ana Andamento", email: "backup-andamento@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_sem_chave", name: "Silas Sem-Chave", email: "backup-sem-chave@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_ilegivel", name: "Ilda Ilegível", email: "backup-ilegivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
+  { id: "user_admin_backup_indisponivel", name: "Ivan Indisponível", email: "backup-indisponivel@innoelektron.com", role: "ADMIN", operatorId: null, operatorName: null, password: "senha1234" },
   // Motorista — conta única de rede, sem operatorId (ver PROGRESSO.md). Usado
   // pelo PWA do motorista (`/c/...`, `/app/*`, ver `mocks/meData.ts`).
   { id: "user_driver", name: "Carla Motorista", email: "motorista@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },

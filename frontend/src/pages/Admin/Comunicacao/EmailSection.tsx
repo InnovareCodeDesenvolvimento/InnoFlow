@@ -16,7 +16,7 @@ import type { CommunicationSettingsDTO } from "@/types/api"
 import { ChannelHeader, EnabledRow } from "./ChannelParts"
 import { ChannelTestPanel } from "./ChannelTestPanel"
 import { RecipientsField } from "./RecipientsField"
-import { SecretControl } from "./SecretControl"
+import { SecretControl } from "@/components/admin/SecretControl"
 
 const SECURE_OPTIONS = [
   { value: "false", label: SECURE_LABELS.false },

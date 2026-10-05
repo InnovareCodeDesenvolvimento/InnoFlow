@@ -42,6 +42,7 @@ const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
 const AdminComunicacao = lazy(() => import("@/pages/Admin/Comunicacao"))
+const AdminBackups = lazy(() => import("@/pages/Admin/Backups"))
 // Estorno e chargeback (L1.8) e devoluções de contas excluídas (L1.4): dinheiro de terceiros, só ADMIN (UI e servidor).
 const AdminChargebacks = lazy(() => import("@/pages/Admin/Chargebacks"))
 const AdminDevolucoesContasExcluidas = lazy(() => import("@/pages/Admin/DevolucoesContasExcluidas"))
@@ -96,6 +97,12 @@ function LandingFallback() {
       <Loader2 className="h-8 w-8 animate-spin text-accent-glow" aria-hidden="true" />
     </div>
   )
+}
+
+/** O callback do Google (`GET /api/backup/google/callback`) devolve o navegador a `/admin/backup?google=ok|erro&motivo=…`; a tela vive em `/admin/backups`. Preserva a query. */
+function BackupGoogleReturn() {
+  const { search } = useLocation()
+  return <Navigate to={{ pathname: "/admin/backups", search }} replace />
 }
 
 /** Toaster só fora da landing: ela nunca dispara toast, e o sonner pesa ~33 KB no caminho crítico. Ao navegar para outra rota monta na hora. */
@@ -215,6 +222,16 @@ export default function App() {
                   </RequireAuth>
                 }
               />
+              {/* Backup automático do banco: configuração da PLATAFORMA, só ADMIN; o servidor confere de novo (403). `/admin/backup` (singular) é para onde o callback do Google devolve o navegador (`?google=ok|erro`): redireciona para a tela, preservando a query. */}
+              <Route
+                path="backups"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminBackups />
+                  </RequireAuth>
+                }
+              />
+              <Route path="backup" element={<BackupGoogleReturn />} />
               {/* AuditLog é ADMIN-only por decisão de produto (rastreabilidade da rede inteira, ver decisoes-audit-log.md). */}
               <Route
                 path="auditoria"

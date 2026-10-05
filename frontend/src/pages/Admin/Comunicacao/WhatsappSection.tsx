@@ -16,7 +16,7 @@ import type { CommunicationSettingsDTO } from "@/types/api"
 import { ChannelHeader, EnabledRow } from "./ChannelParts"
 import { ChannelTestPanel } from "./ChannelTestPanel"
 import { RecipientsField } from "./RecipientsField"
-import { SecretControl } from "./SecretControl"
+import { SecretControl } from "@/components/admin/SecretControl"
 
 const VERSION_OPTIONS = [
   { value: "2", label: "Versão 2 (atual)" },
