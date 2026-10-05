@@ -11,7 +11,25 @@ import { REPORT_PERIODS } from '../lib/reportingWindow'
 const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'formato esperado YYYY-MM-DD')
 
 const roleEnum = z.enum(['ADMIN', 'OPERATOR', 'DRIVER'])
-const auditActionEnum = z.enum(['CREATE', 'UPDATE', 'DELETE', 'REMOTE_COMMAND', 'WALLET_ADJUSTMENT', 'LOGIN_SUCCESS', 'LOGIN_FAILED', 'EXPORT', 'OTHER'])
+// Espelha o enum `AuditAction` do Prisma (um teste confere os dois). Faltavam `PAYMENT_CREDIT`/`PAYMENT_CONFIG_CHANGE` (F5) e os 4 do lote 1 (L1.3/L1.4/L1.8): filtrar a tela de Auditoria por
+// eles dava 400.
+export const auditActionEnum = z.enum([
+  'CREATE',
+  'UPDATE',
+  'DELETE',
+  'REMOTE_COMMAND',
+  'WALLET_ADJUSTMENT',
+  'LOGIN_SUCCESS',
+  'LOGIN_FAILED',
+  'EXPORT',
+  'PAYMENT_CREDIT',
+  'PAYMENT_CONFIG_CHANGE',
+  'PASSWORD_RESET',
+  'ACCOUNT_DELETION',
+  'REFUND',
+  'CHARGEBACK',
+  'OTHER',
+])
 const auditOutcomeEnum = z.enum(['SUCCESS', 'DENIED', 'FAILED'])
 
 export const auditLogQuerySchema = z.object({
