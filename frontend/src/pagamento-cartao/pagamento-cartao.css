@@ -1,29 +1,34 @@
 /**
- * CSS escrito à mão, de propósito — NÃO importa `src/index.css` (Tailwind)
- * do app principal. Duas razões: (1) manter esta pasta 100% auto-contida
- * (poucos arquivos, fácil de auditar, sem acoplar ao pipeline de build do
- * app principal); (2) os valores de cor abaixo são uma cópia INTENCIONAL
- * (não um import) dos tokens de `src/index.css` — se a paleta mudar lá, agir
- * aqui é uma decisão separada, não um efeito colateral automático de uma
- * mudança no app principal.
+ * CSS escrito à mão, de propósito — NÃO importa `src/index.css` (Tailwind) nem `components/ui` do app principal (SAQ A-EP: esta pasta é 100% auto-contida,
+ * poucos arquivos, fácil de auditar). Os valores abaixo são uma CÓPIA INTENCIONAL (não um import) dos tokens do design system unificado
+ * (`src/index.css`: night, lima, raios de controle/card, sombra tingida) — se a paleta mudar lá, agir aqui é uma decisão separada, não um efeito colateral.
  *
- * Fonte do sistema (sem Google Fonts) — o documento isolado não deveria
- * precisar de NENHUMA requisição de rede além da tokenização em si.
+ * F-E do design system (04/10/2026): moldura escura de marca no topo (degradê petróleo -> noite + brilho teal, como a landing), card claro sobreposto, campos com raio de
+ * controle (14 px) e foco por token, botão LIMA como CTA único ("Salvar cartão" / "Fechar"), mascote (rosto de 64 px, data URI) nos estados de espera/erro/sucesso.
+ *
+ * Fonte do sistema (sem Google Fonts) e SEM imagem externa: o documento isolado não pode precisar de NENHUMA requisição de rede além da tokenização em si
+ * (CSP desta página: img-src 'self' data:, font-src 'self'; o rosto do mascote entra como data URI no bundle).
  */
 
 :root {
+  --pc-night: #061621;
+  --pc-petrol-950: #0e2a3a;
+  --pc-teal: 13, 137, 156;
+  --pc-lime: #61db24;
+  --pc-on-lime: #061621;
   --pc-primary: #29698e;
-  --pc-primary-dark: #0e2a3a;
-  --pc-primary-50: #f4f8fb;
-  --pc-accent: #248829;
+  --pc-accent: #1c6920; /* accent-700: 6,8:1 sobre branco (o accent-600 dava 4,5:1 raspando em texto de 11 px) */
   --pc-danger: #dc2626;
   --pc-danger-50: #fef2f2;
   --pc-ink: #111827;
   --pc-ink-soft: #374151;
-  --pc-ink-softer: #6b7280;
+  --pc-ink-softer: #5f6673; /* AA sobre branco e sobre #f9fafb (o #6b7280 de antes dava 4,4:1 no fundo da página) */
   --pc-border: #e4e7eb;
   --pc-surface: #ffffff;
   --pc-background: #f9fafb;
+  --pc-radius-control: 14px;
+  --pc-radius-card: 20px;
+  --pc-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 28px -16px rgba(41, 105, 142, 0.35);
 }
 
 * {
@@ -39,46 +44,71 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ---- Moldura escura de marca --------------------------------------------- */
+.pc-band {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 16px 64px;
+  color: #ffffff;
+  background:
+    radial-gradient(34rem 18rem at 88% -20%, rgba(var(--pc-teal), 0.36), transparent 62%),
+    radial-gradient(26rem 16rem at -8% 120%, rgba(97, 219, 36, 0.11), transparent 62%),
+    linear-gradient(180deg, var(--pc-petrol-950) 0%, var(--pc-night) 100%);
+}
+
+.pc-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 auto;
+  max-width: 380px;
+}
+
+.pc-brand strong {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.pc-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.pc-face img {
+  display: block;
+  border-radius: 50%;
+}
+
 .pc-shell {
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 16px 40px;
+  padding: 0 16px 40px;
 }
 
-.pc-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 20px;
-  width: 100%;
-  max-width: 380px;
-}
-
-.pc-header img {
-  height: 28px;
-  width: 28px;
-}
-
-.pc-header strong {
-  font-size: 15px;
-  letter-spacing: -0.01em;
-  color: var(--pc-primary-dark);
-}
-
+/* ---- Card claro (o miolo de leitura) ------------------------------------- */
 .pc-card {
+  position: relative;
   width: 100%;
   max-width: 380px;
+  margin-top: -40px;
   background: var(--pc-surface);
   border: 1px solid var(--pc-border);
-  border-radius: 20px;
+  border-radius: var(--pc-radius-card);
   padding: 24px 20px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  box-shadow: var(--pc-shadow-card);
 }
 
 .pc-title {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 800;
   letter-spacing: -0.01em;
   margin: 0 0 4px;
@@ -107,28 +137,41 @@ body {
 .pc-field input {
   width: 100%;
   border: 1px solid var(--pc-border);
-  border-radius: 10px;
-  padding: 11px 12px;
+  border-radius: var(--pc-radius-control);
+  padding: 12px 14px;
   font-size: 16px; /* evita zoom automático do iOS ao focar */
   color: var(--pc-ink);
   background: var(--pc-surface);
 }
 
+.pc-field input::placeholder {
+  color: #9ca3af; /* só placeholder (decorativo); o rótulo é o <label> */
+}
+
 .pc-field input:focus {
   outline: none;
   border-color: var(--pc-primary);
-  box-shadow: 0 0 0 3px rgba(41, 105, 142, 0.18);
+  box-shadow: 0 0 0 3px rgba(41, 105, 142, 0.28);
+}
+
+.pc-field input:disabled {
+  background: #f3f4f6;
+  color: var(--pc-ink-softer);
 }
 
 .pc-field input[aria-invalid="true"] {
   border-color: var(--pc-danger);
 }
 
+.pc-field input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.22);
+}
+
 .pc-field-error {
-  margin-top: 5px;
+  margin: 5px 0 0;
   font-size: 12px;
   font-weight: 600;
-  color: var(--pc-danger);
+  color: #b91c1c;
 }
 
 .pc-row {
@@ -141,30 +184,50 @@ body {
   min-width: 0;
 }
 
+/* ---- CTA único: lima (D2), texto noite ~10:1 ------------------------------ */
 .pc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
+  min-height: 48px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--pc-radius-control);
   padding: 13px 16px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
-  background: var(--pc-primary);
-  color: #ffffff;
-  transition: background-color 0.15s ease;
+  background: var(--pc-lime);
+  color: var(--pc-on-lime);
+  box-shadow: 0 14px 30px -12px rgba(97, 219, 36, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
-.pc-button:hover:not(:disabled) {
-  background: #1b506f;
+@media (hover: hover) {
+  .pc-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 36px -12px rgba(97, 219, 36, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+}
+
+.pc-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.pc-button:focus-visible {
+  outline: 3px solid var(--pc-primary);
+  outline-offset: 3px;
 }
 
 .pc-button:disabled {
-  opacity: 0.55;
+  opacity: 0.75;
   cursor: not-allowed;
 }
 
 .pc-alert {
-  border-radius: 12px;
+  border-radius: var(--pc-radius-control);
   padding: 12px 14px;
   font-size: 13px;
   font-weight: 500;
@@ -175,17 +238,74 @@ body {
 .pc-alert-danger {
   background: var(--pc-danger-50);
   color: #991b1b;
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.18);
 }
 
+/* ---- Estados de uma tela só (conectando, sem conexão, sem opener, validado) --- */
 .pc-center {
   text-align: center;
-  padding: 24px 4px;
+  padding: 8px 4px 12px;
+}
+
+.pc-center .pc-title {
+  margin-bottom: 8px;
 }
 
 .pc-center p {
   color: var(--pc-ink-softer);
   font-size: 14px;
   line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.pc-center p:last-child {
+  margin-bottom: 0;
+}
+
+/* Mascote (rosto 64 px) em círculo escuro: sempre sobre superfície escura, como a arte pede. */
+.pc-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, var(--pc-petrol-950), var(--pc-night));
+  box-shadow: 0 10px 24px -12px rgba(14, 42, 58, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.pc-hero img {
+  display: block;
+  border-radius: 50%;
+}
+
+/* Selo de sucesso: check LIMA (ação concluída) sobre noite, no canto do rosto. */
+.pc-hero-check {
+  position: absolute;
+  right: -6px;
+  bottom: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--pc-night);
+  color: var(--pc-lime);
+  box-shadow: 0 0 0 3px var(--pc-surface);
+}
+
+/* Anel de carregamento: lima sobre trilho claro, ao redor do rosto (espera por resposta do app principal). */
+.pc-hero-wait::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 3px solid rgba(14, 42, 58, 0.12);
+  border-top-color: var(--pc-lime);
+  animation: pc-spin 0.9s linear infinite;
 }
 
 .pc-badge-secure {
@@ -197,15 +317,16 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--pc-accent);
-  margin-top: 16px;
+  margin: 16px 0 0;
 }
 
+/* Spinner do botão "Validando cartão…": noite sobre lima. */
 .pc-spinner {
   display: inline-block;
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-top-color: #ffffff;
+  border: 2px solid rgba(6, 22, 33, 0.3);
+  border-top-color: var(--pc-on-lime);
   border-radius: 50%;
   animation: pc-spin 0.7s linear infinite;
   vertical-align: middle;
@@ -215,5 +336,20 @@ body {
 @keyframes pc-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Movimento coerente com o resto do produto: quem pede menos movimento não vê giro nem elevação (o texto "Validando cartão…" / "Conectando…" já diz o estado). */
+@media (prefers-reduced-motion: reduce) {
+  .pc-spinner,
+  .pc-hero-wait::after {
+    animation: none;
+  }
+  .pc-button {
+    transition: none;
+  }
+  .pc-button:hover:not(:disabled),
+  .pc-button:active:not(:disabled) {
+    transform: none;
   }
 }

@@ -3,7 +3,9 @@ import { CardForm } from "./CardForm"
 import { SopInvalidFieldsError, SopTokenizationError, tokenizeCard, type CardFormInput } from "./sopClient"
 import type { MeCardTokenizationSessionResponse } from "@/types/api"
 import { CARD_TOKENIZATION_CHANNEL_SOURCE, type CardTokenizationChildMessage, type CardTokenizationInitMessage } from "@/types/cardTokenizationChannel"
-import logoIcon from "@/assets/logo-icon-sm.png"
+// Rosto do mascote (64 px, 3 KB) como DATA URI embutida no bundle (`?inline`): a CSP desta página é `img-src 'self' data:` e não pode ganhar origem nova. Só imagem estática —
+// o guarda de isolamento (`eslint.config.js`) barra `@/components|hooks|lib|...`, não `@/assets`.
+import mascotFace from "@/assets/landing/mascote-rosto-64.webp?inline"
 
 type Status = "no-opener" | "connecting" | "timeout" | "ready" | "submitting" | "done"
 
@@ -11,6 +13,22 @@ const READY_TIMEOUT_MS = 8000
 
 function postToParent(message: CardTokenizationChildMessage) {
   window.opener?.postMessage(message, window.location.origin)
+}
+
+/** Rosto do mascote em círculo escuro. `variant`: `wait` (anel lima girando), `ok` (check lima) ou nenhum (erro/aviso). Decorativo: o texto ao lado diz tudo. */
+function Hero({ variant }: { variant?: "wait" | "ok" }) {
+  return (
+    <div className={`pc-hero${variant === "wait" ? " pc-hero-wait" : ""}`} aria-hidden="true">
+      <img src={mascotFace} alt="" width={64} height={64} />
+      {variant === "ok" && (
+        <span className="pc-hero-check">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12.5l4.5 4.5L19 7.5" />
+          </svg>
+        </span>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -94,60 +112,63 @@ export function CardTokenizationApp() {
   }
 
   return (
-    <div className="pc-shell">
-      <div className="pc-header">
-        <img src={logoIcon} alt="" />
-        <strong>InnoFlow</strong>
-      </div>
+    <>
+      {/* Moldura escura de marca (F-E): o rosto do mascote + o nome. Decorativo e sem rede: data URI. */}
+      <header className="pc-band">
+        <div className="pc-brand">
+          <span className="pc-face">
+            <img src={mascotFace} alt="" width={44} height={44} />
+          </span>
+          <strong>InnoFlow</strong>
+        </div>
+      </header>
 
-      <div className="pc-card">
-        {status === "no-opener" && (
-          <div className="pc-center">
-            <h1 className="pc-title" style={{ marginBottom: 8 }}>
-              Esta página não pode ser aberta diretamente
-            </h1>
-            <p>Volte ao aplicativo InnoFlow e toque em "Adicionar cartão".</p>
-          </div>
-        )}
+      <main className="pc-shell">
+        <div className="pc-card">
+          {status === "no-opener" && (
+            <div className="pc-center">
+              <Hero />
+              <h1 className="pc-title">Esta página não pode ser aberta diretamente</h1>
+              <p>Volte ao aplicativo InnoFlow e toque em "Adicionar cartão".</p>
+            </div>
+          )}
 
-        {status === "connecting" && (
-          <div className="pc-center">
-            <h1 className="pc-title" style={{ marginBottom: 8 }}>
-              Conectando…
-            </h1>
-            <p>Aguardando o InnoFlow enviar os dados do cadastro.</p>
-          </div>
-        )}
+          {status === "connecting" && (
+            <div className="pc-center">
+              <Hero variant="wait" />
+              <h1 className="pc-title">Conectando…</h1>
+              <p>Aguardando o InnoFlow enviar os dados do cadastro.</p>
+            </div>
+          )}
 
-        {status === "timeout" && (
-          <div className="pc-center">
-            <h1 className="pc-title" style={{ marginBottom: 8 }}>
-              Não foi possível conectar
-            </h1>
-            <p>Feche esta aba e toque em "Adicionar cartão" novamente no aplicativo.</p>
-          </div>
-        )}
+          {status === "timeout" && (
+            <div className="pc-center">
+              <Hero />
+              <h1 className="pc-title">Não foi possível conectar</h1>
+              <p>Feche esta aba e toque em "Adicionar cartão" novamente no aplicativo.</p>
+            </div>
+          )}
 
-        {(status === "ready" || status === "submitting") && (
-          <>
-            <h1 className="pc-title">Cadastrar cartão</h1>
-            <p className="pc-subtitle">Seus dados vão direto para a operadora do cartão — o InnoFlow nunca recebe o número nem o CVV.</p>
-            <CardForm onSubmit={handleSubmit} submitting={status === "submitting"} formError={formError} />
-          </>
-        )}
+          {(status === "ready" || status === "submitting") && (
+            <>
+              <h1 className="pc-title">Cadastrar cartão</h1>
+              <p className="pc-subtitle">Seus dados vão direto para a operadora do cartão — o InnoFlow nunca recebe o número nem o CVV.</p>
+              <CardForm onSubmit={handleSubmit} submitting={status === "submitting"} formError={formError} />
+            </>
+          )}
 
-        {status === "done" && (
-          <div className="pc-center">
-            <h1 className="pc-title" style={{ marginBottom: 8 }}>
-              Cartão validado ✓
-            </h1>
-            <p style={{ marginBottom: 16 }}>Pode fechar esta aba e voltar para o aplicativo.</p>
-            <button type="button" className="pc-button" onClick={() => window.close()}>
-              Fechar
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+          {status === "done" && (
+            <div className="pc-center">
+              <Hero variant="ok" />
+              <h1 className="pc-title">Cartão validado ✓</h1>
+              <p>Pode fechar esta aba e voltar para o aplicativo.</p>
+              <button type="button" className="pc-button" onClick={() => window.close()}>
+                Fechar
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+    </>
   )
 }
