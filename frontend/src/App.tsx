@@ -42,6 +42,9 @@ const AdminAuditoria = lazy(() => import("@/pages/Admin/Auditoria"))
 const AdminCarteiras = lazy(() => import("@/pages/Admin/Carteiras"))
 const AdminGatewayPagamento = lazy(() => import("@/pages/Admin/GatewayPagamento"))
 const AdminComunicacao = lazy(() => import("@/pages/Admin/Comunicacao"))
+// Estorno e chargeback (L1.8) e devoluções de contas excluídas (L1.4): dinheiro de terceiros, só ADMIN (UI e servidor).
+const AdminChargebacks = lazy(() => import("@/pages/Admin/Chargebacks"))
+const AdminDevolucoesContasExcluidas = lazy(() => import("@/pages/Admin/DevolucoesContasExcluidas"))
 
 // Catálogo do design system (`/__ds`): SÓ em dev. `import.meta.env.DEV` é substituído por `false` no build, a expressão colapsa para `null` e o
 // `import()` sai do bundle (e do precache do PWA) — conferido com grep no `dist/`. Ver `src/dev/DesignSystemCatalog.tsx`.
@@ -183,6 +186,23 @@ export default function App() {
                 element={
                   <RequireAuth roles={["ADMIN"]}>
                     <AdminGatewayPagamento />
+                  </RequireAuth>
+                }
+              />
+              {/* Chargebacks avisados pela Cielo (L1.8) e fila de devolução do saldo de contas excluídas (L1.4): dinheiro, só ADMIN; o servidor confere de novo (403). */}
+              <Route
+                path="chargebacks"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminChargebacks />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="devolucoes-contas-excluidas"
+                element={
+                  <RequireAuth roles={["ADMIN"]}>
+                    <AdminDevolucoesContasExcluidas />
                   </RequireAuth>
                 }
               />

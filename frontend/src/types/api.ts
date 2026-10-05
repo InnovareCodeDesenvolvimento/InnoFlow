@@ -803,7 +803,7 @@ export interface PaymentListRow {
 export interface PaymentsReportQuery extends ReportPeriodParams, PaginationParams {
   provider?: PaymentProvider
   status?: PaymentIntentStatus
-  /** planejado (L1.8): achar a venda de um chargeback pelos identificadores da adquirente (já gravados no intent). Ainda não aceitos pelo backend. */
+  /** L1.8 (entregue): achar a venda de um chargeback pelos identificadores da adquirente (igualdade exata). `proofOfSale` = NSU. */
   tid?: string
   authorizationCode?: string
   proofOfSale?: string
@@ -1384,6 +1384,13 @@ export const AUDIT_ACTIONS = [
   "LOGIN_SUCCESS",
   "LOGIN_FAILED",
   "EXPORT",
+  // Lote 1 (L1.3/L1.4/L1.8) + F5: espelham o enum `AuditAction` do Prisma e o `auditActionEnum` do backend (sem eles, filtrar por esses valores dava 400).
+  "PAYMENT_CREDIT",
+  "PAYMENT_CONFIG_CHANGE",
+  "PASSWORD_RESET",
+  "ACCOUNT_DELETION",
+  "REFUND",
+  "CHARGEBACK",
   "OTHER",
 ] as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]
@@ -1922,6 +1929,12 @@ export interface AdminAccountDeletionRow {
   refundPixKey: string | null
   refundedAt: string | null
   refundedByUserId: string | null
+  /** Aditivo (L1.4, entregue): idade do pedido em dias. */
+  ageDays: number
+  /** Aditivo: `true` quando passou do prazo recomendado de 30 dias e ainda é `PENDING_REFUND`. */
+  overdue: boolean
+  /** Aditivo: só presente (`true`) quando a chave guardada NÃO pôde ser decifrada (`PAYMENT_SECRETS_KEY` trocada/ausente) — `refundPixKey` vem `null`; falar com o titular por outro canal. */
+  refundPixKeyUnreadable?: true
 }
 export interface AdminAccountDeletionsQuery extends PaginationParams {
   status?: AccountDeletionRefundStatus
@@ -1938,6 +1951,22 @@ export interface AdminAccountDeletionRefundRequest {
   proofReference: string
   currentPassword: string
 }
+/**
+ * Erros de `GET/POST /api/admin/account-deletions*` (entregue, L1.4). A devolução é INTEGRAL: valor menor = 409 `PARTIAL_REFUND_NOT_ALLOWED`; maior = 409 `AMOUNT_EXCEEDS_BALANCE`;
+ * pedido sem saldo = 409 `REFUND_NOT_REQUIRED`; já devolvido = 409 `ALREADY_REFUNDED`. Senha: 403 `INVALID_CURRENT_PASSWORD`, 429 `RATE_LIMITED_ACCOUNT_DELETION` (+ `Retry-After`),
+ * 503 `STEPUP_UNAVAILABLE` (nada gravado). `PAYMENT_SECRETS_KEY_MISSING` (503) = o servidor não tem a chave de cifragem.
+ */
+export type AdminAccountDeletionErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CURRENT_PASSWORD"
+  | "NOT_FOUND"
+  | "ALREADY_REFUNDED"
+  | "REFUND_NOT_REQUIRED"
+  | "AMOUNT_EXCEEDS_BALANCE"
+  | "PARTIAL_REFUND_NOT_ALLOWED"
+  | "PAYMENT_SECRETS_KEY_MISSING"
+  | "STEPUP_UNAVAILABLE"
+  | "RATE_LIMITED_ACCOUNT_DELETION"
 
 // ---- L1.6 — Notificações ao motorista (e-mail) — planejado (L1.6) ------------------------------------------------------------------------------------
 
@@ -1982,7 +2011,7 @@ export type UpdateMeNotificationPreferencesRequest = Partial<MeNotificationPrefe
  * carteira, ou (b) devolução feita pelo dono NO PORTAL DA CIELO e registrada aqui (`CARD_VIA_PORTAL`, fica `PENDING_CONFIRMATION` até a confirmação).
  */
 export type RefundDestination = "WALLET" | "CARD_VIA_PORTAL"
-export type RefundStatus = "CONFIRMED" | "PENDING_CONFIRMATION"
+export type RefundStatus = "CONFIRMED" | "PENDING_CONFIRMATION" | "CANCELLED"
 
 /**
  * `POST /api/admin/sessions/:id/refunds` (ADMIN-only, step-up por senha) -> 201 `CreateSessionRefundResponse`. Erros: 400 `VALIDATION_ERROR`,
@@ -2007,6 +2036,69 @@ export type SessionRefundErrorCode =
   | "SESSION_NOT_FOUND"
   | "AMOUNT_EXCEEDS_REFUNDABLE"
   | "SESSION_NOT_BILLED"
+  /** 409 — `CARD_VIA_PORTAL` numa sessão que não foi paga com cartão (não há venda na Cielo para devolver). */
+  | "NO_CARD_PAYMENT"
+  /** 409 — `WALLET` e a conta do motorista foi excluída (LGPD): não há carteira para receber. */
+  | "DRIVER_ACCOUNT_DELETED"
+  /** 409 — `cancel` de devolução que não é do cartão pendente (confirmada, já cancelada ou na carteira). */
+  | "REFUND_NOT_CANCELLABLE"
+  /** 409 — `confirm` de devolução que não é do cartão pendente (outro ADMIN/job chegou antes, cancelada ou na carteira). */
+  | "REFUND_NOT_CONFIRMABLE"
+  | "STEPUP_UNAVAILABLE"
+  | "RATE_LIMITED"
+
+/**
+ * `GET /api/admin/sessions/:id/refunds` (ADMIN-only, ADITIVA, entregue) -> 200. Só ADMIN (OPERATOR = 403). Sessão não encerrada devolve `billedCents`/`refundableCents` = 0.
+ * `refundedCents` soma os estornos NÃO cancelados (pendentes no portal seguram o teto). Sem nome/e-mail do motorista: só ids.
+ */
+export interface SessionRefundDTO {
+  id: string
+  sessionId: string
+  paymentIntentId: string | null
+  destination: RefundDestination
+  status: RefundStatus
+  amountCents: number
+  /** Texto livre do ADMIN (10 a 500, sem nome do motorista). */
+  reason: string
+  /** No cartão confirmado à mão: a referência do COMPROVANTE do portal; antes disso, a referência do registro (se houve). */
+  portalReference: string | null
+  /** `true` = um ADMIN confirmou à mão; `false` = o job confirmou sozinho, está pendente/cancelado ou é carteira. */
+  confirmedManually: boolean
+  walletEntryId: string | null
+  createdAt: string
+  resolvedAt: string | null
+}
+export interface SessionRefundsResponse {
+  sessionId: string
+  billedCents: number
+  refundedCents: number
+  refundableCents: number
+  items: SessionRefundDTO[]
+}
+
+/** `POST /api/admin/refunds/:id/cancel` `{ currentPassword }` -> 200. Só devolução no cartão `PENDING_CONFIRMATION`; libera o teto. Erros: 403 `INVALID_CURRENT_PASSWORD`, 404 `NOT_FOUND`, 409 `REFUND_NOT_CANCELLABLE`. */
+export interface CancelRefundRequest {
+  currentPassword: string
+}
+export interface CancelRefundResponse {
+  refundId: string
+  status: "CANCELLED"
+}
+
+/**
+ * `POST /api/admin/refunds/:id/confirm` (ADMIN-only, step-up) -> 200. Confirmação MANUAL de uma devolução no cartão pendente (estorno parcial ou venda com mais de ~3 meses, que o job
+ * nunca confirma). `proofReference`: 5 a 120, só letras/números e `. _ - / # :` (sem espaço nem e-mail; recusa CPF com máscara e número de cartão). 409 `REFUND_NOT_CONFIRMABLE`.
+ */
+export interface ConfirmRefundRequest {
+  proofReference: string
+  currentPassword: string
+}
+export interface ConfirmRefundResponse {
+  refundId: string
+  status: "CONFIRMED"
+  confirmedManually: true
+  proofReference: string
+}
 
 export type ChargebackOutcome = "WON" | "LOST" | "ACCEPTED"
 
@@ -2049,7 +2141,62 @@ export interface ChargebackDTO {
   notifiedAt: string
   responseDeadline: string | null
   dossierId: string
+  // ---- aditivos (entregues, L1.8) ----
+  chargingSessionId: string | null
+  reasonCode: string | null
+  /** Estado bruto: `OPEN` enquanto não há desfecho (`outcome` é `null`). */
+  status: ChargebackStatus
+  /** Dívida criada pelo desfecho `CREATE_DEBT` (se houve). */
+  debtId: string | null
+  createdAt: string
+  resolvedAt: string | null
+  /** O motorista está sem o modo cartão POR ESTE chargeback agora (aberto, ou perdido/aceito ainda não desbloqueado). */
+  cardBlocked: boolean
+  /** Desbloqueio manual (P3): quando e por quê (texto do ADMIN, só na tela do ADMIN). `null` enquanto não houve. */
+  cardUnblockedAt: string | null
+  cardUnblockReason: string | null
 }
+export type ChargebackStatus = "OPEN" | ChargebackOutcome
+
+/** `GET /api/admin/chargebacks?outcome=&paymentIntentId=&page=&pageSize=` (ADMIN-only, ADITIVA) -> 200 `{ items, total, page, pageSize }` (NÃO `meta`). Mais recentes primeiro. */
+export interface ChargebacksListQuery extends PaginationParams {
+  outcome?: ChargebackStatus
+  paymentIntentId?: string
+}
+export interface ChargebacksListResponse {
+  items: ChargebackDTO[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+/**
+ * `POST /api/admin/chargebacks/:id/unblock-card` (ADMIN-only, step-up, ADITIVA) -> 200 `ChargebackDTO`. Só em `LOST`/`ACCEPTED` com o cartão ainda bloqueado; devolve o modo cartão sem
+ * apagar nada (registro, desfecho, dossiê e dívida ficam). Erros: 400, 403 `INVALID_CURRENT_PASSWORD`, 404 `NOT_FOUND`, 409 `CHARGEBACK_NOT_LOST`, 409 `CARD_ALREADY_UNBLOCKED`.
+ */
+export interface UnblockCardRequest {
+  /** 10 a 500, sem nome do motorista (o texto fica gravado). */
+  reason: string
+  currentPassword: string
+}
+
+/** Erros das rotas de chargeback (registro, desfecho, desbloqueio, dossiê). */
+export type ChargebackErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CURRENT_PASSWORD"
+  | "NOT_FOUND"
+  | "PAYMENT_NOT_FOUND"
+  /** 409 — a venda não tem valor capturado: não há o que contestar. */
+  | "PAYMENT_NOT_CAPTURED"
+  | "CHARGEBACK_ALREADY_REGISTERED"
+  | "CHARGEBACK_ALREADY_RESOLVED"
+  | "CHARGEBACK_NOT_LOST"
+  | "CARD_ALREADY_UNBLOCKED"
+  | "STEPUP_UNAVAILABLE"
+  | "RATE_LIMITED"
+
+/** Recusa DO MOTORISTA ao tentar pagar com cartão com chargeback ativo: 403 `CARD_CHARGEBACK_BLOCKED` (Pix e carteira seguem). Documentado aqui; quem trata é o PWA. */
+export type CardChargebackBlockedCode = "CARD_CHARGEBACK_BLOCKED"
 /** `GET /api/admin/chargebacks/:id/dossier` (ADMIN-only) -> JSON do snapshot (formato aberto; a Lyra só oferece o download). */
 export type ChargebackDossier = Record<string, unknown>
 

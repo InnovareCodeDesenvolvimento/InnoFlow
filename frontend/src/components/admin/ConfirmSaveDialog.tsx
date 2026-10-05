@@ -30,6 +30,8 @@ export function ConfirmSaveDialog({
   items,
   extra,
   destructive = false,
+  confirmLabel = "Confirmar e salvar",
+  cancelLabel = "Cancelar",
   loading,
   passwordError,
   onConfirm,
@@ -41,6 +43,10 @@ export function ConfirmSaveDialog({
   items: ChangeSummaryItem[]
   extra?: ReactNode
   destructive?: boolean
+  /** Texto do botão de confirmar (padrão "Confirmar e salvar"); outras ações com step-up de senha (gerar chave, conectar o Google) usam o verbo delas. */
+  confirmLabel?: string
+  /** Texto do botão de desistir (padrão: "Cancelar"). Quando a AÇÃO é cancelar algo, use "Voltar" para não haver dois "Cancelar" com sentidos opostos. */
+  cancelLabel?: string
   loading: boolean
   passwordError?: string | null
   onConfirm: (currentPassword: string) => void
@@ -113,11 +119,11 @@ export function ConfirmSaveDialog({
         <DialogFooter>
           <Button type="button" variant="outline" size="touch" onClick={onCancel} disabled={loading}>
             <X className="h-4 w-4" aria-hidden="true" />
-            Cancelar
+            {cancelLabel}
           </Button>
           <Button type="submit" form={formId} size="touch" variant={destructive ? "destructive" : "default"} loading={loading} disabled={password.length === 0}>
             {!loading && <Check className="h-4 w-4" aria-hidden="true" />}
-            Confirmar e salvar
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

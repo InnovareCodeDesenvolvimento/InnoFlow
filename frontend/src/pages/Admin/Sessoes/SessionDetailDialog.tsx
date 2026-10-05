@@ -3,7 +3,9 @@ import { Badge } from "@/components/ui/Badge"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { SessionClosureAdminSection } from "./SessionClosureAdminSection"
+import { RefundsSection } from "./RefundsSection"
 import { useSessionDetail } from "@/hooks/useReports"
+import { useAuthStore } from "@/store/authStore"
 import { getApiErrorMessage } from "@/services/api"
 import {
   CHARGING_SESSION_STATUS_LABELS,
@@ -23,6 +25,8 @@ import {
  */
 export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: string | null; onOpenChange: (open: boolean) => void }) {
   const { data, isLoading, isError, error, refetch } = useSessionDetail(sessionId ?? undefined)
+  // Devoluções (L1.8) são ADMIN-only no servidor (403 ao OPERATOR): o bloco nem monta para ele, em vez de pedir e mostrar erro.
+  const isAdmin = useAuthStore((s) => s.user?.role) === "ADMIN"
   // F5.9: em `STOP_UNCONFIRMED` ainda não há custo calculado (campos `null`) — "R$ 0,00" diria que já foi apurado.
   const money = (cents: number | null) => (data?.status === "STOP_UNCONFIRMED" && cents === null ? "—" : formatCents(cents))
 
@@ -97,6 +101,8 @@ export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: st
                 </ul>
               )}
             </div>
+
+            {isAdmin && <RefundsSection session={data} />}
           </div>
         )}
       </DialogContent>

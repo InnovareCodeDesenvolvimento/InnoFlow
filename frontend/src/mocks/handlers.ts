@@ -61,6 +61,23 @@ import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
 import { commandStatus, parseScenario, remoteStartPolicyDenied, startRemote } from "./remoteStartData"
 import { getGatewayConfig, testGatewayConnection, updateGatewayConfig } from "./paymentGatewayData"
 import { getCommunicationSettings, testCommunicationChannel, updateCommunicationSettings } from "./communicationData"
+import {
+  cancelRefund,
+  confirmRefund,
+  createSessionRefund,
+  findMockPayment,
+  getChargeback,
+  getDossier,
+  getSessionRefunds,
+  listAccountDeletions,
+  listChargebacks,
+  matchesAcquirer,
+  refundAccountDeletion,
+  registerChargeback,
+  resolveChargeback,
+  unblockCard,
+  type MockResult,
+} from "./reversalsData"
 import { createAdminEventStream, createMeEventStream, SSE_RESPONSE_HEADERS } from "./realtimeStream"
 import type {
   AuditLogListItem,
@@ -112,6 +129,12 @@ function currentUser(req: Request): { userId: string; role: Role; operatorId: st
 
 function errorBody(error: string, code: string) {
   return { error, code }
+}
+
+/** Traduz o resultado dos mocks de estorno/chargeback/devolução (`reversalsData.ts`) em resposta HTTP: sucesso com o corpo, erro no envelope `{error, code, details?}` (+ `Retry-After`). */
+function mockResult<T>(result: MockResult<T>) {
+  if (result.ok) return HttpResponse.json(result.body as never, { status: result.status })
+  return HttpResponse.json({ error: result.message, code: result.code, ...(result.details !== undefined ? { details: result.details } : {}) }, { status: result.status, headers: result.headers })
 }
 
 /** Nunca devolve a senha — mesma regra do `toUserDTO` real (`auth.routes.ts`). */
@@ -1055,6 +1078,23 @@ export const handlers = [
       provider: url.searchParams.get("provider") ?? undefined,
       status: url.searchParams.get("status") ?? undefined,
     }
+    // L1.8: achar a venda de um chargeback pelos identificadores da Cielo (igualdade exata). Só vendas de cartão têm esses dados.
+    const acquirer = {
+      tid: url.searchParams.get("tid") ?? undefined,
+      authorizationCode: url.searchParams.get("authorizationCode") ?? undefined,
+      proofOfSale: url.searchParams.get("proofOfSale") ?? undefined,
+    }
+
+    if (acquirer.tid || acquirer.authorizationCode || acquirer.proofOfSale) {
+      const full = buildPaymentsReport(toScope(scope.user), { ...period, ...filters, page: 1, pageSize: 100000 })
+      const matched = full.items.filter((row) => row.provider === "CIELO_CARD" && matchesAcquirer(row.id, acquirer))
+      const start = (pagination.page - 1) * pagination.pageSize
+      return HttpResponse.json({
+        ...full,
+        items: matched.slice(start, start + pagination.pageSize),
+        meta: { page: pagination.page, pageSize: pagination.pageSize, total: matched.length, totalPages: Math.max(1, Math.ceil(matched.length / pagination.pageSize)) },
+      })
+    }
 
     if (format === "csv") {
       const full = buildPaymentsReport(toScope(scope.user), { ...period, ...filters, page: 1, pageSize: 100000 })
@@ -1189,6 +1229,87 @@ export const handlers = [
     const body = await request.json().catch(() => ({}))
     const outcome = testCommunicationChannel(scope.user.userId, "whatsapp", body, localStorage.getItem("mock:comunicacao-teste"))
     return HttpResponse.json(outcome.body, { status: outcome.status, ...("headers" in outcome && outcome.headers ? { headers: outcome.headers } : {}) })
+  }),
+
+  // ---- Estorno, chargeback e devolução de conta excluída (ADMIN only, L1.8 / L1.4) -----------------
+  // Espelho de `paymentReversals.routes.ts`, `chargebacks.routes.ts` e `adminAccountDeletions.routes.ts` (regras, dados de demo e gatilhos em `reversalsData.ts`).
+  // Escritas com step-up de senha; mensagens do cliente sempre por `code`. O corpo (senha, motivo) nunca é logado.
+  http.get("/api/admin/sessions/:id/refunds", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(getSessionRefunds(String(params.id)))
+  }),
+
+  http.post("/api/admin/sessions/:id/refunds", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(createSessionRefund(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/refunds/:id/cancel", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(cancelRefund(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/refunds/:id/confirm", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(confirmRefund(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/payments/:intentId/chargebacks", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const intentId = String(params.intentId)
+    return mockResult(registerChargeback(intentId, await request.json().catch(() => null), findMockPayment(intentId)))
+  }),
+
+  http.get("/api/admin/chargebacks", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(listChargebacks(new URL(request.url)))
+  }),
+
+  // O dossiê vem ANTES de `/:id`: o MSW usa a primeira rota que casa.
+  http.get("/api/admin/chargebacks/:id/dossier", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(getDossier(String(params.id)))
+  }),
+
+  http.get("/api/admin/chargebacks/:id", ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(getChargeback(String(params.id)))
+  }),
+
+  http.patch("/api/admin/chargebacks/:id", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(resolveChargeback(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.post("/api/admin/chargebacks/:id/unblock-card", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(unblockCard(String(params.id), await request.json().catch(() => null)))
+  }),
+
+  http.get("/api/admin/account-deletions", ({ request }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    const result = listAccountDeletions(new URL(request.url))
+    const response = mockResult(result)
+    // A resposta traz chave Pix de titular: nunca em cache (igual ao servidor real).
+    response.headers.set("Cache-Control", "no-store")
+    return response
+  }),
+
+  http.post("/api/admin/account-deletions/:id/refund", async ({ request, params }) => {
+    const scope = requireAdmin(request)
+    if ("error" in scope) return scope.error
+    return mockResult(refundAccountDeletion(String(params.id), await request.json().catch(() => null), scope.user.userId))
   }),
 
   // ---- Auditoria (ADMIN only) ---------------------------------------------------
