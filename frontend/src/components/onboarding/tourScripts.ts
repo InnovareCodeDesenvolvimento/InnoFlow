@@ -80,7 +80,7 @@ const DRIVER_STEPS: readonly TourStep[] = [
     id: "welcome",
     kind: "welcome",
     title: "Bem-vindo à InnoFlow!",
-    body: "Eu sou o mascote da InnoFlow. Vou te mostrar o app em poucos passos: onde achar um eletroposto, como iniciar a recarga e onde acompanhar tudo.",
+    body: "Eu sou o Inno, o mascote da InnoFlow. Vou te mostrar o app em poucos passos: onde achar um eletroposto, como iniciar a recarga e onde acompanhar tudo.",
   },
   {
     id: "mapa",
@@ -142,7 +142,7 @@ const PANEL_STEPS: readonly TourStep[] = [
     kind: "welcome",
     title: "Bem-vindo ao painel da InnoFlow!",
     body: (ctx) =>
-      "Eu sou o mascote da InnoFlow. Vou te mostrar onde fica cada coisa, do cadastro dos carregadores até o dinheiro que entra." +
+      "Eu sou o Inno, o mascote da InnoFlow. Vou te mostrar onde fica cada coisa, do cadastro dos carregadores até o dinheiro que entra." +
       (ctx.role === "OPERATOR" ? " Você enxerga só os dados do seu operador." : ""),
   },
   {
