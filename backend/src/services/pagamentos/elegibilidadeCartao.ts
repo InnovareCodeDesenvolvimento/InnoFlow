@@ -19,6 +19,9 @@ import { AppError } from '../../api/middleware/errorHandler'
  *     - cadastros de cartão TENTADOS por usuário em 24 h (`CARD_BLOCK_MAX_REGISTRATIONS_PER_USER_DAY`, padrão 10).
  *     Bloqueado => 429 `CARD_TEMPORARILY_BLOCKED` + `Retry-After` + `details.blockedUntil`, e UM alerta `payment_card_testing_suspected` quando o contador cruza o limite
  *     (sem dado pessoal: IP só mascarado em /24; o usuário só pelo id interno). A chave do IP no Redis é um hash (nenhum IP cru fica guardado).
+ *  3. CHARGEBACK (L1.8, DL7/P3): o motorista que teve um chargeback registrado perde o MODO CARTÃO (Pix e carteira seguem). Bloqueio DERIVADO do razão `PaymentReversal` (sem flag): existe
+ *     chargeback OPEN, ou LOST/ACCEPTED que o ADMIN ainda não desbloqueou (`cardUnblockedAt` nulo). WON libera sozinho; LOST/ACCEPTED só com o desbloqueio manual. Vem ANTES da identidade
+ *     (mandar quem tem chargeback "entrar com o Google" seria um beco sem saída) e é fail-CLOSED (erro de banco propaga — é o portão de dinheiro). Recusa com 403 `CARD_CHARGEBACK_BLOCKED`.
  *  Falha de Redis => NÃO bloqueia (fail-open, com aviso): é um freio de abuso, não o portão de dinheiro; o portão de identidade (1) não depende de Redis.
  */
 
@@ -26,7 +29,7 @@ const PRAZO_REDIS_MS = 2_000
 const JANELA_DIA_SEG = 24 * 3600
 const JANELA_HORA_SEG = 3600
 
-export type MotivoInelegibilidadeCartao = 'GOOGLE_LOGIN_REQUIRED' | 'TEMPORARILY_BLOCKED'
+export type MotivoInelegibilidadeCartao = 'GOOGLE_LOGIN_REQUIRED' | 'TEMPORARILY_BLOCKED' | 'CHARGEBACK_BLOCKED'
 
 export interface ElegibilidadeCartao {
   eligible: boolean
@@ -99,8 +102,21 @@ async function bloqueadoAte(userId: string, ip: string | null | undefined): Prom
   return melhorEsforco(ler(), null as Date | null, 'ler contadores de risco do cartão')
 }
 
+/**
+ * O motorista está bloqueado no cartão por chargeback? Mesma consulta do `docs/MODELO-DADOS-LOTE1.md` §4 (índice parcial `ix_payment_reversal_card_block`) + o desbloqueio manual: OPEN bloqueia sempre;
+ * LOST/ACCEPTED bloqueiam até `cardUnblockedAt` ser preenchido; WON nunca bloqueia.
+ */
+export async function motoristaBloqueadoPorChargeback(userId: string): Promise<boolean> {
+  const achado = await prisma.paymentReversal.findFirst({
+    where: { userId, kind: 'CHARGEBACK', OR: [{ status: 'OPEN' }, { status: { in: ['LOST', 'ACCEPTED'] }, cardUnblockedAt: null }] },
+    select: { id: true },
+  })
+  return achado !== null
+}
+
 /** Elegibilidade completa (para `GET /api/me/payment-methods` e para os portões). */
 export async function avaliarElegibilidadeCartao(userId: string, ip?: string | null): Promise<ElegibilidadeCartao> {
+  if (await motoristaBloqueadoPorChargeback(userId)) return { eligible: false, reason: 'CHARGEBACK_BLOCKED', blockedUntil: null }
   if (env.CARD_REQUIRE_VERIFIED_IDENTITY) {
     const usuario = await prisma.user.findUnique({ where: { id: userId }, select: { googleSub: true, role: true } })
     if (!cartaoLiberadoParaUsuario(usuario)) return { eligible: false, reason: 'GOOGLE_LOGIN_REQUIRED', blockedUntil: null }
@@ -114,6 +130,9 @@ export async function avaliarElegibilidadeCartao(userId: string, ip?: string | n
 export async function exigirCartaoElegivel(userId: string, ip?: string | null): Promise<void> {
   const e = await avaliarElegibilidadeCartao(userId, ip)
   if (e.eligible) return
+  if (e.reason === 'CHARGEBACK_BLOCKED') {
+    throw new AppError('O pagamento com cartão está indisponível para a sua conta. O Pix e a carteira continuam disponíveis. Em caso de dúvida, fale com o suporte.', 403, 'CARD_CHARGEBACK_BLOCKED')
+  }
   if (e.reason === 'GOOGLE_LOGIN_REQUIRED') {
     throw new AppError('Para pagar com cartão, entre com a sua conta Google. O Pix e a carteira continuam disponíveis.', 403, 'CARD_REQUIRES_VERIFIED_IDENTITY')
   }

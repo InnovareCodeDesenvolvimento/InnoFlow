@@ -499,6 +499,7 @@ model User {
   paymentReversals               PaymentReversal[]        @relation("PaymentReversalPayer")
   paymentReversalsCreated        PaymentReversal[]        @relation("PaymentReversalCreatedBy")
   paymentReversalsResolved       PaymentReversal[]        @relation("PaymentReversalResolvedBy")
+  paymentReversalsCardUnblocked  PaymentReversal[]        @relation("PaymentReversalCardUnblockedBy")
 
   @@index([operatorId])
 }
@@ -1254,6 +1255,7 @@ model BackupConfig {
   id Int @id @default(1)
 
   enabled        Boolean @default(false)
+  enabledAt      DateTime? @db.Timestamptz(3) // quando o automático foi ligado (âncora do alerta "nunca rodou"); nulo com ele desligado
   hourLocal      Int     @default(3) // hora cheia em Brasília (UTC-3 fixo), 0..23
   frequencyDays  Int     @default(1) // 1, 2 ou 7 (CHECK)
   retentionCount Int     @default(7) // quantas cópias manter no destino (>= 1); nunca apaga a única/última
@@ -1640,6 +1642,14 @@ model PaymentReversal {
   resolvedAt       DateTime? @db.Timestamptz(3)
   resolvedByUserId String?
   resolvedBy       User?     @relation("PaymentReversalResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: Restrict)
+
+  // DL7/P3 (aceita pelo dono em 06/10/2026): chargeback perdido (LOST/ACCEPTED) bloqueia o modo cartão, e o ADMIN pode DESBLOQUEAR MANUALMENTE, caso a caso. O bloqueio continua DERIVADO
+  // (sem flag): bloqueado = chargeback OPEN, OU LOST/ACCEPTED com `cardUnblockedAt` nulo. O desbloqueio NÃO apaga o registro nem mexe no dossiê/desfecho (o status segue LOST/ACCEPTED).
+  // Os três campos nascem juntos (CHECK payment_reversal_card_unblock) e, uma vez gravados, são imutáveis (trigger).
+  cardUnblockedAt       DateTime? @db.Timestamptz(3)
+  cardUnblockedByUserId String?
+  cardUnblockedBy       User?     @relation("PaymentReversalCardUnblockedBy", fields: [cardUnblockedByUserId], references: [id], onDelete: Restrict)
+  cardUnblockReason     String?   @db.VarChar(500)
 
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
   // Só na migration: ux_payment_reversal_chargeback_per_intent (paymentIntentId) WHERE kind = 'CHARGEBACK'; ix_payment_reversal_card_block (userId) WHERE chargeback

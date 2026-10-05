@@ -71,6 +71,14 @@ export const updateChargebackSchema = z
   })
 export type UpdateChargebackInput = z.infer<typeof updateChargebackSchema>
 
+export const unblockCardSchema = z
+  .object({
+    reason: textoCurto(10, 500, 'Explique por que o cartão volta a ser liberado (mínimo 10 caracteres).'),
+    currentPassword: senhaAtual,
+  })
+  .strict()
+export type UnblockCardInput = z.infer<typeof unblockCardSchema>
+
 export const listChargebacksQuerySchema = z.object({
   outcome: z.enum(['OPEN', 'WON', 'LOST', 'ACCEPTED']).optional(),
   paymentIntentId: z.string().min(1).max(64).optional(),
