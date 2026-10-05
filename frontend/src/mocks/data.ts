@@ -206,6 +206,13 @@ export const mockSites: Site[] = [
   },
 ]
 
+/** `Date.now() - ms` em ISO. Só alimenta `lastSeenAt`/`connectedAt`/`disconnectedAt` dos carregadores de demo; a tela usa o `online` pronto, nunca recalcula por estas datas. */
+const msAgo = (ms: number) => new Date(Date.now() - ms).toISOString()
+
+/**
+ * `online` é decisão do SERVIDOR (lote 1): aqui é um valor fixo por carregador. cp_1/cp_2/cp_3 online; cp_4 (Outlet Campinas, conector livre) CAIU há 2 h e cp_5 nunca
+ * reportou - são os que mostram o aviso "offline" no diálogo de iniciar recarga e recusam o POST com `CHARGE_POINT_OFFLINE`.
+ */
 export const mockChargePoints: ChargePoint[] = [
   {
     id: "cp_1",
@@ -217,6 +224,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-001",
     firmwareVersion: "1.4.2",
     active: true,
+    online: true,
+    lastSeenAt: msAgo(20_000),
+    connectedAt: msAgo(3 * 3_600_000),
+    disconnectedAt: null,
     createdAt: "2026-08-01T12:00:00.000Z",
     updatedAt: "2026-08-01T12:00:00.000Z",
   },
@@ -230,6 +241,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-002",
     firmwareVersion: "2.0.1",
     active: true,
+    online: true,
+    lastSeenAt: msAgo(20_000),
+    connectedAt: msAgo(3 * 3_600_000),
+    disconnectedAt: null,
     createdAt: "2026-08-02T12:00:00.000Z",
     updatedAt: "2026-08-02T12:00:00.000Z",
   },
@@ -243,6 +258,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-003",
     firmwareVersion: "1.4.2",
     active: true,
+    online: true,
+    lastSeenAt: msAgo(20_000),
+    connectedAt: msAgo(3 * 3_600_000),
+    disconnectedAt: null,
     createdAt: "2026-08-03T12:00:00.000Z",
     updatedAt: "2026-08-03T12:00:00.000Z",
   },
@@ -256,6 +275,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-004",
     firmwareVersion: "3.1.0",
     active: true,
+    online: false,
+    lastSeenAt: msAgo(2 * 3_600_000),
+    connectedAt: msAgo(5 * 3_600_000),
+    disconnectedAt: msAgo(2 * 3_600_000 - 60_000),
     createdAt: "2026-08-04T12:00:00.000Z",
     updatedAt: "2026-08-04T12:00:00.000Z",
   },
@@ -269,6 +292,10 @@ export const mockChargePoints: ChargePoint[] = [
     serialNumber: "SN-005",
     firmwareVersion: "2.0.1",
     active: true,
+    online: false,
+    lastSeenAt: null,
+    connectedAt: null,
+    disconnectedAt: null,
     createdAt: "2026-08-05T12:00:00.000Z",
     updatedAt: "2026-08-05T12:00:00.000Z",
   },

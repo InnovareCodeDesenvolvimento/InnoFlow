@@ -53,8 +53,8 @@ export function isPasswordResetFlash(state: unknown): boolean {
 // ---- Retry-After ----------------------------------------------------------------------------------------------------------------------------------
 
 /**
- * Segundos de espera do 429, do header `Retry-After` (inteiro de segundos; a forma de data HTTP também é aceita). `null` quando o header não é legível: o CORS do backend
- * não tem `exposedHeaders`, então só chega com o mesmo domínio (nginx na frente) - fora disso a mensagem fala "alguns minutos".
+ * Segundos de espera do 429, do header `Retry-After` (inteiro de segundos; a forma de data HTTP também é aceita). `null` quando o header não é legível (ausente, ou
+ * descartado por um proxy). O CORS do backend o expõe entre domínios desde o lote 1 (`Access-Control-Expose-Headers: Retry-After`, 3e0dbb3); só nesse `null` a mensagem fala "alguns minutos".
  */
 export function retryAfterSeconds(err: unknown, now: number = Date.now()): number | null {
   if (!axios.isAxiosError(err)) return null

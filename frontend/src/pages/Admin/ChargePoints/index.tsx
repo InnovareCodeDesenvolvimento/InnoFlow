@@ -135,7 +135,7 @@ export default function ChargePointsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <ChargePointCommandsMenu chargePointId={cp.id} chargePointName={cp.ocppIdentity} connectors={cp.connectors} />
+                      <ChargePointCommandsMenu chargePointId={cp.id} chargePointName={cp.ocppIdentity} connectors={cp.connectors} online={cp.online} />
                       <Button variant="ghost" size="icon" aria-label={`Tarifas de ${cp.ocppIdentity}`} title="Tarifas" onClick={() => setTariffsFor(cp)}>
                         <Tag className="h-4 w-4" aria-hidden="true" />
                       </Button>

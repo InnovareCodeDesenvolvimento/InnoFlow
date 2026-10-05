@@ -14,11 +14,13 @@ import { aguardarEstavel, prepararPagina } from "./estabilizar"
  * Rodar: `npx playwright test --config playwright.visual.config.ts criterios-recarga-remota --update-snapshots=none`.
  *
  * Estados (conta ADMIN do mock; relógio fixo, saltos explícitos para o mock sair de PENDING): form vazio · form preenchido (busca com dívida, motorista escolhido, motivo longo) ·
- * confirmação com dívida + erro por code · aguardando · recusado · aceito.
+ * confirmação com dívida + erro por code · aguardando · aceito (com sessão: "Ver sessão") · recusado · aguardando a sessão iniciar (cenário `session-never`) · carregador offline
+ * (cp_4: aviso, conectores bloqueados, "Revisar" desabilitado).
  */
 
 const PASTA = "e2e-visual/.resultados/recarga-remota"
 const CP = "CP-VILA-NORTE-01"
+const CP_OFFLINE = "CP-OUTLET-CAMPINAS-01"
 const MOTIVO = "Motorista sem bateria no celular, recarga iniciada pelo suporte por telefone a pedido do cliente que está no local"
 
 function gravar(nome: string, dados: unknown) {
@@ -39,8 +41,8 @@ async function entrar(page: Page) {
 
 const dialogo = (page: Page) => page.getByRole("dialog", { name: "Iniciar recarga" })
 
-async function abrir(page: Page) {
-  await page.getByRole("button", { name: `Comandos de ${CP}` }).click()
+async function abrir(page: Page, cp = CP) {
+  await page.getByRole("button", { name: `Comandos de ${cp}` }).click()
   await page.getByRole("menuitem", { name: /Iniciar recarga/ }).click()
   await expect(dialogo(page)).toBeVisible()
   await page.waitForTimeout(500) // entrada animada do Dialog (reduced-motion: ~0), margem
@@ -63,7 +65,7 @@ async function geometria(page: Page) {
         return { nome: (e.getAttribute("aria-label") ?? e.textContent ?? e.tagName).trim().replace(/\s+/g, " ").slice(0, 44), h: Math.round(b.height * 10) / 10, w: Math.round(b.width * 10) / 10 }
       })
     const fechar = d.querySelector("button[aria-label='Fechar']")!.getBoundingClientRect()
-    const rodape = [...d.querySelectorAll("button, a")].filter((e) => visivel(e) && /Revisar|Iniciar recarga|Voltar|Cancelar|Concluir|Fechar janela|Tentar|Ver sessões/.test(e.textContent ?? "")).map((e) => e.getBoundingClientRect())
+    const rodape = [...d.querySelectorAll("button, a")].filter((e) => visivel(e) && /Revisar|Iniciar recarga|Voltar|Cancelar|Concluir|Fechar janela|Tentar|Ver sess/.test(e.textContent ?? "")).map((e) => e.getBoundingClientRect())
     return {
       janela: { w: window.innerWidth, h: window.innerHeight },
       dialogo: { x: r.x, y: r.y, w: r.width, h: r.height, direita: r.right, base: r.bottom },
@@ -150,8 +152,38 @@ test.describe("Iniciar recarga — régua de geometria, axe e contraste", () => 
 
     // 5) aceito (salto do relógio: o mock passa dos 3 s e o próximo ciclo traz ACCEPTED)
     await page.clock.setFixedTime(new Date(T0.getTime() + 5_000))
-    await expect(page.getByTestId("remote-start-status")).toHaveAttribute("data-phase", "ACCEPTED", { timeout: 15_000 })
+    await expect(page.getByTestId("remote-start-status")).toHaveAttribute("data-phase", "ACCEPTED", { timeout: 20_000 })
+    await expect(dialogo(page).getByRole("link", { name: "Ver sessão", exact: true })).toBeVisible()
     await medirEstado(page, projeto, "5-aceito")
+  })
+
+  test("estado aguardando a sessão iniciar (cenário do mock)", async ({ page }, info) => {
+    const projeto = info.project.name
+    test.setTimeout(120_000)
+    await entrar(page)
+    await page.evaluate(() => localStorage.setItem("mock:remote-start", "session-never"))
+    await abrir(page)
+    const d = dialogo(page)
+    await d.getByRole("searchbox", { name: "Buscar motorista" }).fill("carla")
+    await d.getByText("Carla Motorista", { exact: true }).first().click()
+    await d.getByLabel(/Motivo/).fill(MOTIVO)
+    await d.getByRole("button", { name: /Revisar recarga/ }).click()
+    await d.getByRole("button", { name: "Iniciar recarga" }).click()
+    await page.clock.setFixedTime(new Date(T0.getTime() + 5_000))
+    await expect(page.getByTestId("remote-start-status")).toHaveAttribute("data-phase", "STARTING", { timeout: 15_000 })
+    await medirEstado(page, projeto, "7-aguardando-sessao")
+  })
+
+  test("carregador offline: aviso, conectores bloqueados e 'Revisar' desabilitado", async ({ page }, info) => {
+    const projeto = info.project.name
+    test.setTimeout(120_000)
+    await entrar(page)
+    await abrir(page, CP_OFFLINE)
+    await expect(dialogo(page).getByTestId("remote-start-offline")).toBeVisible()
+    const g = await medirEstado(page, projeto, "8-offline")
+    expect(g.h3).toEqual([])
+    await expect(dialogo(page).getByRole("radio", { name: /Conector 1/ })).toBeDisabled()
+    await expect(dialogo(page).getByRole("button", { name: /Revisar recarga/ })).toBeDisabled()
   })
 
   test("estado recusado (cenário do mock)", async ({ page }, info) => {

@@ -8,23 +8,43 @@
  *
  * CENÁRIOS por `localStorage["mock:remote-start"]` (lido no POST): `rejected` (o carregador recusa), `timeout` (sem resposta em 35 s), `not-found` (o GET dá 404),
  * `stuck` (fica PENDING para sempre → "ainda sem resposta" aos 60 s), `poll-5xx` (o GET dá 500), `offline`, `busy`, `forbidden`, `5xx` (POST 500). Sem valor = aceito.
+ * ACEITO e `sessionId` (contrato do lote 1): sem valor, as `SESSION_LATE_POLLS` primeiras consultas depois do aceito devolvem `sessionId: null` (o StartTransaction ainda não
+ * chegou) e as seguintes o id de uma sessão REAL do mock (abre no detalhe de Sessões); `session-never` = fica `null` para sempre (a sessão nunca nasce → aos 60 s, link para a
+ * lista); `session-expired` = `null` por algumas consultas e depois 404 (o registro do comando expirou). A progressão é por CONTAGEM de consultas, não por relógio (o
+ * harness visual fixa o relógio).
+ * Offline por DADO: carregador com `online: false` (cp_4, cp_5) → `CHARGE_POINT_OFFLINE`, igual ao servidor; o cenário `offline` força o mesmo em um carregador online (corrida).
  * Por DADO (sem gatilho): Juliana/Aline/Camila têm dívida (e saldo zero) → `DRIVER_HAS_OPEN_DEBT`; Eduardo (saldo zero, sem dívida) → `INSUFFICIENT_BALANCE`; Carla (R$ 50,00) inicia.
  * Resultado: PENDING por `PENDING_MS` (dá para ver "aguardando") e depois o desfecho do cenário. Estado vive na PÁGINA (zera a cada `page.goto`).
  */
 import { mockChargePoints, mockConnectors } from "./data"
 import { getDriverWallet } from "./driversData"
+import { generatedSessions } from "./reportsData"
 import type { AdminCommandStatusResponse, MeCommandStatus, RemoteStartResponse, Role } from "@/types/api"
 
 export const PENDING_MS = 3_000
+/** Quantas consultas DEPOIS do aceito ainda voltam `sessionId: null` no cenário padrão. */
+export const SESSION_LATE_POLLS = 2
 const REASON_MIN = 10
 const REASON_MAX = 200
 // eslint-disable-next-line no-control-regex -- espelha o backend
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/
 
-export type RemoteStartScenario = "accepted" | "rejected" | "timeout" | "not-found" | "stuck" | "poll-5xx" | "offline" | "busy" | "forbidden" | "5xx"
+export type RemoteStartScenario =
+  | "accepted"
+  | "rejected"
+  | "timeout"
+  | "not-found"
+  | "stuck"
+  | "poll-5xx"
+  | "offline"
+  | "busy"
+  | "forbidden"
+  | "5xx"
+  | "session-never"
+  | "session-expired"
 
 export function parseScenario(raw: string | null): RemoteStartScenario {
-  const known: RemoteStartScenario[] = ["rejected", "timeout", "not-found", "stuck", "poll-5xx", "offline", "busy", "forbidden", "5xx"]
+  const known: RemoteStartScenario[] = ["rejected", "timeout", "not-found", "stuck", "poll-5xx", "offline", "busy", "forbidden", "5xx", "session-never", "session-expired"]
   return known.find((k) => k === raw) ?? "accepted"
 }
 
@@ -32,6 +52,9 @@ interface CommandRecord {
   startedAt: number
   scenario: RemoteStartScenario
   operatorId: string | null
+  chargePointId: string
+  /** Consultas já respondidas com ACCEPTED (a progressão do `sessionId` é por contagem). */
+  acceptedPolls: number
 }
 const commands = new Map<string, CommandRecord>()
 let counter = 1
@@ -84,13 +107,13 @@ export function startRemote(opts: {
   if (!cp) return fail(404, "CHARGE_POINT_NOT_FOUND", "Charge point não encontrado.")
   const connector = mockConnectors.find((c) => c.chargePointId === cp.id && c.connectorId === body.connectorId)
   if (!connector) return fail(404, "CONNECTOR_NOT_FOUND", "Conector não encontrado.")
-  if (scenario === "offline") return fail(409, "CHARGE_POINT_OFFLINE", "Charge point está offline.")
+  if (scenario === "offline" || !cp.online) return fail(409, "CHARGE_POINT_OFFLINE", "Charge point está offline.")
   if (scenario === "busy" || connector.status !== "AVAILABLE") return fail(409, "CONNECTOR_BUSY", "Conector ocupado.", [{ path: "connectorStatus", message: connector.status }])
   if (driver.openDebtCents > 0) return fail(409, "DRIVER_HAS_OPEN_DEBT", "Motorista com dívida em aberto.")
   if (driver.balanceCents < 2000) return fail(409, "INSUFFICIENT_BALANCE", "Saldo insuficiente para iniciar uma recarga.")
 
   const correlationId = nextCorrelationId()
-  commands.set(correlationId, { startedAt: Date.now(), scenario, operatorId: cp.operatorId })
+  commands.set(correlationId, { startedAt: Date.now(), scenario, operatorId: cp.operatorId, chargePointId: cp.id, acceptedPolls: 0 })
   return { ok: true, status: 202, body: { correlationId, status: "PENDING", idTag: `VIRT-${correlationId.slice(-6)}`, walletBalanceCents: driver.balanceCents, estimatedMaxCostCents: Math.min(driver.balanceCents, 5000) } }
 }
 
@@ -107,5 +130,20 @@ export function commandStatus(correlationId: string, scope: { role: Role; operat
   if (record.scenario === "poll-5xx") return { ok: false, status: 500, code: "INTERNAL_ERROR", message: "Erro interno." }
   if (record.scenario === "stuck" || Date.now() - record.startedAt < PENDING_MS) return { ok: true, body: { status: "PENDING" } }
   const final: MeCommandStatus = record.scenario === "rejected" ? "REJECTED" : record.scenario === "timeout" ? "TIMEOUT" : "ACCEPTED"
-  return { ok: true, body: { status: final } }
+  if (final !== "ACCEPTED") return { ok: true, body: { status: final } }
+
+  // Aceito (remote-start): `sessionId` null até o StartTransaction chegar, depois o id da sessão.
+  record.acceptedPolls += 1
+  if (record.scenario === "session-never") return { ok: true, body: { status: "ACCEPTED", sessionId: null } }
+  if (record.scenario === "session-expired" && record.acceptedPolls > SESSION_LATE_POLLS) return { ok: false, status: 404, code: "COMMAND_NOT_FOUND", message: "Comando não encontrado ou expirado." }
+  if (record.acceptedPolls <= SESSION_LATE_POLLS) return { ok: true, body: { status: "ACCEPTED", sessionId: null } }
+  return { ok: true, body: { status: "ACCEPTED", sessionId: mockSessionIdFor(record.chargePointId) } }
+}
+
+/** Id de uma sessão REAL do mock (a mais recente do carregador; senão qualquer uma): `GET /api/admin/reports/sessions/:id` responde com o detalhe. */
+function mockSessionIdFor(chargePointId: string): string | null {
+  const byCp = generatedSessions.filter((s) => s.chargePointId === chargePointId)
+  const pool = byCp.length > 0 ? byCp : generatedSessions
+  const latest = pool.reduce<(typeof pool)[number] | null>((acc, s) => (acc === null || s.startedAt > acc.startedAt ? s : acc), null)
+  return latest?.id ?? null
 }

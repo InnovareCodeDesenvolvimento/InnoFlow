@@ -1,6 +1,7 @@
 import axios from "axios"
 import { getApiErrorCode, getApiErrorStatus } from "@/services/api"
 import { NETWORK_ERROR_MESSAGE, RATE_LIMITED_ACCOUNT_MESSAGE } from "@/lib/authErrors"
+import { retryAfterSeconds, waitPhrase } from "@/lib/passwordReset"
 import type { ApiErrorBody, ConnectorStatus, MeCommandStatus } from "@/types/api"
 
 /**
@@ -38,12 +39,22 @@ export function validateReason(raw: string): ReasonValidation {
 
 /**
  * Conector que dá para iniciar agora: status `AVAILABLE`. É o que o servidor aceita (`iniciarSessaoRemota` responde 409 `CONNECTOR_BUSY` para qualquer outro, inclusive
- * `PREPARING`) — a parte "carregador online" é do servidor (`CHARGE_POINT_OFFLINE`): o DTO admin de pontos de recarga não traz `online`, e reescrever o limiar de 5 min
- * aqui seria duplicar a regra única de `core/estacoes/disponibilidade.ts`.
+ * `PREPARING`). A parte "carregador online" vem do DTO (`ChargePoint.online`, calculado pelo SERVIDOR - nunca refazer o limiar de 5 min aqui) e é tratada por
+ * `isChargePointOffline`; o servidor continua sendo a fonte de verdade (corrida: `CHARGE_POINT_OFFLINE`).
  */
 export function isConnectorStartable(status: ConnectorStatus): boolean {
   return status === "AVAILABLE"
 }
+
+/**
+ * Só `false` EXPLÍCITO bloqueia o formulário: `undefined` (servidor sem o campo, tela que não sabe) deixa seguir e o servidor decide (`CHARGE_POINT_OFFLINE`).
+ * Nunca deduzir offline de `lastSeenAt` no navegador (relógio do cliente + ignoraria a queda registrada em `disconnectedAt`).
+ */
+export function isChargePointOffline(online: boolean | undefined): boolean {
+  return online === false
+}
+
+export const CHARGE_POINT_OFFLINE_NOTICE = "Este carregador está offline. Não é possível iniciar uma recarga agora."
 
 // ---- Confirmação ----------------------------------------------------------------------------------------------------------------------------------------
 
@@ -71,7 +82,11 @@ export function remoteStartError(err: unknown): RemoteStartError {
     if (status === undefined) return { message: `${NETWORK_ERROR_MESSAGE} ${REMOTE_START_UNSURE_MESSAGE}` }
     if (status >= 500) return { message: `O serviço está instável agora. ${REMOTE_START_UNSURE_MESSAGE}` }
   }
-  if (status === 429) return { message: RATE_LIMITED_ACCOUNT_MESSAGE }
+  if (status === 429) {
+    // `Retry-After` ficou legível entre domínios (CORS expõe o header, lote 1): com o tempo exato a mensagem diz quanto esperar; sem ele, o texto de sempre ("alguns minutos").
+    const wait = retryAfterSeconds(err)
+    return { message: wait === null ? RATE_LIMITED_ACCOUNT_MESSAGE : `Muitas tentativas para esta conta. Tente de novo em ${waitPhrase(wait)}.` }
+  }
   switch (code) {
     case "VALIDATION_ERROR": {
       const paths = axios.isAxiosError<ApiErrorBody>(err) ? (err.response?.data?.details ?? []).map((d) => d.path) : []
@@ -101,7 +116,7 @@ export function remoteStartError(err: unknown): RemoteStartError {
 
 // ---- Acompanhamento do resultado ------------------------------------------------------------------------------------------------------------------------
 
-/** Consulta a cada 2 s por até 60 s (o servidor dá TIMEOUT sozinho em 35 s; os 60 s são folga). */
+/** Consulta a cada 2 s por até 60 s (o servidor dá TIMEOUT sozinho em 35 s; os 60 s são folga). O limite vale para o TOTAL (inclui a espera pela sessão depois do "aceito"). */
 export const COMMAND_POLL_INTERVAL_MS = 2_000
 export const COMMAND_POLL_TIMEOUT_MS = 60_000
 /** Falhas de rede/5xx SEGUIDAS toleradas durante o acompanhamento antes de desistir (uma falha isolada não derruba o acompanhamento). */
@@ -109,9 +124,17 @@ export const COMMAND_POLL_MAX_FAILURES = 3
 
 /**
  * Onde o acompanhamento está. `PENDING` do servidor vira `POLLING` aqui; os 3 desfechos do carregador vêm do contrato (`MeCommandStatus`); os demais são NOSSOS:
- * `UNAVAILABLE` (404: expirou/fora de escopo — "resultado indisponível"), `NO_ANSWER` (passou dos 60 s ainda pendente) e `ERROR` (conexão com o servidor falhou).
+ * `STARTING` (o carregador ACEITOU, mas a sessão ainda não nasceu: `sessionId: null` - continua consultando, NÃO é desfecho), `UNAVAILABLE` (404: expirou/fora de escopo
+ * — "resultado indisponível"), `NO_ANSWER` (passou dos 60 s ainda pendente) e `ERROR` (conexão com o servidor falhou).
+ * `ACCEPTED` é terminal e pode ou não ter `sessionId`: sem ele (60 s sem a sessão, 404 depois do aceito, servidor sem o campo) o link vai para a LISTA de Sessões.
  */
-export type CommandPhase = "POLLING" | Exclude<MeCommandStatus, "PENDING"> | "UNAVAILABLE" | "NO_ANSWER" | "ERROR"
+export type CommandPhase = "POLLING" | "STARTING" | Exclude<MeCommandStatus, "PENDING"> | "UNAVAILABLE" | "NO_ANSWER" | "ERROR"
+
+/** Estado devolvido pelo acompanhamento: a fase e, no `ACCEPTED` com sessão criada, o id dela. */
+export interface CommandProgress {
+  phase: CommandPhase | "IDLE"
+  sessionId: string | null
+}
 
 const TERMINAL_PHASES: ReadonlySet<string> = new Set<CommandPhase>(["ACCEPTED", "REJECTED", "TIMEOUT", "UNAVAILABLE", "NO_ANSWER", "ERROR"])
 
@@ -129,10 +152,20 @@ export interface CommandPhaseCopy {
 /** Texto de cada fase. REJECTED NÃO é "erro": o carregador respondeu, só disse não (cabo desconectado, equipamento ocupado…). */
 export const COMMAND_PHASE_COPY: Record<CommandPhase, CommandPhaseCopy> = {
   POLLING: { title: "Aguardando o carregador…", detail: "O comando foi enviado. O carregador costuma responder em poucos segundos.", tone: "info" },
+  STARTING: { title: "Aguardando a sessão iniciar…", detail: "O carregador aceitou o comando. Falta ele confirmar o início da recarga — costuma levar alguns segundos.", tone: "info" },
   ACCEPTED: { title: "O carregador aceitou.", detail: "A recarga está começando. A sessão aparece em Sessões assim que o carregador confirmar o início.", tone: "success" },
   REJECTED: { title: "O carregador recusou o início da recarga.", detail: "Nenhuma sessão foi iniciada e nada foi cobrado. Confira se o cabo está conectado ao veículo e se o conector está livre, e tente de novo.", tone: "warning" },
   TIMEOUT: { title: "Sem resposta do carregador.", detail: "O carregador não respondeu a tempo. A recarga pode ter começado mesmo assim: confira em Sessões antes de tentar de novo.", tone: "warning" },
   UNAVAILABLE: { title: "Resultado indisponível.", detail: "Não deu para ler o resultado deste comando (ele pode ter expirado). Confira em Sessões se a recarga começou.", tone: "warning" },
   NO_ANSWER: { title: "Ainda sem resposta.", detail: "Passou de 1 minuto sem resultado. Confira em Sessões se a recarga começou antes de tentar de novo.", tone: "warning" },
   ERROR: { title: "Perdemos a conexão com o servidor.", detail: "Não deu para acompanhar o resultado. Confira em Sessões se a recarga começou antes de tentar de novo.", tone: "danger" },
+}
+
+/** `ACCEPTED` com a sessão já criada: o texto fala da sessão (o padrão fala de "assim que o carregador confirmar o início", que já aconteceu). */
+export const ACCEPTED_WITH_SESSION_DETAIL = "A recarga começou e a sessão já foi criada. Abra o detalhe para acompanhar."
+
+/** Texto da fase; no `ACCEPTED` varia conforme a sessão já existe ou não. */
+export function commandPhaseCopy(phase: CommandPhase, sessionId: string | null): CommandPhaseCopy {
+  const copy = COMMAND_PHASE_COPY[phase]
+  return phase === "ACCEPTED" && sessionId ? { ...copy, detail: ACCEPTED_WITH_SESSION_DETAIL } : copy
 }

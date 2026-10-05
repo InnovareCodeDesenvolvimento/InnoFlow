@@ -13,6 +13,7 @@ import type { Connector, DriverListRow } from "@/types/api"
 const sent: unknown[] = []
 let sendResult: { ok: true } | { ok: false; error: unknown } = { ok: true }
 let phase: CommandPhase | "IDLE" = "IDLE"
+let sessionId: string | null = null
 const mutateAsync = (payload: unknown) => {
   sent.push(payload)
   return sendResult.ok ? Promise.resolve({ correlationId: "3f9c2a10-5b7e-4d21-9a6c-000000000001", status: "PENDING" }) : Promise.reject(sendResult.error)
@@ -20,7 +21,7 @@ const mutateAsync = (payload: unknown) => {
 
 vi.mock("@/hooks/useRemoteStart", () => ({
   useRemoteStart: () => ({ mutateAsync, isPending: false, reset: () => undefined }),
-  useCommandPolling: (id: string | null) => (id ? phase : "IDLE"),
+  useCommandPolling: (id: string | null) => ({ phase: id ? phase : "IDLE", sessionId: id ? sessionId : null }),
 }))
 
 const carla: DriverListRow = { id: "drv_1", name: "Carla Motorista", email: "carla@x.com", walletBalanceCents: 5000, openDebtCents: 0, activeSessionId: null, createdAt: "2026-09-01T12:00:00.000Z" }
@@ -55,18 +56,20 @@ function httpError(status: number, code: string, details?: Array<{ path?: string
   return err
 }
 
-function renderDialog(connectors: Connector[] = [connector(1, "AVAILABLE"), connector(2, "CHARGING")], ui: ReactNode = null) {
+function renderDialog(connectors: Connector[] = [connector(1, "AVAILABLE"), connector(2, "CHARGING")], ui: ReactNode = null, online?: boolean) {
   const client = new QueryClient()
   const onOpenChange = vi.fn()
-  render(
+  const tree = (list: Connector[], on: boolean | undefined) => (
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <RemoteStartDialog chargePointId="cp1" chargePointName="CP-VILA-NORTE-01" connectors={connectors} onOpenChange={onOpenChange} />
+        <RemoteStartDialog chargePointId="cp1" chargePointName="CP-VILA-NORTE-01" connectors={list} online={on} onOpenChange={onOpenChange} />
         {ui}
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
-  return { onOpenChange }
+  const { rerender } = render(tree(connectors, online))
+  // Simula a lista viva mudando por baixo do diálogo (tempo real / invalidate): outro status de conector e/ou `online` novo.
+  return { onOpenChange, update: (list: Connector[], on?: boolean) => rerender(tree(list, on)) }
 }
 
 const flat = (s: string | null) => (s ?? "").split(String.fromCharCode(160)).join(" ")
@@ -82,6 +85,7 @@ beforeEach(() => {
   sent.length = 0
   sendResult = { ok: true }
   phase = "IDLE"
+  sessionId = null
   drivers = [carla, juliana]
 })
 
@@ -212,5 +216,114 @@ describe("RemoteStartDialog — dinheiro de uma PESSOA: preencher, CONFIRMAR, s�
     expect(within(dialog()).queryByRole("link", { name: "Ver sessões" })).toBeNull()
     await userEvent.click(await within(dialog()).findByRole("button", { name: /Tentar de novo/ }))
     expect(within(dialog()).getByTestId("remote-start-summary")).toBeInTheDocument()
+  })
+})
+
+describe("carregador OFFLINE (`online === false`, calculado pelo servidor)", () => {
+  it("avisa com o texto combinado, NENHUM conector é escolhível (nem o AVAILABLE) e 'Revisar' fica desabilitado - sem depender de erro do servidor", async () => {
+    renderDialog([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], null, false)
+    expect(within(dialog()).getByTestId("remote-start-offline")).toHaveTextContent("Este carregador está offline. Não é possível iniciar uma recarga agora.")
+    for (const n of [1, 2]) expect(within(dialog()).getByRole("radio", { name: new RegExp(`Conector ${n}`) })).toBeDisabled()
+    expect(within(dialog()).queryByText(/Nenhum conector está livre/)).toBeNull() // o motivo real é o offline
+    expect(within(dialog()).getByRole("button", { name: /Revisar recarga/ })).toBeDisabled()
+    expect(sent).toHaveLength(0)
+  })
+
+  it("com UM conector livre ele NÃO vem escolhido (online vem escolhido; offline não)", () => {
+    renderDialog([connector(1, "AVAILABLE")], null, false)
+    expect(within(dialog()).getByRole("radio", { name: /Conector 1/ })).not.toBeChecked()
+  })
+
+  it("online true ou desconhecido (undefined) NÃO mostra o aviso e deixa escolher", () => {
+    renderDialog([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], null, true)
+    expect(within(dialog()).queryByTestId("remote-start-offline")).toBeNull()
+    expect(within(dialog()).getByRole("radio", { name: /Conector 1/ })).toBeEnabled()
+  })
+
+  it("online ausente (servidor antigo): segue como antes, o servidor decide (CHARGE_POINT_OFFLINE por code)", async () => {
+    sendResult = { ok: false, error: httpError(409, "CHARGE_POINT_OFFLINE") }
+    renderDialog([connector(1, "AVAILABLE")])
+    expect(within(dialog()).queryByTestId("remote-start-offline")).toBeNull()
+    await fillForm()
+    await userEvent.click(within(dialog()).getByRole("button", { name: /Revisar recarga/ }))
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Iniciar recarga" }))
+    expect(await screen.findByTestId("remote-start-error")).toHaveTextContent("O carregador está offline")
+  })
+
+  it("corrida: ONLINE ao abrir, mas o servidor responde CHARGE_POINT_OFFLINE ao confirmar - o tratamento por code continua valendo", async () => {
+    sendResult = { ok: false, error: httpError(409, "CHARGE_POINT_OFFLINE") }
+    renderDialog([connector(1, "AVAILABLE")], null, true)
+    await fillForm()
+    await userEvent.click(within(dialog()).getByRole("button", { name: /Revisar recarga/ }))
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Iniciar recarga" }))
+    expect(await screen.findByTestId("remote-start-error")).toHaveTextContent("O carregador está offline — o comando não pode ser enviado")
+  })
+
+  it("o carregador cai COM o formulário aberto: o aviso aparece e a escolha some; se voltar, o formulário volta ao normal", async () => {
+    const { update } = renderDialog([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], null, true)
+    await userEvent.click(within(dialog()).getByRole("radio", { name: /Conector 1/ }))
+    expect(within(dialog()).getByRole("radio", { name: /Conector 1/ })).toBeChecked()
+    update([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], false)
+    expect(within(dialog()).getByTestId("remote-start-offline")).toBeInTheDocument()
+    expect(within(dialog()).getByRole("radio", { name: /Conector 1/ })).toBeDisabled()
+    expect(within(dialog()).getByRole("button", { name: /Revisar recarga/ })).toBeDisabled()
+    update([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], true)
+    expect(within(dialog()).queryByTestId("remote-start-offline")).toBeNull()
+    expect(within(dialog()).getByRole("radio", { name: /Conector 1/ })).toBeChecked() // a escolha anterior volta (é derivada, não perdida)
+  })
+})
+
+describe("aceito: link direto para a sessão, espera pela sessão e fallback para a lista", () => {
+  async function toProgress() {
+    const ctx = renderDialog([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], null, true)
+    await fillForm()
+    await userEvent.click(within(dialog()).getByRole("button", { name: /Revisar recarga/ }))
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Iniciar recarga" }))
+    return ctx
+  }
+
+  it("ACCEPTED com sessionId: 'Ver sessão' vai DIRETO ao detalhe (?sessao=<id>) e o texto fala da sessão", async () => {
+    phase = "ACCEPTED"
+    sessionId = "cmsess123"
+    await toProgress()
+    const link = await within(dialog()).findByRole("link", { name: "Ver sessão" })
+    expect(link).toHaveAttribute("href", "/admin/sessoes?sessao=cmsess123")
+    expect(within(dialog()).queryByRole("link", { name: "Ver sessões" })).toBeNull()
+    expect(screen.getByTestId("remote-start-status")).toHaveTextContent("a sessão já foi criada")
+  })
+
+  it("STARTING (aceito, sessão ainda não nasceu): 'Aguardando a sessão iniciar…' na região aria-live, SEM link e SEM tratar como concluído", async () => {
+    phase = "STARTING"
+    await toProgress()
+    const status = await screen.findByTestId("remote-start-status")
+    expect(status).toHaveAttribute("aria-live", "polite")
+    expect(status).toHaveAttribute("data-phase", "STARTING")
+    expect(status).toHaveTextContent("Aguardando a sessão iniciar…")
+    expect(within(dialog()).queryByRole("link")).toBeNull()
+    expect(within(dialog()).getByRole("button", { name: "Fechar janela" })).toBeInTheDocument() // ainda não terminou
+  })
+
+  it("ACCEPTED sem sessionId (a sessão não chegou em 60 s / 404 depois do aceito): cai no link para a LISTA 'Ver sessões'", async () => {
+    phase = "ACCEPTED"
+    sessionId = null
+    await toProgress()
+    expect(await within(dialog()).findByRole("link", { name: "Ver sessões" })).toHaveAttribute("href", "/admin/sessoes")
+    expect(within(dialog()).queryByRole("link", { name: "Ver sessão" })).toBeNull()
+  })
+})
+
+describe("o acompanhamento NÃO some quando o status do conector muda depois do envio (bug achado: a escolha derivada virava null)", () => {
+  it("depois de enviar, o conector passa a CHARGING (invalidate/tempo real): confirmação e acompanhamento continuam na tela, com o mesmo conector", async () => {
+    phase = "POLLING"
+    const { update } = renderDialog([connector(1, "AVAILABLE"), connector(2, "AVAILABLE")], null, true)
+    await fillForm()
+    await userEvent.click(within(dialog()).getByRole("button", { name: /Revisar recarga/ }))
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Iniciar recarga" }))
+    expect(within(dialog()).getByRole("heading", { name: "Acompanhando a recarga" })).toBeInTheDocument()
+
+    update([connector(1, "CHARGING"), connector(2, "AVAILABLE")], true)
+    expect(within(dialog()).getByRole("heading", { name: "Acompanhando a recarga" })).toBeInTheDocument()
+    expect(within(dialog()).getByText(/conector 1 · carteira de Carla Motorista/)).toBeInTheDocument()
+    expect(screen.getByTestId("remote-start-status")).toBeInTheDocument()
   })
 })

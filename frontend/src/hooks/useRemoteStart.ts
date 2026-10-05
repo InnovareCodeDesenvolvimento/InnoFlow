@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query"
 import { chargePointsService } from "@/services/chargePoints"
 import { adminCommandsService } from "@/services/adminCommands"
 import { getApiErrorStatus } from "@/services/api"
-import { COMMAND_POLL_INTERVAL_MS, COMMAND_POLL_MAX_FAILURES, COMMAND_POLL_TIMEOUT_MS, type CommandPhase } from "@/lib/remoteStart"
+import { COMMAND_POLL_INTERVAL_MS, COMMAND_POLL_MAX_FAILURES, COMMAND_POLL_TIMEOUT_MS, type CommandPhase, type CommandProgress } from "@/lib/remoteStart"
 import type { RemoteStartRequest } from "@/types/api"
 
 /**
@@ -29,12 +29,17 @@ export interface CommandPollingOptions {
  * (`ACCEPTED`/`REJECTED`/`TIMEOUT`), até `timeoutMs` (`NO_ANSWER`), 404 (`UNAVAILABLE`, "resultado indisponível") ou `maxFailures` falhas de conexão/5xx
  * seguidas (`ERROR`; uma falha isolada não derruba o acompanhamento). 403 também vira `ERROR`.
  *
+ * `ACCEPTED` com `sessionId: string` já termina (devolve o id da sessão). `ACCEPTED` com `sessionId: null` = o carregador aceitou mas a sessão ainda não nasceu: fase
+ * `STARTING` (NÃO terminal) e segue consultando no mesmo ritmo, dentro do MESMO limite de `timeoutMs`. Passou do limite, ou o registro do comando expirou (404) DEPOIS do
+ * aceito: termina em `ACCEPTED` sem `sessionId` (o link vai para a lista de Sessões) - já sabemos que o carregador aceitou, então não vira "indisponível" nem "sem resposta".
+ * `ACCEPTED` sem a chave `sessionId` (servidor antigo) termina na hora, como antes.
+ *
  * Para de consultar ao desmontar, ao trocar/zerar o `correlationId` e ao chegar a um desfecho — o `AbortController` cancela o pedido em voo. `null` = ocioso.
  * O estado é guardado COM o id a que pertence: trocar de comando nunca mostra o desfecho do anterior (derivado no render, sem `setState` síncrono em efeito).
  */
-export function useCommandPolling(correlationId: string | null, options: CommandPollingOptions = {}): CommandPhase | "IDLE" {
+export function useCommandPolling(correlationId: string | null, options: CommandPollingOptions = {}): CommandProgress {
   const { intervalMs = COMMAND_POLL_INTERVAL_MS, timeoutMs = COMMAND_POLL_TIMEOUT_MS, maxFailures = COMMAND_POLL_MAX_FAILURES } = options
-  const [outcome, setOutcome] = useState<{ id: string; phase: CommandPhase } | null>(null)
+  const [outcome, setOutcome] = useState<{ id: string; phase: CommandPhase; sessionId: string | null } | null>(null)
 
   useEffect(() => {
     if (!correlationId) return
@@ -44,26 +49,34 @@ export function useCommandPolling(correlationId: string | null, options: Command
     let timer: ReturnType<typeof setTimeout> | undefined
     let failures = 0
     let stopped = false
+    let accepted = false // o carregador já disse "aceito" (só falta a sessão): muda o que 404 e "passou do limite" querem dizer
 
-    const finish = (phase: CommandPhase) => {
-      if (!stopped) setOutcome({ id, phase })
+    const finish = (phase: CommandPhase, sessionId: string | null = null) => {
+      if (!stopped) setOutcome({ id, phase, sessionId })
     }
 
     const tick = async () => {
       try {
-        const { status } = await adminCommandsService.status(id, controller.signal)
+        const res = await adminCommandsService.status(id, controller.signal)
         if (stopped) return
         failures = 0
-        if (status !== "PENDING") return finish(status)
+        if (res.status === "ACCEPTED") {
+          if (typeof res.sessionId === "string" && res.sessionId !== "") return finish("ACCEPTED", res.sessionId)
+          if (res.sessionId === undefined) return finish("ACCEPTED") // sem a chave: nada a esperar (servidor antigo)
+          accepted = true
+          finish("STARTING") // `sessionId: null`: aceito, a sessão ainda não nasceu - segue consultando
+        } else if (res.status !== "PENDING") {
+          return finish(res.status)
+        }
       } catch (err) {
         if (stopped) return
         const httpStatus = getApiErrorStatus(err)
-        if (httpStatus === 404) return finish("UNAVAILABLE")
+        if (httpStatus === 404) return accepted ? finish("ACCEPTED") : finish("UNAVAILABLE")
         if (httpStatus === 403) return finish("ERROR")
         failures += 1
         if (failures >= maxFailures) return finish("ERROR")
       }
-      if (Date.now() - startedAt >= timeoutMs) return finish("NO_ANSWER")
+      if (Date.now() - startedAt >= timeoutMs) return accepted ? finish("ACCEPTED") : finish("NO_ANSWER")
       timer = setTimeout(() => void tick(), intervalMs)
     }
 
@@ -76,6 +89,6 @@ export function useCommandPolling(correlationId: string | null, options: Command
     }
   }, [correlationId, intervalMs, timeoutMs, maxFailures])
 
-  if (!correlationId) return "IDLE"
-  return outcome?.id === correlationId ? outcome.phase : "POLLING"
+  if (!correlationId) return { phase: "IDLE", sessionId: null }
+  return outcome?.id === correlationId ? { phase: outcome.phase, sessionId: outcome.sessionId } : { phase: "POLLING", sessionId: null }
 }

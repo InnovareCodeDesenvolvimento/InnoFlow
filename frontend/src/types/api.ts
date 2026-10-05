@@ -186,6 +186,17 @@ export interface ChargePoint {
   serialNumber: string | null
   firmwareVersion: string | null
   active: boolean
+  /**
+   * Lote 1 (backend 3e0dbb3, `docs/CONTRATO-ADMIN-CARREGADORES-E-COMANDOS.md`): "o carregador está falando com a gente agora". Calculado pelo SERVIDOR
+   * (`isChargePointOnline`: `lastSeenAt` recente E sem queda registrada em `disconnectedAt`) - NÃO refazer no navegador (relógio do cliente, e ignoraria a queda).
+   */
+  online: boolean
+  /** ISO 8601; `null` = nunca reportou. Só informativo. */
+  lastSeenAt: string | null
+  /** Última conexão do WebSocket (relógio do servidor). */
+  connectedAt: string | null
+  /** Último fechamento do WebSocket. */
+  disconnectedAt: string | null
   createdAt: string
   updatedAt: string
   connectors?: Connector[]
@@ -884,6 +895,11 @@ export type RemoteStartErrorCode =
  */
 export interface AdminCommandStatusResponse {
   status: MeCommandStatus
+  /**
+   * Só quando `status === "ACCEPTED"` E o comando é um remote-start (chave AUSENTE nos demais casos). `string` = a sessão nascida deste comando;
+   * `null` = o carregador aceitou, mas o `StartTransaction` (que cria a sessão) ainda não chegou - consultar de novo. O registro do comando vive 2 min (depois, 404).
+   */
+  sessionId?: string | null
 }
 export type AdminCommandStatusErrorCode = "COMMAND_NOT_FOUND" | "FORBIDDEN"
 
@@ -1856,7 +1872,7 @@ export interface ResetPasswordRequest {
   newPassword: string
 }
 /**
- * 429 `RATE_LIMITED_AUTH` traz `Retry-After` (segundos) — mas o CORS do backend não expõe esse header (sem `exposedHeaders`): só é legível com o mesmo domínio (nginx na frente).
+ * 429 `RATE_LIMITED_AUTH` traz `Retry-After` (segundos) — legível também com a API em outro domínio desde o lote 1 (backend 3e0dbb3: `Access-Control-Expose-Headers: Retry-After`); só some se um proxy no meio o descartar.
  * 503 `SERVICE_UNAVAILABLE`: o serviço de redefinição está sem o Redis/estado que precisa (fail-closed) — o token NÃO é gasto; tentar de novo vale.
  * 400 `VALIDATION_ERROR` com `details[].path="newPassword"` (10 a 72 bytes): o token NÃO é gasto — a tela mantém o formulário.
  */
@@ -1925,7 +1941,7 @@ export type MeAccountDeletionErrorCode =
   | "UNAUTHORIZED"
 
 /**
- * `GET /api/me/data-export` - erros (a rota só existe para DRIVER): 429 `RATE_LIMITED_EXPORT` (3 por dia; traz `Retry-After`, mas o CORS não o expõe fora do mesmo domínio),
+ * `GET /api/me/data-export` - erros (a rota só existe para DRIVER): 429 `RATE_LIMITED_EXPORT` (3 por dia; traz `Retry-After`, legível entre domínios desde o lote 1),
  * 401 sessão inválida, 403 não é DRIVER, 5xx. A resposta de sucesso é o arquivo `MeDataExport` (a tela baixa, não renderiza).
  */
 export type MeDataExportErrorCode = "RATE_LIMITED_EXPORT" | "UNAUTHORIZED" | "FORBIDDEN"

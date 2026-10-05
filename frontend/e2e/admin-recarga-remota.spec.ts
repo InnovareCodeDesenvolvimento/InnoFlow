@@ -5,7 +5,11 @@ import { expect, test, type Page } from "@playwright/test"
  * `adminCommands.routes.ts`). Só ADMIN vê o item (DL4); OPERATOR não vê (e o mock devolve 403 igual ao servidor). O resultado do carregador chega por
  * acompanhamento (GET a cada 2 s): o mock fica PENDING ~3 s e depois dá o desfecho do cenário em `localStorage["mock:remote-start"]`.
  *
- * Mundo semeado: cp_1 CP-VILA-NORTE-01 (conector 1 AVAILABLE, conector 2 CHARGING). Motoristas (`driversData.ts`): "Carla Motorista" saldo R$ 50,00 e sem dívida;
+ * Lote 1 (backend 3e0dbb3): o DTO traz `online` (calculado pelo servidor) e o `GET /commands/:id` traz `sessionId` no ACCEPTED. Offline: aviso e conector bloqueado SEM depender de erro do
+ * servidor; aceito: `sessionId: null` -> "Aguardando a sessão iniciar…" (as 2 primeiras consultas) -> id -> "Ver sessão" abre o detalhe direto; a sessão que nunca chega (60 s) ou o
+ * registro que expira (404) caem no link para a lista.
+ *
+ * Mundo semeado: cp_1 CP-VILA-NORTE-01 ONLINE (conector 1 AVAILABLE, conector 2 CHARGING); cp_4 CP-OUTLET-CAMPINAS-01 OFFLINE (conector 1 AVAILABLE). Motoristas (`driversData.ts`): "Carla Motorista" saldo R$ 50,00 e sem dívida;
  * "Juliana Alves" saldo zero e dívida R$ 18,50; "Eduardo Ferreira" saldo zero. O estado do mock vive NA PÁGINA: cada teste faz login e só navega por dentro.
  */
 
@@ -15,6 +19,7 @@ const PASSWORD = "senha1234"
 const ADMIN = "admin@innoelektron.com"
 const OPERATOR = "operador@innoelektron.com"
 const CP = "CP-VILA-NORTE-01"
+const CP_OFFLINE = "CP-OUTLET-CAMPINAS-01"
 const REASON = "Motorista sem bateria no celular, recarga iniciada pelo suporte por telefone"
 const flat = (s: string | null) => (s ?? "").split(String.fromCharCode(160)).join(" ")
 
@@ -32,8 +37,8 @@ async function login(page: Page, email: string) {
 const scenario = (page: Page, value: string) => page.evaluate((v) => localStorage.setItem("mock:remote-start", v), value)
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Iniciar recarga" })
 
-async function openDialog(page: Page) {
-  await page.getByRole("button", { name: `Comandos de ${CP}` }).click()
+async function openDialog(page: Page, cp = CP) {
+  await page.getByRole("button", { name: `Comandos de ${cp}` }).click()
   await page.getByRole("menuitem", { name: /Iniciar recarga/ }).click()
   await expect(dialog(page)).toBeVisible()
   return dialog(page)
@@ -92,17 +97,62 @@ test.describe("ADMIN inicia recarga remota", () => {
     await expect(d.getByText(REASON)).toBeVisible()
     expect(posts).toBe(0)
 
-    // Confirma: aguardando o carregador (região aria-live), depois aceito.
+    // Confirma: aguardando o carregador (região aria-live) -> aceito, mas a sessão ainda não nasceu (sessionId null) -> a sessão chegou.
     await confirm(page).click()
     const status = page.getByTestId("remote-start-status")
     await expect(status).toHaveAttribute("aria-live", "polite")
     await expect(status).toContainText("Aguardando o carregador")
+    await expect(status).toContainText("Aguardando a sessão iniciar…", { timeout: 15_000 })
+    await expect(status).toHaveAttribute("data-phase", "STARTING")
+    await expect(d.getByRole("link")).toHaveCount(0) // ainda não terminou: nenhum link
+    await expect(d.getByRole("button", { name: "Fechar janela" })).toBeVisible()
     await expect(status).toContainText("O carregador aceitou.", { timeout: 15_000 })
+    await expect(status).toContainText("a sessão já foi criada")
     expect(posts).toBe(1)
 
-    // Link para Sessões (o id da sessão ainda não existe: ela nasce quando o carregador confirma o início).
-    await d.getByRole("link", { name: "Ver sessões" }).click()
+    // "Ver sessão" vai DIRETO ao detalhe da sessão (diálogo da tela de Sessões aberto pela querystring); fechar limpa a URL (F5 não reabre).
+    await expect(d.getByRole("link", { name: "Ver sessões" })).toHaveCount(0)
+    await d.getByRole("link", { name: "Ver sessão", exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/sessoes\?sessao=[A-Za-z0-9_-]+$/)
+    const detail = page.getByRole("dialog", { name: /Detalhe da sessão/ })
+    await expect(detail).toBeVisible()
+    await expect(detail.getByText(/CP-VILA-NORTE-01 · conector \d/)).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(detail).toHaveCount(0)
     await expect(page).toHaveURL(/\/admin\/sessoes$/)
+  })
+
+  test("carregador OFFLINE: aviso claro e nenhum conector escolhível ANTES de qualquer erro do servidor; nada é enviado", async ({ page }) => {
+    await login(page, ADMIN)
+    let posts = 0
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.url().includes("/commands/remote-start")) posts += 1
+    })
+    const d = await openDialog(page, CP_OFFLINE)
+    await expect(d.getByTestId("remote-start-offline")).toHaveText("Este carregador está offline. Não é possível iniciar uma recarga agora.")
+    // O conector 1 está AVAILABLE no cadastro, mas o carregador está offline: não dá para escolher (nem vem escolhido sozinho).
+    await expect(d.getByRole("radio", { name: /Conector 1/ })).toBeDisabled()
+    await expect(d.getByRole("radio", { name: /Conector 1/ })).not.toBeChecked()
+    await expect(d.getByText(/Nenhum conector está livre/)).toHaveCount(0)
+    await expect(d.getByRole("button", { name: /Revisar recarga/ })).toBeDisabled()
+    // O resto do formulário continua usável (dá para preparar enquanto o carregador volta), mas nada avança.
+    await d.getByRole("searchbox", { name: "Buscar motorista" }).fill("carla")
+    await d.getByText("Carla Motorista", { exact: true }).first().click()
+    await d.getByLabel(/Motivo/).fill(REASON)
+    await expect(d.getByRole("button", { name: /Revisar recarga/ })).toBeDisabled()
+    await expect(page.getByTestId("remote-start-summary")).toHaveCount(0)
+    expect(posts).toBe(0)
+    // Teclado: Esc fecha e o foco volta ao menu da linha certa.
+    await page.keyboard.press("Escape")
+    await expect(dialog(page)).toHaveCount(0)
+    await expect(page.getByRole("button", { name: `Comandos de ${CP_OFFLINE}` })).toBeFocused()
+  })
+
+  test("carregador ONLINE não mostra o aviso e deixa escolher o conector livre (cp_1)", async ({ page }) => {
+    await login(page, ADMIN)
+    const d = await openDialog(page)
+    await expect(d.getByTestId("remote-start-offline")).toHaveCount(0)
+    await expect(d.getByRole("radio", { name: /Conector 1/ })).toBeEnabled()
   })
 
   test("sem motivo (ou curto): erro no campo, nada avança; sem motorista também avisa", async ({ page }) => {
@@ -265,6 +315,49 @@ test.describe("ADMIN inicia recarga remota", () => {
     await page.keyboard.press("Escape")
     await expect(dialog(page)).toHaveCount(0)
     await expect(trigger).toBeFocused()
+  })
+})
+
+test.describe("aceito: a sessão que não chega", () => {
+  test("registro do comando expira (404) depois do aceito: o carregador ACEITOU, então cai no link para a LISTA - não vira 'resultado indisponível'", async ({ page }) => {
+    await login(page, ADMIN)
+    await scenario(page, "session-expired")
+    await fillAndReview(page, "carla", "Carla Motorista")
+    await confirm(page).click()
+    const status = page.getByTestId("remote-start-status")
+    await expect(status).toHaveAttribute("data-phase", "STARTING", { timeout: 15_000 })
+    await expect(status).toHaveAttribute("data-phase", "ACCEPTED", { timeout: 15_000 })
+    await expect(status).toContainText("O carregador aceitou.")
+    await expect(status).not.toContainText("Resultado indisponível")
+    await expect(dialog(page).getByRole("link", { name: "Ver sessão", exact: true })).toHaveCount(0)
+    await dialog(page).getByRole("link", { name: "Ver sessões", exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/sessoes$/)
+  })
+
+  test("a sessão NUNCA chega: espera dentro do mesmo limite de 60 s e só então oferece a lista de Sessões", async ({ page }) => {
+    test.setTimeout(150_000)
+    await login(page, ADMIN)
+    await scenario(page, "session-never")
+    await fillAndReview(page, "carla", "Carla Motorista")
+    const gets: number[] = []
+    page.on("request", (r) => {
+      if (r.url().includes("/api/admin/commands/")) gets.push(Date.now())
+    })
+    await confirm(page).click()
+    const status = page.getByTestId("remote-start-status")
+    await expect(status).toHaveAttribute("data-phase", "STARTING", { timeout: 15_000 })
+    await expect(status).toContainText("Aguardando a sessão iniciar…")
+    await expect(dialog(page).getByRole("link")).toHaveCount(0)
+    // Passou do limite: termina como ACCEPTED sem sessão (não como "sem resposta"), com o link para a lista.
+    await expect(status).toHaveAttribute("data-phase", "ACCEPTED", { timeout: 90_000 })
+    await expect(status).toContainText("O carregador aceitou.")
+    await expect(status).not.toContainText("a sessão já foi criada")
+    await expect(dialog(page).getByRole("link", { name: "Ver sessões", exact: true })).toHaveAttribute("href", "/admin/sessoes")
+    const total = gets.length
+    expect(total, "consultas de 2 em 2 s por ~60 s (o contador conta a partir do envio)").toBeGreaterThanOrEqual(25)
+    expect(total).toBeLessThanOrEqual(33)
+    await page.waitForTimeout(5_000)
+    expect(gets.length).toBe(total) // parou
   })
 })
 

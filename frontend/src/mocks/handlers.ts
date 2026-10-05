@@ -850,6 +850,10 @@ export const handlers = [
       serialNumber: body.serialNumber ?? null,
       firmwareVersion: body.firmwareVersion ?? null,
       active: true,
+      online: false, // acabou de ser cadastrado: ainda não falou com o servidor
+      lastSeenAt: null,
+      connectedAt: null,
+      disconnectedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }

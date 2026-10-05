@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { AxiosError, type AxiosResponse } from "axios"
 import {
+  ACCEPTED_WITH_SESSION_DETAIL,
+  CHARGE_POINT_OFFLINE_NOTICE,
   COMMAND_PHASE_COPY,
   REMOTE_START_FALLBACK_MESSAGE,
   REMOTE_START_REASON_MAX,
   REMOTE_START_REASON_MIN,
+  commandPhaseCopy,
+  isChargePointOffline,
   isConnectorStartable,
   isTerminalPhase,
   remoteStartError,
@@ -13,11 +17,22 @@ import {
 } from "./remoteStart"
 import { CONNECTOR_STATUSES } from "@/types/api"
 
-function httpError(status: number, code?: string, details?: Array<{ path?: string; message?: string }>) {
+function httpError(status: number, code?: string, details?: Array<{ path?: string; message?: string }>, headers?: Record<string, string>) {
   const err = new AxiosError("falhou")
-  err.response = { status, data: { error: "texto do backend que NÃO pode aparecer", code, details } } as AxiosResponse
+  err.response = { status, data: { error: "texto do backend que NÃO pode aparecer", code, details }, headers } as unknown as AxiosResponse
   return err
 }
+
+describe("carregador offline — só `online === false` explícito bloqueia", () => {
+  it("false bloqueia; true e undefined (campo ausente) deixam seguir e o servidor decide", () => {
+    expect(isChargePointOffline(false)).toBe(true)
+    expect(isChargePointOffline(true)).toBe(false)
+    expect(isChargePointOffline(undefined)).toBe(false)
+  })
+  it("o aviso é o texto combinado", () => {
+    expect(CHARGE_POINT_OFFLINE_NOTICE).toBe("Este carregador está offline. Não é possível iniciar uma recarga agora.")
+  })
+})
 
 describe("validateReason — espelha 10–200, trim, sem caracteres de controle", () => {
   it("vazio e só espaços: pede o motivo", () => {
@@ -70,6 +85,11 @@ describe("remoteStartError — por code/status, nunca pelo texto do backend", ()
     expect(remoteStartError(httpError(500, "INTERNAL_ERROR")).message).toMatch(/Sessões/)
     expect(remoteStartError(httpError(503)).message).toMatch(/instável/)
   })
+  it("429 com Retry-After legível (CORS expõe o header) diz o tempo exato; sem o header, 'alguns minutos'", () => {
+    expect(remoteStartError(httpError(429, "RATE_LIMITED", undefined, { "retry-after": "300" })).message).toBe("Muitas tentativas para esta conta. Tente de novo em 5 minutos.")
+    expect(remoteStartError(httpError(429, "RATE_LIMITED", undefined, { "retry-after": "20" })).message).toMatch(/menos de 1 minuto/)
+    expect(remoteStartError(httpError(429, "RATE_LIMITED")).message).toMatch(/alguns minutos/)
+  })
   it("429 e código desconhecido caem em mensagens próprias", () => {
     expect(remoteStartError(httpError(429, "RATE_LIMITED")).message).toMatch(/Muitas tentativas/)
     expect(remoteStartError(httpError(409, "ALGO_NOVO")).message).toBe(REMOTE_START_FALLBACK_MESSAGE)
@@ -91,6 +111,16 @@ describe("textos de acompanhamento", () => {
     expect(isTerminalPhase("IDLE")).toBe(false)
     expect(isTerminalPhase("POLLING")).toBe(false)
     for (const p of ["ACCEPTED", "REJECTED", "TIMEOUT", "UNAVAILABLE", "NO_ANSWER", "ERROR"] as const) expect(isTerminalPhase(p)).toBe(true)
+  })
+  it("STARTING (aceito, sessão ainda não criada) NÃO é desfecho e tem texto próprio", () => {
+    expect(isTerminalPhase("STARTING")).toBe(false)
+    expect(COMMAND_PHASE_COPY.STARTING.title).toBe("Aguardando a sessão iniciar…")
+    expect(COMMAND_PHASE_COPY.STARTING.tone).toBe("info")
+  })
+  it("ACCEPTED: o detalhe muda quando a sessão já existe", () => {
+    expect(commandPhaseCopy("ACCEPTED", "sess_1").detail).toBe(ACCEPTED_WITH_SESSION_DETAIL)
+    expect(commandPhaseCopy("ACCEPTED", null)).toBe(COMMAND_PHASE_COPY.ACCEPTED)
+    expect(commandPhaseCopy("TIMEOUT", "sess_1")).toBe(COMMAND_PHASE_COPY.TIMEOUT)
   })
   it("a frase de confirmação nomeia a carteira", () => {
     expect(remoteStartSummary("Carla Motorista")).toBe("Vai debitar a carteira de Carla Motorista")

@@ -16,10 +16,13 @@ export function ChargePointCommandsMenu({
   chargePointId,
   chargePointName,
   connectors = [],
+  online,
 }: {
   chargePointId: string
   chargePointName: string
   connectors?: Connector[]
+  /** `ChargePoint.online` (servidor). Alimenta só o aviso do "Iniciar recarga"; `undefined` não bloqueia. */
+  online?: boolean
 }) {
   const isAdmin = useAuthStore((s) => s.user?.role === "ADMIN")
   const [remoteStartOpen, setRemoteStartOpen] = useState(false)
@@ -81,7 +84,14 @@ export function ChargePointCommandsMenu({
       />
 
       {isAdmin && remoteStartOpen && (
-        <RemoteStartDialog chargePointId={chargePointId} chargePointName={chargePointName} connectors={connectors} restoreFocusTo={triggerRef} onOpenChange={setRemoteStartOpen} />
+        <RemoteStartDialog
+          chargePointId={chargePointId}
+          chargePointName={chargePointName}
+          connectors={connectors}
+          online={online}
+          restoreFocusTo={triggerRef}
+          onOpenChange={setRemoteStartOpen}
+        />
       )}
     </>
   )

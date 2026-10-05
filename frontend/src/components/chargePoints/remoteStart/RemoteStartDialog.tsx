@@ -15,12 +15,14 @@ import {
   isTerminalPhase,
   REMOTE_START_REASON_MAX,
   REMOTE_START_REASON_MIN,
+  isChargePointOffline,
   isConnectorStartable,
   remoteStartError,
   remoteStartSummary,
   validateReason,
   type RemoteStartError,
 } from "@/lib/remoteStart"
+import { adminSessionPath, ADMIN_SESSIONS_PATH } from "@/lib/sessionDeepLink"
 import type { Connector, DriverListRow } from "@/types/api"
 import { ConnectorChoice } from "./ConnectorChoice"
 import { DriverBalanceLine, DriverPicker } from "./DriverPicker"
@@ -32,6 +34,9 @@ type Stage = "form" | "confirm" | "progress"
  * "Iniciar recarga" (L1.5, só ADMIN — DL4): o suporte inicia uma recarga NA CARTEIRA de um motorista (sem cartão). Três passos, no mesmo padrão do ajuste de saldo
  * (é a carteira de uma PESSOA): (1) conector + motorista + motivo, (2) CONFIRMAR uma frase inequívoca — "Vai debitar a carteira de <nome>" —, (3) acompanhar o
  * resultado do carregador (consulta a cada 2 s por até 60 s). Fechar o diálogo (ou desmontar) para o acompanhamento; o comando já enviado continua no carregador.
+ * Aceito com `sessionId` -> "Ver sessão" abre o detalhe direto; aceito sem sessão ainda -> "Aguardando a sessão iniciar…" e, se ela não chegar, "Ver sessões" (a lista).
+ * Carregador OFFLINE (`online === false`, vem pronto do servidor): sem escolha de conector, aviso claro e "Revisar" desabilitado - o servidor segue sendo a fonte de verdade
+ * (`CHARGE_POINT_OFFLINE` por code, para a corrida: caiu entre abrir o diálogo e confirmar).
  *
  * Montar só quando aberto (`{open && <RemoteStartDialog />}`): cada abertura começa do zero e o acompanhamento nasce e morre com o diálogo.
  */
@@ -39,6 +44,7 @@ export function RemoteStartDialog({
   chargePointId,
   chargePointName,
   connectors,
+  online,
   isAdmin = true,
   restoreFocusTo,
   onOpenChange,
@@ -46,6 +52,8 @@ export function RemoteStartDialog({
   chargePointId: string
   chargePointName: string
   connectors: Connector[]
+  /** `ChargePoint.online` da lista (calculado pelo servidor). `undefined` = não sei: não bloqueia, o servidor decide. */
+  online?: boolean
   isAdmin?: boolean
   /** Para onde o foco volta ao fechar (o botão do menu da linha — o item do menu que abriu o diálogo já não existe). */
   restoreFocusTo?: RefObject<HTMLElement | null>
@@ -58,20 +66,26 @@ export function RemoteStartDialog({
   const [showErrors, setShowErrors] = useState(false)
   const [serverError, setServerError] = useState<RemoteStartError | null>(null)
   const [correlationId, setCorrelationId] = useState<string | null>(null)
+  // Conector que foi para a confirmação/envio. Depois do passo 1 a escolha NÃO pode mais ser derivada da lista viva: ao aceitar, o conector deixa de estar livre (o tempo
+  // real/`invalidateQueries` traz o status novo) e a escolha derivada virava `null`, apagando a confirmação e o acompanhamento.
+  const [lockedConnector, setLockedConnector] = useState<number | null>(null)
 
   const queryClient = useQueryClient()
   const mutation = useRemoteStart(chargePointId)
-  const phase = useCommandPolling(correlationId)
+  const { phase, sessionId } = useCommandPolling(correlationId)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const errorRef = useRef<HTMLDivElement>(null)
 
   // Escolha de conector derivada: vale só se ainda estiver livre (a lista muda por tempo real enquanto o diálogo está aberto); com um único livre, já vem escolhido.
-  const startable = connectors.filter((c) => isConnectorStartable(c.status))
+  // Offline: nenhum conector serve (a derivação zera a escolha sozinha se o carregador cair com o formulário aberto, e volta se ele voltar).
+  const offline = isChargePointOffline(online)
+  const startable = offline ? [] : connectors.filter((c) => isConnectorStartable(c.status))
   const connectorId = startable.some((c) => c.connectorId === connectorChoice) ? connectorChoice : startable.length === 1 ? startable[0].connectorId : null
 
   const reason = validateReason(reasonInput)
   const reasonError = serverError?.field === "reason" ? serverError.message : showErrors ? reason.error : null
   const formValid = connectorId !== null && driver !== null && reason.error === null
+  const shownConnector = stage === "form" ? connectorId : lockedConnector
   const sending = mutation.isPending
 
   // Foco no título do passo novo: o botão que a pessoa apertou some do DOM e, sem isto, o foco cairia no corpo do diálogo (teclado/leitor de tela perdem o lugar).
@@ -97,14 +111,15 @@ export function RemoteStartDialog({
     setShowErrors(true)
     if (!formValid) return
     setServerError(null)
+    setLockedConnector(connectorId)
     setStage("confirm")
   }
 
   const handleConfirm = async () => {
-    if (!formValid || sending) return
+    if (lockedConnector === null || driver === null || reason.error !== null || sending) return
     setServerError(null)
     try {
-      const res = await mutation.mutateAsync({ connectorId, userId: driver.id, reason: reason.reason })
+      const res = await mutation.mutateAsync({ connectorId: lockedConnector, userId: driver.id, reason: reason.reason })
       setCorrelationId(res.correlationId)
       setStage("progress")
     } catch (err) {
@@ -155,7 +170,8 @@ export function RemoteStartDialog({
               connectors={connectors}
               value={connectorId}
               onChange={setConnectorChoice}
-              error={showErrors && connectorId === null ? "Escolha o conector em que a recarga vai começar." : undefined}
+              offline={offline}
+              error={showErrors && !offline && connectorId === null ? "Escolha o conector em que a recarga vai começar." : undefined}
             />
 
             <div className="space-y-2">
@@ -201,7 +217,7 @@ export function RemoteStartDialog({
               <Button type="button" variant="ghost" size="touch" onClick={() => onOpenChange(false)}>
                 Cancelar
               </Button>
-              <Button type="submit" size="touch">
+              <Button type="submit" size="touch" disabled={offline}>
                 Revisar recarga
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Button>
@@ -209,7 +225,7 @@ export function RemoteStartDialog({
           </form>
         )}
 
-        {stage === "confirm" && driver && connectorId !== null && (
+        {stage === "confirm" && driver && shownConnector !== null && (
           <div className="space-y-4">
             <h3 ref={headingRef} tabIndex={-1} className="text-base font-bold text-ink outline-none">
               Confirme a recarga
@@ -223,7 +239,7 @@ export function RemoteStartDialog({
                 <div>
                   <dt className="text-[11px] font-bold uppercase tracking-wide text-ink-softer">Carregador</dt>
                   <dd className="break-words font-semibold text-ink">
-                    {chargePointName} · conector {connectorId}
+                    {chargePointName} · conector {shownConnector}
                   </dd>
                 </div>
                 <div>
@@ -275,15 +291,15 @@ export function RemoteStartDialog({
           </div>
         )}
 
-        {stage === "progress" && driver && connectorId !== null && (
+        {stage === "progress" && driver && shownConnector !== null && (
           <div className="space-y-4">
             <h3 ref={headingRef} tabIndex={-1} className="text-base font-bold text-ink outline-none">
               Acompanhando a recarga
             </h3>
             <p className="text-sm text-ink-softer">
-              {chargePointName} · conector {connectorId} · carteira de {driver.name}
+              {chargePointName} · conector {shownConnector} · carteira de {driver.name}
             </p>
-            {phase !== "IDLE" && <RemoteStartProgress phase={phase} />}
+            {phase !== "IDLE" && <RemoteStartProgress phase={phase} sessionId={sessionId} />}
             {!finished && <p className="text-xs text-ink-softer">Você pode fechar esta janela: o comando já foi enviado, mas o resultado deixa de aparecer aqui.</p>}
 
             <DialogFooter>
@@ -294,8 +310,11 @@ export function RemoteStartDialog({
                 </Button>
               )}
               {finished && phase !== "REJECTED" && (
-                <Link to="/admin/sessoes" className={buttonVariants({ variant: phase === "ACCEPTED" ? "default" : "outline", size: "touch" })}>
-                  Ver sessões
+                <Link
+                  to={phase === "ACCEPTED" && sessionId ? adminSessionPath(sessionId) : ADMIN_SESSIONS_PATH}
+                  className={buttonVariants({ variant: phase === "ACCEPTED" ? "default" : "outline", size: "touch" })}
+                >
+                  {phase === "ACCEPTED" && sessionId ? "Ver sessão" : "Ver sessões"}
                 </Link>
               )}
               <Button type="button" variant="ghost" size="touch" onClick={() => onOpenChange(false)}>
