@@ -26,7 +26,10 @@ export default defineConfig({
   // compila sob demanda: poucos workers evitam capturar uma tela enquanto a CPU está disputada (instabilidade de timing, não de pixel).
   fullyParallel: true,
   workers: Number(process.env.VISUAL_WORKERS || 3),
-  retries: 0,
+  // RETENTATIVAS (3): telas do PWA com o card escuro "brand" + rosto do mascote (histórico vazio, sessão vazia, cartões, adicionar saldo) têm ruído de rasterização NÃO determinístico (DOM,
+  // retângulos e estilos idênticos; blocos de JPEG com ±1..29 níveis em torno de texto/rosto, ~30% das capturas sob carga). Medido: não some com `--disable-gpu`, `--disable-lcd-text` nem com mais
+  // espera. Regressão REAL falha em todas as tentativas; ruído passa numa delas e o Playwright marca "flaky". Essas 4 rotas ainda têm `ruidoRaster` (tolerância de 0,4%). `VISUAL_RETRIES=0` = rígido.
+  retries: Number(process.env.VISUAL_RETRIES ?? 3),
   forbidOnly: !!process.env.CI,
   timeout: 90_000,
   reporter: [["list"], ["html", { open: "never", outputFolder: "e2e-visual/.relatorio" }]],
