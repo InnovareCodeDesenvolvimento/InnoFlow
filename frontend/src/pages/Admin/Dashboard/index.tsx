@@ -6,21 +6,21 @@ import {
   CheckCircle2,
   DollarSign,
   Gauge,
-  LayoutDashboard,
   Receipt,
   Zap,
 } from "lucide-react"
-import { PageHeader } from "@/components/painel/PageHeader"
+import { BrandBackdrop } from "@/components/brand/BrandBackdrop"
+import { Mascot, MascotFace } from "@/components/brand/Mascot"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
 import { Badge } from "@/components/ui/Badge"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Skeleton, TableSkeleton } from "@/components/ui/Skeleton"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
 import { OperatorFilterSelect } from "@/components/relatorios/OperatorFilterSelect"
 import { SiteFilterSelect } from "@/components/relatorios/SiteFilterSelect"
-import { MetricCard } from "@/components/relatorios/MetricCard"
+import { StatCard } from "@/components/ui/StatCard"
 import { RevenueBarChart } from "@/components/relatorios/RevenueBarChart"
 import { PaymentSplitDonut } from "@/components/relatorios/PaymentSplitDonut"
 import { useDashboardLive, useDashboardSummary } from "@/hooks/useDashboard"
@@ -57,7 +57,23 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" description="Visão geral do faturamento e da operação." icon={LayoutDashboard} />
+      {/* Faixa de marca do topo (D3: o mascote abre o painel; nunca sobre dado). É o ÚNICO título da página: o h1 "Dashboard" fica aqui em vez de no PageHeader. */}
+      <section className="surface-dark surface-dark-rich relative overflow-hidden rounded-feature px-5 py-6 shadow-tinted-card sm:px-8 sm:py-7">
+        <BrandBackdrop />
+        <div className="relative z-10 flex items-center gap-4 sm:gap-6">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15 lg:hidden" aria-hidden="true">
+            <MascotFace size={56} className="rounded-full" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-extrabold tracking-tight text-ink sm:text-2xl">Dashboard</h1>
+            <p className="mt-1 text-sm text-ink-soft">Visão geral do faturamento e da operação.</p>
+          </div>
+          <div className="relative hidden shrink-0 lg:block" aria-hidden="true">
+            <div className="brand-backlight" />
+            <Mascot sizes="120px" className="[--m-h:130px]" />
+          </div>
+        </div>
+      </section>
 
       <div className="flex flex-wrap items-center gap-3">
         <PeriodSelector preset={period.preset} from={period.from} to={period.to} onPresetChange={period.setPreset} onCustomChange={period.setCustom} />
@@ -68,7 +84,7 @@ export default function DashboardPage() {
       {isLoading && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 rounded-2xl" />
+            <Skeleton key={i} className="h-28 rounded-card" />
           ))}
         </div>
       )}
@@ -78,16 +94,16 @@ export default function DashboardPage() {
       {!isLoading && !isError && data && (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
-            <MetricCard label="Faturamento" value={data.metrics.revenueCents.value} deltaPct={data.metrics.revenueCents.deltaPct} formatValue={(v) => formatCents(v)} icon={DollarSign} highlight index={0} />
-            <MetricCard label="Sessões" value={data.metrics.sessions.value} deltaPct={data.metrics.sessions.deltaPct} formatValue={(v) => v.toLocaleString("pt-BR")} icon={Zap} index={1} />
-            <MetricCard label="Energia" value={data.metrics.energyWh.value} deltaPct={data.metrics.energyWh.deltaPct} formatValue={(v) => formatEnergyWh(v)} icon={BatteryCharging} index={2} />
-            <MetricCard label="Ticket médio" value={data.metrics.avgTicketCents.value} deltaPct={data.metrics.avgTicketCents.deltaPct} formatValue={(v) => formatCents(v)} icon={Receipt} index={3} />
-            <MetricCard label="Taxa de sucesso" value={data.metrics.successRatePct.value} deltaPct={data.metrics.successRatePct.deltaPct} formatValue={(v) => formatPercent(v)} icon={CheckCircle2} index={4} />
-            <MetricCard label="Utilização" value={data.metrics.utilizationPct.value} deltaPct={data.metrics.utilizationPct.deltaPct} formatValue={(v) => formatPercent(v)} icon={Gauge} index={5} />
+            <StatCard variant="hero" label="Faturamento" value={data.metrics.revenueCents.value} deltaPct={data.metrics.revenueCents.deltaPct} formatValue={(v) => formatCents(v)} icon={DollarSign} />
+            <StatCard label="Sessões" value={data.metrics.sessions.value} deltaPct={data.metrics.sessions.deltaPct} formatValue={(v) => v.toLocaleString("pt-BR")} icon={Zap} />
+            <StatCard label="Energia" value={data.metrics.energyWh.value} deltaPct={data.metrics.energyWh.deltaPct} formatValue={(v) => formatEnergyWh(v)} icon={BatteryCharging} />
+            <StatCard label="Ticket médio" value={data.metrics.avgTicketCents.value} deltaPct={data.metrics.avgTicketCents.deltaPct} formatValue={(v) => formatCents(v)} icon={Receipt} />
+            <StatCard label="Taxa de sucesso" value={data.metrics.successRatePct.value} deltaPct={data.metrics.successRatePct.deltaPct} formatValue={(v) => formatPercent(v)} icon={CheckCircle2} />
+            <StatCard label="Utilização" value={data.metrics.utilizationPct.value} deltaPct={data.metrics.utilizationPct.deltaPct} formatValue={(v) => formatPercent(v)} icon={Gauge} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Card className="card-premium lg:col-span-2">
+            <Card className="lg:col-span-2">
               <CardHeader>
                 <CardTitle>Faturamento por dia</CardTitle>
               </CardHeader>
@@ -99,7 +115,7 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-            <Card className="card-premium">
+            <Card>
               <CardHeader>
                 <CardTitle>Cartão × Carteira</CardTitle>
               </CardHeader>
@@ -110,7 +126,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card className="card-premium">
+            <Card>
               <CardHeader>
                 <CardTitle>Top 5 eletropostos</CardTitle>
                 <CardDescription>Por faturamento no período</CardDescription>
@@ -119,7 +135,7 @@ export default function DashboardPage() {
                 {data.topSites.length === 0 ? (
                   <EmptyState title="Sem dados no período" description="Nenhum eletroposto faturou nesse intervalo." />
                 ) : (
-                  <Table>
+                  <Table density="compact" className="min-w-0">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Eletroposto</TableHead>
@@ -142,7 +158,7 @@ export default function DashboardPage() {
             </Card>
 
             {isAdmin && data.topOperators ? (
-              <Card className="card-premium">
+              <Card>
                 <CardHeader>
                   <CardTitle>Ranking por operador</CardTitle>
                   <CardDescription>Só visível para administradores da plataforma</CardDescription>
@@ -151,7 +167,7 @@ export default function DashboardPage() {
                   {data.topOperators.length === 0 ? (
                     <EmptyState title="Sem dados no período" />
                   ) : (
-                    <Table>
+                    <Table density="compact" className="min-w-0">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Operador</TableHead>
@@ -173,7 +189,7 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             ) : (
-              <Card className="card-premium">
+              <Card>
                 <CardHeader>
                   <CardTitle>Movimento de hoje</CardTitle>
                   <CardDescription>Por eletroposto</CardDescription>
@@ -182,7 +198,7 @@ export default function DashboardPage() {
                   {data.todayMovement.length === 0 ? (
                     <EmptyState title="Nenhuma sessão hoje" description="Ainda não houve recarga encerrada hoje neste escopo." />
                   ) : (
-                    <Table>
+                    <Table density="compact" className="min-w-0">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Eletroposto</TableHead>
@@ -207,7 +223,7 @@ export default function DashboardPage() {
           </div>
 
           {isAdmin && (
-            <Card className="card-premium">
+            <Card>
               <CardHeader>
                 <CardTitle>Movimento de hoje</CardTitle>
                 <CardDescription>Por eletroposto</CardDescription>
@@ -216,7 +232,7 @@ export default function DashboardPage() {
                 {data.todayMovement.length === 0 ? (
                   <EmptyState title="Nenhuma sessão hoje" description="Ainda não houve recarga encerrada hoje neste escopo." />
                 ) : (
-                  <Table>
+                  <Table density="compact">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Eletroposto</TableHead>
@@ -243,7 +259,7 @@ export default function DashboardPage() {
         </>
       )}
 
-      <Card className="card-premium">
+      <Card>
         <CardHeader>
           <CardTitle>Ao vivo</CardTitle>
           <CardDescription>Sessões ativas e status dos carregadores — atualiza a cada 15 segundos</CardDescription>
@@ -265,7 +281,7 @@ export default function DashboardPage() {
               {live.data.activeSessions.length === 0 ? (
                 <EmptyState icon={Zap} title="Nenhuma sessão ativa agora" description="Nenhum carregador está em uso neste escopo." />
               ) : (
-                <Table>
+                <Table density="compact">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Eletroposto</TableHead>

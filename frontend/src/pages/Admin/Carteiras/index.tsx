@@ -3,7 +3,7 @@ import { ChevronRight, Search, Users, WalletCards, Zap } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Badge } from "@/components/ui/Badge"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Input } from "@/components/ui/Input"
 import { Pagination } from "@/components/ui/Pagination"
 import { TableSkeleton } from "@/components/ui/Skeleton"
@@ -91,7 +91,7 @@ export default function CarteirasPage() {
       {!needsMoreChars && !isLoading && !isError && data && data.items.length > 0 && (
         <>
           <div className={isFetching ? "opacity-60 transition-opacity" : "transition-opacity"}>
-            <Table>
+            <Table density="compact">
               <TableHeader>
                 <TableRow>
                   <TableHead>Motorista</TableHead>
@@ -105,7 +105,7 @@ export default function CarteirasPage() {
               </TableHeader>
               <TableBody>
                 {data.items.map((driver) => (
-                  <TableRow key={driver.id} className="pressable cursor-pointer" onClick={() => setSelected(driver)}>
+                  <TableRow key={driver.id} className="cursor-pointer" onClick={() => setSelected(driver)}>
                     <TableCell>
                       <button
                         type="button"

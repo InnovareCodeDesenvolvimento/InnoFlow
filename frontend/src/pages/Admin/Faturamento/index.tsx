@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
 import { Select } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Skeleton, TableSkeleton } from "@/components/ui/Skeleton"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
 import { OperatorFilterSelect } from "@/components/relatorios/OperatorFilterSelect"
@@ -84,10 +84,10 @@ export default function FaturamentoPage() {
 
       {!isLoading && !isError && data && (
         <>
-          <Card className="card-premium animate-fade-in-up">
+          <Card>
             <CardHeader>
               <CardTitle>
-                Faturamento total: <span className="text-gradient-brand tabular-nums">{formatCents(data.totals.revenueCents)}</span>
+                Faturamento total: <span className="text-primary-700 tabular-nums">{formatCents(data.totals.revenueCents)}</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -99,7 +99,7 @@ export default function FaturamentoPage() {
             </CardContent>
           </Card>
 
-          <Card className="card-premium">
+          <Card>
             <CardHeader>
               <CardTitle>Detalhamento por {BREAKDOWN_OPTIONS.find((o) => o.value === breakdown)?.label.toLowerCase()}</CardTitle>
             </CardHeader>
@@ -107,7 +107,7 @@ export default function FaturamentoPage() {
               {data.breakdownRows.length === 0 ? (
                 <EmptyState title="Sem dados no período" />
               ) : (
-                <Table>
+                <Table density="compact">
                   <TableHeader>
                     <TableRow>
                       <TableHead>{BREAKDOWN_OPTIONS.find((o) => o.value === breakdown)?.label}</TableHead>

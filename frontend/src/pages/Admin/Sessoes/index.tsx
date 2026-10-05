@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge"
 import { Select } from "@/components/ui/Select"
 import { Input } from "@/components/ui/Input"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
@@ -110,7 +110,7 @@ export default function SessoesPage() {
 
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
-          <Table>
+          <Table density="compact">
             <TableHeader>
               <TableRow>
                 <TableHead>Início</TableHead>
@@ -124,8 +124,8 @@ export default function SessoesPage() {
             </TableHeader>
             <TableBody>
               {data.items.map((session) => (
-                <TableRow key={session.id} className="pressable cursor-pointer" onClick={() => setSelectedSessionId(session.id)}>
-                  <TableCell>{formatDateTime(session.startedAt)}</TableCell>
+                <TableRow key={session.id} className="cursor-pointer" onClick={() => setSelectedSessionId(session.id)}>
+                  <TableCell className="whitespace-nowrap">{formatDateTime(session.startedAt)}</TableCell>
                   <TableCell className="font-semibold text-ink">{session.siteName}</TableCell>
                   <TableCell>
                     {session.ocppIdentity} · {session.connectorId}

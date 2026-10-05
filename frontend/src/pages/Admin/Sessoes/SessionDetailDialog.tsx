@@ -106,9 +106,10 @@ export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: st
 
 function Field({ label, value, compact, strong }: { label: string; value: string; compact?: boolean; strong?: boolean }) {
   return (
-    <div>
+    <div className="min-w-0">
       <dt className="text-[11px] font-bold uppercase tracking-wide text-ink-softer">{label}</dt>
-      <dd className={compact ? (strong ? "text-gradient-brand text-base font-black" : "text-ink-soft") : "font-semibold text-ink"}>{value}</dd>
+      {/* `overflow-wrap:anywhere`: o e-mail do motorista não cabia na coluna a 375 px e vazava para fora do diálogo (achado do pixel de contraste da F-D). */}
+      <dd className={compact ? (strong ? "text-lg font-black text-primary-700" : "text-ink-soft") : "font-semibold text-ink [overflow-wrap:anywhere]"}>{value}</dd>
     </div>
   )
 }

@@ -412,6 +412,10 @@ export const handlers = [
     const scope = requireStaff(request)
     if ("error" in scope) return scope.error
     const url = new URL(request.url)
+    // Só para os E2E/critérios do Admin (F-D): `mock:admin-sites=error` -> 500 (ErrorState de marca); `=empty` -> lista vazia (vazio de primeiro uso com mascote).
+    const forced = localStorage.getItem("mock:admin-sites")
+    if (forced === "error") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "empty") return HttpResponse.json(paginate([], url))
     return HttpResponse.json(paginate(scopedByOperator(mockSites, scope.user), url))
   }),
 

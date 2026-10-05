@@ -33,7 +33,7 @@ export function EnvironmentSection({
   const isProduction = value === "production"
 
   return (
-    <Card className="card-premium" data-testid="section-environment">
+    <Card data-testid="section-environment">
       <CardHeader>
         <CardTitle>Ambiente</CardTitle>
         <CardDescription>Em qual ambiente da Cielo a plataforma cobra.</CardDescription>

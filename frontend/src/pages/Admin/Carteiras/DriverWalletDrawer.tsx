@@ -57,13 +57,13 @@ export function DriverWalletDrawer({ driver, isAdmin, onClose }: { driver: Drive
     <>
       <DialogPrimitive.Root open onOpenChange={(open) => !open && onClose()}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 animate-fade-in bg-ink/50 backdrop-blur-[2px]" />
+          <DialogPrimitive.Overlay className="dialog-scrim fixed inset-0 z-50 animate-fade-in" />
           <DialogPrimitive.Content
             aria-describedby="wallet-drawer-desc"
             className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-surface shadow-lg duration-200 focus-visible:outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right"
           >
             <header className="flex items-start gap-3 border-b border-border-subtle px-5 py-4">
-              <span className="shadow-tinted-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
+              <span className="shadow-tinted flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
                 <Wallet className="h-5 w-5" />
               </span>
               <div className="min-w-0 flex-1">

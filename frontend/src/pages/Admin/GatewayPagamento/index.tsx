@@ -3,7 +3,7 @@ import { CreditCard, Info, QrCode, RotateCcw, Save, TriangleAlert, Vault } from 
 import { toast } from "sonner"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Button } from "@/components/ui/Button"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { usePaymentGatewayConfig, useUpdatePaymentGateway } from "@/hooks/usePaymentGateway"
 import { getApiErrorMessage, getApiErrorStatus } from "@/services/api"
@@ -220,7 +220,7 @@ export default function GatewayPagamentoPage() {
       <WebhookSection dto={dto} draft={draft} errors={errors} onChange={patchDraft} />
 
       {/* Barra de salvar: gruda no fim da área de rolagem do shell (o <main> do admin), sempre ao alcance. */}
-      <div className="sticky bottom-0 z-10 -mx-4 border-t border-border bg-surface/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8" data-testid="save-bar">
+      <div className="sticky bottom-0 z-10 -mx-4 border-t border-border bg-surface px-4 py-3 shadow-[0_-10px_24px_-18px_rgb(var(--color-primary)/0.4)] sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8" data-testid="save-bar">
         <div className="mx-auto flex max-w-4xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-ink-softer" aria-live="polite" data-testid="save-bar-status">
             {dirty ? (

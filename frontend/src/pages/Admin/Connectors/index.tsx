@@ -4,8 +4,7 @@ import { toast } from "sonner"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Button } from "@/components/ui/Button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
-import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState, AdminFirstUseState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
@@ -70,7 +69,7 @@ export default function ConnectorsPage() {
         description="Cada tomada de um ponto de recarga — tipo, potência e status."
         icon={Plug}
         actions={
-          <Button className="btn-glow-primary" onClick={openCreate}>
+          <Button variant="lime" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo conector
           </Button>
@@ -81,12 +80,12 @@ export default function ConnectorsPage() {
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os conectores.")} onRetry={() => refetch()} />}
 
       {!isLoading && !isError && data && data.items.length === 0 && (
-        <EmptyState
+        <AdminFirstUseState
           icon={Plug}
           title="Nenhum conector cadastrado"
           description="Cadastre um ponto de recarga primeiro, depois adicione os conectores dele aqui."
           action={
-            <Button onClick={openCreate}>
+            <Button variant="glass" onClick={openCreate}>
               <Plus className="h-4 w-4" aria-hidden="true" />
               Novo conector
             </Button>

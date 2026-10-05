@@ -25,7 +25,7 @@ export function CredentialsSection({
   const sopClientId = draft.sopClientId ?? dto.sopClientId ?? ""
 
   return (
-    <Card className="card-premium" data-testid="section-credentials">
+    <Card data-testid="section-credentials">
       <CardHeader>
         <CardTitle>Credenciais da Cielo</CardTitle>
         <CardDescription>Da conta única da plataforma. Os segredos ficam guardados cifrados no servidor e nunca voltam para esta tela.</CardDescription>

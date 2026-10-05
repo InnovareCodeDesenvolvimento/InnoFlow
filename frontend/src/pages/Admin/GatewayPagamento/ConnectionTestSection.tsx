@@ -82,7 +82,7 @@ export function ConnectionTestSection({ hasUnsavedCredentials }: { hasUnsavedCre
   const verdict = result ? testVerdict(result) : null
 
   return (
-    <Card className="card-premium" data-testid="section-connection-test">
+    <Card data-testid="section-connection-test">
       <CardHeader>
         <CardTitle>Testar conexão</CardTitle>
         <CardDescription>Confere agora, na Cielo, se as credenciais salvas funcionam. Não cobra nada e não altera nada.</CardDescription>

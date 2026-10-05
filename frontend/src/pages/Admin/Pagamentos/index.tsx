@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/Badge"
 import { Select } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
@@ -82,7 +82,7 @@ export default function PagamentosPage() {
 
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
-          <Table>
+          <Table density="compact">
             <TableHeader>
               <TableRow>
                 <TableHead>Data</TableHead>
@@ -96,7 +96,7 @@ export default function PagamentosPage() {
             <TableBody>
               {data.items.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell>{formatDateTime(row.createdAt)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatDateTime(row.createdAt)}</TableCell>
                   <TableCell className="font-semibold text-ink">{row.userName}</TableCell>
                   <TableCell>{row.siteName ?? "—"}</TableCell>
                   <TableCell>{PROVIDER_OPTIONS.find((o) => o.value === row.provider)?.label ?? row.provider}</TableCell>

@@ -5,8 +5,7 @@ import { PageHeader } from "@/components/painel/PageHeader"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
-import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState, AdminFirstUseState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
@@ -61,7 +60,7 @@ export default function AuthTokensPage() {
         description="RFID e tokens de app usados para iniciar recarga — identidade de rede, válida em qualquer operador."
         icon={KeyRound}
         actions={
-          <Button className="btn-glow-primary" onClick={openCreate}>
+          <Button variant="lime" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo token
           </Button>
@@ -72,11 +71,11 @@ export default function AuthTokensPage() {
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os tokens.")} onRetry={() => refetch()} />}
 
       {!isLoading && !isError && data && data.items.length === 0 && (
-        <EmptyState
+        <AdminFirstUseState
           icon={KeyRound}
           title="Nenhum token cadastrado"
           action={
-            <Button onClick={openCreate}>
+            <Button variant="glass" onClick={openCreate}>
               <Plus className="h-4 w-4" aria-hidden="true" />
               Novo token
             </Button>

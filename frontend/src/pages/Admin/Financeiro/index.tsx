@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Wallet } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
 import { OperatorFilterSelect } from "@/components/relatorios/OperatorFilterSelect"
@@ -42,7 +42,7 @@ export default function FinanceiroPage() {
 
       {!isLoading && !isError && data && (
         <>
-          <Card className="card-premium animate-fade-in-up">
+          <Card>
             <CardHeader>
               <CardTitle>Resumo do período</CardTitle>
             </CardHeader>
@@ -81,7 +81,7 @@ function Row({ label, value, hint, tone, highlight }: { label: string; value: nu
       <dd
         className={
           highlight
-            ? "text-gradient-brand text-lg font-black tabular-nums"
+            ? "text-primary-700 text-lg font-black tabular-nums"
             : tone === "warning"
               ? "font-black tabular-nums text-warning-700"
               : "font-black tabular-nums text-ink"

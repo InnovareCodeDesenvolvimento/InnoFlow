@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge"
 import { Select } from "@/components/ui/Select"
 import { Input } from "@/components/ui/Input"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
@@ -96,7 +96,7 @@ export default function AuditoriaPage() {
 
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
-          <Table>
+          <Table density="compact">
             <TableHeader>
               <TableRow>
                 <TableHead>Quando</TableHead>
@@ -110,7 +110,7 @@ export default function AuditoriaPage() {
               {data.items.map((log) => (
                 <TableRow
                   key={log.id}
-                  className={cn("pressable cursor-pointer", log.outcome !== "SUCCESS" && "bg-danger-50/60 hover:bg-danger-50")}
+                  className={cn("cursor-pointer", log.outcome !== "SUCCESS" && "bg-danger-50/60 hover:bg-danger-50")}
                   onClick={() => setSelectedId(log.id)}
                 >
                   <TableCell className="whitespace-nowrap">{formatDateTime(log.occurredAt)}</TableCell>

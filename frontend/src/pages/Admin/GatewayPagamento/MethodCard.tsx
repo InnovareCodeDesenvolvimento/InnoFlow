@@ -40,11 +40,11 @@ export function MethodCard({
   const blocked = !readiness.ready && !enabled
 
   return (
-    <Card className="card-premium" data-testid={`method-${id}`}>
+    <Card data-testid={`method-${id}`}>
       <CardContent className="space-y-4 p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="shadow-tinted-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
+            <span className="shadow-tinted flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
               <Icon className="h-5 w-5" />
             </span>
             <h2 className="text-base font-bold text-ink">

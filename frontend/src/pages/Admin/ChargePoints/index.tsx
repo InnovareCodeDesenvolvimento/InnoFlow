@@ -5,8 +5,7 @@ import { PageHeader } from "@/components/painel/PageHeader"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
-import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState, AdminFirstUseState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
@@ -68,7 +67,7 @@ export default function ChargePointsPage() {
         description="Carregadores OCPP 1.6-J — reinicie, destrave ou altere disponibilidade remotamente."
         icon={Zap}
         actions={
-          <Button className="btn-glow-primary" onClick={openCreate}>
+          <Button variant="lime" onClick={openCreate}>
             <Plus className="h-4 w-4" aria-hidden="true" />
             Novo ponto de recarga
           </Button>
@@ -79,12 +78,12 @@ export default function ChargePointsPage() {
       {isError && <ErrorState message={getApiErrorMessage(error, "Não foi possível carregar os pontos de recarga.")} onRetry={() => refetch()} />}
 
       {!isLoading && !isError && data && data.items.length === 0 && (
-        <EmptyState
+        <AdminFirstUseState
           icon={Zap}
           title="Nenhum ponto de recarga cadastrado"
           description="Cadastre um site primeiro, depois adicione os carregadores dele aqui."
           action={
-            <Button onClick={openCreate}>
+            <Button variant="glass" onClick={openCreate}>
               <Plus className="h-4 w-4" aria-hidden="true" />
               Novo ponto de recarga
             </Button>

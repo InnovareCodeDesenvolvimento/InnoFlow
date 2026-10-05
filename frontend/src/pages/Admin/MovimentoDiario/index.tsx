@@ -1,9 +1,10 @@
 import { useState } from "react"
 import { CalendarDays } from "lucide-react"
 import { PageHeader } from "@/components/painel/PageHeader"
+import { Card } from "@/components/ui/Card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ErrorState } from "@/components/ui/ErrorState"
+import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { TableSkeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { PeriodSelector } from "@/components/relatorios/PeriodSelector"
@@ -56,21 +57,21 @@ export default function MovimentoDiarioPage() {
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="card-premium animate-fade-in-up stagger-1 p-4">
+            <Card className="p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">Total de sessões</p>
               <p className="mt-1 text-xl font-black tabular-nums text-ink">{data.totals.sessions.toLocaleString("pt-BR")}</p>
-            </div>
-            <div className="card-premium animate-fade-in-up stagger-2 p-4">
+            </Card>
+            <Card className="p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">Energia total</p>
               <p className="mt-1 text-xl font-black tabular-nums text-ink">{formatEnergyWh(data.totals.energyWh)}</p>
-            </div>
-            <div className="card-premium animate-fade-in-up stagger-3 p-4">
+            </Card>
+            <Card variant="inverse" className="p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-ink-softer">Faturamento total</p>
-              <p className="text-gradient-brand mt-1 text-xl font-black tabular-nums">{formatCents(data.totals.revenueCents)}</p>
-            </div>
+              <p className="mt-1 text-xl font-extrabold tabular-nums text-ink">{formatCents(data.totals.revenueCents)}</p>
+            </Card>
           </div>
 
-          <Table>
+          <Table density="compact">
             <TableHeader>
               <TableRow>
                 <TableHead>Data</TableHead>
@@ -84,11 +85,11 @@ export default function MovimentoDiarioPage() {
             <TableBody>
               {data.items.map((row) => (
                 <TableRow key={`${row.date}_${row.siteId}`}>
-                  <TableCell>{formatDate(row.date)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatDate(row.date)}</TableCell>
                   <TableCell className="font-semibold text-ink">{row.siteName}</TableCell>
                   <TableCell>{row.sessions}</TableCell>
-                  <TableCell>{formatEnergyWh(row.energyWh)}</TableCell>
-                  <TableCell>{formatCents(row.avgTicketCents)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatEnergyWh(row.energyWh)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatCents(row.avgTicketCents)}</TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">{formatCents(row.revenueCents)}</TableCell>
                 </TableRow>
               ))}

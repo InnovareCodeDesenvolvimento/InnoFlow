@@ -39,7 +39,7 @@ export function WebhookSection({
 
   if (notInUse) {
     return (
-      <Card className="card-premium" data-testid="section-webhook">
+      <Card data-testid="section-webhook">
         <CardHeader>
           <CardTitle>Webhook</CardTitle>
         </CardHeader>
@@ -57,7 +57,7 @@ export function WebhookSection({
   }
 
   return (
-    <Card className="card-premium" data-testid="section-webhook">
+    <Card data-testid="section-webhook">
       <CardHeader>
         <CardTitle>Webhook</CardTitle>
         <CardDescription>
