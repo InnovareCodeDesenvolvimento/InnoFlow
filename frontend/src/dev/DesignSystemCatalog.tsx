@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react"
-import { Gauge, Inbox, PlugZap, Wallet, Zap } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import { Gauge, Inbox, List, Map as MapIcon, PlugZap, Wallet, Zap } from "lucide-react"
 import { Mascot, MascotFace } from "@/components/brand/Mascot"
 import { Logo } from "@/components/brand/Logo"
+import { LoadingScreen } from "@/components/feedback/LoadingScreen"
 import { NotFound } from "@/components/feedback/NotFound"
 import { RouteErrorView } from "@/components/feedback/RouteErrorView"
 import { PageHeader } from "@/components/painel/PageHeader"
@@ -9,8 +10,12 @@ import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
+import { ErrorState } from "@/components/ui/ErrorState"
 import { IconBadge } from "@/components/ui/IconBadge"
 import { Input } from "@/components/ui/Input"
+import { Segmented } from "@/components/ui/Segmented"
+import { Select } from "@/components/ui/Select"
+import { Textarea } from "@/components/ui/Textarea"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StatCard } from "@/components/ui/StatCard"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
@@ -63,8 +68,27 @@ const PAIRS: Array<{ name: string; fg: [number, number, number]; bg: [number, nu
   { name: "lima SOBRE BRANCO (proibido como texto)", fg: [97, 219, 36], bg: [255, 255, 255], min: 4.5, forbidden: true },
 ]
 
+/** Liga/desliga o escopo do PWA (`html[data-area="driver"]`) só neste catálogo, para comparar campos, véu e cards dos dois escopos. */
+function ScopeToggle() {
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    if (on) document.documentElement.dataset.area = "driver"
+    else delete document.documentElement.dataset.area
+    return () => {
+      delete document.documentElement.dataset.area
+    }
+  }, [on])
+  return (
+    <label className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-ink">
+      <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
+      Escopo do PWA (data-area="driver")
+    </label>
+  )
+}
+
 export default function DesignSystemCatalog() {
   const [hero, setHero] = useState(true)
+  const [seg, setSeg] = useState<"list" | "map">("list")
   return (
     <div className="min-h-screen bg-background">
       <div className="surface-dark px-4 py-6 sm:px-8">
@@ -208,6 +232,36 @@ export default function DesignSystemCatalog() {
             <EmptyState icon={Inbox} title="Outline (legado)" description="Caixa tracejada." />
             <EmptyState tone="quiet" icon={Inbox} title="Quiet" description="Sem tracejado, selo tingido." action={<Button variant="primary" size="sm">Criar</Button>} />
             <EmptyState tone="brand" title="Brand" description="Ainda não há recarga por aqui." art={<MascotFace size={64} />} action={<Button variant="lime">Ver eletropostos</Button>} />
+          </div>
+        </Section>
+
+        <Section
+          title="Campos, véu e Segmented — escopo de área"
+          note="Input/Select/Textarea/Button usam --field-radius (12 px por padrão; 14 px com data-area='driver'). O interruptor abaixo liga o escopo do PWA no <html> para comparar."
+        >
+          <ScopeToggle />
+          <div className="grid gap-4 md:grid-cols-3">
+            <Input label="Input" placeholder="Digite" />
+            <Select label="Select" options={[{ value: "a", label: "Opção A" }]} />
+            <Textarea label="Textarea" placeholder="Texto longo" />
+          </div>
+          <Row>
+            <Segmented label="Exemplo claro" value={seg} onChange={setSeg} options={[{ value: "list", label: "Lista", icon: List }, { value: "map", label: "Mapa", icon: MapIcon }]} />
+            <div className="surface-dark rounded-feature p-3">
+              <Segmented label="Exemplo escuro" value={seg} onChange={setSeg} options={[{ value: "list", label: "Lista", icon: List }, { value: "map", label: "Mapa", icon: MapIcon }]} />
+            </div>
+          </Row>
+        </Section>
+
+        <Section title="ErrorState e LoadingScreen" note="inline (caixa vermelha, admin) · marca (art) · page (a tela inteira falhou) · LoadingScreen inline com e sem arte.">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ErrorState message="Erro inline (admin)." onRetry={() => undefined} className="py-8" />
+            <ErrorState art={<MascotFace size={64} />} message="Erro de marca (PWA/público)." onRetry={() => undefined} />
+          </div>
+          <ErrorState tone="page" art={<MascotFace size={64} />} message="Erro de tela inteira." onRetry={() => undefined} className="min-h-[40svh]" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <LoadingScreen variant="inline" className="mx-0 min-h-[30svh]" />
+            <LoadingScreen variant="inline" className="mx-0 min-h-[30svh]" art={<MascotFace size={48} />} artDelayMs={0} />
           </div>
         </Section>
 

@@ -42,7 +42,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             className={cn(
-              "w-full appearance-none rounded-lg border border-border bg-surface px-3.5 py-2.5 pr-9 text-[16px] text-ink transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary disabled:bg-muted disabled:text-ink-subtle sm:text-sm",
+              "w-full appearance-none rounded-[var(--field-radius)] border border-border bg-surface px-3.5 py-2.5 pr-9 text-[16px] text-ink transition-colors focus:outline-none focus:ring-2 focus:ring-focus/40 focus:border-focus disabled:bg-muted disabled:text-ink-subtle sm:text-sm",
               error && "border-danger focus:border-danger focus:ring-danger/30",
               className,
             )}

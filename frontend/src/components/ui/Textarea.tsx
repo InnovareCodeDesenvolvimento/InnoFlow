@@ -29,7 +29,7 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({ className, la
         aria-describedby={cn(error && errorId, hint && hintId) || undefined}
         className={cn(
           // text-[16px] evita zoom automático do iOS ao focar o campo
-          "min-h-20 w-full resize-y rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[16px] text-ink transition-colors placeholder:text-ink-subtle focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary disabled:bg-muted disabled:text-ink-subtle sm:text-sm",
+          "min-h-20 w-full resize-y rounded-[var(--field-radius)] border border-border bg-surface px-3.5 py-2.5 text-[16px] text-ink transition-colors placeholder:text-ink-subtle focus:outline-none focus:ring-2 focus:ring-focus/40 focus:border-focus disabled:bg-muted disabled:text-ink-subtle sm:text-sm",
           error && "border-danger focus:border-danger focus:ring-danger/30",
           className,
         )}

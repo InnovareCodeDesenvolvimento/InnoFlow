@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react"
 import { ScrollToTop } from "@/components/layout/ScrollToTop"
 import { RequireAuth } from "@/components/layout/RequireAuth"
 import { RouteError } from "@/components/feedback/RouteError"
+import { LoadingScreen } from "@/components/feedback/LoadingScreen"
 import { registerInstallPromptListeners } from "@/store/installPromptStore"
 import { useAuthStore } from "@/store/authStore"
 
@@ -68,6 +69,10 @@ function RoutesBoundary({ children }: { children: React.ReactNode }) {
 }
 
 function RouteFallback() {
+  // PWA do motorista: o carregamento já é na moldura de marca (escura, anel lima) — sem o clarão branco entre a tela de login e o shell escuro.
+  // O mascote NÃO entra aqui (este módulo é do bundle inicial); o shell tem o próprio fallback, com o rosto, para as trocas de página.
+  const inDriverApp = useLocation().pathname.startsWith("/app")
+  if (inDriverApp) return <LoadingScreen />
   return (
     <div className="container-app flex items-center justify-center py-24">
       <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />

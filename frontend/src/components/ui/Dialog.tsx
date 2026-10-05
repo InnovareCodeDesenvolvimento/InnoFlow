@@ -14,7 +14,7 @@ const DialogOverlay = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-ink/50 backdrop-blur-[2px] animate-fade-in", className)}
+    className={cn("dialog-scrim fixed inset-0 z-50 animate-fade-in", className)}
     {...props}
   />
 ))
@@ -45,7 +45,7 @@ const DialogContent = forwardRef<
           if (target?.isConnected) target.focus()
         }}
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-surface p-6 shadow-lg animate-scale-in sm:w-full",
+          "fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[var(--dialog-radius)] bg-surface p-6 shadow-lg animate-scale-in sm:w-full",
           widthClassName ?? "sm:max-w-lg",
           className,
         )}

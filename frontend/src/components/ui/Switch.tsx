@@ -23,7 +23,7 @@ const Switch = forwardRef<HTMLButtonElement, SwitchProps>(({ checked, onCheckedC
     className={cn(
       "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent transition-colors before:absolute before:-inset-2 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
       // "desligado" em ink-softer (≈4,8:1 com branco): border-strong (#D1D5DB) some no fundo claro (1,5:1, reprova o 3:1 de componente de UI).
-      checked ? "bg-accent" : "bg-ink-softer",
+      checked ? "bg-accent" : "bg-state-off",
       className,
     )}
     {...props}

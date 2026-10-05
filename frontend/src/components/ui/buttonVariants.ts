@@ -10,23 +10,25 @@ import { cva } from "class-variance-authority"
  *  - `accent` (verde AA com texto branco), `outline`, `ghost`, `destructive`, `link`: como antes.
  * Hover sobe 1 px só com ponteiro (`hover: hover`) e o toque encolhe (`active:scale`) — feedback tátil, não efeito.
  */
+// O raio mora em CADA variante (não na base): `buttonVariants()` é usado direto em <Link> (sem tailwind-merge), então base + variante com raios arbitrários diferentes
+// competiriam pela ordem do CSS — e o `lime`/`glass` (raio de controle 14 px) perdia para o da base. `--field-radius`: 12 px (= rounded-lg) fora do PWA, 14 px no PWA.
 const lift = "[@media(hover:hover)]:hover:-translate-y-px active:scale-[0.97]"
 const motion = "transition-[transform,box-shadow,background-color,border-color,color] duration-150 ease-brand"
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary-700 shadow-sm",
-        primary: `bg-primary text-primary-foreground hover:bg-primary-700 shadow-tinted ${motion} ${lift}`,
+        default: "rounded-[var(--field-radius)] bg-primary text-primary-foreground hover:bg-primary-700 shadow-sm",
+        primary: `rounded-[var(--field-radius)] bg-primary text-primary-foreground hover:bg-primary-700 shadow-tinted ${motion} ${lift}`,
         lime: `rounded-[var(--radius-control)] bg-lime text-on-lime shadow-lime hover:shadow-lime-lg ${motion} ${lift} [@media(hover:hover)]:hover:-translate-y-0.5`,
         glass: `rounded-[var(--radius-control)] border border-white/25 bg-white/10 text-white hover:bg-white/15 ${motion} ${lift}`,
-        accent: "bg-accent text-accent-foreground hover:bg-accent-700 shadow-sm",
-        outline: "border border-border bg-surface text-ink hover:bg-muted",
-        ghost: "text-ink-soft hover:bg-muted hover:text-ink",
-        destructive: "bg-danger text-white hover:bg-danger-700 shadow-sm",
-        link: "text-primary underline-offset-4 hover:underline",
+        accent: "rounded-[var(--field-radius)] bg-accent text-accent-foreground hover:bg-accent-700 shadow-sm",
+        outline: "rounded-[var(--field-radius)] border border-border bg-surface text-ink hover:bg-muted",
+        ghost: "rounded-[var(--field-radius)] text-ink-soft hover:bg-muted hover:text-ink",
+        destructive: "rounded-[var(--field-radius)] bg-danger text-white hover:bg-danger-700 shadow-sm",
+        link: "rounded-[var(--field-radius)] text-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-4 py-2",

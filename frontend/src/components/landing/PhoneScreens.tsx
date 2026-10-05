@@ -141,7 +141,7 @@ function MapaScreen() {
           <span className="absolute left-[68%] top-[22%] flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white shadow-md ring-2 ring-white">
             <Zap className="h-2.5 w-2.5" />
           </span>
-          <span className="absolute right-[10%] top-[62%] flex h-5 w-5 items-center justify-center rounded-full bg-ink-softer text-white shadow-md ring-2 ring-white">
+          <span className="absolute right-[10%] top-[62%] flex h-5 w-5 items-center justify-center rounded-full bg-state-off text-white shadow-md ring-2 ring-white">
             <Zap className="h-2.5 w-2.5" />
           </span>
           <span className="absolute left-[52%] top-[56%] h-2.5 w-2.5 rounded-full bg-info ring-4 ring-info/25" />

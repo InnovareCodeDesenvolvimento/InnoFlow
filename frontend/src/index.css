@@ -157,6 +157,13 @@
     --color-on-dark: 255 255 255;           /* texto sobre superfície escura: 100% título, 80% corpo, 70% legenda */
     --color-border-on-dark: 255 255 255;    /* usar com alpha 12–20% */
     --color-focus: var(--color-primary);    /* anel de foco; vira lima dentro de .surface-dark */
+    --color-on-focus: 255 255 255;          /* texto sobre `bg-focus` (item ativo de Segmented): branco sobre petróleo; noite sobre lima em .surface-dark */
+    --color-state-off: 107 114 128;         /* #6B7280 — FUNDO de marcador "fora do ar" (pino do mapa, ponto, Switch desligado). Existe porque `ink-softer` era usado como texto E como fundo: o texto precisou escurecer (#5F6673, AA) e o fundo nao devia mudar junto */
+
+    /* ESCOPO DE ÁREA (F-C): defaults = o visual de sempre (Admin e público ficam pixel-idênticos); `html[data-area="driver"]` (ligado pelo shell
+       do PWA, ver `pages/App/Layout.tsx`) migra os componentes base SEM tocar o Admin. Na F-D, o default sobe para o valor do driver e o bloco some. */
+    --field-radius: 0.75rem;                /* Input/Select/Textarea e Button: o `rounded-lg` de antes = 0,75rem no tailwind.config (NÃO é o 0,5rem do Tailwind padrão) */
+    --dialog-radius: 1.25rem;               /* rounded-2xl */
 
     --radius-control: 0.875rem;             /* botão/input grande (= .lnd-btn) */
     --radius-card: 1.25rem;                 /* card de conteúdo */
@@ -209,6 +216,12 @@
     @apply bg-surface rounded-2xl shadow-card ring-1 ring-border-subtle;
   }
 
+  /* Card que é link/botão (linha de histórico, "Meus cartões"...): o `ring-1` do card ocupa o box-shadow e, por estar em @layer components, vencia o anel de
+     foco global (@layer base) — o foco por teclado ficava quase invisível (contraste 1,2:1 medido por `criterios-fc`). Pseudo-classe = mais específico. */
+  .card-elevated:focus-visible {
+    @apply ring-2 ring-focus ring-offset-2 ring-offset-background;
+  }
+
   .skeleton {
     @apply animate-pulse rounded-md bg-muted;
   }
@@ -245,6 +258,7 @@
     --color-border-subtle: 29 58 74;
     --color-border-strong: 58 94 114;
     --color-focus: var(--color-accent-glow);
+    --color-on-focus: var(--color-on-lime);
   }
   /* Foco visível em fundo escuro: o anel primary some no azul-marinho (mesma regra da landing, `.lnd-dark :focus-visible`). */
   .surface-dark :focus-visible {
@@ -315,6 +329,37 @@
     inset: 6% -18% 4% -18%;
     border-radius: 50%;
     background: radial-gradient(closest-side, rgb(var(--color-brand-teal) / 0.5), rgb(var(--color-lime) / 0.12) 60%, transparent);
+  }
+
+  /* Véu de Dialog/sheet. Default = o de sempre (ink/50 + desfoque de 2 px). No PWA: véu noite, SEM desfoque (backdrop-filter em tela cheia custa
+     quadros em celular modesto e o guia de motion da unificação o proíbe). */
+  .dialog-scrim {
+    background-color: rgb(var(--color-ink) / 0.5);
+    backdrop-filter: blur(2px);
+  }
+
+  /* ==== ESCOPO "driver" (F-C): ligado em <html data-area="driver"> pelo shell do PWA. Portais (Dialog, sheet, Toaster) vivem em <body>, fora do
+     shell — por isso o atributo fica no <html> e não numa <div>. Admin e público NÃO entram aqui. ==== */
+  :root[data-area="driver"] {
+    --field-radius: var(--radius-control);
+    --dialog-radius: var(--radius-feature);
+  }
+  /* Foco não pode ficar ESCONDIDO atrás do cabeçalho fixo (3,5 rem) nem da navegação fixa de baixo (~4,5 rem): o navegador rola o focado para dentro desta margem. */
+  :root[data-area="driver"] {
+    scroll-padding-top: 4.5rem;
+    scroll-padding-bottom: 6rem;
+  }
+  :root[data-area="driver"] .dialog-scrim {
+    background-color: rgb(var(--color-night) / 0.62);
+    backdrop-filter: none;
+  }
+  :root[data-area="driver"] .card-elevated {
+    @apply shadow-tinted-card;
+  }
+  /* Toaster temático: mesma gramática dos cards (raio de controle, sombra tingida, borda sutil). */
+  :root[data-area="driver"] [data-sonner-toast] {
+    border-radius: var(--radius-control);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 14px 30px -14px rgb(var(--color-primary) / 0.45);
   }
 }
 
@@ -671,6 +716,23 @@
   box-shadow:
     0 1px 2px rgb(15 23 42 / 0.04),
     0 10px 24px -18px rgb(var(--color-primary) / 0.3);
+}
+
+/* ---- Foco do mapa (Leaflet) — FORA de @layer de propósito: `.leaflet-container` é criada pelo Leaflet em tempo de execução, nenhum arquivo do app a cita, então o purge
+   do Tailwind apagaria a regra se ela estivesse em @layer components (medido: `content: none` no navegador). */
+.leaflet-container:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+/* Borda desenhada por pseudo-elemento: os painéis do Leaflet têm z-index até 1000 e cobririam um `outline` do próprio contêiner (o anel global também seria cortado pelo `overflow-hidden` do pai). */
+.leaflet-container:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  border: 3px solid rgb(var(--color-focus));
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

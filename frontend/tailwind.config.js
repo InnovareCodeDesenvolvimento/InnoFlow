@@ -75,6 +75,9 @@ export default {
         lime: "rgb(var(--color-lime) / <alpha-value>)",
         "on-lime": "rgb(var(--color-on-lime) / <alpha-value>)",
         focus: "rgb(var(--color-focus) / <alpha-value>)",
+        "on-focus": "rgb(var(--color-on-focus) / <alpha-value>)",
+        // FUNDO de marcador "fora do ar" (ink-softer é de TEXTO e escureceu no AA). Ver index.css.
+        "state-off": "rgb(var(--color-state-off) / <alpha-value>)",
         background: "rgb(var(--color-background) / <alpha-value>)",
         "background-warm": "rgb(var(--color-background-warm) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",
