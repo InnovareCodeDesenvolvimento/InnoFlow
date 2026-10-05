@@ -17,6 +17,8 @@ export const SENHA = "senha1234"
 export const PERSONAS = {
   driver: { email: "motorista@innoelektron.com", arquivo: "driver" },
   admin: { email: "admin@innoelektron.com", arquivo: "admin" },
+  /** OPERATOR do operador A: vê o painel SEM as telas só-ADMIN (Tokens, Auditoria, Gateway) — elas mostram "Acesso restrito". */
+  operator: { email: "operador@innoelektron.com", arquivo: "operator" },
   /** Motorista com recibos pré-semeados (F5.9) — é o único com histórico no mock recém-carregado. */
   travado: { email: "travado@innoelektron.com", arquivo: "travado" },
 } as const
