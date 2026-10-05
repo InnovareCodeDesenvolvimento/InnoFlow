@@ -1116,3 +1116,5 @@ Plano: docs/PLANO-FUNCIONALIDADES.md (Nova, 46efc03). Todas = recomendação da 
 - **P1 ACEITA:** a exclusão de conta grava o evento `ACCOUNT_DELETION` já com o snapshot de ator anonimizado; a política de privacidade informa que registros de auditoria antigos são mantidos; o trigger append-only do AuditLog NÃO é alterado.
 - **P4 ACEITA:** prazo máximo de 30 dias (com alerta) para devolver o saldo pendente da conta excluída; devolução SEMPRE do saldo integral (sem reembolso parcial).
 - **P2 e P3: sem resposta do dono ainda.** Os agentes seguem o default recomendado (reversível): P2 zerar `startIp/startUserAgent` das sessões do titular na exclusão; P3 chargeback perdido bloqueia o cartão, com desbloqueio manual pelo ADMIN caso a caso.
+- **P2 ACEITA (05/10/2026):** a exclusão de conta zera `startIp`/`startUserAgent` das sessões do titular.
+- **P3 ACEITA (05/10/2026):** chargeback perdido bloqueia o cartão do motorista; o ADMIN pode desbloquear manualmente, caso a caso (coluna/ação de desbloqueio em `PaymentReversal`, expand puro — a implementar pelo Vega-E/Cronos se ainda não existir).
