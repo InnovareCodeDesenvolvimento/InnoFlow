@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react"
+import { toast } from "sonner"
 import { Gauge, Inbox, List, Map as MapIcon, PlugZap, Wallet, Zap } from "lucide-react"
 import { Mascot, MascotFace } from "@/components/brand/Mascot"
 import { Logo } from "@/components/brand/Logo"
@@ -8,6 +9,7 @@ import { RouteErrorView } from "@/components/feedback/RouteErrorView"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/Dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
@@ -17,6 +19,7 @@ import { Segmented } from "@/components/ui/Segmented"
 import { Select } from "@/components/ui/Select"
 import { Textarea } from "@/components/ui/Textarea"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { Switch } from "@/components/ui/Switch"
 import { StatCard } from "@/components/ui/StatCard"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table"
 import { formatCents } from "@/lib/utils"
@@ -71,6 +74,8 @@ const PAIRS: Array<{ name: string; fg: [number, number, number]; bg: [number, nu
 export default function DesignSystemCatalog() {
   const [hero, setHero] = useState(true)
   const [seg, setSeg] = useState<"list" | "map">("list")
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [on, setOn] = useState(true)
   return (
     <div className="min-h-screen bg-background">
       <div className="surface-dark px-4 py-6 sm:px-8">
@@ -243,6 +248,41 @@ export default function DesignSystemCatalog() {
           </div>
         </Section>
 
+        <Section title="Estados e sobreposições" note="disabled · loading · erro de campo · Dialog · Toaster · Switch. A baseline do catálogo (e2e-visual/catalogo.visual.ts) também fotografa hover e foco desta seção.">
+          <Row>
+            <Button variant="lime" data-ds="botao-lima">Lima (ação)</Button>
+            <Button variant="primary">Petróleo</Button>
+            <Button variant="lime" disabled>Lima desabilitado</Button>
+            <Button variant="primary" loading>Carregando</Button>
+            <Button variant="outline" disabled>Outline desabilitado</Button>
+          </Row>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Input label="Campo normal" placeholder="Digite" data-ds="campo-normal" />
+            <Input label="Campo desabilitado" placeholder="Indisponível" disabled />
+            <Input label="Campo com erro" defaultValue="valor inválido" error="Mensagem de erro do campo." />
+          </div>
+          <Row>
+            <Switch checked={on} onCheckedChange={setOn} aria-label="Interruptor ligado" />
+            <Switch checked={false} onCheckedChange={() => undefined} aria-label="Interruptor desligado" />
+            <Switch checked disabled onCheckedChange={() => undefined} aria-label="Interruptor desabilitado" />
+            <Button variant="outline" data-ds="abrir-dialogo" onClick={() => setDialogOpen(true)}>Abrir diálogo</Button>
+            <Button variant="outline" data-ds="abrir-toast" onClick={() => toast.success("Alteração salva.", { description: "Exemplo de toast do catálogo." })}>Disparar toast</Button>
+          </Row>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogContent widthClassName="sm:max-w-sm">
+              <DialogHeader icon={Wallet}>
+                <DialogTitle>Título do diálogo</DialogTitle>
+                <DialogDescription>Descrição curta do que acontece ao confirmar.</DialogDescription>
+              </DialogHeader>
+              <Input label="Campo no diálogo" placeholder="Digite" />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+                <Button variant="primary" onClick={() => setDialogOpen(false)}>Salvar</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </Section>
+
         <Section title="Skeleton">
           <Row><Skeleton className="h-10 w-48" /><Skeleton className="h-10 w-32" /></Row>
           <div className="surface-dark rounded-feature p-4"><Skeleton className="h-10 w-56" /></div>
@@ -254,7 +294,7 @@ export default function DesignSystemCatalog() {
               <div className="relative"><div className="brand-backlight" aria-hidden="true" /><Mascot sizes="200px" className="[--m-h:240px]" /></div>
               <div className="space-y-3">
                 <p className="eyebrow text-lime">Eyebrow</p>
-                <p className="glass-strong inline-block rounded-2xl px-4 py-3 font-extrabold text-white">Chip de vidro</p>
+                <p className="glass-strong inline-block rounded-card px-4 py-3 font-extrabold text-white">Chip de vidro</p>
                 <div><Logo tone="dark" /></div>
               </div>
             </div>
