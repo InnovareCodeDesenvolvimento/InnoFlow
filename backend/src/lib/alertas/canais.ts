@@ -65,6 +65,8 @@ export interface OpcoesDoTransporteSmtp {
 
 export interface TransporteDeEmail {
   sendMail(msg: { from: string; to: string[]; subject: string; text: string; html?: string }): Promise<unknown>
+  /** Só o handshake (conectar, TLS, autenticar) — SEM enviar mensagem. */
+  verify?(): Promise<unknown>
   close?(): void
 }
 
@@ -117,6 +119,28 @@ export async function enviarPorSmtp(c: ConfigEmail, msg: { subject: string; text
     const info = await transporte.sendMail({ from: c.de, to: para, subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}) })
     return { messageId: messageIdSeguro(info) }
   } catch (err) {
+    throw new FalhaDeCanal('email', motivoDeFalhaSmtp(err))
+  } finally {
+    try {
+      transporte.close?.()
+    } catch {
+      /* ignorado */
+    }
+  }
+}
+
+/**
+ * Teste de CONEXÃO SMTP: conecta, negocia TLS e autentica (`verify()` do transporte), SEM enviar nenhuma mensagem. Lança `FalhaDeCanal` com o motivo curto de sempre (nunca a mensagem crua
+ * da biblioteca). Mesma trava anti-SSRF do envio real (resolve uma vez, valida todos os IPs, conecta no IP validado).
+ */
+export async function verificarConexaoSmtp(c: ConfigEmail, deps: DepsDoCanalEmail = {}): Promise<void> {
+  const destino = await destinoOuFalha('email', c.host, c.politicaDeDestino, deps.dns ?? resolvedorDnsPadrao)
+  const transporte = (deps.criarTransporte ?? criarTransporteSmtp)({ host: c.host, porta: c.porta, secure: c.secure, exigirTls: c.exigirTls, usuario: c.usuario, senha: c.senha, ip: destino.ip })
+  try {
+    if (!transporte.verify) throw new FalhaDeCanal('email', 'smtp ENOVERIFY')
+    await transporte.verify()
+  } catch (err) {
+    if (err instanceof FalhaDeCanal) throw err
     throw new FalhaDeCanal('email', motivoDeFalhaSmtp(err))
   } finally {
     try {

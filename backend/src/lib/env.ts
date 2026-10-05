@@ -140,8 +140,9 @@ const envSchema = z.object({
   // feature opcional (mesma lição de bug-env-eager-todos-entrypoints.md).
   GOOGLE_CLIENT_ID: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().min(1).optional()),
 
-  // L1.9 (06/10/2026) — termos de uso e política de privacidade: VERSÃO VIGENTE + dados públicos da empresa (controlador, suporte, encarregado/DPO). Config de ambiente, não tabela
-  // (docs/MODELO-DADOS-LOTE1.md §6): a versão só muda junto com o TEXTO, que é deploy do frontend — suba a env no MESMO deploy. Versões com default (o boot dos 3 entrypoints não pode
+  // L1.9 (06/10/2026) — termos de uso e política de privacidade: VERSÃO VIGENTE + dados públicos da empresa (controlador, suporte, encarregado/DPO).
+  // RESERVA desde o pedido do dono (06/10/2026): o painel (Admin > Dados da empresa, tabela `CompanyProfile`) MANDA; estas envs só valem enquanto nada foi salvo lá
+  // (`services/legal/dadosLegais.ts`). Seguem lidas aqui por serem o fallback e o padrão das versões — suba a env no MESMO deploy do texto novo se não usar o painel. Versões com default (o boot dos 3 entrypoints não pode
   // depender de uma decisão jurídica do dono) e no máximo 32 caracteres (coluna `ConsentRecord.version`). Dados da empresa OPCIONAIS e SEM default: o dono ainda não informou CNPJ,
   // razão social, e-mail de suporte nem DPO — vazio vira `null` em `GET /api/public/legal`, nunca placeholder inventado. Valor inválido (e-mail/CNPJ malformado) é IGNORADO com aviso
   // no log (`core/legal/termos.ts`), nunca derruba o boot por causa de um campo cosmético.

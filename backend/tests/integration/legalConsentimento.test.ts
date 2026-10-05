@@ -33,15 +33,15 @@ describe('termos de uso e privacidade (L1.9)', () => {
       Object.assign(env, { LEGAL_COMPANY_NAME: undefined, LEGAL_COMPANY_CNPJ: undefined, LEGAL_SUPPORT_EMAIL: undefined, LEGAL_SUPPORT_PHONE: undefined, LEGAL_DPO_EMAIL: undefined })
       const res = await request(app).get('/api/public/legal')
       expect(res.status).toBe(200)
-      expect(res.body).toEqual({ termsVersion: TERMOS_VIGENTES, privacyVersion: PRIVACIDADE_VIGENTE, company: { name: null, cnpj: null, supportEmail: null, supportPhone: null, dpoEmail: null } })
-      expect(res.headers['cache-control']).toContain('max-age')
+      expect(res.body).toEqual({ termsVersion: TERMOS_VIGENTES, privacyVersion: PRIVACIDADE_VIGENTE, company: { name: null, cnpj: null, supportEmail: null, supportPhone: null, dpoEmail: null, tradeName: null, address: null, website: null, dpoName: null } })
+      expect(res.headers['cache-control']).toContain('max-age') // curto (30 s): o painel pode mudar a versão
     })
 
     it('com os dados informados: CNPJ formatado e e-mails aparados; valor INVÁLIDO vira null (não quebra nem publica lixo)', async () => {
       Object.assign(env, { LEGAL_COMPANY_NAME: 'InnoFlow Ltda', LEGAL_COMPANY_CNPJ: '11222333000181', LEGAL_SUPPORT_EMAIL: 'suporte@innoflow.com.br', LEGAL_SUPPORT_PHONE: '(11) 4000-0000', LEGAL_DPO_EMAIL: 'isto-nao-e-email' })
       const res = await request(app).get('/api/public/legal')
       expect(res.status).toBe(200)
-      expect(res.body.company).toEqual({ name: 'InnoFlow Ltda', cnpj: '11.222.333/0001-81', supportEmail: 'suporte@innoflow.com.br', supportPhone: '(11) 4000-0000', dpoEmail: null })
+      expect(res.body.company).toEqual({ name: 'InnoFlow Ltda', cnpj: '11.222.333/0001-81', supportEmail: 'suporte@innoflow.com.br', supportPhone: '(11) 4000-0000', dpoEmail: null, tradeName: null, address: null, website: null, dpoName: null })
     })
 
     it('só expõe o que é público: nenhuma chave além de versões e company', async () => {

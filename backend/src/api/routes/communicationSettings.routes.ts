@@ -4,19 +4,25 @@ import { isPaymentSecretsKeyConfigured } from '../../lib/crypto/paymentSecrets'
 import { atualizarConfigComunicacao } from '../../services/comunicacao/atualizarConfigComunicacao'
 import { toCommunicationSettingsDto } from '../../services/comunicacao/comunicacaoDto'
 import { getConfigComunicacaoEstrita, verificarSegredosDecifraveis } from '../../services/comunicacao/configComunicacao'
-import { testarEmail, testarWhatsapp } from '../../services/comunicacao/testarCanais'
+import { testarConexaoSmtp, testarEmail, testarWhatsapp } from '../../services/comunicacao/testarCanais'
+import { resolvedorTxtDoSistema, verificarDominioRemetente } from '../../services/comunicacao/verificarDominio'
+import { getDadosLegais } from '../../services/legal/dadosLegais'
 import { exigirSenhaAtual, StepUpRateLimitedError } from '../../services/auth/stepUpSenha'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { auditCtx } from '../middleware/auditTrail'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AppError } from '../middleware/errorHandler'
-import { communicationSettingsTestRateLimit, communicationSettingsWriteRateLimit } from '../middleware/rateLimit'
-import { validateBody } from '../middleware/validate'
+import { communicationSettingsTestRateLimit, communicationSettingsWriteRateLimit, domainCheckRateLimit } from '../middleware/rateLimit'
+import { validateBody, validateQuery } from '../middleware/validate'
 import {
+  domainCheckQuerySchema,
   testEmailSchema,
+  testSmtpConnectionSchema,
   testWhatsappSchema,
   updateCommunicationSettingsSchema,
+  type DomainCheckQuery,
   type TestEmailInput,
+  type TestSmtpConnectionInput,
   type TestWhatsappInput,
   type UpdateCommunicationSettingsInput,
 } from '../schemas/communicationSettings.schema'
@@ -102,6 +108,40 @@ router.post(
     req.body = {}
     auditCtx(res).describe({ action: 'OTHER', actionDetail: `test_email:${resultado.ok ? 'ok' : resultado.error?.code}`, changes: null })
     res.json(resultado)
+  }),
+)
+
+/**
+ * `POST .../test-smtp-connection`: só o HANDSHAKE SMTP (conectar, TLS, autenticar) — NÃO envia mensagem. Mesmas proteções do `test-email` (balde de 5/min, anti-SSRF, anti-exfiltração,
+ * `config` não salva opcional). Sempre 200 com o RESULTADO (`ok`, `stage`, `code`); 400 `SECRET_REQUIRED_FOR_NEW_DESTINATION` quando o corpo troca o destino sem reenviar a senha.
+ */
+router.post(
+  '/test-smtp-connection',
+  communicationSettingsTestRateLimit,
+  validateBody(testSmtpConnectionSchema),
+  asyncHandler(async (req, res) => {
+    const input = req.body as TestSmtpConnectionInput
+    const resultado = await testarConexaoSmtp(input)
+    req.body = {} // a senha de teste (se veio) não fica viva na requisição nem entra na auditoria
+    auditCtx(res).describe({ action: 'OTHER', actionDetail: `test_smtp_connection:${resultado.ok ? 'ok' : resultado.code}`, changes: null })
+    res.json(resultado)
+  }),
+)
+
+/**
+ * `GET .../domain-check?selector=`: diagnóstico de SPF / DKIM / DMARC do domínio do e-mail REMETENTE configurado (painel > env). O domínio NUNCA vem do cliente; só o seletor DKIM (validado).
+ * Só consulta TXT públicos; falha de DNS vira `ERRO` no registro (200), nunca derruba. Balde de 6/min por ADMIN.
+ */
+router.get(
+  '/domain-check',
+  domainCheckRateLimit,
+  validateQuery(domainCheckQuerySchema),
+  asyncHandler(async (req, res) => {
+    const { selector } = req.query as unknown as DomainCheckQuery
+    const dto = await dtoAtual()
+    const legal = await getDadosLegais()
+    res.setHeader('Cache-Control', 'no-store')
+    res.json(await verificarDominioRemetente({ remetente: dto.email.fromAddress, smtpHost: dto.email.host, suporteEmail: legal.empresa.supportEmail, seletor: selector ?? null, resolverTxt: resolvedorTxtDoSistema }))
   }),
 )
 

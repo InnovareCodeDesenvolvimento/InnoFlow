@@ -41,6 +41,7 @@ import adminAuditLogsRoutes from './routes/auditLogs.routes'
 import adminEventsRoutes from './routes/events.routes'
 import adminPaymentGatewayRoutes from './routes/paymentGateway.routes'
 import adminCommunicationSettingsRoutes from './routes/communicationSettings.routes'
+import adminCompanyProfileRoutes from './routes/companyProfile.routes'
 import adminCommandsRoutes from './routes/adminCommands.routes'
 import adminBackupRoutes, { backupGoogleCallbackRouter } from './routes/backup.routes'
 import { refundsRouter, sessionRefundsRouter } from './routes/paymentReversals.routes'
@@ -156,6 +157,7 @@ export function createApp(): Express {
   app.use('/api/admin/account-deletions', adminRateLimit, adminAccountDeletionsRoutes) // ADMIN-only (L1.4/DL2) — devolução manual do saldo de conta excluída
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
   app.use('/api/admin/payment-gateway', adminRateLimit, adminPaymentGatewayRoutes) // ADMIN-only (F5.5) — config da conta Cielo
+  app.use('/api/admin/company-profile', adminRateLimit, adminCompanyProfileRoutes) // ADMIN-only — dados da empresa (controlador, suporte, DPO) e versões dos termos
   app.use('/api/admin/communication-settings', adminRateLimit, adminCommunicationSettingsRoutes) // ADMIN-only (N-7) — e-mail (SMTP) e WhatsApp (Evolution API) dos avisos ao dono
   app.use('/api/admin/backup', adminRateLimit, adminBackupRoutes) // ADMIN-only — backup automático do banco (config, chave, histórico, executar/conferir, Google Drive)
   app.use('/api/admin/commands', adminRateLimit, adminCommandsRoutes) // resultado de comando remoto (L1.5) — mesma política de papel do disparo (DL4)

@@ -179,7 +179,7 @@ exposto.
 
 ### Termos, privacidade e LGPD (L1.9 / L1.4) — envs e operação (06/10/2026)
 
-**Envs `LEGAL_*` (as 3 apps recebem as mesmas; só a `api` as usa de fato).** Todas opcionais — nada derruba o boot:
+**Envs `LEGAL_*` — agora só RESERVA (06/10/2026).** O dono cadastra razão social, CNPJ, suporte, endereço, site, encarregado (DPO) e as **versões** dos Termos/Privacidade pelo painel (**Admin > Dados da empresa**, ver a subseção abaixo) e o **painel manda**; as envs só valem enquanto nada foi salvo lá. Não é preciso definir nenhuma. As 3 apps recebem as mesmas; todas opcionais — nada derruba o boot:
 
 | Env | Para quê | Default |
 |---|---|---|
@@ -196,6 +196,14 @@ exposto.
 - **Suba `LEGAL_TERMS_VERSION`/`LEGAL_PRIVACY_VERSION` no MESMO deploy em que o texto novo vai ao ar.** O cadastro (e-mail e Google) só vale com `acceptedTermsVersion` = a vigente (senão 409
   `TERMS_VERSION_OUTDATED`); quem já tem conta e aceitou a versão anterior passa a `upToDate=false` e vê o modal de reaceite no próximo login.
 - O aceite é prova gravada (`ConsentRecord`, append-only) com o IP da requisição (zerado se a conta for excluída).
+
+**Dados da empresa pelo painel (`/api/admin/company-profile`, migration `20261006140000_company_profile`).** Tabela `CompanyProfile` (singleton, sem segredo, sem step-up de senha; só ADMIN; limite de 10 salvamentos/min; auditoria `UPDATE`/`CompanyProfile`, fail-closed, com os **nomes** dos campos — razão social, CNPJ, site e versões entram com valor; e-mail/telefone de suporte, endereço e encarregado entram só como "alterado"). Contrato literal em `docs/CONTRATO-EMPRESA-ADMIN.md`.
+
+- **Painel > env.** Os **dados da empresa** são um grupo: enquanto o painel nunca salvou, valem as envs; no primeiro salvamento o painel **importa** o que a env já informava e passa a mandar em tudo (campo apagado no painel não volta pela env). As **versões** são por campo: vazio no painel = vale a env `LEGAL_*_VERSION` (ou o padrão `2026-10-05`).
+- **Mudar a versão é um ato deliberado.** Alterar a versão efetiva dos Termos ou da Privacidade exige `confirmVersionChange: true` no PUT (senão 409 `VERSION_CHANGE_NOT_CONFIRMED`, com o número de motoristas afetados): **todos** os motoristas passam a `upToDate=false`, veem o modal de reaceite no próximo acesso e o cadastro só vale com a versão nova. Troque a versão **no mesmo momento** em que o texto novo vai ao ar.
+- **Cache de 30 s por processo.** A API que salva vê a mudança na hora; o worker (rodapé dos e-mails) e outras réplicas da API em até 30 s. Uma réplica atrasada pode, no máximo, recusar um aceite com `TERMS_VERSION_OUTDATED` (o front recarrega e repete) — nunca grava um aceite errado. `GET /api/public/legal` tem `Cache-Control: public, max-age=30`.
+- **Banco fora do ar:** a rota pública e o rodapé dos e-mails caem na env (reserva); o aceite dos termos e a tela do admin respondem 503 `LEGAL_SETTINGS_UNAVAILABLE` (não se grava aceite contra uma versão que pode não ser a do banco).
+- **CNPJ** aceito numérico e **alfanumérico** (vigente desde jul/2026), com dígito verificador conferido; fica guardado sem pontuação e é exibido formatado.
 
 **Exclusão de conta e devolução do saldo (L1.4, DL2).** A exclusão é ANONIMIZAÇÃO (a pessoa some; sessões, extrato e pagamentos ficam sob um id pseudônimo por obrigação legal/fiscal). Quem exclui com
 saldo informa uma chave Pix (guardada **cifrada** com a `PAYMENT_SECRETS_KEY` — por isso a rotação da chave também a re-cifra; ver o runbook de rotação) e o ADMIN devolve **por fora** e registra em
@@ -1030,6 +1038,8 @@ No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_cr
 - **Anti-SSRF:** em produção, host SMTP/URL da Evolution apontando para a rede interna, loopback ou metadados de nuvem são recusados (na gravação e de novo na hora de conectar, no IP já validado — um DNS que muda entre a checagem e a conexão não passa). **Resíduo documentado:** o bloqueio vale para o que o painel configura; as envs `ALERT_*` são confiáveis (definidas por quem faz o deploy) e podem apontar para a rede interna. Redirecionamentos HTTP nunca são seguidos.
 - **Auditoria:** cada salvar gera uma linha em "Auditoria" (`UPDATE` / `NotificationChannelConfig`) com antes/depois dos campos não secretos (segredo só como "alterado", destinatários só como contagem) e dispara o alerta `communication_config_changed` (IMPORTANTE) **pela configuração antiga** — se alguém trocar os destinatários, o aviso ainda chega ao dono de antes. Se não foi você: troque a senha do admin e a `PAYMENT_SECRETS_KEY`.
 - **Migration:** `20261005140000_notification_channel_config` (tabela nova `NotificationChannelConfig`, singleton, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).
+- **Teste de conexão SMTP (06/10/2026):** `POST /api/admin/communication-settings/test-smtp-connection` só faz o handshake (conectar, TLS, autenticar) e **não envia mensagem**. Responde sempre 200 com `{ ok, stage: CONNECT|TLS|AUTH|OK, code, message, authenticated, durationMs }` (erro como código; o texto cru do servidor nunca aparece). Mesmas proteções do teste de e-mail: 5 por minuto, anti-SSRF, anti-exfiltração (trocar servidor/usuário exige reenviar a senha) e auditoria `OTHER` sem segredo.
+- **Verificador de DNS do remetente (06/10/2026):** `GET /api/admin/communication-settings/domain-check?selector=<seletor DKIM>` consulta **SPF, DMARC e (com seletor) DKIM** do domínio do **e-mail remetente já configurado** — o domínio nunca vem do cliente e só é consultado se for um domínio público (nada de IP, `localhost` ou sufixo interno). Só lê TXT públicos pelo DNS do sistema (prazo de 4 s por consulta); falha do DNS vira `ERRO` naquele registro, nunca derruba. 6 por minuto por ADMIN. **Não configura nada:** SPF/DKIM/DMARC são registros no DNS do domínio (Registro.br, Cloudflare...). O valor exato de SPF e DKIM depende do provedor SMTP (o sistema manda pedir ao provedor e não inventa); só o DMARC traz um exemplo seguro (`v=DMARC1; p=none; rua=mailto:...`, que apenas monitora). Em produção o container precisa de saída DNS (UDP/TCP 53) para o resolvedor do sistema.
 
 ### 6.10 E-mails ao motorista (L1.6, 06/10/2026)
 

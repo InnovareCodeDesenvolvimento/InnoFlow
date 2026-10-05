@@ -10,7 +10,7 @@ import { ehSempreLigado, type TipoDeNotificacao } from './politica'
  *  - o ASSUNTO é fixo ou só leva valor em reais (nunca texto vindo de gente: nome de posto, nome do motorista...);
  *  - SEM dado sensível: nenhum número de cartão (nem os 4 últimos), nenhum idTag/token, nenhum CPF, nenhum e-mail no corpo;
  *  - SEM pixel de rastreio nem imagem remota (o `layoutEmail` já garante); links só para o PWA (`<PUBLIC_APP_URL>/app/...`);
- *  - rodapé com a identificação da empresa vinda de `LEGAL_*` (L1.9): campo ausente = bloco omitido, NUNCA um CNPJ/nome inventado; e o link "Gerenciar notificações".
+ *  - rodapé com a identificação da empresa (painel Admin > Dados da empresa; reserva: `LEGAL_*`) (L1.9): campo ausente = bloco omitido, NUNCA um CNPJ/nome inventado; e o link "Gerenciar notificações".
  * Valores em REAIS formatados (R$ 1.234,56), nunca centavos crus.
  */
 
@@ -47,11 +47,12 @@ function cta(rotulo: string, destino: string | null): { cta: CtaDoEmail } | Reco
   return destino ? { cta: { rotulo, url: destino } } : {}
 }
 
-/** Bloco de identificação da empresa (LEGAL_*): só o que EXISTE. Sem nenhum campo => string vazia (bloco omitido). */
+/** Bloco de identificação da empresa (razão social, CNPJ, endereço, suporte): só o que EXISTE. Sem nenhum campo => string vazia (bloco omitido). */
 export function blocoDaEmpresa(e: DadosPublicosDaEmpresa): string {
   const linhas: string[] = []
   if (e.name) linhas.push(e.name)
   if (e.cnpj) linhas.push(`CNPJ ${e.cnpj}`)
+  if (e.address) linhas.push(e.address)
   const contato = [e.supportEmail, e.supportPhone].filter((v): v is string => Boolean(v))
   if (contato.length > 0) linhas.push(`Suporte: ${contato.join(' · ')}`)
   return linhas.join('\n')

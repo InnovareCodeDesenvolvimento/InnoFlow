@@ -1,12 +1,11 @@
 import type { ConsentSource, Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
-import { env } from '../../lib/env'
-import { logger } from '../../lib/logger'
 import { AppError } from '../../api/middleware/errorHandler'
-import { avaliarConsentimento, normalizarDadosDaEmpresa, type DadosPublicosDaEmpresa, type StatusDeConsentimento, type VersoesVigentes } from '../../core/legal/termos'
+import { avaliarConsentimento, type DadosPublicosDaEmpresa, type StatusDeConsentimento, type VersoesVigentes } from '../../core/legal/termos'
+import { getDadosLegais, getDadosLegaisEstrito } from './dadosLegais'
 
 /**
- * Termos de uso e política de privacidade (L1.9): versão vigente (env `LEGAL_*`), prova do aceite (`ConsentRecord`) e os dados públicos da empresa.
+ * Termos de uso e política de privacidade (L1.9): versão vigente (painel > env `LEGAL_*`, ver `dadosLegais.ts`), prova do aceite (`ConsentRecord`) e os dados públicos da empresa.
  * A regra "quem está em dia" mora em `core/legal/termos.ts`; aqui só a ligação com env e banco.
  *
  * Aceite = uma linha por (usuário, documento, versão), idempotente (`ON CONFLICT DO NOTHING`, via `skipDuplicates`). Só o IP da requisição é guardado (a coluna não tem
@@ -15,33 +14,23 @@ import { avaliarConsentimento, normalizarDadosDaEmpresa, type DadosPublicosDaEmp
 
 const TAMANHO_MAXIMO_IP = 64
 
-export function versoesVigentes(): VersoesVigentes {
-  return { termsVersion: env.LEGAL_TERMS_VERSION, privacyVersion: env.LEGAL_PRIVACY_VERSION }
+/** Versões VIGENTES (painel > env). ESTRITA: banco fora => 503 — nunca se grava um aceite contra uma versão que pode não ser a do banco. */
+export async function versoesVigentes(): Promise<VersoesVigentes> {
+  return (await getDadosLegaisEstrito()).versoes
 }
 
-let avisouCamposInvalidos = false
-
-/** Dados públicos da empresa vindos da env. Campo ausente = `null` (sem placeholder); campo inválido = `null` + um aviso (só o NOME do campo, nunca o valor) por processo. */
-export function dadosPublicosDaEmpresa(): DadosPublicosDaEmpresa {
-  const { dados, invalidos } = normalizarDadosDaEmpresa({
-    name: env.LEGAL_COMPANY_NAME,
-    cnpj: env.LEGAL_COMPANY_CNPJ,
-    supportEmail: env.LEGAL_SUPPORT_EMAIL,
-    supportPhone: env.LEGAL_SUPPORT_PHONE,
-    dpoEmail: env.LEGAL_DPO_EMAIL,
-  })
-  if (invalidos.length > 0 && !avisouCamposInvalidos) {
-    avisouCamposInvalidos = true
-    logger.warn({ campos: invalidos }, '[legal] variável LEGAL_* com valor inválido — o campo sai vazio em /api/public/legal até ser corrigida')
-  }
-  return dados
+/** Dados públicos da empresa (painel > env). Campo vazio = `null` (sem placeholder). Nunca lança: banco fora => env. */
+export async function dadosPublicosDaEmpresa(): Promise<Required<DadosPublicosDaEmpresa>> {
+  return (await getDadosLegais()).empresa
 }
 
 /** Versão que o cliente diz ter aceitado precisa ser a VIGENTE — senão o texto que ele viu não é o que vale (409, o front recarrega `GET /api/public/legal`). */
-export function exigirVersaoVigenteDosTermos(versaoAceita: string): void {
-  if (versaoAceita !== versoesVigentes().termsVersion) {
+export async function exigirVersaoVigenteDosTermos(versaoAceita: string): Promise<VersoesVigentes> {
+  const vigentes = await versoesVigentes()
+  if (versaoAceita !== vigentes.termsVersion) {
     throw new AppError('Os Termos de Uso foram atualizados. Leia a versão atual e aceite novamente.', 409, 'TERMS_VERSION_OUTDATED')
   }
+  return vigentes // UMA leitura: termos e privacidade do mesmo instante (o cadastro grava os dois)
 }
 
 export function ipDoAceite(ip: string | undefined | null): string | null {
@@ -63,12 +52,12 @@ export function aceitesDoCadastro(params: { termsVersion: string; privacyVersion
 
 export async function statusDoConsentimento(userId: string): Promise<StatusDeConsentimento> {
   const aceites = await prisma.consentRecord.findMany({ where: { userId }, select: { kind: true, version: true, acceptedAt: true }, orderBy: { acceptedAt: 'desc' }, take: 200 })
-  return avaliarConsentimento(versoesVigentes(), aceites)
+  return avaliarConsentimento(await versoesVigentes(), aceites)
 }
 
 /** `POST /api/me/consents`: reaceite de quem já tem conta. Idempotente (reaceitar a mesma versão não duplica nem falha). */
 export async function registrarReaceite(params: { userId: string; termsVersion: string; privacyVersion: string; ip: string | undefined | null }): Promise<StatusDeConsentimento> {
-  const vigentes = versoesVigentes()
+  const vigentes = await versoesVigentes()
   if (params.termsVersion !== vigentes.termsVersion || params.privacyVersion !== vigentes.privacyVersion) {
     throw new AppError('Os documentos legais foram atualizados. Leia as versões atuais e aceite novamente.', 409, 'TERMS_VERSION_OUTDATED')
   }

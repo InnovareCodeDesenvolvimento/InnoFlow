@@ -48,7 +48,7 @@ export interface DepsDoProcessamento {
   enviar: (msg: { to: string; subject: string; text: string; html: string }) => Promise<ResultadoEmailTransacional>
   /** Origem pública do PWA (nunca de header de requisição). `null` = e-mail sem links. */
   baseUrl: () => string | null
-  empresa: () => DadosPublicosDaEmpresa
+  empresa: () => DadosPublicosDaEmpresa | Promise<DadosPublicosDaEmpresa>
   log: LogDoProcessamento
   agora?: () => Date
   prazoDoEnvioMs?: number
@@ -210,7 +210,7 @@ export function criarProcessadorDeNotificacoes(deps: DepsDoProcessamento) {
       return { status: 'DISPENSADA', motivo: decisao.motivo }
     }
 
-    const ctx: ContextoDoEmail = { nome: usuario.name, baseUrl: deps.baseUrl(), empresa: deps.empresa() }
+    const ctx: ContextoDoEmail = { nome: usuario.name, baseUrl: deps.baseUrl(), empresa: await deps.empresa() }
     const montagem = await montarEmail(db, d, ctx, prefs, usuario.email, agora())
     if ('dispensar' in montagem) {
       await dispensar(linha.id, montagem.dispensar)

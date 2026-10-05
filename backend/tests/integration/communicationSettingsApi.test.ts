@@ -11,6 +11,22 @@ import { iniciarHttpFalso, iniciarSmtpFalso, type HttpFalso, type SmtpFalso } fr
  * anti-exfiltração (trocar destino exige reenviar o segredo); anti-SSRF; canal incompleto não liga (409, nada gravado); rotação de chave cobre os segredos novos.
  */
 
+// DNS FALSO do verificador de domínio (sem rede): `mapa` nome -> TXT[] (ou Error); nome fora do mapa = ENODATA.
+const dns = vi.hoisted(() => ({ mapa: {} as Record<string, string[] | Error>, consultados: [] as string[] }))
+vi.mock('../../src/services/comunicacao/verificarDominio', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/services/comunicacao/verificarDominio')>()
+  return {
+    ...real,
+    resolvedorTxtDoSistema: async (nome: string) => {
+      dns.consultados.push(nome)
+      const v = dns.mapa[nome]
+      if (v === undefined) throw Object.assign(new Error('ENODATA'), { code: 'ENODATA' })
+      if (v instanceof Error) throw v
+      return v.map((t) => [t])
+    },
+  }
+})
+
 const SEGREDO_SMTP = 'SenhaSmtp#Marcador-Unico-7a1c'
 const APIKEY = 'EVO-APIKEY-MARCADOR-UNICO-0123456789abcdef'
 
@@ -108,6 +124,8 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
     logsWarn.length = 0
     logsTodos.length = 0
     smtp.recebidos.length = 0
+    dns.mapa = {}
+    dns.consultados.length = 0
     evolution.recebidas.length = 0
     outro.recebidas.length = 0
     evolution.responder((_r, res) => res.writeHead(201).end('{}'))
@@ -631,6 +649,173 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
       } finally {
         process.env.NODE_ENV = nodeEnv
       }
+    })
+  })
+
+  describe('teste de CONEXÃO SMTP (só o handshake)', () => {
+    // Os PUTs destes testes emitem "communication_config_changed" pelo logger; com o notificador GLOBAL ligado os e-mails desses avisos chegariam ao SMTP falso em instantes
+    // aleatórios e contaminariam os testes seguintes. Aqui ele fica desligado (e volta ao padrão preguiçoso ao final).
+    beforeAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(null))
+    afterAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(undefined))
+    const postConexao = (u: { token: string }, body: Record<string, unknown> = {}) => request(app).post('/api/admin/communication-settings/test-smtp-connection').set(auth(u)).send(body)
+
+    it('só ADMIN (401/403) e corpo estrito (campo desconhecido = 400)', async () => {
+      expect((await request(app).post('/api/admin/communication-settings/test-smtp-connection').send({})).status).toBe(401)
+      for (const role of ['OPERATOR', 'DRIVER'] as const) expect((await postConexao(await novoUsuario(role))).status).toBe(403)
+      const admin = await novoUsuario()
+      expect((await postConexao(admin, { to: 'x@exemplo.com.br' })).status).toBe(400)
+      expect((await postConexao(admin, { config: { enabled: true } })).status).toBe(400)
+    })
+
+    it('config SALVA: stage OK, NENHUMA mensagem enviada ao servidor, sem segredo na resposta, auditoria OTHER sem corpo', async () => {
+      const admin = await novoUsuario()
+      await salvarPadrao(admin)
+      const res = await postConexao(admin)
+      expect(res.status, dump(res.body)).toBe(200)
+      expect(res.body).toMatchObject({ ok: true, stage: 'OK', code: null, message: null, authenticated: false })
+      expect(typeof res.body.durationMs).toBe('number')
+      expect(Object.keys(res.body).sort()).toEqual(['authenticated', 'code', 'durationMs', 'message', 'ok', 'stage', 'testedAt'])
+      expect(smtp.recebidos).toHaveLength(0)
+      expect(JSON.stringify(res.body)).not.toContain(SEGREDO_SMTP)
+      const linhas = (await esperarAuditoria(admin.id, 2)).filter((l) => l.actionDetail === 'test_smtp_connection:ok')
+      expect(linhas).toHaveLength(1)
+      expect(linhas[0]).toMatchObject({ action: 'OTHER', outcome: 'SUCCESS', changes: null })
+    })
+
+    it('login recusado = stage AUTH; porta fechada = stage CONNECT; autenticou = authenticated true; nada de segredo nem texto cru em resposta/log/auditoria', async () => {
+      const admin = await novoUsuario()
+      const comAuth = await iniciarSmtpFalso({ usuario: 'alertas', senha: 'SENHA-CERTA-XYZ' })
+      try {
+        await salvarPadrao(admin, { email: { enabled: true, host: '127.0.0.1', port: comAuth.porta, fromAddress: 'alertas@exemplo.com.br', recipients: ['dono@exemplo.com.br'], user: 'alertas', password: 'SENHA-ERRADA-999' } })
+        const erro = await postConexao(admin)
+        expect(erro.status).toBe(200)
+        expect(erro.body).toMatchObject({ ok: false, stage: 'AUTH', code: 'SMTP_AUTH_FAILED', authenticated: false })
+        expect(typeof erro.body.message).toBe('string')
+
+        const certo = await postConexao(admin, { config: { password: 'SENHA-CERTA-XYZ' } })
+        expect(certo.body).toMatchObject({ ok: true, stage: 'OK', code: null, authenticated: true })
+        expect(comAuth.recebidos).toHaveLength(0)
+        for (const t of [JSON.stringify(erro.body), JSON.stringify(certo.body), logsTodos.join('')]) {
+          expect(t).not.toContain('SENHA-ERRADA-999')
+          expect(t).not.toContain('SENHA-CERTA-XYZ')
+          expect(t).not.toContain('Invalid login')
+        }
+      } finally {
+        await comAuth.fechar()
+      }
+      const fechada = await postConexao(admin, { config: { host: '127.0.0.1', port: 1, password: 'x' } })
+      expect(fechada.body).toMatchObject({ ok: false, stage: 'CONNECT', code: 'SMTP_CONNECTION_FAILED' })
+      const auditorias = (await esperarAuditoria(admin.id, 3)).map((l) => JSON.stringify(l))
+      for (const a of auditorias) {
+        expect(a).not.toContain('SENHA-ERRADA-999')
+        expect(a).not.toContain('SENHA-CERTA-XYZ')
+      }
+    }, 30_000)
+
+    it('ANTI-EXFILTRAÇÃO: trocar o host sem reenviar a senha é 400 e NENHUMA conexão é aberta; com a senha nova, a salva continua intocada', async () => {
+      const admin = await novoUsuario()
+      await salvarPadrao(admin)
+      const outroSmtp = await iniciarSmtpFalso({ usuario: 'u', senha: 'senha-nova-1' })
+      try {
+        const semSenha = await postConexao(admin, { config: { host: 'localhost', port: outroSmtp.porta } })
+        expect(semSenha.status).toBe(400)
+        expect(semSenha.body.code).toBe('SECRET_REQUIRED_FOR_NEW_DESTINATION')
+        const comSenha = await postConexao(admin, { config: { host: '127.0.0.1', port: outroSmtp.porta, user: 'u', password: 'senha-nova-1' } })
+        expect(comSenha.body).toMatchObject({ ok: true, stage: 'OK', authenticated: true })
+      } finally {
+        await outroSmtp.fechar()
+      }
+      const depois = await m.prisma.notificationChannelConfig.findUniqueOrThrow({ where: { id: 1 } })
+      expect(depois.smtpPort).toBe(smtp.porta)
+    })
+
+    it('ANTI-SSRF: em produção um host interno é bloqueado em CONNECT (nenhuma conexão); sem host configurado é INVALID_CONFIGURATION (200)', async () => {
+      const admin = await novoUsuario()
+      const semHost = await postConexao(admin)
+      expect(semHost.status).toBe(200)
+      expect(semHost.body).toMatchObject({ ok: false, stage: 'CONNECT', code: 'INVALID_CONFIGURATION' })
+      const nodeEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = 'production'
+      try {
+        const res = await postConexao(admin, { config: { host: '127.0.0.1', port: smtp.porta, fromAddress: 'a@exemplo.com.br' } })
+        expect(res.status).toBe(200)
+        expect(res.body.ok).toBe(false)
+        expect(res.body.stage).toBe('CONNECT')
+        expect(smtp.recebidos).toHaveLength(0)
+      } finally {
+        process.env.NODE_ENV = nodeEnv
+      }
+    })
+
+    it('rate limit curto: o 6º pedido no minuto é 429', async () => {
+      const admin = await novoUsuario()
+      const codigos: number[] = []
+      for (let i = 0; i < 6; i += 1) codigos.push((await postConexao(admin)).status)
+      expect(codigos.slice(0, 5).every((c) => c === 200)).toBe(true)
+      expect(codigos[5]).toBe(429)
+    })
+  })
+
+  describe('verificador de DNS do domínio remetente (GET /domain-check)', () => {
+    // Os PUTs destes testes emitem "communication_config_changed" pelo logger; com o notificador GLOBAL ligado os e-mails desses avisos chegariam ao SMTP falso em instantes
+    // aleatórios e contaminariam os testes seguintes. Aqui ele fica desligado (e volta ao padrão preguiçoso ao final).
+    beforeAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(null))
+    afterAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(undefined))
+    const consultar = (u: { token: string }, qs = '') => request(app).get(`/api/admin/communication-settings/domain-check${qs}`).set(auth(u))
+
+    it('só ADMIN; query desconhecida (tentar passar o domínio) e seletor inválido são 400 — o domínio NUNCA vem do cliente', async () => {
+      expect((await request(app).get('/api/admin/communication-settings/domain-check')).status).toBe(401)
+      for (const role of ['OPERATOR', 'DRIVER'] as const) expect((await consultar(await novoUsuario(role))).status).toBe(403)
+      const admin = await novoUsuario()
+      for (const qs of ['?domain=evil.com', '?selector=a.b', '?selector=a/b', '?selector=-x', `?selector=${'a'.repeat(64)}`, '?selector=x&selector=y']) {
+        expect((await consultar(admin, qs)).status, qs).toBe(400)
+      }
+      expect(dns.consultados).toEqual([])
+    })
+
+    it('sem e-mail remetente configurado: 200 senderConfigured=false e NENHUMA consulta DNS', async () => {
+      const admin = await novoUsuario()
+      const res = await consultar(admin)
+      expect(res.status, dump(res.body)).toBe(200)
+      expect(res.body).toMatchObject({ senderConfigured: false, domain: null, overallStatus: null })
+      expect(dns.consultados).toEqual([])
+    })
+
+    it('usa o domínio do remetente SALVO (painel) e o seletor da query; devolve só TXT público e textos do sistema', async () => {
+      const admin = await novoUsuario()
+      await salvarPadrao(admin, { email: { enabled: true, host: 'smtp.gmail.com', port: 587, fromAddress: 'Aviso@Empresa.com.br', recipients: ['dono@exemplo.com.br'], user: null, password: SEGREDO_SMTP } })
+      dns.mapa = {
+        'empresa.com.br': ['v=spf1 include:_spf.google.com ~all'],
+        '_dmarc.empresa.com.br': ['v=DMARC1; p=none'],
+        'google._domainkey.empresa.com.br': ['v=DKIM1; k=rsa; p=ABCDEF'],
+      }
+      const res = await consultar(admin, '?selector=google')
+      expect(res.status, dump(res.body)).toBe(200)
+      expect(res.body).toMatchObject({ senderConfigured: true, domain: 'empresa.com.br', overallStatus: 'ATENCAO', spf: { status: 'OK' }, dmarc: { status: 'ATENCAO' }, dkim: { status: 'OK' } })
+      expect(res.body.smtpProvider).toContain('Google')
+      expect([...dns.consultados].sort()).toEqual(['_dmarc.empresa.com.br', 'empresa.com.br', 'google._domainkey.empresa.com.br'])
+      expect(res.headers['cache-control']).toBe('no-store')
+      const texto = JSON.stringify(res.body)
+      expect(texto).not.toContain(SEGREDO_SMTP)
+      expect(texto).not.toContain('dono@exemplo.com.br') // destinatário de alerta não vaza
+    })
+
+    it('falha do DNS é ERRO no registro (200), nunca 500; sem seletor o DKIM pede o seletor', async () => {
+      const admin = await novoUsuario()
+      await salvarPadrao(admin, { email: { enabled: true, host: '127.0.0.1', port: smtp.porta, fromAddress: 'aviso@empresa.com.br', recipients: ['dono@exemplo.com.br'], user: null, password: SEGREDO_SMTP } })
+      dns.mapa = { 'empresa.com.br': Object.assign(new Error('boom 10.9.8.7'), { code: 'ECONNREFUSED' }) }
+      const res = await consultar(admin)
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ overallStatus: 'ERRO', spf: { status: 'ERRO' }, dkim: { status: 'ATENCAO', nomeConsultado: null } })
+      expect(JSON.stringify(res.body)).not.toContain('10.9.8.7')
+    })
+
+    it('rate limit curto: o 7º pedido no minuto é 429', async () => {
+      const admin = await novoUsuario()
+      const codigos: number[] = []
+      for (let i = 0; i < 7; i += 1) codigos.push((await consultar(admin)).status)
+      expect(codigos.slice(0, 6).every((c) => c === 200)).toBe(true)
+      expect(codigos[6]).toBe(429)
     })
   })
 

@@ -1,8 +1,8 @@
 import { env } from '../../lib/env'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { AppError } from '../../api/middleware/errorHandler'
-import type { TestEmailInput, TestWhatsappInput } from '../../api/schemas/communicationSettings.schema'
-import { FalhaDeCanal, enviarPorEvolution, enviarPorSmtp, type DepsDoCanalEmail, type DepsDoCanalHttp } from '../../lib/alertas/canais'
+import type { TestEmailInput, TestSmtpConnectionInput, TestWhatsappInput } from '../../api/schemas/communicationSettings.schema'
+import { FalhaDeCanal, enviarPorEvolution, enviarPorSmtp, verificarConexaoSmtp, type DepsDoCanalEmail, type DepsDoCanalHttp } from '../../lib/alertas/canais'
 import { EMAIL_SIMPLES, normalizarNumeroWhatsapp } from '../../lib/alertas/config'
 import {
   camposEmailDaLinha,
@@ -96,11 +96,12 @@ function camposEmailEfetivos(c: ConfigComunicacaoEfetiva): { campos: CamposEmail
   }
 }
 
-export async function testarEmail(input: TestEmailInput, deps: DepsDoCanalEmail = {}): Promise<ResultadoTesteCanal> {
-  const inicio = performance.now()
-  const efetiva = await getConfigComunicacaoEstrita()
+/**
+ * Campos de e-mail do teste = configuração efetiva + o que veio no corpo (ainda não salvo). Aplica a regra ANTI-EXFILTRAÇÃO: trocar host/usuário sem reenviar a senha é 400
+ * `SECRET_REQUIRED_FOR_NEW_DESTINATION` e a senha salva nunca é reaproveitada para outro destino. Compartilhada por `testarEmail` e `testarConexaoSmtp`.
+ */
+function combinarCamposDeEmail(efetiva: ConfigComunicacaoEfetiva, o: NonNullable<TestEmailInput['config']>): { campos: CamposEmail; base: { campos: CamposEmail; ilegivel: boolean } } {
   const base = camposEmailEfetivos(efetiva)
-  const o = input.config ?? {}
   const campos: CamposEmail = {
     host: o.host ?? base.campos.host,
     porta: o.port ?? base.campos.porta,
@@ -117,6 +118,14 @@ export async function testarEmail(input: TestEmailInput, deps: DepsDoCanalEmail 
     throw new AppError('Para testar outro servidor ou usuário, informe a senha (a senha salva não é reaproveitada para outro destino).', 400, 'SECRET_REQUIRED_FOR_NEW_DESTINATION', [{ field: 'config.password' }])
   }
   if (destinoMudou && o.password === undefined) campos.senha = undefined
+  return { campos, base }
+}
+
+export async function testarEmail(input: TestEmailInput, deps: DepsDoCanalEmail = {}): Promise<ResultadoTesteCanal> {
+  const inicio = performance.now()
+  const efetiva = await getConfigComunicacaoEstrita()
+  const o = input.config ?? {}
+  const { campos, base } = combinarCamposDeEmail(efetiva, o)
 
   const para = input.to ?? campos.destinatarios[0]
   const falhaDeConfig = (message: string): ResultadoTesteCanal => ({ channel: 'email', ok: false, testedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - inicio), to: null, error: { code: 'INVALID_CONFIGURATION', message } })
@@ -132,6 +141,59 @@ export async function testarEmail(input: TestEmailInput, deps: DepsDoCanalEmail 
     return { channel: 'email', ok: true, testedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - inicio), to: mascararEmail(para), error: null }
   } catch (err) {
     return { channel: 'email', ok: false, testedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - inicio), to: mascararEmail(para), error: classificarFalhaDeCanal(err) }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ conexão SMTP (sem enviar)
+
+export type EtapaDaConexaoSmtp = 'CONNECT' | 'TLS' | 'AUTH' | 'OK'
+
+/** `POST .../test-smtp-connection` -> 200. `stage` = a etapa em que PAROU (`OK` = passou por tudo). `code` é um código, nunca o texto cru do servidor. */
+export interface ResultadoTesteConexaoSmtp {
+  ok: boolean
+  stage: EtapaDaConexaoSmtp
+  code: CodigoErroTeste | null
+  /** Mensagem fixa em PT-BR para o admin (escrita por nós; nunca a resposta do servidor SMTP). `null` quando `ok`. */
+  message: string | null
+  /** `true` = foi feito login com usuário/senha; `false` = o servidor foi usado sem autenticação (nada configurado). */
+  authenticated: boolean
+  testedAt: string
+  durationMs: number
+}
+
+export function etapaDoCodigo(code: CodigoErroTeste): EtapaDaConexaoSmtp {
+  if (code === 'SMTP_AUTH_FAILED') return 'AUTH'
+  if (code === 'SMTP_TLS_REQUIRED') return 'TLS'
+  return 'CONNECT'
+}
+
+/** Só o HANDSHAKE (conectar, TLS, autenticar): NENHUMA mensagem é enviada. Mesmas proteções do `testarEmail` (anti-exfiltração, anti-SSRF, prazo curto, sem segredo na resposta). */
+export async function testarConexaoSmtp(input: TestSmtpConnectionInput, deps: DepsDoCanalEmail = {}): Promise<ResultadoTesteConexaoSmtp> {
+  const inicio = performance.now()
+  const efetiva = await getConfigComunicacaoEstrita()
+  const o = input.config ?? {}
+  const { campos, base } = combinarCamposDeEmail(efetiva, o)
+  const resultado = (parcial: Pick<ResultadoTesteConexaoSmtp, 'ok' | 'stage' | 'code' | 'message'> & { authenticated?: boolean }): ResultadoTesteConexaoSmtp => ({
+    authenticated: false,
+    testedAt: new Date().toISOString(),
+    durationMs: Math.round(performance.now() - inicio),
+    ...parcial,
+  })
+  const falhaDeConfig = (message: string): ResultadoTesteConexaoSmtp => resultado({ ok: false, stage: 'CONNECT', code: 'INVALID_CONFIGURATION', message })
+  if (base.ilegivel && o.password === undefined) return falhaDeConfig('A senha SMTP salva não pôde ser decifrada (chave de cifragem trocada ou perdida): informe a senha de novo.')
+
+  // O handshake não envia mensagem, então remetente e destinatários não importam: um remetente de enfeite (domínio reservado `.invalid`, que nunca recebe nada) evita exigir o que o teste não usa.
+  const avisos: string[] = []
+  const cfg = emailDeCampos({ ...campos, emailRemetente: campos.emailRemetente ?? 'verificacao@conexao.invalid', nomeRemetente: null }, politicaDeDestinoDoPainel(process.env), avisos)
+  if (!cfg) return falhaDeConfig(avisos[0] ?? 'Configuração de e-mail incompleta.')
+
+  const autenticou = Boolean(cfg.usuario && cfg.senha)
+  try {
+    await verificarConexaoSmtp(cfg, deps)
+    return resultado({ ok: true, stage: 'OK', code: null, message: null, authenticated: autenticou })
+  } catch (err) {
+    const { code, message } = classificarFalhaDeCanal(err)
+    return resultado({ ok: false, stage: etapaDoCodigo(code), code, message })
   }
 }
 

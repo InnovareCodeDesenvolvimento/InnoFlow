@@ -160,6 +160,15 @@ export const communicationSettingsWriteRateLimit = buildLimiter(60 * 1000, 10, '
 export const communicationSettingsTestRateLimit = buildLimiter(60 * 1000, 5, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
 
 /**
+ * `GET /api/admin/communication-settings/domain-check` — cada chamada faz até 3 consultas DNS de saída; 6/min por ADMIN (o diagnóstico é manual: o dono olha, ajusta o DNS no provedor
+ * e consulta de novo — e a propagação do DNS leva minutos, não segundos).
+ */
+export const domainCheckRateLimit = buildLimiter(60 * 1000, 6, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/** `PUT /api/admin/company-profile` — raro e feito por um humano: 10/min por ADMIN (por USUÁRIO, não por IP). Roda DEPOIS de `authenticate`/`requireRole('ADMIN')`. */
+export const companyProfileWriteRateLimit = buildLimiter(60 * 1000, 10, 'RATE_LIMITED', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
  * Escritas de estorno e chargeback (L1.8) — mexem em dinheiro de terceiros, são raras e feitas por um humano: 20/min por ADMIN (por USUÁRIO, não por IP). Roda DEPOIS de
  * `authenticate`/`requireRole('ADMIN')`. Além disso a rota exige a senha do ADMIN (step-up, com throttle próprio) e o trigger do banco impõe o teto do estorno.
  */

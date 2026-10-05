@@ -23,7 +23,7 @@ const processador = criarProcessadorDeNotificacoes({
   redis,
   enviar: (msg) => enviarEmailTransacional(msg),
   baseUrl: () => resolverBaseUrlPublica({ publicAppUrl: env.PUBLIC_APP_URL, corsOrigins: env.CORS_ALLOWED_ORIGINS, producao: env.NODE_ENV === 'production' }),
-  empresa: dadosPublicosDaEmpresa,
+  empresa: dadosPublicosDaEmpresa, // painel > env, com cache de 30 s (nunca lança: banco fora => env)
   log: logger,
 })
 

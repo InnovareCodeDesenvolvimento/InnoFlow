@@ -1658,3 +1658,34 @@ model PaymentReversal {
   @@index([chargingSessionId])
   @@index([paymentIntentId])
 }
+
+// ------------------------------------------------------------
+// Dados da empresa (controlador) cadastrados pelo painel ADMIN — L1.9 / pedido do dono (05/10/2026)
+// ------------------------------------------------------------
+//
+// Tabela SINGLETON (id = 1, CHECK na migration), mesmo desenho de NotificationChannelConfig: o painel manda, as envs `LEGAL_*` são a RESERVA. SEM segredos (tudo aparece na página
+// pública de termos/rodapé), então nada é cifrado. Vazio = NULL, nunca texto inventado. `cnpj` fica NORMALIZADO (14 caracteres, sem pontuação; dígitos verificadores conferidos na API).
+// `companyDataSavedAt` marca "o painel assumiu os DADOS da empresa" (preenchido a cada PUT que toca um campo da empresa): daí em diante a env NÃO completa campo vazio (limpar
+// o CNPJ no painel não pode fazê-lo reaparecer pela env). Já as VERSÕES são por campo: NULL = vale a env `LEGAL_*_VERSION` (ou o padrão do código). Ver `services/legal/dadosLegais.ts`.
+model CompanyProfile {
+  id Int @id @default(1)
+
+  legalName    String? // razão social
+  tradeName    String? // nome fantasia
+  cnpj         String? @db.VarChar(14)
+  supportEmail String?
+  supportPhone String?
+  address      String?
+  website      String?
+  dpoName      String? // encarregado (DPO): identidade e contato são públicos por força da LGPD (art. 41, §1º)
+  dpoEmail     String?
+
+  termsVersion   String? @db.VarChar(32)
+  privacyVersion String? @db.VarChar(32)
+
+  companyDataSavedAt DateTime? @db.Timestamptz(3)
+  updatedByUserId    String? // sem FK de propósito (mesmo critério do snapshot do ator no AuditLog)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+}

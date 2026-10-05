@@ -151,6 +151,9 @@ describe('regras que valem para TODOS os e-mails', () => {
     // só o que existe: nome sem CNPJ não inventa o CNPJ
     expect(blocoDaEmpresa({ ...SEM_EMPRESA, name: 'Só o Nome' })).toBe('Só o Nome')
     expect(blocoDaEmpresa({ ...SEM_EMPRESA, supportEmail: 'a@b.com', supportPhone: '1199' })).toBe('Suporte: a@b.com · 1199')
+    // endereço (cadastrado no painel) entra entre o CNPJ e o suporte; sem endereço a linha some
+    expect(blocoDaEmpresa({ ...SEM_EMPRESA, name: 'X Ltda', cnpj: '11.222.333/0001-81', address: 'Rua A, 10', supportEmail: 'a@b.com' })).toBe('X Ltda\nCNPJ 11.222.333/0001-81\nRua A, 10\nSuporte: a@b.com')
+    expect(blocoDaEmpresa({ ...SEM_EMPRESA, name: 'X Ltda', address: null })).toBe('X Ltda')
   })
 
   it('SEM origem pública confiável: nenhum link nem botão (nunca um link inventado)', () => {

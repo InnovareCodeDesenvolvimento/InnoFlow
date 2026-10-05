@@ -123,7 +123,7 @@ router.post(
     const { name, email, password, phone, acceptedTermsVersion } = req.body as RegisterInput
 
     // L1.9: sem aceite da versão VIGENTE dos termos não há cadastro (409 `TERMS_VERSION_OUTDATED`; ausente = 400 pelo schema). ANTES de tocar o banco/bcrypt.
-    exigirVersaoVigenteDosTermos(acceptedTermsVersion)
+    const vigentes = await exigirVersaoVigenteDosTermos(acceptedTermsVersion)
 
     // Em QUALQUER caixa: `User.email` é único COM caixa, então `DONO@x.com` e `dono@x.com` coexistiriam como contas distintas — e a lista de testadores do
     // sandbox (F5.8, ALTO-2) e a regra de staff do login com Google comparam sem caixa. Mesma resposta do duplicado exato (não cria enumeração nova).
@@ -142,7 +142,7 @@ router.post(
         passwordHash,
         role: 'DRIVER',
         wallet: { create: {} },
-        consentRecords: { create: aceitesDoCadastro({ termsVersion: acceptedTermsVersion, privacyVersion: versoesVigentes().privacyVersion, origem: 'REGISTER', ip: req.ip }) },
+        consentRecords: { create: aceitesDoCadastro({ termsVersion: acceptedTermsVersion, privacyVersion: vigentes.privacyVersion, origem: 'REGISTER', ip: req.ip }) },
       },
     })
 
@@ -233,12 +233,14 @@ router.post(
 
     const { credential, acceptedTermsVersion } = req.body as GoogleSignInInput
     // L1.9: o aceite só é EXIGIDO se o Google for CRIAR uma conta (quem já tem conta entra sem aceitar nada novo) — `autenticarComGoogle` decide; aqui só o que veio no corpo.
+    // Só lê a versão vigente (banco/cache) quando há aceite no corpo: quem já tem conta entra sem depender dos dados legais.
+    const vigentes = acceptedTermsVersion === undefined ? null : await versoesVigentes()
     const aceite =
-      acceptedTermsVersion === undefined
+      acceptedTermsVersion === undefined || vigentes === null
         ? ({ status: 'AUSENTE' } as const)
-        : acceptedTermsVersion !== versoesVigentes().termsVersion
+        : acceptedTermsVersion !== vigentes.termsVersion
           ? ({ status: 'DESATUALIZADO' } as const)
-          : ({ status: 'OK', termsVersion: acceptedTermsVersion, privacyVersion: versoesVigentes().privacyVersion, ip: ipDoAceite(req.ip) } as const)
+          : ({ status: 'OK', termsVersion: acceptedTermsVersion, privacyVersion: vigentes.privacyVersion, ip: ipDoAceite(req.ip) } as const)
     const resultado = await autenticarComGoogle(credential, { verifyIdToken: createGoogleTokenVerifier(clientId), users: prismaGoogleUserRepository, aceite })
 
     switch (resultado.status) {
