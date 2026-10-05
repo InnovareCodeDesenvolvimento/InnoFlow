@@ -124,7 +124,7 @@ export async function testarEmail(input: TestEmailInput, deps: DepsDoCanalEmail 
   if (base.ilegivel && o.password === undefined) return falhaDeConfig('A senha SMTP salva não pôde ser decifrada (chave de cifragem trocada ou perdida): informe a senha de novo.')
 
   const avisos: string[] = []
-  const cfg = emailDeCampos(campos, politicaDeDestinoDoPainel(process.env), avisos, { exigirDestinatarios: false })
+  const cfg = emailDeCampos(campos, politicaDeDestinoDoPainel(process.env), avisos)
   if (!cfg) return falhaDeConfig(avisos[0] ?? 'Configuração de e-mail incompleta.')
 
   try {

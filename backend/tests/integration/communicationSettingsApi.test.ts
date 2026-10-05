@@ -334,6 +334,32 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
       expect(depois.updatedAt.getTime()).toBe(antes.updatedAt.getTime())
     })
 
+    // MUDANÇA DELIBERADA (L1.6, item 1): o 409 CHANNEL_INCOMPLETE do e-mail deixou de cobrar destinatário de alerta — exige só servidor + remetente. O código e o formato do erro não mudam.
+    it('MUDANÇA DELIBERADA L1.6: ligar o e-mail com SMTP + remetente e SEM destinatário de alerta => 200; o transacional sai, o alerta não', async () => {
+      const admin = await novoUsuario()
+      const res = await put(admin, { currentPassword: SENHA_ADMIN_TESTE, email: { enabled: true, host: '127.0.0.1', port: smtp.porta, secure: false, fromAddress: 'nao-responda@exemplo.com.br' } })
+      expect(res.status, dump(res.body)).toBe(200)
+      expect(res.body.email).toMatchObject({ enabled: true, active: true, recipients: [] })
+      expect(res.body.warnings.join(' ')).toContain('sem destinatário de alertas')
+
+      const { enviarEmailTransacional } = await import('../../src/services/comunicacao/email')
+      const r = await enviarEmailTransacional({ to: 'motorista@exemplo.com.br', subject: 'Transacional via painel', text: 'corpo-transacional-painel' })
+      expect(r.ok).toBe(true)
+      expect(smtp.recebidos).toHaveLength(1)
+      expect(smtp.recebidos[0].para).toEqual(['motorista@exemplo.com.br'])
+
+      const snap = await m.cfg.getConfigComunicacao()
+      expect(m.inst.montarCanais(snap.config)).toEqual([]) // nenhum canal de ALERTA por e-mail
+    })
+
+    it('o que continua incompleto continua dando 409: ligar o e-mail sem remetente (mesmo com destinatário)', async () => {
+      const admin = await novoUsuario()
+      const res = await put(admin, { currentPassword: SENHA_ADMIN_TESTE, email: { enabled: true, host: '127.0.0.1', port: smtp.porta, recipients: ['dono@exemplo.com.br'] } })
+      expect(res.status).toBe(409)
+      expect(res.body.code).toBe('CHANNEL_INCOMPLETE')
+      expect(JSON.stringify(res.body.details)).toContain('remetente')
+    })
+
     it('ANTI-EXFILTRAÇÃO: trocar host/usuário SMTP ou URL/instância da Evolution SEM reenviar o segredo => 400 SECRET_REQUIRED_FOR_NEW_DESTINATION; com o segredo novo passa', async () => {
       const admin = await novoUsuario()
       await salvarPadrao(admin)

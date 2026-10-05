@@ -133,7 +133,8 @@ export function toCommunicationSettingsDto(c: ConfigComunicacaoEfetiva, extras: 
     secretsKeyConfigured: extras.secretsKeyConfigured,
     secretsDecryptable: extras.secretsDecryptable,
     privateHostsAllowed: permitirRedePrivadaDaEnv(extras.fonteEnv),
-    warnings: c.avisos,
+    // L1.6: canal pronto sem destinatário de alerta é um estado VÁLIDO (só o e-mail transacional ao motorista funciona) — a tela é avisada, mas `active` continua `true`.
+    warnings: e !== null && e.para.length === 0 ? [...c.avisos, 'E-mail pronto só para mensagens ao motorista: sem destinatário de alertas, os avisos ao dono por e-mail não são enviados.'] : c.avisos,
     updatedAt: linha ? linha.updatedAt.toISOString() : null,
   }
 }

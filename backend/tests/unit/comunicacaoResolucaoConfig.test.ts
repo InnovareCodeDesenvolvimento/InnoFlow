@@ -74,10 +74,10 @@ describe('resolverConfigAlertas', () => {
     expect(JSON.stringify(r.avisos)).not.toContain('lixo-corrompido')
   })
 
-  it('canal ligado mas incompleto/proibido NUNCA derruba: desliga com aviso (host interno em produção, http em produção, sem destinatário, sem apikey)', () => {
+  it('canal ligado mas incompleto/proibido NUNCA derruba: desliga com aviso (host interno em produção, http em produção, sem apikey; e-mail SEM destinatário de alerta NÃO desliga mais — MUDANÇA DELIBERADA L1.6)', () => {
     const prod = { NODE_ENV: 'production' }
     expect(resolverConfigAlertas(linha({ ...completaEmail, smtpHost: '10.0.0.5' }), prod, decifrar, undefined).config.email).toBeNull()
-    expect(resolverConfigAlertas(linha({ ...completaEmail, alertEmailRecipients: [] }), prod, decifrar, undefined).config.email).toBeNull()
+    expect(resolverConfigAlertas(linha({ ...completaEmail, alertEmailRecipients: [] }), prod, decifrar, undefined).config.email).toMatchObject({ para: [] })
     expect(resolverConfigAlertas(linha({ ...completaWhats, evolutionBaseUrl: 'http://evo.db.com' }), prod, decifrar, undefined).config.whatsapp).toBeNull()
     expect(resolverConfigAlertas(linha({ ...completaWhats, evolutionBaseUrl: 'https://169.254.169.254' }), prod, decifrar, undefined).config.whatsapp).toBeNull()
     expect(resolverConfigAlertas(linha({ ...completaWhats, evolutionApiKeyCiphertext: null }), prod, decifrar, undefined).config.whatsapp).toBeNull()

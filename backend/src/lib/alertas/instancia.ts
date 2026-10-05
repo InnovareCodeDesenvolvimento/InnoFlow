@@ -11,7 +11,7 @@ import { logger } from '../logger'
 import { createLogGate } from '../rateLimitedLog'
 import { env } from '../env'
 import { getConfigComunicacao, resolverAgora } from '../../services/comunicacao/configComunicacao'
-import { criarCanalEmail, criarCanalWhatsapp, type CanalDeAlerta } from './canais'
+import { criarCanalEmail, criarCanalWhatsapp, type CanalDeAlerta, type DepsDoCanalEmail, type DepsDoCanalHttp } from './canais'
 import { booleano, type ConfigAlertas } from './config'
 import { Notificador, type LogDoNotificador, type ProvedorDeConfig } from './notificador'
 import { DedupeStoreComFallback, RedisDedupeStore, type RedisMinimo } from './storeRedis'
@@ -27,15 +27,22 @@ const logDoNotificador: LogDoNotificador = (nivel, dados, mensagem) => {
 
 export function descreverCanais(c: ConfigAlertas): string {
   const partes: string[] = []
-  if (c.email) partes.push(`email[${c.email.origem}](${c.email.para.length} destinatario(s), min ${c.email.minSeveridade})`)
+  if (c.email) {
+    partes.push(
+      c.email.para.length > 0
+        ? `email[${c.email.origem}](${c.email.para.length} destinatario(s), min ${c.email.minSeveridade})`
+        : `email[${c.email.origem}](so transacional: sem destinatario de alerta)`,
+    )
+  }
   if (c.whatsapp) partes.push(`whatsapp/${c.whatsapp.provedor}[${c.whatsapp.origem}](${c.whatsapp.para.length} numero(s), min ${c.whatsapp.minSeveridade})`)
   return partes.length > 0 ? partes.join(' + ') : 'nenhum'
 }
 
-export function montarCanais(c: ConfigAlertas): CanalDeAlerta[] {
+export function montarCanais(c: ConfigAlertas, deps: { email?: DepsDoCanalEmail; whatsapp?: DepsDoCanalHttp } = {}): CanalDeAlerta[] {
   const canais: CanalDeAlerta[] = []
-  if (c.email) canais.push(criarCanalEmail(c.email))
-  if (c.whatsapp) canais.push(criarCanalWhatsapp(c.whatsapp))
+  // L1.6: o canal de e-mail pode estar "pronto" (SMTP completo) SEM destinatário de alerta — aí ele serve só ao e-mail transacional ao motorista, e os alertas ao dono por e-mail não saem.
+  if (c.email && c.email.para.length > 0) canais.push(criarCanalEmail(c.email, deps.email))
+  if (c.whatsapp) canais.push(criarCanalWhatsapp(c.whatsapp, deps.whatsapp))
   return canais
 }
 

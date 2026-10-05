@@ -8,16 +8,18 @@ import { classificarFalhaDeCanal, type CodigoErroTeste } from './testarCanais'
  * `html` é opcional: o corpo em texto puro SEMPRE vai junto (monte os dois com `layoutEmail` de `core/comunicacao/layoutEmail.ts`).
  *
  * Nunca lança e nunca devolve segredo: o resultado é `{ ok: true }` ou `{ ok: false, code }`. NÃO passa pelo dedupe/teto dos avisos ao dono (são mensagens de natureza
- * diferente; cada fluxo decide o próprio throttle). Limite atual: o canal de e-mail só fica ATIVO com ao menos um destinatário de alerta salvo (o dono) — a mesma validação do aviso.
+ * diferente; cada fluxo decide o próprio throttle).
+ * L1.6 (MUDANÇA DELIBERADA): o transacional depende SÓ de o canal SMTP estar pronto (servidor + remetente completos e ligado). A lista de destinatários de ALERTA não entra: sem
+ * ela o e-mail ao motorista sai normalmente (e os alertas ao dono por e-mail é que não saem). Antes, o canal só ficava ativo com >= 1 destinatário de alerta.
  */
-export type ResultadoEmailTransacional = { ok: true } | { ok: false; code: CodigoErroTeste | 'EMAIL_NOT_CONFIGURED' }
+export type ResultadoEmailTransacional = { ok: true; messageId?: string } | { ok: false; code: CodigoErroTeste | 'EMAIL_NOT_CONFIGURED' }
 
 export async function enviarEmailTransacional(msg: { to: string; subject: string; text: string; html?: string }, deps: DepsDoCanalEmail = {}): Promise<ResultadoEmailTransacional> {
   try {
     const { config } = await getConfigComunicacao()
     if (!config.email) return { ok: false, code: 'EMAIL_NOT_CONFIGURED' }
-    await enviarPorSmtp(config.email, { subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), para: [msg.to] }, deps)
-    return { ok: true }
+    const { messageId } = await enviarPorSmtp(config.email, { subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), para: [msg.to] }, deps)
+    return { ok: true, ...(messageId ? { messageId } : {}) }
   } catch (err) {
     return { ok: false, code: classificarFalhaDeCanal(err).code }
   }

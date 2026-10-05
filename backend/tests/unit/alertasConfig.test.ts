@@ -36,12 +36,12 @@ describe('lerConfigAlertas', () => {
     expect(lerConfigAlertas({ ...EMAIL_OK, ALERT_SMTP_SECURE: 'false' }, undefined).email?.secure).toBe(false)
   })
 
-  it('e-mail: lista com endereços inválidos ignora só os inválidos (e avisa); nenhum válido = canal desligado', () => {
+  it('e-mail: lista com endereços inválidos ignora só os inválidos (e avisa); nenhum válido = canal ATIVO só para o transacional (MUDANÇA DELIBERADA L1.6: antes desligava)', () => {
     const c = lerConfigAlertas({ ...EMAIL_OK, ALERT_EMAIL_TO: 'a@b.com, lixo, c@d.com.br' }, undefined)
     expect(c.email?.para).toEqual(['a@b.com', 'c@d.com.br'])
     expect(c.avisos.join(' ')).toContain('1 endereco(s) invalido(s)')
     const nenhum = lerConfigAlertas({ ...EMAIL_OK, ALERT_EMAIL_TO: 'lixo' }, undefined)
-    expect(nenhum.email).toBeNull()
+    expect(nenhum.email).toMatchObject({ para: [], host: 'smtp.exemplo.com.br' })
   })
 
   it('e-mail: sem host, ou sem remetente utilizável, desliga com aviso; remetente cai para o usuário SMTP se for e-mail', () => {
