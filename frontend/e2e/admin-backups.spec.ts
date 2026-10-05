@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { expect, test, type Page } from "@playwright/test"
 
 /**
- * Admin → Backups, contra os mocks MSW (`src/mocks/backupData.ts` + `handlers.ts`). NADA aqui foi provado contra o backend real, nem contra S3/Drive reais. O estado do mock vive por
+ * Admin → Backup do banco (layout do InnoChat: cabeçalho com ação, faixa de situação, grade de 4 cartões com "ⓘ" e histórico largo; "Salvar" POR CARTÃO), contra os mocks MSW (`src/mocks/backupData.ts` + `handlers.ts`). NADA aqui foi provado contra o backend real, nem contra S3/Drive reais. O estado do mock vive por
  * conta de ADMIN e na memória da PÁGINA (um `page.goto` zera tudo), então cada teste usa UMA navegação real (login) e o resto é clique na SPA (exceto os de retorno do Google, que são
  * navegação por natureza).
  *
@@ -14,7 +14,7 @@ import { expect, test, type Page } from "@playwright/test"
  *  backup-atrasado@              -> ligado e atrasado, falhas por CREDENTIAL
  *  backup-nunca@                 -> ligado e nunca saiu uma cópia
  *  backup-andamento@             -> um backup rodando agora
- *  backup-sem-chave@             -> servidor sem PAYMENT_SECRETS_KEY e sem URL pública
+ *  backup-sem-chave@             -> servidor sem a chave dos segredos (derivada do JWT_SECRET) e sem URL pública
  *  backup-ilegivel@              -> segredos salvos que não decifram
  *  backup-indisponivel@          -> GET da config devolve 503
  *
@@ -36,7 +36,7 @@ async function login(page: Page, email: string) {
 async function openPage(page: Page) {
   await page.getByRole("navigation", { name: NAV }).getByRole("link", { name: "Backups" }).click()
   await expect(page).toHaveURL(/\/admin\/backups$/)
-  await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Backup do banco", level: 1 })).toBeVisible()
   await expect(page.getByTestId("section-history")).toBeVisible()
 }
 
@@ -77,9 +77,13 @@ function captureKeyPosts(page: Page) {
 }
 
 const main = (page: Page) => page.locator("main")
-const saveButton = (page: Page) => page.getByTestId("save-button")
+/** O "Salvar" é POR CARTÃO: Agendamento (horário, frequência, cópias, alerta, ligar) e Destino (destino, bucket, Drive, segredos). */
+const saveSchedule = (page: Page) => page.getByTestId("schedule-save")
+const saveDestination = (page: Page) => page.getByTestId("destination-save")
 const saveDialog = (page: Page) => page.getByRole("dialog", { name: "Confirmar alterações no backup" })
-const destinationGroup = (page: Page) => page.getByRole("group", { name: "Destino do backup" })
+const chooseDestination = (page: Page, value: "S3" | "DRIVE" | "NONE") => page.getByTestId("field-destination").selectOption(value)
+const TOAST_SCHEDULE = "Agendamento do backup salvo."
+const TOAST_DESTINATION = "Destino do backup salvo."
 const enableSwitch = (page: Page) => page.getByRole("switch", { name: "Ligar o backup automático" })
 
 async function submitSaveDialog(page: Page, password: string = PASSWORD) {
@@ -90,14 +94,14 @@ async function submitSaveDialog(page: Page, password: string = PASSWORD) {
 test.describe("acesso", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
-  test("ADMIN vê Backups no menu (grupo Rede) e abre a tela com 1 h1 e as seções em h2", async ({ page }) => {
+  test("ADMIN vê Backups no menu (grupo Rede) e abre a tela (\"Backup do banco\") com 1 h1 e as seções em h2", async ({ page }) => {
     await login(page, "admin@innoelektron.com")
     const link = page.getByRole("navigation", { name: NAV }).getByRole("link", { name: "Backups" })
     await expect(link).toBeVisible()
     await expect(link).toHaveAttribute("href", "/admin/backups")
     await openPage(page)
     await expect(page.locator("h1")).toHaveCount(1)
-    for (const name of ["Estado geral", "Ações", "Chave de criptografia", "Agendamento", "Destino", "Histórico"]) {
+    for (const name of ["Estado geral", "Chave do backup", "Conferir backup", "Agendamento", "Destino", "Histórico"]) {
       await expect(main(page).getByRole("heading", { level: 2, name })).toBeVisible()
     }
   })
@@ -125,7 +129,7 @@ test.describe("retorno do Google (?google=ok | erro) e redirecionamento de /admi
     await expect(page.getByTestId("google-return-ok")).toContainText("Conta Google conectada")
     expect(new URL(page.url()).search).toBe("")
     await page.reload()
-    await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Backup do banco", level: 1 })).toBeVisible()
     await expect(page.getByTestId("google-return-ok")).toHaveCount(0)
   })
 
@@ -147,7 +151,7 @@ test.describe("retorno do Google (?google=ok | erro) e redirecionamento de /admi
     ["no_refresh_token", /myaccount\.google\.com\/permissions/],
     ["account_check_failed", /confirmar qual é a conta/],
     ["folder_create_failed", /criar a pasta/],
-    ["secrets_key_missing", /PAYMENT_SECRETS_KEY/],
+    ["secrets_key_missing", /JWT_SECRET/],
     ["network", /falar com o Google/],
     ["unknown", /não concluiu a conexão/],
   ]
@@ -176,7 +180,7 @@ test.describe("retorno do Google (?google=ok | erro) e redirecionamento de /admi
   test("um valor estranho em ?google= não mostra nada", async ({ page }) => {
     await login(page, "backup-drive@innoelektron.com")
     await page.goto("/admin/backups?google=talvez")
-    await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Backup do banco", level: 1 })).toBeVisible()
     await expect(page.getByTestId("google-return-ok")).toHaveCount(0)
     await expect(page.getByTestId("google-return-error")).toHaveCount(0)
   })
@@ -190,25 +194,30 @@ test.describe("retorno do Google (?google=ok | erro) e redirecionamento de /admi
 test.describe("leitura: estados da tela", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
-  test("primeiro uso (admin@): sem destino nem chave; ligar bloqueado COM o motivo escrito; aviso permanente e o do runbook", async ({ page }) => {
+  test("primeiro uso (admin@): sem destino nem chave; ligar bloqueado COM o motivo escrito; aviso permanente (JWT_SECRET) e o do runbook", async ({ page }) => {
     await login(page, "admin@innoelektron.com")
     await openPage(page)
-    await expect(page.getByTestId("secrets-key-notice")).toContainText("A PAYMENT_SECRETS_KEY precisa de uma cópia fora do sistema; sem ela restaurar não devolve os segredos cifrados.")
+    await expect(page.getByTestId("secrets-key-notice")).toContainText(
+      "Os segredos salvos (credenciais, senhas, tokens) são cifrados com uma chave derivada do JWT_SECRET do servidor. Guarde uma cópia dele fora do sistema: se ele for trocado, os segredos salvos precisam ser cadastrados de novo.",
+    )
+    expect(await page.locator("body").innerText()).not.toContain("PAYMENT_SECRETS_KEY")
     await expect(page.getByTestId("restore-notice")).toContainText("Restaurar não tem botão aqui, de propósito")
     await expect(page.getByTestId("restore-notice")).toContainText("docs/RUNBOOK-BACKUP-RESTAURACAO.md")
     await expect(page.getByRole("button", { name: /restaurar/i })).toHaveCount(0)
     await expect(page.getByTestId("health")).toHaveAttribute("data-tone", "off")
     await expect(page.getByTestId("destination-status")).toHaveText("Nenhum destino")
-    await expect(page.getByTestId("key-status")).toHaveText("Sem chave")
     await expect(page.getByTestId("key-missing")).toBeVisible()
+    await expect(page.getByTestId("key-fingerprint")).toHaveCount(0)
     await expect(enableSwitch(page)).toBeDisabled()
     const blockers = page.getByTestId("enable-blockers")
-    await expect(blockers).toContainText("Complete o destino")
+    await expect(blockers).toContainText("Complete e salve o destino")
     await expect(blockers).toContainText("Gere a chave de criptografia")
     await expect(page.getByTestId("section-history").getByText("Nenhuma execução ainda")).toBeVisible()
     await expect(page.getByTestId("destination-none-note")).toBeVisible()
-    await expect(saveButton(page)).toBeDisabled()
-    await expect(page.getByTestId("save-bar-status")).toHaveText("Nenhuma alteração pendente.")
+    await expect(saveSchedule(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
+    await expect(page.getByTestId("schedule-save-status")).toHaveText("Nenhuma alteração pendente.")
+    await expect(page.getByTestId("destination-save-status")).toHaveText("Nenhuma alteração pendente.")
   })
 
   test("primeiro uso: 'Fazer backup agora' liberado (vira teste do pg_dump); conferir e testar destino bloqueados com o motivo escrito", async ({ page }) => {
@@ -220,18 +229,18 @@ test.describe("leitura: estados da tela", () => {
     await expect(page.getByTestId("reason-verify")).toHaveText("Escolha um destino e salve antes.")
     await expect(page.getByTestId("reason-test")).toHaveText("Escolha um destino e salve antes.")
     await expect(page.getByTestId("action-run")).toHaveAttribute("aria-describedby", "backup-run-reason")
-    await expect(page.getByTestId("section-actions")).toContainText("Sem destino escolhido é só um teste do pg_dump")
+    await expect(page.getByTestId("destination-none-note")).toContainText("só testa o pg_dump")
   })
 
   test("S3 pronto (backup-s3@): estado em dia, chave com impressão digital, segredos só como 'Configurada', histórico em 3 páginas", async ({ page }) => {
     await login(page, "backup-s3@innoelektron.com")
     await openPage(page)
     await expect(page.getByTestId("health")).toHaveAttribute("data-tone", "ok")
-    await expect(page.getByTestId("health-title")).toHaveText("Backups em dia")
+    await expect(page.getByTestId("status-badge")).toHaveText("Em dia")
     await expect(page.getByTestId("fact-next-run")).toContainText("Horário de Brasília")
     await expect(page.getByTestId("fact-last-verify")).toContainText("passou na conferência")
-    await expect(page.getByTestId("key-status")).toHaveText("Chave gerada")
     await expect(page.getByTestId("key-fingerprint")).toHaveText("630dcd29")
+    await expect(page.getByTestId("field-destination")).toHaveValue("S3")
     await expect(page.getByTestId("destination-status")).toContainText("Bucket S3-compatível: pronto")
     await expect(page.getByTestId("s3-endpoint")).toHaveValue("https://abc123.r2.cloudflarestorage.com")
     await expect(page.getByTestId("s3-bucket")).toHaveValue("innoflow-backups")
@@ -271,10 +280,10 @@ test.describe("leitura: estados da tela", () => {
     await openPage(page)
     const health = page.getByTestId("health")
     await expect(health).toHaveAttribute("data-tone", "late")
-    await expect(health).toHaveAttribute("role", "alert")
+    await expect(page.getByTestId("health-title")).toHaveAttribute("role", "alert")
     await expect(page.getByTestId("health-title")).toHaveText(/^Sem backup há \d+ dias? e \d+ h$/)
-    await expect(page.getByTestId("status-badge")).toContainText("Atenção")
-    await expect(page.getByTestId("fact-last-attempt")).toContainText("Falhou: O destino recusou a credencial")
+    await expect(page.getByTestId("status-badge")).toContainText("Atrasado")
+    await expect(page.getByTestId("fact-last-attempt")).toContainText("Última tentativa falhou: O destino recusou a credencial")
     const first = page.getByTestId("run-error").first()
     await expect(first).toHaveAttribute("data-code", "CREDENTIAL")
     await expect(first).toContainText("Gere uma credencial nova no provedor")
@@ -284,20 +293,24 @@ test.describe("leitura: estados da tela", () => {
     await login(page, "backup-nunca@innoelektron.com")
     await openPage(page)
     await expect(page.getByTestId("health")).toHaveAttribute("data-tone", "never")
+    await expect(page.getByTestId("status-badge")).toHaveText("Nunca rodou")
     await expect(page.getByTestId("health-title")).toHaveText("Ligado, mas nunca saiu uma cópia")
     await expect(page.getByTestId("fact-last-success")).toContainText("Nenhuma cópia saiu ainda")
   })
 
-  test("servidor sem PAYMENT_SECRETS_KEY: alerta de perigo, gerar chave indisponível, segredo digitado recusado antes do pedido", async ({ page }) => {
+  test("servidor sem a chave dos segredos (JWT_SECRET): alerta de perigo, gerar chave indisponível, segredo digitado recusado antes do pedido, nenhum texto cita PAYMENT_SECRETS_KEY", async ({ page }) => {
     await login(page, "backup-sem-chave@innoelektron.com")
     await openPage(page)
     await expect(page.getByTestId("secrets-key-missing-alert")).toContainText("Servidor sem chave de cifragem")
     await expect(page.getByTestId("key-unavailable")).toBeVisible()
     await expect(page.getByTestId("key-generate")).toBeDisabled()
-    await destinationGroup(page).getByRole("button", { name: "Bucket S3" }).click()
+    await expect(page.getByTestId("secrets-key-missing-alert")).toContainText("JWT_SECRET")
+    await expect(page.getByTestId("key-unavailable")).toContainText("JWT_SECRET")
+    await chooseDestination(page, "S3")
     await page.getByRole("button", { name: "Informar Chave de acesso" }).click()
     await page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso").fill("AK")
-    await expect(page.getByTestId("secret-s3AccessKey")).toContainText("O servidor não tem a PAYMENT_SECRETS_KEY")
+    await expect(page.getByTestId("secret-s3AccessKey")).toContainText("O servidor não tem a chave dos segredos (derivada do JWT_SECRET)")
+    expect(await page.locator("body").innerText()).not.toContain("PAYMENT_SECRETS_KEY")
   })
 
   test("segredos ilegíveis: alerta e chips 'Configurada (ilegível)'", async ({ page }) => {
@@ -341,7 +354,7 @@ test.describe("ações: backup agora, conferir, testar destino (assíncronas, co
     const active = page.getByTestId("active-run")
     await expect(active).toHaveAttribute("data-status", "RUNNING")
     await expect(active).toContainText("Backup manual: em andamento")
-    await expect(page.getByTestId("status-badge")).toContainText("Rodando agora")
+    await expect(page.getByTestId("status-badge")).toContainText("Copiando agora")
     await expect(page.getByTestId("action-run")).toBeDisabled()
     await expect(page.getByTestId("action-verify")).toBeDisabled()
     await expect(page.getByTestId("reason-run")).toContainText("em andamento")
@@ -408,7 +421,7 @@ test.describe("ações: backup agora, conferir, testar destino (assíncronas, co
       expect(await page.locator("body").innerText()).not.toContain("MENSAGEM-CRUA")
       await expect(page.getByTestId("run-error").first()).toHaveAttribute("data-code", code)
       await expect(page.getByTestId("run-row").first()).toContainText("Falhou")
-      await expect(page.getByTestId("fact-last-attempt")).toContainText(`Falhou: ${titulo}`)
+      await expect(page.getByTestId("fact-last-attempt")).toContainText(`Última tentativa falhou: ${titulo}`)
     })
   }
 
@@ -488,7 +501,9 @@ test.describe("ações: backup agora, conferir, testar destino (assíncronas, co
     await page.getByTestId("field-alert-after").fill("48")
     for (const id of ["action-run", "action-verify", "action-test"]) await expect(page.getByTestId(id)).toBeDisabled()
     await expect(page.getByTestId("reason-run")).toContainText("alterações não salvas")
-    await page.getByRole("button", { name: "Descartar" }).click()
+    await expect(page.getByTestId("reason-verify")).toContainText("alterações não salvas")
+    await expect(page.getByTestId("reason-test")).toContainText("alterações não salvas")
+    await page.getByTestId("schedule-discard").click()
     for (const id of ["action-run", "action-verify", "action-test"]) await expect(page.getByTestId(id)).toBeEnabled()
   })
 })
@@ -501,16 +516,18 @@ test.describe("configuração: salvar, step-up de senha, validação", () => {
     const puts = capturePuts(page)
     await openPage(page)
     await page.getByTestId("field-hour").selectOption("5")
-    await page.getByRole("group", { name: "Frequência do backup" }).getByRole("button", { name: "Toda semana" }).click()
+    await page.getByTestId("field-frequency").selectOption("7")
     await page.getByTestId("field-alert-after").fill("48")
-    await expect(page.getByTestId("save-bar-status")).toContainText("3 alterações não salvas")
-    await expect(page.getByTestId("save-bar-password-note")).toHaveText("Esta alteração não pede senha.")
-    await saveButton(page).click()
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
+    await expect(page.getByTestId("schedule-save-status")).toContainText("3 alterações não salvas")
+    await expect(page.getByTestId("schedule-save-note")).toHaveText("Esta alteração não pede senha.")
+    // o outro cartão não foi tocado
+    await expect(page.getByTestId("destination-save-status")).toHaveText("Nenhuma alteração pendente.")
+    await saveSchedule(page).click()
+    await expect(page.getByText(TOAST_SCHEDULE)).toBeVisible()
     expect(puts.bodies).toEqual([{ hourLocal: 5, frequencyDays: 7, alertAfterHours: 48 }])
     expect(puts.passwords).toEqual([undefined])
     await expect(saveDialog(page)).toHaveCount(0)
-    await expect(page.getByTestId("save-bar-status")).toHaveText("Nenhuma alteração pendente.")
+    await expect(page.getByTestId("schedule-save-status")).toHaveText("Nenhuma alteração pendente.")
     await expect(page.getByTestId("fact-next-run")).toContainText("05:00")
   })
 
@@ -519,21 +536,21 @@ test.describe("configuração: salvar, step-up de senha, validação", () => {
     const puts = capturePuts(page)
     await openPage(page)
     await enableSwitch(page).click()
-    await expect(page.getByTestId("save-bar-password-note")).toHaveText("Esta alteração não pede senha.")
-    await saveButton(page).click()
-    await expect(page.getByTestId("schedule-status")).toHaveText("Desligado")
+    await expect(page.getByTestId("schedule-save-note")).toHaveText("Esta alteração não pede senha.")
+    await saveSchedule(page).click()
+    await expect(enableSwitch(page)).toHaveAttribute("aria-checked", "false")
     expect(puts.bodies[0]).toEqual({ enabled: false })
     expect(puts.passwords[0]).toBeUndefined()
     await expect(page.getByTestId("fact-next-run")).toContainText("Automático desligado")
     await expect(page.getByTestId("health")).toHaveAttribute("data-tone", "off")
 
     await enableSwitch(page).click()
-    await expect(page.getByTestId("save-bar-password-note")).toHaveText("Esta alteração pede a sua senha atual ao salvar.")
-    await saveButton(page).click()
+    await expect(page.getByTestId("schedule-save-note")).toHaveText("Esta alteração pede a sua senha atual ao salvar.")
+    await saveSchedule(page).click()
     await expect(saveDialog(page)).toBeVisible()
     await expect(saveDialog(page).getByTestId("save-summary")).toContainText("Backup automático")
     await submitSaveDialog(page)
-    await expect(page.getByTestId("schedule-status")).toHaveText("Ligado")
+    await expect(enableSwitch(page)).toHaveAttribute("aria-checked", "true")
     expect(puts.bodies[1]).toEqual({ enabled: true })
     expect(puts.passwords[1]).toBe(PASSWORD)
   })
@@ -543,7 +560,7 @@ test.describe("configuração: salvar, step-up de senha, validação", () => {
     const puts = capturePuts(page)
     await openPage(page)
     await page.getByTestId("field-retention").fill("10")
-    await saveButton(page).click()
+    await saveSchedule(page).click()
     const dialog = saveDialog(page)
     await expect(dialog.getByTestId("save-summary")).toContainText("Cópias a manter")
     await expect(dialog.getByTestId("save-summary")).toContainText("30")
@@ -557,27 +574,30 @@ test.describe("configuração: salvar, step-up de senha, validação", () => {
     await expect(page.getByTestId("field-retention")).toHaveValue("10")
     // a sessão NÃO caiu (era 403, não 401)
     await expect(page).toHaveURL(/\/admin\/backups$/)
-    await saveButton(page).click()
+    await saveSchedule(page).click()
     await submitSaveDialog(page)
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
+    await expect(page.getByText(TOAST_SCHEDULE)).toBeVisible()
     expect(puts.bodies.at(-1)).toEqual({ retentionCount: 10 })
     expect(puts.passwords.at(-1)).toBe(PASSWORD)
     await expect(page.getByTestId("field-retention")).toHaveValue("10")
-    await expect(page.getByTestId("save-bar-status")).toHaveText("Nenhuma alteração pendente.")
+    await expect(page.getByTestId("schedule-save-status")).toHaveText("Nenhuma alteração pendente.")
   })
 
   test("limite de tentativas (429 RATE_LIMITED_BACKUP): vira alerta da tela com o tempo de espera e o rascunho continua; 503 do step-up idem", async ({ page }) => {
     await login(page, "backup-s3@innoelektron.com")
     await openPage(page)
     await page.getByTestId("field-retention").fill("12")
-    await saveButton(page).click()
+    await saveSchedule(page).click()
     await submitSaveDialog(page, "stepup-429")
     const error = page.getByTestId("save-error")
     await expect(error).toHaveAttribute("data-code", "RATE_LIMITED_BACKUP")
     await expect(error).toContainText("Aguarde 2 minutos")
     await expect(error).toContainText("continua na tela")
     await expect(page.getByTestId("field-retention")).toHaveValue("12")
-    await saveButton(page).click()
+    // o erro aparece NO CARTÃO que tentou salvar (Agendamento), não no Destino
+    await expect(page.getByTestId("section-schedule").getByTestId("save-error")).toBeVisible()
+    await expect(page.getByTestId("section-destination").getByTestId("save-error")).toHaveCount(0)
+    await saveSchedule(page).click()
     await submitSaveDialog(page, "stepup-503")
     await expect(page.getByTestId("save-error")).toHaveAttribute("data-code", "STEPUP_UNAVAILABLE")
     await expect(page.getByTestId("save-error")).toContainText("Nada foi salvo")
@@ -588,12 +608,12 @@ test.describe("configuração: salvar, step-up de senha, validação", () => {
     await openPage(page)
     await page.getByTestId("field-retention").fill("12")
     for (let i = 0; i < 5; i += 1) {
-      await saveButton(page).click()
+      await saveSchedule(page).click()
       await submitSaveDialog(page, `errada-${i}`)
       await expect(saveDialog(page).getByText("Senha incorreta.")).toBeVisible()
       await page.keyboard.press("Escape")
     }
-    await saveButton(page).click()
+    await saveSchedule(page).click()
     await submitSaveDialog(page, "errada-6")
     await expect(page.getByTestId("save-error")).toHaveAttribute("data-code", "RATE_LIMITED_BACKUP")
     await expect(page.getByTestId("save-error")).toContainText("Aguarde 10 minutos")
@@ -606,28 +626,32 @@ test.describe("configuração: salvar, step-up de senha, validação", () => {
     await page.getByTestId("field-alert-after").fill("5")
     await expect(main(page).getByText("Informe um número inteiro de 1 a 365.")).toBeVisible()
     await expect(main(page).getByText("Informe um número inteiro de 6 a 720 horas.")).toBeVisible()
-    await expect(saveButton(page)).toBeDisabled()
-    await expect(page.getByTestId("save-bar-errors")).toContainText("corrija os campos marcados")
+    await expect(saveSchedule(page)).toBeDisabled()
+    await expect(page.getByTestId("schedule-save-errors")).toContainText("corrija os campos marcados")
     await page.getByTestId("field-retention").fill("366")
     await expect(main(page).getByText("Informe um número inteiro de 1 a 365.")).toBeVisible()
     await page.getByTestId("field-retention").fill("2,5")
     await expect(main(page).getByText("Informe um número inteiro de 1 a 365.")).toBeVisible()
     await page.getByTestId("field-retention").fill("365")
     await page.getByTestId("field-alert-after").fill("720")
-    await expect(saveButton(page)).toBeEnabled()
+    await expect(saveSchedule(page)).toBeEnabled()
   })
 
-  test("Descartar volta tudo ao salvo (inclusive segredo aberto e destino)", async ({ page }) => {
+  test("Descartar é POR CARTÃO: cada um volta ao salvo sem mexer no outro (inclusive segredo aberto e destino)", async ({ page }) => {
     await login(page, "backup-s3@innoelektron.com")
     await openPage(page)
     await page.getByTestId("field-retention").fill("9")
     await page.getByRole("button", { name: "Substituir Segredo" }).click()
     await page.getByTestId("secret-s3SecretKey").getByLabel("Segredo").fill("SEGREDO-DESCARTADO-1")
-    await destinationGroup(page).getByRole("button", { name: "Google Drive" }).click()
-    await page.getByRole("button", { name: "Descartar" }).click()
-    await expect(page.getByTestId("field-retention")).toHaveValue("30")
-    await expect(destinationGroup(page).getByRole("button", { name: "Bucket S3" })).toHaveAttribute("aria-pressed", "true")
+    await chooseDestination(page, "DRIVE")
+    await expect(page.getByTestId("schedule-save-status")).toContainText("1 alteração não salva")
+    // descartar o Destino não toca no Agendamento
+    await page.getByTestId("destination-discard").click()
+    await expect(page.getByTestId("field-destination")).toHaveValue("S3")
     await expect(page.getByTestId("secret-s3SecretKey").locator("input")).toHaveCount(0)
+    await expect(page.getByTestId("field-retention")).toHaveValue("9")
+    await page.getByTestId("schedule-discard").click()
+    await expect(page.getByTestId("field-retention")).toHaveValue("30")
     expect(await everythingTheUserCouldSee(page)).not.toContain("SEGREDO-DESCARTADO-1")
   })
 })
@@ -644,21 +668,21 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     await expect(page.getByTestId("s3-host-changed")).toBeVisible()
     await expect(page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso")).toBeVisible()
     await expect(page.getByTestId("secret-s3SecretKey").getByLabel("Segredo")).toBeVisible()
-    await expect(saveButton(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
     await expect(page.getByTestId("secret-s3AccessKey")).toContainText("digite a chave de acesso E o segredo de novo")
     await page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso").fill("SEGREDO-AK-777")
-    await expect(saveButton(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
     await page.getByTestId("secret-s3SecretKey").getByLabel("Segredo").fill("SEGREDO-SK-888")
-    await expect(saveButton(page)).toBeEnabled()
+    await expect(saveDestination(page)).toBeEnabled()
 
-    await saveButton(page).click()
+    await saveDestination(page).click()
     const summary = await saveDialog(page).getByTestId("save-summary").innerText()
     expect(summary).toContain("https://novo.r2.cloudflarestorage.com")
     expect(summary).toContain("Será substituída")
     expect(summary).not.toContain("SEGREDO-")
     expect(await saveDialog(page).innerHTML()).not.toContain("SEGREDO-")
     await submitSaveDialog(page)
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
+    await expect(page.getByText(TOAST_DESTINATION)).toBeVisible()
 
     expect(puts.bodies.at(-1)).toEqual({ s3: { endpoint: "https://novo.r2.cloudflarestorage.com", accessKey: "SEGREDO-AK-777", secretKey: "SEGREDO-SK-888" } })
     await expect(page.getByTestId("s3-endpoint")).toHaveValue("https://novo.r2.cloudflarestorage.com")
@@ -676,10 +700,10 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     await expect(page.getByTestId("s3-host-changed")).toHaveCount(0)
     await page.getByTestId("s3-bucket").fill("outro-bucket")
     await page.getByTestId("s3-prefix").fill("")
-    await saveButton(page).click()
+    await saveDestination(page).click()
     await expect(saveDialog(page).getByTestId("save-summary")).toContainText("outro-bucket")
     await submitSaveDialog(page)
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
+    await expect(page.getByText(TOAST_DESTINATION)).toBeVisible()
     expect(puts.bodies.at(-1)).toEqual({ s3: { endpoint: "https://abc123.r2.cloudflarestorage.com/", bucket: "outro-bucket", prefix: null } })
     await expect(page.getByTestId("s3-prefix")).toHaveValue("")
   })
@@ -695,7 +719,7 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     ] as const) {
       await page.getByTestId("s3-endpoint").fill(value)
       await expect(main(page).getByText(new RegExp(text)).first()).toBeVisible()
-      await expect(saveButton(page)).toBeDisabled()
+      await expect(saveDestination(page)).toBeDisabled()
     }
   })
 
@@ -712,9 +736,9 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
       await page.getByTestId("s3-endpoint").fill(endpoint)
       await page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso").fill("AK")
       await page.getByTestId("secret-s3SecretKey").getByLabel("Segredo").fill("SK")
-      await saveButton(page).click()
+      await saveDestination(page).click()
       await submitSaveDialog(page)
-      await expect(page.getByTestId("save-error")).toHaveAttribute("data-code", code)
+      await expect(page.getByTestId("section-destination").getByTestId("save-error")).toHaveAttribute("data-code", code)
       await expect(page.getByTestId("save-error")).toContainText(texto)
       await expect(page.getByTestId("s3-endpoint")).toHaveValue(endpoint)
       await expect(page.getByTestId("s3-endpoint")).toHaveAttribute("aria-invalid", "true")
@@ -732,14 +756,17 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     await page.getByRole("button", { name: "Apagar o segredo salvo" }).click()
     await expect(page.getByTestId("secret-s3SecretKey-chip")).toHaveText("Será apagada ao salvar")
     await expect(page.getByTestId("destination-error")).toContainText("destino precisa continuar completo")
-    await expect(saveButton(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
+    // desligar o automático é OUTRO cartão (e outro "Salvar", sem senha): depois disso o destino pode ficar incompleto
     await enableSwitch(page).click()
+    await saveSchedule(page).click()
+    await expect(enableSwitch(page)).toHaveAttribute("aria-checked", "false")
     await expect(page.getByTestId("destination-error")).toHaveCount(0)
-    await saveButton(page).click()
+    await saveDestination(page).click()
     await expect(saveDialog(page).getByTestId("save-summary")).toContainText("Será apagado")
     await submitSaveDialog(page)
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
-    expect(puts.bodies.at(-1)).toEqual({ enabled: false, clearSecrets: ["s3SecretKey"] })
+    await expect(page.getByText(TOAST_DESTINATION)).toBeVisible()
+    expect(puts.bodies).toEqual([{ enabled: false }, { clearSecrets: ["s3SecretKey"] }])
     await expect(page.getByTestId("secret-s3SecretKey-chip")).toHaveText("Não configurada")
     await expect(page.getByTestId("destination-status")).toContainText("incompleto")
   })
@@ -751,12 +778,12 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     await page.getByRole("button", { name: "Apagar a chave de acesso salva" }).click()
     await page.getByRole("button", { name: "Desfazer" }).click()
     await page.getByRole("button", { name: "Substituir Chave de acesso" }).click()
-    await expect(saveButton(page)).toBeDisabled()
-    await expect(page.getByTestId("save-bar-status")).toHaveText("Nenhuma alteração pendente.")
+    await expect(saveDestination(page)).toBeDisabled()
+    await expect(page.getByTestId("destination-save-status")).toHaveText("Nenhuma alteração pendente.")
     await page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso").fill("SEGREDO-NOVO-AK")
-    await expect(saveButton(page)).toBeEnabled()
+    await expect(saveDestination(page)).toBeEnabled()
     await page.getByRole("button", { name: "Cancelar" }).first().click()
-    await expect(saveButton(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
     expect(puts.bodies).toEqual([])
   })
 
@@ -771,10 +798,10 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
       el.dispatchEvent(new Event("input", { bubbles: true }))
     })
     await expect(page.getByTestId("secret-s3SecretKey")).toContainText("Não pode conter quebra de linha")
-    await expect(saveButton(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
   })
 
-  test("primeira configuração do zero (admin@): S3 + credenciais + chave + ligar numa gravação só (o servidor valida o estado futuro)", async ({ page }) => {
+  test("primeira configuração do zero (admin@): chave, depois o Destino (S3 + credenciais) salvo, e SÓ ENTÃO ligar no Agendamento (o servidor valida o estado futuro, então cada cartão salva o seu)", async ({ page }) => {
     await login(page, "admin@innoelektron.com")
     const puts = capturePuts(page)
     await openPage(page)
@@ -784,9 +811,9 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     await page.getByTestId("key-confirm").click()
     await page.getByTestId("key-saved-checkbox").check()
     await page.getByTestId("key-done").click()
-    await expect(page.getByTestId("key-status")).toHaveText("Chave gerada")
-    // 2) destino + ligar
-    await destinationGroup(page).getByRole("button", { name: "Bucket S3" }).click()
+    await expect(page.getByTestId("key-fingerprint")).toHaveText(/^[0-9a-f]{8}$/)
+    // 2) destino (um Salvar) e depois ligar (outro Salvar)
+    await chooseDestination(page, "S3")
     await expect(enableSwitch(page)).toBeDisabled()
     await page.getByTestId("s3-endpoint").fill("https://acc.r2.cloudflarestorage.com")
     await page.getByTestId("s3-bucket").fill("meu-bucket")
@@ -794,15 +821,23 @@ test.describe("destino S3: credenciais só-escrita e regras do servidor espelhad
     await page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso").fill("SEGREDO-PRIMEIRA-AK")
     await page.getByRole("button", { name: "Informar Segredo" }).click()
     await page.getByTestId("secret-s3SecretKey").getByLabel("Segredo").fill("SEGREDO-PRIMEIRA-SK")
+    // o destino digitado e NÃO salvo não libera o "ligar": o servidor só aceita ligar com o destino já salvo
+    await expect(enableSwitch(page)).toBeDisabled()
+    await expect(page.getByTestId("enable-blockers")).toContainText("Complete e salve o destino")
+    await saveDestination(page).click()
+    await submitSaveDialog(page)
+    await expect(page.getByText(TOAST_DESTINATION)).toBeVisible()
+    await expect(page.getByTestId("destination-status")).toContainText("pronto")
     await expect(enableSwitch(page)).toBeEnabled()
     await enableSwitch(page).click()
-    await saveButton(page).click()
+    await saveSchedule(page).click()
     await submitSaveDialog(page)
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
-    expect(puts.bodies).toHaveLength(1)
-    expect(puts.bodies[0]).toMatchObject({ enabled: true, destination: "S3", s3: { endpoint: "https://acc.r2.cloudflarestorage.com", bucket: "meu-bucket" } })
-    await expect(page.getByTestId("schedule-status")).toHaveText("Ligado")
-    await expect(page.getByTestId("destination-status")).toContainText("pronto")
+    await expect(page.getByText(TOAST_SCHEDULE)).toBeVisible()
+    expect(puts.bodies).toHaveLength(2)
+    expect(puts.bodies[0]).toMatchObject({ destination: "S3", s3: { endpoint: "https://acc.r2.cloudflarestorage.com", bucket: "meu-bucket" } })
+    expect(puts.bodies[0]).not.toHaveProperty("enabled")
+    expect(puts.bodies[1]).toEqual({ enabled: true })
+    await expect(enableSwitch(page)).toHaveAttribute("aria-checked", "true")
     expect(await everythingTheUserCouldSee(page)).not.toContain("SEGREDO-PRIMEIRA")
   })
 })
@@ -815,6 +850,13 @@ test.describe("destino Google Drive: Client ID/Secret, endereço de retorno, con
     await login(page, "backup-drive-desconectado@innoelektron.com")
     await openPage(page)
     await expect(page.getByTestId("drive-fields")).toBeVisible()
+    // "Como acessar o Drive ⓘ": o passo a passo e a dica "Em produção" moram no painel do ⓘ (fechado por padrão)
+    const driveHelp = page.getByTestId("drive-help")
+    await expect(driveHelp).toHaveAttribute("aria-expanded", "false")
+    await expect(page.getByTestId("drive-help-panel")).toBeHidden()
+    await driveHelp.click()
+    await expect(driveHelp).toHaveAttribute("aria-expanded", "true")
+    await expect(page.getByTestId("drive-help-panel")).toContainText("Aplicativo da Web")
     await expect(page.getByTestId("drive-production-tip")).toContainText("Em produção")
     await expect(page.getByTestId("drive-production-tip")).toContainText("expira em 7 dias")
     await expect(page.getByTestId("drive-redirect-uri")).toHaveValue("https://api.innoflow.example/api/backup/google/callback")
@@ -851,22 +893,22 @@ test.describe("destino Google Drive: Client ID/Secret, endereço de retorno, con
     await page.getByTestId("drive-client-id").fill("outro-client-id")
     await expect(page.getByTestId("drive-connect")).toBeDisabled()
     await expect(page.getByTestId("drive-connect-reason")).toContainText("salve antes de conectar")
-    await page.getByRole("button", { name: "Descartar" }).click()
+    await page.getByTestId("destination-discard").click()
     await expect(page.getByTestId("drive-connect")).toBeEnabled()
   })
 
   test("Drive sem Client ID/Secret: 'Conectar' bloqueado dizendo o que falta; salvar Client ID + Secret libera", async ({ page }) => {
     await login(page, "admin@innoelektron.com")
     await openPage(page)
-    await destinationGroup(page).getByRole("button", { name: "Google Drive" }).click()
+    await chooseDestination(page, "DRIVE")
     await expect(page.getByTestId("drive-connect")).toBeDisabled()
     await expect(page.getByTestId("drive-connect-reason")).toContainText("salve antes de conectar")
     await page.getByTestId("drive-client-id").fill("novo-app.apps.googleusercontent.com")
     await page.getByRole("button", { name: "Informar Client Secret" }).click()
     await page.getByTestId("secret-driveClientSecret").getByLabel("Client Secret").fill("SEGREDO-CLIENT-SECRET")
-    await saveButton(page).click()
+    await saveDestination(page).click()
     await submitSaveDialog(page)
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
+    await expect(page.getByText(TOAST_DESTINATION)).toBeVisible()
     await expect(page.getByTestId("drive-connect")).toBeEnabled()
     expect(await everythingTheUserCouldSee(page)).not.toContain("SEGREDO-CLIENT-SECRET")
   })
@@ -898,9 +940,11 @@ test.describe("destino Google Drive: Client ID/Secret, endereço de retorno, con
     await expect(page.getByTestId("drive-client-id-disconnects")).toContainText("dono@gmail.example")
     // o automático está ligado: o destino ficaria incompleto -> barrado antes do pedido
     await expect(page.getByTestId("destination-error")).toContainText("destino precisa continuar completo")
-    await expect(saveButton(page)).toBeDisabled()
+    await expect(saveDestination(page)).toBeDisabled()
     await enableSwitch(page).click()
-    await saveButton(page).click()
+    await saveSchedule(page).click()
+    await expect(enableSwitch(page)).toHaveAttribute("aria-checked", "false")
+    await saveDestination(page).click()
     await expect(saveDialog(page).getByTestId("save-summary")).toContainText("Será desconectada")
     await submitSaveDialog(page)
     await expect(page.getByTestId("drive-disconnected")).toBeVisible()
@@ -921,7 +965,7 @@ test.describe("destino Google Drive: Client ID/Secret, endereço de retorno, con
   test("sem URL pública (PUBLIC_API_BASE_URL): o endereço de retorno não aparece e o motivo é dito", async ({ page }) => {
     await login(page, "backup-sem-chave@innoelektron.com")
     await openPage(page)
-    await destinationGroup(page).getByRole("button", { name: "Google Drive" }).click()
+    await chooseDestination(page, "DRIVE")
     await expect(page.getByTestId("drive-redirect-unknown")).toContainText("PUBLIC_API_BASE_URL")
     await expect(page.getByTestId("drive-redirect-uri")).toHaveCount(0)
   })
@@ -949,11 +993,12 @@ test.describe("chave de criptografia: gerar, mostrar UMA vez, substituir", () =>
     const reveal = page.getByTestId("key-reveal-dialog")
     await expect(reveal).toBeVisible()
     await expect(reveal.getByTestId("key-reveal-warning")).toContainText("Sem esta chave, os backups são inúteis")
-    await expect(reveal.getByTestId("key-reveal-warning")).toContainText("PAYMENT_SECRETS_KEY")
+    await expect(reveal.getByTestId("key-reveal-warning")).toContainText("JWT_SECRET")
+    await expect(reveal.getByTestId("key-reveal-warning")).not.toContainText("PAYMENT_SECRETS_KEY")
     const key = (await reveal.getByTestId("generated-key").innerText()).trim()
     expect(key).toMatch(KEY_FORMAT)
     // o cartão atrás já mostra a impressão digital nova
-    await expect(page.getByTestId("key-status")).toHaveText("Chave gerada")
+    await expect(page.getByTestId("key-fingerprint")).toHaveText(/^[0-9a-f]{8}$/)
 
     // o evento de saída da página é barrado enquanto a chave está na tela
     expect(await page.evaluate(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented })).toBe(true)
@@ -1001,7 +1046,7 @@ test.describe("chave de criptografia: gerar, mostrar UMA vez, substituir", () =>
     await openPage(page)
     // esta conta já tem chave: o impedimento é só a conta Google; prova que o texto da chave NÃO aparece como pendência
     await expect(page.getByTestId("enable-blockers")).not.toContainText("Gere a chave")
-    await expect(page.getByTestId("enable-blockers")).toContainText("Complete o destino")
+    await expect(page.getByTestId("enable-blockers")).toContainText("Complete e salve o destino")
   })
 
   test("substituir: aviso forte, frase exata + senha, expectedFingerprint no pedido, e a chave nova aparece uma vez", async ({ page }) => {
@@ -1051,17 +1096,129 @@ test.describe("chave de criptografia: gerar, mostrar UMA vez, substituir", () =>
   })
 })
 
+test.describe("layout do InnoChat: cabeçalho com ação, faixa de situação, grade 2x2 de cartões com ⓘ, histórico largo", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("cabeçalho (título + subtítulo + Fazer backup agora + ⓘ), faixa de 3 colunas, grade 2x2 e histórico largo abaixo", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    await openPage(page)
+    await expect(page.locator("h1")).toHaveText("Backup do banco")
+    await expect(main(page).getByText("Cópia cifrada do banco fora do servidor, com aviso se atrasar.")).toBeVisible()
+    await expect(page.getByTestId("action-run")).toHaveText("Fazer backup agora")
+    await expect(page.getByTestId("page-help")).toHaveAttribute("aria-label", "Como funciona: Backup do banco")
+    // faixa de status: 3 colunas, nesta ordem
+    const strip = page.getByTestId("section-status")
+    await expect(strip.getByText("Última cópia enviada")).toBeVisible()
+    await expect(strip.getByText("Próxima cópia automática")).toBeVisible()
+    await expect(strip.getByText("Situação")).toBeVisible()
+    await expect(strip.getByText(/^\d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}$/).first()).toBeVisible()
+    const box = async (id: string) => (await page.getByTestId(id).boundingBox())!
+    const [key, verify, schedule, destination, history, status] = await Promise.all(["section-key", "section-verify", "section-schedule", "section-destination", "section-history", "section-status"].map(box))
+    // 2 colunas x 2 linhas: Chave | Conferir / Agendamento | Destino
+    expect(Math.abs(key.y - verify.y)).toBeLessThan(2)
+    expect(Math.abs(schedule.y - destination.y)).toBeLessThan(2)
+    expect(key.x).toBeLessThan(verify.x)
+    expect(schedule.x).toBeLessThan(destination.x)
+    expect(schedule.y).toBeGreaterThan(key.y + key.height - 1)
+    // a faixa vem antes da grade e o histórico é LARGO (a largura da faixa) e fica abaixo
+    expect(status.y + status.height).toBeLessThanOrEqual(key.y)
+    expect(history.y).toBeGreaterThanOrEqual(schedule.y + schedule.height - 1)
+    expect(Math.abs(history.width - status.width)).toBeLessThan(2)
+    // o aviso do JWT_SECRET e a nota de restaurar ficam no rodapé, depois do histórico
+    const notice = await box("secrets-key-notice")
+    expect(notice.y).toBeGreaterThan(history.y + history.height - 1)
+  })
+
+  test("cada cartão tem um ⓘ (botão com rótulo, aria-expanded e aria-controls) que abre e fecha a explicação", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    await openPage(page)
+    const cards: Array<[string, string]> = [
+      ["section-key", "Como funciona: Chave do backup"],
+      ["section-verify", "Como funciona: Conferir backup"],
+      ["section-schedule", "Como funciona: Agendamento"],
+      ["section-destination", "Como funciona: Destino"],
+      ["section-history", "Como funciona: Histórico"],
+    ]
+    for (const [id, label] of cards) {
+      const toggle = page.getByTestId(`${id}-help`)
+      await expect(toggle).toHaveAttribute("aria-label", label)
+      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      const panelId = await toggle.getAttribute("aria-controls")
+      expect(panelId).toBeTruthy()
+      const panel = page.getByTestId(`${id}-help-panel`)
+      await expect(panel).toBeHidden()
+      await toggle.focus()
+      await page.keyboard.press("Enter")
+      await expect(toggle).toHaveAttribute("aria-expanded", "true")
+      await expect(panel).toBeVisible()
+      await expect(panel).toHaveAttribute("id", panelId!)
+      await page.keyboard.press("Space")
+      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await expect(panel).toBeHidden()
+    }
+    // o ⓘ do cabeçalho explica a tela inteira
+    await page.getByTestId("page-help").click()
+    await expect(page.getByTestId("page-help-panel")).toContainText("Fazer backup agora")
+  })
+
+  test("o cartão Chave explica a chave e cita o JWT_SECRET (nunca PAYMENT_SECRETS_KEY)", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    await openPage(page)
+    await page.getByTestId("section-key-help").click()
+    await expect(page.getByTestId("section-key-help-panel")).toContainText("JWT_SECRET")
+    expect(await page.locator("body").innerText()).not.toContain("PAYMENT_SECRETS_KEY")
+  })
+
+  test("Chave e Conferir trazem o conteúdo do InnoChat; Agendamento tem Frequência, Hora, Cópias a manter e Avisar após; Destino tem Guardar em", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    await openPage(page)
+    const key = page.getByTestId("section-key")
+    await expect(key.getByText("Impressão digital da chave atual")).toBeVisible()
+    await expect(key.getByText(/^Gerada em \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}\. Confira se é a mesma do arquivo que você guardou\. A chave em si não aparece de novo\.$/)).toBeVisible()
+    await expect(key.getByRole("button", { name: "Gerar nova chave", exact: true })).toBeVisible()
+    const verify = page.getByTestId("section-verify")
+    await expect(verify.getByRole("button", { name: "Conferir backup", exact: true })).toBeVisible()
+    await expect(verify.getByText("Uma vez por semana o sistema faz isso sozinho e avisa por e-mail se a cópia não abrir.")).toBeVisible()
+    const schedule = page.getByTestId("section-schedule")
+    await expect(schedule.getByText("Backup automático", { exact: true })).toBeVisible()
+    for (const label of ["Frequência", "Hora (Brasília)", "Cópias a manter", "Avisar após (horas)"]) await expect(schedule.getByLabel(label)).toBeVisible()
+    await expect(schedule.getByText("De 1 a 365. As mais antigas são apagadas.")).toBeVisible()
+    await expect(schedule.getByText("Sem cópia nova, de 6 a 720.")).toBeVisible()
+    await expect(page.getByTestId("section-destination").getByLabel("Guardar em")).toBeVisible()
+    await expect(page.getByTestId("section-destination").getByRole("button", { name: "Testar conexão", exact: true })).toBeVisible()
+  })
+
+  test("salvar é POR CARTÃO: editar os dois, salvar o Agendamento manda só o dele e o rascunho do Destino continua", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    const puts = capturePuts(page)
+    await openPage(page)
+    await page.getByTestId("field-alert-after").fill("48")
+    await page.getByTestId("s3-bucket").fill("outro-bucket")
+    await saveSchedule(page).click()
+    await expect(page.getByText(TOAST_SCHEDULE)).toBeVisible()
+    expect(puts.bodies).toEqual([{ alertAfterHours: 48 }])
+    await expect(page.getByTestId("s3-bucket")).toHaveValue("outro-bucket")
+    await expect(page.getByTestId("destination-save-status")).toContainText("1 alteração não salva")
+    await expect(page.getByTestId("schedule-save-status")).toHaveText("Nenhuma alteração pendente.")
+    await saveDestination(page).click()
+    await submitSaveDialog(page)
+    await expect(page.getByText(TOAST_DESTINATION)).toBeVisible()
+    expect(puts.bodies.at(-1)).toEqual({ s3: { bucket: "outro-bucket" } })
+  })
+})
+
 test.describe("a11y e teclado", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 
-  test("segmentos com aria-pressed, interruptor com nome, rótulos associados, foco volta ao gatilho do diálogo", async ({ page }) => {
+  test("selects com rótulo, interruptor com nome, rótulos associados, foco volta ao gatilho do diálogo", async ({ page }) => {
     await login(page, "backup-s3@innoelektron.com")
     await openPage(page)
-    await expect(page.getByRole("group", { name: "Frequência do backup" }).getByRole("button", { name: "Todo dia" })).toHaveAttribute("aria-pressed", "true")
-    await expect(destinationGroup(page).getByRole("button", { name: "Bucket S3" })).toHaveAttribute("aria-pressed", "true")
+    await expect(page.getByLabel("Frequência")).toHaveValue("1")
+    await expect(page.getByLabel("Guardar em")).toHaveValue("S3")
     await expect(enableSwitch(page)).toHaveAttribute("aria-describedby", /.+/)
     await expect(page.getByLabel("Cópias a manter")).toBeVisible()
-    await expect(page.getByLabel("Horário (Brasília)")).toBeVisible()
+    await expect(page.getByLabel("Hora (Brasília)")).toBeVisible()
+    await expect(page.getByLabel("Avisar após (horas)")).toBeVisible()
     await expect(page.getByLabel("Endereço do bucket")).toBeVisible()
     await page.getByTestId("key-replace").focus()
     await page.keyboard.press("Enter")
@@ -1079,9 +1236,9 @@ test.describe("a11y e teclado", () => {
     await page.getByTestId("field-alert-after").focus()
     await page.keyboard.press("Control+A")
     await page.keyboard.type("60")
-    await page.getByTestId("save-button").focus()
+    await saveSchedule(page).focus()
     await page.keyboard.press("Enter")
-    await expect(page.getByText("Configuração do backup salva.")).toBeVisible()
+    await expect(page.getByText(TOAST_SCHEDULE)).toBeVisible()
     expect(puts.bodies).toEqual([{ alertAfterHours: 60 }])
   })
 })
@@ -1118,13 +1275,32 @@ test.describe("375 px: sem rolagem lateral, alvos de 44 px, histórico em cartõ
     test(`${label}: sem rolagem lateral e nenhum controle abaixo de 44 px`, async ({ page }) => {
       await login(page, email)
       await page.goto("/admin/backups")
-      await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Backup do banco", level: 1 })).toBeVisible()
       await expect(page.getByTestId("section-history")).toBeVisible()
       const m = await measure(page)
       expect(m.overflow).toEqual({ main: 0, doc: 0 })
       expect(m.small, `alvos < 44 px: ${m.small.join(" | ")}`).toEqual([])
     })
   }
+
+  test("os 4 cartões empilham em UMA coluna, na ordem Chave, Conferir, Agendamento, Destino", async ({ page }) => {
+    await login(page, "backup-s3@innoelektron.com")
+    await page.goto("/admin/backups")
+    await expect(page.getByTestId("section-history")).toBeVisible()
+    const ys: number[] = []
+    const xs: number[] = []
+    for (const id of ["section-key", "section-verify", "section-schedule", "section-destination", "section-history"]) {
+      const b = (await page.getByTestId(id).boundingBox())!
+      ys.push(b.y)
+      xs.push(Math.round(b.x))
+    }
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys)
+    expect(new Set(xs).size).toBe(1)
+    // o ⓘ tem alvo de 44 px
+    const help = (await page.getByTestId("section-key-help").boundingBox())!
+    expect(help.width).toBeGreaterThanOrEqual(43.5)
+    expect(help.height).toBeGreaterThanOrEqual(43.5)
+  })
 
   test("histórico vira lista de cartões (sem tabela) e a paginação tem botões de 44 px", async ({ page }) => {
     await login(page, "backup-s3@innoelektron.com")

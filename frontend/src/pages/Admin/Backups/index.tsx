@@ -1,77 +1,135 @@
-import { useEffect, useRef, useState } from "react"
-import { DatabaseBackup, RotateCcw, Save, TriangleAlert } from "lucide-react"
+import { useEffect, useId, useRef, useState } from "react"
+import { DatabaseBackup, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/painel/PageHeader"
 import { AdminErrorState as ErrorState } from "@/components/admin/AdminStates"
 import { ConfirmSaveDialog } from "@/components/admin/ConfirmSaveDialog"
 import { Alert } from "@/components/ui/Alert"
 import { Button } from "@/components/ui/Button"
-import { Card, CardContent } from "@/components/ui/Card"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { useBackupConfig, useUpdateBackupConfig } from "@/hooks/useBackup"
 import {
   EMPTY_DRAFT,
   buildUpdatePayload,
+  clearDraftScope,
   describeChanges,
   draftTouched,
   exigeSenha,
   hasChanges,
   parseBackupError,
   s3HostChanged,
+  scopeDraft,
   validateDraft,
   withCurrentPassword,
   type BackupDraft,
   type BackupError,
+  type BackupScope,
   type DraftErrors,
 } from "@/lib/backup"
-import { cn } from "@/lib/utils"
 import { getApiErrorStatus } from "@/services/api"
 import type { BackupConfigDTO } from "@/types/api"
-import { ActionsSection } from "./ActionsSection"
 import { DestinationSection, type DestinationPatch } from "./DestinationSection"
 import { GoogleReturnBanner } from "./GoogleReturnBanner"
 import { HistorySection } from "./HistorySection"
 import { KeySection } from "./KeySection"
 import { RestoreNotice, SecretsKeyMissingAlert, SecretsKeyPermanentNotice, SecretsUnreadableAlert } from "./Notices"
+import { ActionFeedback } from "./Outcomes"
+import { HelpPanel, HelpToggle } from "./parts"
 import { ScheduleSection } from "./ScheduleSection"
 import { StatusSection, StatusSkeleton } from "./StatusSection"
+import { useBackupActions, type BackupActions } from "./useBackupActions"
+import { VerifySection } from "./VerifySection"
 
-const PAGE_TITLE = "Backups"
-const PAGE_DESCRIPTION = "Cópia cifrada do banco fora do servidor, com aviso se atrasar: destino, chave, agendamento e histórico."
+const PAGE_TITLE = "Backup do banco"
+const PAGE_DESCRIPTION = "Cópia cifrada do banco fora do servidor, com aviso se atrasar."
 
 /**
- * Esqueleto com a FORMA da tela pronta (aviso permanente, estado, ações, chave, agendamento, destino, histórico): evita salto de layout quando os dados chegam. Alturas MEDIDAS no cartão real
- * (conta `backup-s3@`, tela cheia): 375 px / 768 px / 1440 px (de 1024 px para cima a sidebar fixa estreita a coluna, daí `sm` e `lg`). A barra de salvar e o aviso de restauração ficam
- * abaixo do histórico e não entram: o que ainda se mexe quando os dados chegam é só o que está depois do histórico.
+ * Esqueleto com a FORMA da tela pronta (faixa de estado, os 4 cartões em grade, histórico): evita salto de layout quando os dados chegam. Alturas MEDIDAS nos cartões reais (conta `backup-s3@`,
+ * tela cheia): 375 px / 768 px / 1440 px (a grade vira 2 colunas em `lg`; `sm` cobre 640-1023 px). O rodapé de avisos fica abaixo do histórico e
+ * não entra: o que ainda se mexe quando os dados chegam é só o que está depois do histórico.
  */
 function BackupSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-label="Carregando a configuração de backup">
-      <Skeleton className="h-[194px] w-full rounded-xl sm:h-[94px] lg:h-[74px]" />
       <StatusSkeleton />
-      <Skeleton className="h-[404px] w-full rounded-card sm:h-[236px]" />
-      <Skeleton className="h-[473px] w-full rounded-card sm:h-[280px] lg:h-[260px]" />
-      <Skeleton className="h-[793px] w-full rounded-card sm:h-[438px] lg:h-[406px]" />
-      <Skeleton className="h-[990px] w-full rounded-card sm:h-[637px] lg:h-[584px]" />
-      <Skeleton className="h-[1954px] w-full rounded-card sm:h-[1586px] lg:h-[825px]" />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Skeleton className="h-[284px] w-full rounded-card sm:h-[252px] lg:h-[276px]" />
+        <Skeleton className="h-[308px] w-full rounded-card sm:h-[256px] lg:h-[276px]" />
+        <Skeleton className="h-[757px] w-full rounded-card sm:h-[429px] lg:h-[838px]" />
+        <Skeleton className="h-[1179px] w-full rounded-card sm:h-[780px] lg:h-[838px]" />
+      </div>
+      <Skeleton className="h-[1958px] w-full rounded-card sm:h-[1590px] lg:h-[829px]" />
     </div>
   )
 }
 
 /**
- * Admin → Backups. ADMIN-ONLY: o guarda de papel mora na ROTA (`RequireAuth roles=["ADMIN"]`) e o servidor confere de novo (403 `FORBIDDEN`). Rota lazy.
+ * Admin → Backup do banco (rota `/admin/backups`). ADMIN-ONLY: o guarda de papel mora na ROTA (`RequireAuth roles=["ADMIN"]`) e o servidor confere de novo (403 `FORBIDDEN`). Rota lazy.
+ *
+ * Organização do InnoChat: cabeçalho com a ação "Fazer backup agora" e um "ⓘ", faixa de estado, grade de 4 cartões (Chave, Conferir, Agendamento, Destino, cada um com "ⓘ") e o histórico
+ * como cartão largo; o aviso do JWT_SECRET e a nota "restaurar não tem botão" ficam no rodapé.
  *
  * Estado: o servidor é a fonte da verdade (`useQuery`); o que a pessoa edita é um RASCUNHO de sobreposições (`BackupDraft`) por cima do DTO carregado, não uma cópia dele, então não há
- * efeito sincronizando estado a partir de dado assíncrono. Salvar envia só o diff; segredos só existem no rascunho enquanto a pessoa os digita e morrem junto com ele depois do PUT
+ * efeito sincronizando estado a partir de dado assíncrono. O rascunho mora aqui (e não no editor) porque o botão do cabeçalho precisa saber se há alteração não salva (as ações usam a
+ * configuração SALVA). Cada cartão de configuração salva só o seu pedaço (`BackupScope`); segredos só existem no rascunho enquanto a pessoa os digita e morrem junto com ele depois do PUT
  * (e a mutation é zerada: `gcTime: 0` + `reset()`). A chave do backup e o estado das execuções têm componentes e consultas próprios (não passam pelo rascunho).
  */
 export default function BackupsPage() {
   const { data: dto, isLoading, isError, error, refetch } = useBackupConfig()
   const forbidden = getApiErrorStatus(error) === 403
+  const [draft, setDraft] = useState<BackupDraft>(EMPTY_DRAFT)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const helpId = useId()
+
+  const dirty = dto ? hasChanges(buildUpdatePayload(dto, draft)) : false
+  const actions = useBackupActions(dto, dirty)
+  const runReason = actions.reasons.run
 
   return (
     <div className="space-y-6">
-      <PageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} icon={DatabaseBackup} />
+      <div className="space-y-3">
+        <PageHeader
+          title={PAGE_TITLE}
+          description={PAGE_DESCRIPTION}
+          icon={DatabaseBackup}
+          actions={
+            <>
+              {dto ? (
+                <Button
+                  type="button"
+                  size="touch"
+                  onClick={() => void actions.start("run")}
+                  loading={actions.pending.run}
+                  disabled={runReason !== null}
+                  aria-describedby="backup-run-reason"
+                  data-testid="action-run"
+                >
+                  {!actions.pending.run && <DatabaseBackup className="h-4 w-4" aria-hidden="true" />}
+                  Fazer backup agora
+                </Button>
+              ) : (
+                isLoading && <Skeleton className="h-11 w-44 rounded-[var(--field-radius)] sm:h-10" />
+              )}
+              <HelpToggle open={helpOpen} onToggle={() => setHelpOpen((v) => !v)} panelId={helpId} label="Backup do banco" testId="page-help" />
+            </>
+          }
+        />
+        <HelpPanel id={helpId} open={helpOpen} testId="page-help-panel">
+          <p>
+            Esta tela cuida da cópia de segurança do banco de dados. O sistema copia o banco, cifra o arquivo com a chave do backup e envia para um destino fora do servidor (Google Drive ou armazenamento S3). Se passar do prazo sem cópia nova, o dono
+            é avisado e a situação fica “Atrasado”.
+          </p>
+          <p>
+            “Fazer backup agora” roda uma cópia na hora, em segundo plano: a tela acompanha sozinha e mostra o resultado. Sem destino escolhido ele só testa o pg_dump (copia, confere e descarta), o que NÃO conta como backup. Os botões desabilitados sempre
+            dizem o motivo.
+          </p>
+          <p>Cada cartão tem o seu “ⓘ” com a explicação do que faz. Chave, destino, credenciais e “ligar o automático” pedem a sua senha atual ao salvar.</p>
+        </HelpPanel>
+        <p id="backup-run-reason" className="text-xs font-medium text-ink-soft" data-testid="reason-run" hidden={runReason === null}>
+          {runReason}
+        </p>
+        <ActionFeedback actions={actions} kind="run" />
+      </div>
 
       <GoogleReturnBanner />
 
@@ -81,19 +139,36 @@ export default function BackupsPage() {
         <ErrorState message={forbidden ? "Somente administradores podem ver e alterar os backups." : parseBackupError(error).message} onRetry={forbidden ? undefined : () => void refetch()} />
       )}
 
-      {dto && <BackupEditor dto={dto} />}
+      {dto && <BackupEditor dto={dto} draft={draft} setDraft={setDraft} actions={actions} />}
     </div>
   )
 }
 
-/** O formulário e as seções. Só existe com o DTO carregado (o rascunho nasce vazio junto com ele) e devolve os blocos como irmãos, para herdarem o `space-y-6` da página. */
-function BackupEditor({ dto }: { dto: BackupConfigDTO }) {
+/** Tudo o que a pessoa vê de um escopo (um cartão de configuração): o que muda, os erros dos campos, e se pede senha. Calculado do rascunho SÓ daquele escopo. */
+function viewOf(dto: BackupConfigDTO, draft: BackupDraft, scope: BackupScope, serverErrors: DraftErrors) {
+  const scoped = scopeDraft(draft, scope)
+  const payload = buildUpdatePayload(dto, scoped)
+  const errors = validateDraft(dto, scoped)
+  return {
+    payload,
+    changes: describeChanges(dto, payload),
+    errors: { ...serverErrors, ...errors } as DraftErrors,
+    errorCount: Object.keys(errors).length,
+    dirty: hasChanges(payload),
+    touched: draftTouched(scoped),
+    needsPassword: exigeSenha(payload),
+  }
+}
+
+/** A grade de cartões e o histórico. Só existe com o DTO carregado. Devolve os blocos como irmãos, para herdarem o `space-y-6` da página. */
+function BackupEditor({ dto, draft, setDraft, actions }: { dto: BackupConfigDTO; draft: BackupDraft; setDraft: (update: (prev: BackupDraft) => BackupDraft) => void; actions: BackupActions }) {
   const mutation = useUpdateBackupConfig()
 
-  const [draft, setDraft] = useState<BackupDraft>(EMPTY_DRAFT)
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
-  const [saveError, setSaveError] = useState<BackupError | null>(null)
-  // 403 INVALID_CURRENT_PASSWORD: o erro vive no diálogo de salvar (que continua aberto), não no alerta da página.
+  // Qual cartão tem o diálogo de senha aberto / qual está salvando agora (o diálogo mostra o "carregando" dele; o botão do cartão só quando não há diálogo).
+  const [saveDialog, setSaveDialog] = useState<BackupScope | null>(null)
+  const [savingScope, setSavingScope] = useState<BackupScope | null>(null)
+  const [saveError, setSaveError] = useState<{ scope: BackupScope; error: BackupError } | null>(null)
+  // 403 INVALID_CURRENT_PASSWORD: o erro vive no diálogo de salvar (que continua aberto), não no alerta do cartão.
   const [passwordError, setPasswordError] = useState<string | null>(null)
   // Erros que o SERVIDOR apontou num campo (endereço recusado, credencial a redigitar): somem na próxima edição.
   const [serverErrors, setServerErrors] = useState<DraftErrors>({})
@@ -141,38 +216,32 @@ function BackupEditor({ dto }: { dto: BackupConfigDTO }) {
       drive: { ...prev.drive, ...(marked && key === "driveClientSecret" ? { clientSecret: undefined } : {}) },
     }))
 
-  const payload = buildUpdatePayload(dto, draft)
-  const changes = describeChanges(dto, payload)
-  const errors = validateDraft(dto, draft)
-  const fieldErrors: DraftErrors = { ...serverErrors, ...errors }
-  const dirty = hasChanges(payload)
-  const needsPassword = exigeSenha(payload)
-  const errorCount = Object.keys(errors).length
-  const canSave = dirty && errorCount === 0 && !mutation.isPending
-  const reducesRetention = payload.retentionCount !== undefined && payload.retentionCount < dto.retentionCount
+  const views = { schedule: viewOf(dto, draft, "schedule", serverErrors), destination: viewOf(dto, draft, "destination", serverErrors) }
 
-  const handleDiscard = () => {
-    setDraft(EMPTY_DRAFT)
-    setSaveError(null)
+  const discard = (scope: BackupScope) => {
+    setDraft((prev) => clearDraftScope(prev, scope))
+    setSaveError((current) => (current?.scope === scope ? null : current))
     setServerErrors({})
   }
 
   const closeSaveDialog = () => {
-    setSaveDialogOpen(false)
+    setSaveDialog(null)
     setPasswordError(null)
   }
 
-  const handleSave = async (currentPassword?: string) => {
-    if (!dirty || mutation.isPending) return
+  const handleSave = async (scope: BackupScope, currentPassword?: string) => {
+    const view = views[scope]
+    if (!view.dirty || mutation.isPending) return
     setSaveError(null)
     setPasswordError(null)
+    setSavingScope(scope)
     try {
-      await mutation.mutateAsync(currentPassword ? withCurrentPassword(payload, currentPassword) : payload)
-      // Segredos digitados morrem aqui: o rascunho inteiro é descartado (o DTO novo já está no cache).
-      setDraft(EMPTY_DRAFT)
+      await mutation.mutateAsync(currentPassword ? withCurrentPassword(view.payload, currentPassword) : view.payload)
+      // Segredos digitados morrem aqui: o rascunho DESTE cartão é descartado (o DTO novo já está no cache); o outro cartão segue como estava.
+      setDraft((prev) => clearDraftScope(prev, scope))
       setServerErrors({})
       closeSaveDialog()
-      toast.success("Configuração do backup salva.")
+      toast.success(scope === "schedule" ? "Agendamento do backup salvo." : "Destino do backup salvo.")
     } catch (err) {
       const parsed = parseBackupError(err)
       if (parsed.code === "INVALID_CURRENT_PASSWORD") {
@@ -180,89 +249,77 @@ function BackupEditor({ dto }: { dto: BackupConfigDTO }) {
         setPasswordError(parsed.message)
       } else {
         closeSaveDialog()
-        setSaveError(parsed)
+        setSaveError({ scope, error: parsed })
         setServerErrors(Object.fromEntries(parsed.fields.map((field) => [field, parsed.message])))
       }
     } finally {
       // O corpo do PUT carrega credenciais do bucket, o Client Secret e a senha atual: `mutation.variables` não pode ficar na memória até o próximo envio.
       mutation.reset()
+      setSavingScope(null)
     }
   }
 
-  const requestSave = () => {
+  const requestSave = (scope: BackupScope) => {
     setSaveError(null)
     setPasswordError(null)
-    if (needsPassword) setSaveDialogOpen(true)
-    else void handleSave()
+    if (views[scope].needsPassword) setSaveDialog(scope)
+    else void handleSave(scope)
   }
+
+  const cardSave = (scope: BackupScope) => ({
+    count: views[scope].changes.length,
+    errorCount: views[scope].errorCount,
+    needsPassword: views[scope].needsPassword,
+    canSave: views[scope].dirty && views[scope].errorCount === 0 && !mutation.isPending,
+    canDiscard: (views[scope].dirty || views[scope].touched) && !mutation.isPending,
+    loading: mutation.isPending && savingScope === scope && saveDialog === null,
+    onSave: () => requestSave(scope),
+    onDiscard: () => discard(scope),
+  })
+
+  const errorAlert = (scope: BackupScope) =>
+    saveError?.scope === scope ? (
+      <Alert ref={errorRef} tone="danger" role="alert" icon={TriangleAlert} data-testid="save-error" data-code={saveError.error.code}>
+        <p className="font-semibold">{saveError.error.message}</p>
+        {saveError.error.draftKept && <p className="mt-1 text-xs font-medium">O que você preencheu continua na tela.</p>}
+      </Alert>
+    ) : null
+
+  const dialogScope = saveDialog && views[saveDialog].dirty ? saveDialog : null
+  const dialogView = dialogScope ? views[dialogScope] : null
+  const reducesRetention = dialogView?.payload.retentionCount !== undefined && dialogView.payload.retentionCount < dto.retentionCount
 
   return (
     <>
-      <SecretsKeyPermanentNotice />
       {!dto.secretsKeyConfigured && <SecretsKeyMissingAlert />}
       {dto.secretsKeyConfigured && !dto.secretsReadable && <SecretsUnreadableAlert />}
 
       <StatusSection enabled={dto.enabled} />
 
-      <ActionsSection dto={dto} dirty={dirty} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <KeySection dto={dto} disabled={mutation.isPending} />
+        <VerifySection actions={actions} />
+        <ScheduleSection dto={dto} draft={draft} errors={views.schedule.errors} onChange={patchSchedule} disabled={mutation.isPending} save={cardSave("schedule")} error={errorAlert("schedule")} />
+        <DestinationSection
+          dto={dto}
+          draft={draft}
+          errors={views.destination.errors}
+          onChange={patchDestination}
+          onMarkClear={markClear}
+          disabled={mutation.isPending}
+          dirty={views.destination.dirty}
+          actions={actions}
+          save={cardSave("destination")}
+          error={errorAlert("destination")}
+        />
+      </div>
 
-      <KeySection dto={dto} disabled={mutation.isPending} />
-
-      {saveError && (
-        <Alert ref={errorRef} tone="danger" role="alert" icon={TriangleAlert} data-testid="save-error" data-code={saveError.code}>
-          <p className="font-semibold">{saveError.message}</p>
-          {saveError.draftKept && <p className="mt-1 text-xs font-medium">O que você preencheu continua na tela.</p>}
-        </Alert>
-      )}
-
-      <ScheduleSection dto={dto} draft={draft} errors={fieldErrors} onChange={patchSchedule} disabled={mutation.isPending} />
-
-      <DestinationSection dto={dto} draft={draft} errors={fieldErrors} onChange={patchDestination} onMarkClear={markClear} disabled={mutation.isPending} dirty={dirty} />
-
-      {/* Barra de salvar: um card como os outros (mesmo padrão do gateway e da comunicação). Com alteração pendente ela gruda no fim da área de rolagem do shell (o <main> do admin); sem alteração fica no fim do bloco, sem tapar conteúdo. */}
-      <Card className={cn("z-10", dirty && "sticky bottom-0 shadow-tinted-card")} data-testid="save-bar">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-          <div className="space-y-0.5" aria-live="polite">
-            <p className="text-sm text-ink-softer" data-testid="save-bar-status">
-              {dirty ? (
-                <>
-                  <span className="font-semibold text-ink">
-                    {changes.length} {changes.length === 1 ? "alteração não salva" : "alterações não salvas"}
-                  </span>
-                  {errorCount > 0 && (
-                    <span className="font-semibold text-danger-700" data-testid="save-bar-errors">
-                      {" "}
-                      — corrija os campos marcados para salvar.
-                    </span>
-                  )}
-                </>
-              ) : (
-                "Nenhuma alteração pendente."
-              )}
-            </p>
-            <p className="text-xs text-ink-softer" data-testid="save-bar-password-note">
-              {dirty ? (needsPassword ? "Esta alteração pede a sua senha atual ao salvar." : "Esta alteração não pede senha.") : "Mudar destino, credenciais, cópias a manter ou ligar o automático pede a sua senha."}
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex">
-            <Button type="button" variant="outline" size="touch" onClick={handleDiscard} disabled={(!dirty && !draftTouched(draft)) || mutation.isPending}>
-              <RotateCcw className="h-4 w-4" aria-hidden="true" />
-              Descartar
-            </Button>
-            <Button type="button" size="touch" onClick={requestSave} loading={mutation.isPending && !saveDialogOpen} disabled={!canSave} data-testid="save-button">
-              {!(mutation.isPending && !saveDialogOpen) && <Save className="h-4 w-4" aria-hidden="true" />}
-              Salvar alterações
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {saveDialogOpen && dirty && (
+      {dialogScope && dialogView && (
         <ConfirmSaveDialog
           title="Confirmar alterações no backup"
           description="Revise o que será enviado ao servidor. Chaves, segredos e senhas nunca são exibidos."
           passwordHint="Pedida em toda alteração que muda para onde o backup vai, com que credencial, quantas cópias ficam ou que liga o automático."
-          items={changes}
+          items={dialogView.changes}
           extra={
             reducesRetention ? (
               <Alert tone="warning" size="sm" role="status" icon={TriangleAlert} className="mt-4 font-medium" data-testid="retention-warning">
@@ -273,13 +330,16 @@ function BackupEditor({ dto }: { dto: BackupConfigDTO }) {
           loading={mutation.isPending}
           passwordError={passwordError}
           onCancel={closeSaveDialog}
-          onConfirm={(currentPassword) => void handleSave(currentPassword)}
+          onConfirm={(currentPassword) => void handleSave(dialogScope, currentPassword)}
         />
       )}
 
       <HistorySection />
 
-      <RestoreNotice />
+      <div className="space-y-4">
+        <SecretsKeyPermanentNotice />
+        <RestoreNotice />
+      </div>
     </>
   )
 }

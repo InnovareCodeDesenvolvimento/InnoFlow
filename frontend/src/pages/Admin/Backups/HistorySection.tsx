@@ -1,8 +1,8 @@
 import { useState } from "react"
-import { ChevronLeft, ChevronRight, History as HistoryIcon, ListChecks } from "lucide-react"
+import { ChevronLeft, ChevronRight, History as HistoryIcon } from "lucide-react"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
-import { Card, CardContent } from "@/components/ui/Card"
+import { CardContent } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { TableSkeleton } from "@/components/ui/Skeleton"
@@ -11,7 +11,7 @@ import { useBackupRuns } from "@/hooks/useBackup"
 import { useMediaQuery } from "@/hooks/useMediaQuery"
 import { DESTINATION_LABELS, TRIGGER_LABELS, formatBrasilia, formatBytes, formatDuration, runErrorText, runStateLabel } from "@/lib/backup"
 import type { BackupRunDTO } from "@/types/api"
-import { SectionHeader } from "./parts"
+import { HelpCard } from "./parts"
 
 export const HISTORY_PAGE_SIZE = 10
 
@@ -91,8 +91,20 @@ export function HistorySection() {
   const { data, isLoading, isError, isFetching, refetch } = useBackupRuns(page, HISTORY_PAGE_SIZE)
 
   return (
-    <Card data-testid="section-history">
-      <SectionHeader icon={ListChecks} title="Histórico" description="Cada backup, conferência ou tentativa. As que falharam mostram o motivo." />
+    <HelpCard
+      testId="section-history"
+      title="Histórico"
+      description="Cada backup, conferência ou tentativa. As que falharam mostram o motivo."
+      help={
+        <>
+          <p>
+            Aqui ficam todas as execuções, da mais recente para a mais antiga: o backup automático, o manual (“Fazer backup agora”) e as conferências. “Enviado” é uma cópia que saiu do servidor; “Só teste” é o teste do pg_dump sem destino, que NÃO
+            conta como backup; “Falhou” mostra o motivo e o código, para você (ou quem cuida do servidor) corrigir.
+          </p>
+          <p>Execuções em andamento atualizam sozinhas. São 10 por página.</p>
+        </>
+      }
+    >
       <CardContent className="space-y-4">
         {isLoading && <TableSkeleton rows={5} cols={5} />}
 
@@ -160,6 +172,6 @@ export function HistorySection() {
           </div>
         )}
       </CardContent>
-    </Card>
+    </HelpCard>
   )
 }

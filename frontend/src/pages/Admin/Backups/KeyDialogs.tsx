@@ -204,7 +204,7 @@ export function KeyRevealDialog({ result, onDone }: { result: GeneratedBackupKey
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             <li>Guarde num gerenciador de senhas E numa cópia offline (papel ou pen drive trancado). Não guarde só no servidor: ele é o que pode se perder.</li>
             {result.replaced && <li>A chave antiga continua necessária para abrir as cópias antigas. Não a jogue fora.</li>}
-            <li>Ela NÃO substitui a PAYMENT_SECRETS_KEY: sem esta, restaurar não devolve as credenciais cifradas (Cielo, SMTP…).</li>
+            <li>Ela NÃO substitui o JWT_SECRET do servidor: sem ele, restaurar não devolve as credenciais cifradas (Cielo, SMTP…). Guarde uma cópia dele também.</li>
           </ul>
         </Alert>
 

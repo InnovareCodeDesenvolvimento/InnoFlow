@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useId, useState } from "react"
 import { CircleCheck, CircleX, Copy, Link2, TriangleAlert, Unlink } from "lucide-react"
 import { toast } from "sonner"
 import { SecretControl } from "@/components/admin/SecretControl"
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/Input"
 import { useGoogleDisconnect, useGoogleStart } from "@/hooks/useBackup"
 import { connectBlockReason, formatBrasilia, isSafeGoogleUrl, parseBackupError, type BackupDraft, type BackupError, type DraftErrors } from "@/lib/backup"
 import type { BackupConfigDTO } from "@/types/api"
+import { HelpPanel, HelpToggle } from "./parts"
 
 async function copyText(text: string, okMessage: string) {
   try {
@@ -165,7 +166,7 @@ function DriveConnection({ dto, dirty, disabled }: { dto: BackupConfigDTO; dirty
   )
 }
 
-/** Campos do destino Google Drive: Client ID, Client Secret (só-escrita), o endereço de retorno a cadastrar no Google Cloud (com "Copiar"), o passo a passo e a conexão da conta. */
+/** Campos do destino Google Drive: "Como acessar o Drive ⓘ" (passo a passo + dica "Em produção"), o endereço de retorno a cadastrar no Google Cloud (com "Copiar"), Client ID, Client Secret (só-escrita) e a conexão da conta. */
 export function DriveFields({
   dto,
   draft,
@@ -186,18 +187,29 @@ export function DriveFields({
   const clientId = draft.drive.clientId ?? dto.drive.clientId ?? ""
   const clientIdChanging = draft.drive.clientId !== undefined && draft.drive.clientId.trim() !== (dto.drive.clientId ?? "")
   const redirectUri = dto.drive.redirectUri
+  // O "ⓘ" do passo a passo é estado local deste bloco (nada fora dele precisa saber se está aberto).
+  const [helpOpen, setHelpOpen] = useState(false)
+  const helpId = useId()
 
   return (
     <div className="space-y-5" data-testid="drive-fields">
-      <ol className="list-decimal space-y-1 pl-5 text-xs text-ink-soft">
-        <li>No Google Cloud, crie um app OAuth do tipo “Aplicativo da Web” e ative a API do Google Drive.</li>
-        <li>Cadastre o endereço de retorno abaixo como “URI de redirecionamento autorizado”.</li>
-        <li>Cole o Client ID e o Client Secret aqui e salve.</li>
-        <li>Clique em “Conectar com Google” e autorize.</li>
-      </ol>
-      <Alert tone="warning" size="sm" role="note" icon={TriangleAlert} className="font-medium" data-testid="drive-production-tip">
-        <p>O app do Google Cloud precisa estar “Em produção”. Em modo “Teste” o acesso expira em 7 dias e o backup passa a falhar (conta desconectada).</p>
-      </Alert>
+      <div>
+        <div className="flex items-center gap-1">
+          <p className="text-sm font-medium text-ink-soft">Como acessar o Drive</p>
+          <HelpToggle open={helpOpen} onToggle={() => setHelpOpen((v) => !v)} panelId={helpId} label="Como acessar o Drive" testId="drive-help" className="-my-1.5" />
+        </div>
+        <HelpPanel id={helpId} open={helpOpen} testId="drive-help-panel">
+          <ol className="list-decimal space-y-1 pl-5 text-xs">
+            <li>No Google Cloud, crie um app OAuth do tipo “Aplicativo da Web” e ative a API do Google Drive.</li>
+            <li>Cadastre o endereço de retorno abaixo como “URI de redirecionamento autorizado”.</li>
+            <li>Cole o Client ID e o Client Secret aqui e salve.</li>
+            <li>Clique em “Conectar com Google” e autorize.</li>
+          </ol>
+          <Alert tone="warning" size="sm" role="note" icon={TriangleAlert} className="font-medium" data-testid="drive-production-tip">
+            <p>O app do Google Cloud precisa estar “Em produção”. Em modo “Teste” o acesso expira em 7 dias e o backup passa a falhar (conta desconectada).</p>
+          </Alert>
+        </HelpPanel>
+      </div>
 
       {redirectUri ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
@@ -218,7 +230,7 @@ export function DriveFields({
         </Alert>
       )}
 
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
         <Input
           label="Client ID"
           autoComplete="off"

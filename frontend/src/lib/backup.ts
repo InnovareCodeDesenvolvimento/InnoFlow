@@ -43,8 +43,12 @@ export const ALERT_MAX = 720
 /** Frase exata que o servidor exige para TROCAR uma chave que já existe. */
 export const REPLACE_KEY_CONFIRMATION = "GERAR NOVA CHAVE"
 
-/** Texto do aviso permanente da tela (pedido do dono): a cópia da PAYMENT_SECRETS_KEY fora do sistema. */
-export const SECRETS_KEY_NOTICE = "A PAYMENT_SECRETS_KEY precisa de uma cópia fora do sistema; sem ela restaurar não devolve os segredos cifrados."
+/**
+ * Texto do aviso permanente da tela (decisão do dono, 05/10): a chave que cifra os segredos salvos agora é DERIVADA do `JWT_SECRET` do servidor (como no InnoChat). A cópia do
+ * `JWT_SECRET` fora do sistema é o que permite recuperar os segredos; trocá-lo obriga a cadastrar os segredos de novo.
+ */
+export const SECRETS_KEY_NOTICE =
+  "Os segredos salvos (credenciais, senhas, tokens) são cifrados com uma chave derivada do JWT_SECRET do servidor. Guarde uma cópia dele fora do sistema: se ele for trocado, os segredos salvos precisam ser cadastrados de novo."
 
 export const RUNBOOK_PATH = "docs/RUNBOOK-BACKUP-RESTAURACAO.md"
 
@@ -72,6 +76,16 @@ export function formatBrasilia(iso: string | null | undefined): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(d)
+}
+
+/** "05/10/2026 às 14:30" em Brasília (a faixa de estado e a chave usam este; a tabela do histórico usa o curto de `formatBrasilia`). */
+export function formatBrasiliaLong(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  const parts = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Sao_Paulo" }).formatToParts(d)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ""
+  return `${get("day")}/${get("month")}/${get("year")} às ${get("hour")}:${get("minute")}`
 }
 
 export function formatBytes(bytes: number | null | undefined): string {
@@ -192,6 +206,21 @@ export function healthOf(status: BackupStatusDTO, enabled: boolean): { tone: Hea
   return { tone: "ok", title: "Backups em dia", detail: status.lastSuccessAt ? `Última cópia com sucesso em ${formatBrasilia(status.lastSuccessAt)}.` : "Automático ligado." }
 }
 
+export type SituationTone = "success" | "danger" | "neutral" | "primary"
+
+/**
+ * O selo "Situação" da faixa de estado (como no InnoChat): verde "Em dia", vermelho "Atrasado" / "Nunca rodou", cinza "Desligado", azul "Copiando agora". `detail` é a linha de apoio
+ * (só quando acrescenta algo que o selo não diz). Decidido pelo MESMO `healthOf`, então o selo e o resto da tela nunca discordam.
+ */
+export function situationOf(status: BackupStatusDTO, enabled: boolean): { tone: SituationTone; label: string; detail: string | null; health: HealthTone } {
+  const health = healthOf(status, enabled)
+  if (status.running) return { tone: "primary", label: "Copiando agora", detail: null, health: health.tone }
+  if (health.tone === "never") return { tone: "danger", label: "Nunca rodou", detail: health.title, health: health.tone }
+  if (health.tone === "late") return { tone: "danger", label: "Atrasado", detail: health.title, health: health.tone }
+  if (health.tone === "off") return { tone: "neutral", label: "Desligado", detail: "Só o botão “Fazer backup agora” copia o banco.", health: health.tone }
+  return { tone: "success", label: "Em dia", detail: null, health: health.tone }
+}
+
 // ---------------------------------------------------------------------------
 // Textos por CÓDIGO (execução de backup, teste de destino)
 // ---------------------------------------------------------------------------
@@ -206,7 +235,7 @@ export const RUN_ERROR_TEXT: Record<BackupErrorCode, { title: string; action: st
   DUMP: { title: "Falha ao copiar o banco", action: "O pg_dump não rodou (cliente ausente na imagem, versão antiga…). É um problema do servidor: avise quem cuida da infraestrutura." },
   DUMP_TIMEOUT: { title: "A cópia do banco passou do prazo", action: "O banco demorou mais que o limite para ser copiado. Avise quem cuida da infraestrutura." },
   KEY: { title: "Problema com a chave do backup", action: "A chave está ausente, ilegível ou é diferente da que cifrou o arquivo. Confira a impressão digital da chave." },
-  SECRETS_KEY: { title: "A PAYMENT_SECRETS_KEY ausente ou trocada", action: "Sem ela o servidor não decifra as credenciais do destino. Restaure a chave original ou salve as credenciais de novo." },
+  SECRETS_KEY: { title: "A chave dos segredos (JWT_SECRET) ausente ou trocada", action: "Sem o JWT_SECRET original o servidor não decifra as credenciais do destino. Restaure o JWT_SECRET original ou salve as credenciais de novo." },
   TOO_BIG: { title: "Arquivo maior que 5 GiB", action: "O envio simples do S3 não aceita arquivo desse tamanho. Avise quem cuida da infraestrutura." },
   NO_BACKUP: { title: "Nenhuma cópia no destino", action: "Não há arquivo para conferir. Faça um backup primeiro." },
   VERIFY: { title: "A conferência reprovou a cópia", action: "O arquivo está vazio, adulterado, sem a marca do sistema ou sem tabelas. Faça um backup novo e confira de novo." },
@@ -231,10 +260,10 @@ export function runStateLabel(run: Pick<BackupRunDTO, "status" | "trigger" | "ob
 }
 
 export const PROBLEM_TEXT: Record<BackupProblemToEnable, string> = {
-  DESTINATION_INCOMPLETE: "Complete o destino (S3: endereço, bucket, chave de acesso e segredo; Drive: conecte a conta Google).",
+  DESTINATION_INCOMPLETE: "Complete e salve o destino (S3: endereço, bucket, chave de acesso e segredo; Drive: conecte a conta Google).",
   KEY_MISSING: "Gere a chave de criptografia do backup.",
-  SECRETS_KEY_MISSING: "O servidor não tem a PAYMENT_SECRETS_KEY (quem cuida da infraestrutura precisa configurá-la).",
-  SECRETS_UNREADABLE: "Os segredos salvos não podem ser lidos (a PAYMENT_SECRETS_KEY mudou): salve as credenciais de novo.",
+  SECRETS_KEY_MISSING: "O servidor não tem a chave dos segredos, derivada do JWT_SECRET (quem cuida da infraestrutura precisa conferir o JWT_SECRET).",
+  SECRETS_UNREADABLE: "Os segredos salvos não podem ser lidos (o JWT_SECRET mudou): salve as credenciais de novo.",
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +279,7 @@ export const GOOGLE_REASON_TEXT: Record<string, string> = {
   no_refresh_token: "O Google não entregou o acesso de longa duração. Remova o app em myaccount.google.com/permissions e conecte de novo.",
   account_check_failed: "O Google autorizou, mas não deu para confirmar qual é a conta. Tente de novo.",
   folder_create_failed: "A conta conectou, mas não deu para criar a pasta de backups no Drive. Tente de novo.",
-  secrets_key_missing: "O servidor não tem a PAYMENT_SECRETS_KEY, então não pode guardar o acesso ao Google. Avise quem cuida da infraestrutura.",
+  secrets_key_missing: "O servidor não tem a chave dos segredos (derivada do JWT_SECRET), então não pode guardar o acesso ao Google. Avise quem cuida da infraestrutura.",
   network: "Não deu para falar com o Google agora. Tente de novo daqui a pouco.",
   unknown: "O Google não concluiu a conexão. Tente de novo.",
 }
@@ -306,6 +335,23 @@ export interface BackupDraft {
 }
 
 export const EMPTY_DRAFT: BackupDraft = { s3: {}, drive: {}, clear: {} }
+
+/**
+ * A tela salva POR CARTÃO (como o InnoChat): "Agendamento" e "Destino" têm cada um o seu "Salvar", mas o rascunho é um só. Um escopo é o pedaço do rascunho que o cartão enxerga:
+ * `schedule` = ligado/horário/frequência/cópias a manter/alerta; `destination` = destino, bucket S3, Google Drive e apagar segredos. Salvar um cartão envia SÓ o diff do seu escopo.
+ */
+export type BackupScope = "schedule" | "destination"
+
+/** O rascunho SEM o escopo dado (volta ao salvo naquele pedaço). Depois de salvar um cartão só o escopo dele é descartado; o outro cartão segue editando. */
+export function clearDraftScope(draft: BackupDraft, scope: BackupScope): BackupDraft {
+  if (scope === "schedule") return { ...draft, enabled: undefined, hourLocal: undefined, frequencyDays: undefined, retentionCount: undefined, alertAfterHours: undefined }
+  return { ...draft, destination: undefined, s3: {}, drive: {}, clear: {} }
+}
+
+/** O rascunho SÓ com o escopo dado: o que o cartão valida, resume e envia. Ligar o automático, por exemplo, só vale com o destino JÁ SALVO (o servidor valida o estado futuro). */
+export function scopeDraft(draft: BackupDraft, scope: BackupScope): BackupDraft {
+  return clearDraftScope(draft, scope === "schedule" ? "destination" : "schedule")
+}
 
 /** O PUT sem a senha atual (que só entra na hora de enviar, `withCurrentPassword`). */
 export type BackupChanges = Omit<UpdateBackupConfigRequest, "currentPassword">
@@ -477,7 +523,7 @@ export function exigeSenha(payload: BackupChanges): boolean {
 export type DraftErrors = Partial<Record<string, string>>
 
 export const SECRET_AGAIN_MESSAGE = "Você mudou o endereço do bucket: digite a chave de acesso E o segredo de novo (elas só valem para o destino em que foram salvas)."
-export const NO_SECRETS_KEY_MESSAGE = "O servidor não tem a PAYMENT_SECRETS_KEY: não dá para guardar este segredo."
+export const NO_SECRETS_KEY_MESSAGE = "O servidor não tem a chave dos segredos (derivada do JWT_SECRET): não dá para guardar este segredo."
 const REGION_RE = /^[A-Za-z0-9-]{1,40}$/
 const BUCKET_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/
 const PREFIX_RE = /^[A-Za-z0-9._\-/ ]*$/
@@ -548,7 +594,7 @@ export function validateDraft(dto: BackupConfigDTO, draft: BackupDraft): DraftEr
     if (!typed(draft.s3.secretKey) && !errors["s3.secretKey"]) errors["s3.secretKey"] = SECRET_AGAIN_MESSAGE
   }
 
-  // Sem a PAYMENT_SECRETS_KEY no servidor, não dá para guardar nenhum segredo (503 `SECRETS_KEY_MISSING`).
+  // Sem a chave dos segredos no servidor (derivada do JWT_SECRET), não dá para guardar nenhum segredo (503 `SECRETS_KEY_MISSING`).
   if (!dto.secretsKeyConfigured) {
     if (typed(draft.s3.accessKey) && !errors["s3.accessKey"]) errors["s3.accessKey"] = NO_SECRETS_KEY_MESSAGE
     if (typed(draft.s3.secretKey) && !errors["s3.secretKey"]) errors["s3.secretKey"] = NO_SECRETS_KEY_MESSAGE
@@ -654,7 +700,7 @@ export const MSG = {
   passwordRequired: "Informe sua senha atual para confirmar esta alteração.",
   stepUpUnavailable: "Não foi possível confirmar sua senha agora. Nada foi salvo. Tente de novo em instantes.",
   secretsKeyMissing:
-    "O servidor não tem a PAYMENT_SECRETS_KEY, então não consegue guardar credenciais nem a chave do backup. Nada foi salvo. Peça para quem cuida da infraestrutura configurá-la e reiniciar a API.",
+    "O servidor não tem a chave que cifra os segredos (derivada do JWT_SECRET), então não consegue guardar credenciais nem a chave do backup. Nada foi salvo. Peça para quem cuida da infraestrutura conferir o JWT_SECRET e reiniciar a API.",
   internal: "Não foi possível concluir e nada foi alterado. Tente novamente.",
   generic: "Não foi possível concluir a operação. Tente de novo em instantes.",
   unavailable: "O servidor não conseguiu atender agora. Nada foi alterado. Tente de novo em instantes.",

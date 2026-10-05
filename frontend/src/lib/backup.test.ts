@@ -6,9 +6,11 @@ import {
   MSG,
   NO_SECRETS_KEY_MESSAGE,
   QUEUED_HINT_AFTER_MS,
+  SECRETS_KEY_NOTICE,
   SECRET_AGAIN_MESSAGE,
   actionBlockReason,
   buildUpdatePayload,
+  clearDraftScope,
   connectBlockReason,
   describeChanges,
   destinationReadyAfter,
@@ -16,6 +18,7 @@ import {
   enableBlockers,
   exigeSenha,
   formatAge,
+  formatBrasiliaLong,
   formatBytes,
   formatDuration,
   formatWait,
@@ -30,6 +33,8 @@ import {
   runRefetchInterval,
   runStateLabel,
   s3HostChanged,
+  scopeDraft,
+  situationOf,
   statusRefetchInterval,
   validateDraft,
   validateEndpoint,
@@ -200,10 +205,12 @@ describe("validateDraft", () => {
     expect(s3HostChanged(dto({ destination: "S3" }, { endpoint: "https://a.com", bucket: "b" }), draft({ s3: { endpoint: "https://b.com" } }))).toBe(false)
   })
 
-  it("servidor sem PAYMENT_SECRETS_KEY: segredo digitado é recusado antes do pedido", () => {
+  it("servidor sem a chave dos segredos (JWT_SECRET): segredo digitado é recusado antes do pedido, sem citar PAYMENT_SECRETS_KEY", () => {
     const e = validateDraft(dto({ secretsKeyConfigured: false }), draft({ s3: { accessKey: "AK" }, drive: { clientSecret: "CS" } }))
     expect(e["s3.accessKey"]).toBe(NO_SECRETS_KEY_MESSAGE)
     expect(e["drive.clientSecret"]).toBe(NO_SECRETS_KEY_MESSAGE)
+    expect(NO_SECRETS_KEY_MESSAGE).toMatch(/JWT_SECRET/)
+    expect(NO_SECRETS_KEY_MESSAGE).not.toMatch(/PAYMENT_SECRETS_KEY/)
   })
 
   it("LIGAR: exige destino completo e chave; o rascunho pode completar o destino na mesma gravação", () => {
@@ -228,8 +235,10 @@ describe("validateDraft", () => {
   })
 
   it("enableBlockers lista chave, destino e problemas do servidor", () => {
-    expect(enableBlockers(dto({ secretsKeyConfigured: false }), EMPTY_DRAFT).join(" ")).toMatch(/PAYMENT_SECRETS_KEY/)
+    expect(enableBlockers(dto({ secretsKeyConfigured: false }), EMPTY_DRAFT).join(" ")).toMatch(/JWT_SECRET/)
+    expect(enableBlockers(dto({ secretsKeyConfigured: false }), EMPTY_DRAFT).join(" ")).not.toMatch(/PAYMENT_SECRETS_KEY/)
     expect(enableBlockers(dto({ secretsReadable: false }), EMPTY_DRAFT).join(" ")).toMatch(/lidos/)
+    expect(enableBlockers(dto({ secretsReadable: false }), EMPTY_DRAFT).join(" ")).toMatch(/JWT_SECRET/)
     expect(enableBlockers(READY(), EMPTY_DRAFT)).toEqual([])
   })
 })
@@ -355,7 +364,114 @@ describe("retorno do Google", () => {
   })
 })
 
+describe("escopos por cartão (Agendamento / Destino)", () => {
+  const mixed = draft({
+    enabled: false,
+    retentionCount: "9",
+    alertAfterHours: "48",
+    destination: "DRIVE",
+    s3: { bucket: "outro", secretKey: "SEGREDO" },
+    drive: { clientId: "novo" },
+    clear: { s3AccessKey: true },
+  })
+
+  it("scopeDraft mantém só o pedaço do cartão; clearDraftScope descarta só esse pedaço", () => {
+    const schedule = scopeDraft(mixed, "schedule")
+    expect(schedule.retentionCount).toBe("9")
+    expect(schedule.alertAfterHours).toBe("48")
+    expect(schedule.destination).toBeUndefined()
+    expect(schedule.s3).toEqual({})
+    expect(schedule.clear).toEqual({})
+    const destination = scopeDraft(mixed, "destination")
+    expect(destination.destination).toBe("DRIVE")
+    expect(destination.s3).toEqual({ bucket: "outro", secretKey: "SEGREDO" })
+    expect(destination.clear).toEqual({ s3AccessKey: true })
+    expect(destination.retentionCount).toBeUndefined()
+    expect(destination.enabled).toBeUndefined()
+    // depois de salvar o Agendamento, o Destino segue editando
+    const afterSchedule = clearDraftScope(mixed, "schedule")
+    expect(afterSchedule.retentionCount).toBeUndefined()
+    expect(afterSchedule.destination).toBe("DRIVE")
+    expect(afterSchedule.s3.secretKey).toBe("SEGREDO")
+    // e vice-versa: salvar o Destino leva embora o segredo digitado, mas não a retenção
+    const afterDestination = clearDraftScope(mixed, "destination")
+    expect(afterDestination.s3).toEqual({})
+    expect(afterDestination.drive).toEqual({})
+    expect(afterDestination.retentionCount).toBe("9")
+  })
+
+  it("cada cartão envia só o seu diff (o segredo digitado no Destino NUNCA vai no PUT do Agendamento)", () => {
+    const base = READY()
+    expect(buildUpdatePayload(base, scopeDraft(mixed, "schedule"))).toEqual({ enabled: false, retentionCount: 9, alertAfterHours: 48 })
+    const dest = buildUpdatePayload(base, scopeDraft(mixed, "destination"))
+    expect(dest).not.toHaveProperty("retentionCount")
+    expect(dest).not.toHaveProperty("alertAfterHours")
+    expect(dest.destination).toBe("DRIVE")
+    expect(JSON.stringify(buildUpdatePayload(base, scopeDraft(mixed, "schedule")))).not.toContain("SEGREDO")
+  })
+
+  it("exigeSenha por cartão: horário/frequência/alerta não pedem; cópias a manter e ligar pedem; destino pede", () => {
+    const base = READY()
+    expect(exigeSenha(buildUpdatePayload(base, scopeDraft(draft({ hourLocal: "5", frequencyDays: 7, alertAfterHours: "48" }), "schedule")))).toBe(false)
+    expect(exigeSenha(buildUpdatePayload(base, scopeDraft(draft({ retentionCount: "3" }), "schedule")))).toBe(true)
+    expect(exigeSenha(buildUpdatePayload(base, scopeDraft(draft({ s3: { bucket: "x" } }), "destination")))).toBe(true)
+  })
+
+  it("LIGAR só vale com o destino JÁ SALVO: completar o destino no rascunho do outro cartão não libera o interruptor", () => {
+    const sem = dto({}, {}, {}, { exists: true, fingerprint: "aaaaaaaa" })
+    const completando = draft({ enabled: true, destination: "S3", s3: { endpoint: "https://a.com", bucket: "bk", accessKey: "AK", secretKey: "SK" } })
+    // visão do cartão Agendamento: o destino digitado e não salvo não conta
+    expect(enableBlockers(sem, scopeDraft(completando, "schedule")).join(" ")).toMatch(/Complete e salve o destino/)
+    expect(validateDraft(sem, scopeDraft(completando, "schedule")).enabled).toMatch(/destino/i)
+    // visão do cartão Destino: sem ligar nada, não há erro de "ligar"
+    expect(validateDraft(sem, scopeDraft(completando, "destination")).enabled).toBeUndefined()
+  })
+
+  it("já ligado: o cartão Destino continua barrando uma alteração que o deixaria incompleto; o Agendamento não se mete", () => {
+    const apagar = draft({ clear: { s3SecretKey: true }, retentionCount: "9" })
+    expect(validateDraft(READY(), scopeDraft(apagar, "destination")).destination).toMatch(/completo/)
+    expect(validateDraft(READY(), scopeDraft(apagar, "schedule")).destination).toBeUndefined()
+  })
+})
+
+describe("situação da faixa de estado (selo)", () => {
+  it("Em dia / Atrasado / Nunca rodou / Desligado / Copiando agora, pelo mesmo healthOf", () => {
+    expect(situationOf(status(), true)).toMatchObject({ tone: "success", label: "Em dia", detail: null, health: "ok" })
+    expect(situationOf(status({ stale: true, ageHours: 79 }), true)).toMatchObject({ tone: "danger", label: "Atrasado", detail: "Sem backup há 3 dias e 7 h", health: "late" })
+    expect(situationOf(status({ neverRan: true, lastSuccessAt: null, ageHours: null }), true)).toMatchObject({ tone: "danger", label: "Nunca rodou", health: "never" })
+    expect(situationOf(status(), false)).toMatchObject({ tone: "neutral", label: "Desligado", health: "off" })
+    expect(situationOf(status({ running: true }), true)).toMatchObject({ tone: "primary", label: "Copiando agora" })
+  })
+})
+
+describe("textos do JWT_SECRET (a chave dos segredos agora é derivada dele)", () => {
+  it("o aviso permanente é o texto do dono e nenhum texto de erro cita PAYMENT_SECRETS_KEY", () => {
+    expect(SECRETS_KEY_NOTICE).toBe(
+      "Os segredos salvos (credenciais, senhas, tokens) são cifrados com uma chave derivada do JWT_SECRET do servidor. Guarde uma cópia dele fora do sistema: se ele for trocado, os segredos salvos precisam ser cadastrados de novo.",
+    )
+    const all = [
+      MSG.secretsKeyMissing,
+      NO_SECRETS_KEY_MESSAGE,
+      runErrorText("SECRETS_KEY").title,
+      runErrorText("SECRETS_KEY").action,
+      ...enableBlockers(dto({ secretsKeyConfigured: false }), EMPTY_DRAFT),
+      ...enableBlockers(dto({ secretsReadable: false }), EMPTY_DRAFT),
+    ].join(" ")
+    expect(all).toMatch(/JWT_SECRET/)
+    expect(all).not.toMatch(/PAYMENT_SECRETS_KEY/)
+    // o NOME do código do servidor continua o mesmo
+    expect(parseBackupError(axiosError(503, { code: "SECRETS_KEY_MISSING" })).code).toBe("SECRETS_KEY_MISSING")
+  })
+})
+
 describe("formatação", () => {
+  it("data e hora longas em Brasília (dd/mm/aaaa às hh:mm), independentes do fuso do navegador", () => {
+    expect(formatBrasiliaLong("2026-10-05T17:30:00.000Z")).toBe("05/10/2026 às 14:30")
+    expect(formatBrasiliaLong("2026-10-05T02:05:00.000Z")).toBe("04/10/2026 às 23:05")
+    expect(formatBrasiliaLong(null)).toBe("—")
+    expect(formatBrasiliaLong("lixo")).toBe("—")
+  })
+
   it("bytes, duração, idade e espera", () => {
     expect(formatBytes(null)).toBe("—")
     expect(formatBytes(512)).toBe("512 B")

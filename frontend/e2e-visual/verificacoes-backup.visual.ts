@@ -7,11 +7,11 @@ import { medirContrastePixel } from "./contraste-pixel"
 import { aguardarEstavel, prepararPagina } from "./estabilizar"
 
 /**
- * VERIFICAÇÕES INDEPENDENTES da tela /admin/backups (Lyra) — a régua que NÃO depende de baseline (nenhuma foto é comparada nem gravada em `baseline/`):
+ * VERIFICAÇÕES INDEPENDENTES da tela /admin/backups ("Backup do banco", layout do InnoChat) (Lyra) — a régua que NÃO depende de baseline (nenhuma foto é comparada nem gravada em `baseline/`):
  *  1) contraste de TEXTO por PIXEL em vários ESTADOS (cada persona do mock, resultado de cada ação, retorno do Google, diálogos de senha/chave/conexão, segredo aberto, erros de campo);
  *  2) axe COMPLETO (wcag2a/aa + 2.1 a/aa) no <main> e nos diálogos, 0 violações;
- *  3) geometria a 375/768/1440: mesma coluna/largura das telas de referência (Tarifas), sem rolagem lateral, 1 h1 + h2 nas seções, alvos >= 44 px a 375, barra de salvar só gruda com alteração,
- *     altura dos cartões (para calibrar o esqueleto de carga) e perfil OPERATOR = "Acesso restrito".
+ *  3) geometria a 375/768/1440: mesma coluna/largura das telas de referência (Tarifas), sem rolagem lateral, 1 h1 + h2 nas seções, alvos >= 44 px a 375, grade de cartões (2 colunas em lg,
+ *     1 abaixo), altura dos cartões (para calibrar o esqueleto de carga) e perfil OPERATOR = "Acesso restrito".
  * Rodar: `npx playwright test --config playwright.visual.config.ts verificacoes-backup --update-snapshots=none` (nunca em paralelo com outro harness: compartilham `.auth`).
  * Grava `e2e-visual/.resultados/backup/*.json` e capturas `*.png` (para olhar; não são baseline).
  */
@@ -32,7 +32,7 @@ async function entrar(page: Page, email: string) {
 }
 async function abrir(page: Page, opts: { spinnerEhConteudo?: boolean } = {}) {
   await page.goto("/admin/backups", { waitUntil: "load" })
-  await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Backup do banco", level: 1 })).toBeVisible()
   await expect(page.getByTestId("section-history")).toBeVisible()
   await aguardarEstavel(page, opts)
 }
@@ -49,10 +49,11 @@ async function axeZero(page: Page, projeto: string, estado: string, incluir = "m
   expect(r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`), `axe em ${estado} a ${projeto}px`).toEqual([])
 }
 const tela = (page: Page) => page.locator("main")
-const salvar = (page: Page) => page.getByTestId("save-button")
+const salvarAgendamento = (page: Page) => page.getByTestId("schedule-save")
+const salvarDestino = (page: Page) => page.getByTestId("destination-save")
 const dialogoSalvar = (page: Page) => page.getByRole("dialog", { name: "Confirmar alterações no backup" })
 
-/** Janela alta: a barra de salvar GRUDADA (há alteração) cobriria o rodapé numa janela baixa e falsearia o pixel lido (o da sombra). Janela alta = nada escondido. */
+/** Janela alta: a página inteira cabe na janela (nada fica sob a dobra nem sob um elemento fixo), então o pixel lido é o do texto, não o de uma sobreposição. */
 async function janelaAlta(page: Page) {
   await page.setViewportSize({ width: page.viewportSize()!.width, height: 3200 })
   await aguardarEstavel(page, { spinnerEhConteudo: true })
@@ -181,7 +182,7 @@ test.describe("1) contraste por pixel + axe — estados da tela (ADMIN)", () => 
     await medir(page, p, "s3", "segredo-aberto-e-marcado-para-apagar")
     await axeZero(page, p, "segredo-aberto-e-marcado-para-apagar")
 
-    await page.getByRole("button", { name: "Descartar" }).click()
+    await page.getByTestId("destination-discard").click()
     await page.getByTestId("s3-endpoint").fill("https://novo.exemplo.com")
     await page.getByTestId("field-retention").fill("0")
     await page.getByTestId("field-alert-after").fill("9999")
@@ -194,7 +195,7 @@ test.describe("1) contraste por pixel + axe — estados da tela (ADMIN)", () => 
     await page.getByTestId("s3-endpoint").fill("https://localhost")
     await page.getByTestId("secret-s3AccessKey").getByLabel("Chave de acesso").fill("AK")
     await page.getByTestId("secret-s3SecretKey").getByLabel("Segredo").fill("SK")
-    await salvar(page).click()
+    await salvarDestino(page).click()
     await dialogoSalvar(page).getByLabel("Sua senha atual").fill(SENHA)
     await dialogoSalvar(page).getByRole("button", { name: "Confirmar e salvar" }).click()
     await expect(page.getByTestId("save-error")).toBeVisible()
@@ -218,7 +219,7 @@ test.describe("1) contraste por pixel + axe — estados da tela (ADMIN)", () => 
     await entrar(page, "backup-s3@innoelektron.com")
     await abrir(page)
     await page.getByTestId("field-retention").fill("5")
-    await salvar(page).click()
+    await salvarAgendamento(page).click()
     await dialogoSalvar(page).getByLabel("Sua senha atual").fill("stepup-429")
     await dialogoSalvar(page).getByRole("button", { name: "Confirmar e salvar" }).click()
     await expect(page.getByTestId("save-error")).toBeVisible()
@@ -232,7 +233,7 @@ test.describe("1) contraste por pixel + axe — estados da tela (ADMIN)", () => 
     await entrar(page, "backup-s3@innoelektron.com")
     await abrir(page)
     await page.getByTestId("field-retention").fill("5")
-    await salvar(page).click()
+    await salvarAgendamento(page).click()
     await expect(dialogoSalvar(page)).toBeVisible()
     await medir(page, p, "s3", "dialogo-salvar-vazio", { dialogo: true })
     await axeZero(page, p, "dialogo-salvar", "[role=dialog]")
@@ -242,7 +243,7 @@ test.describe("1) contraste por pixel + axe — estados da tela (ADMIN)", () => 
     await medir(page, p, "s3", "dialogo-senha-errada", { dialogo: true })
     await axeZero(page, p, "dialogo-senha-errada", "[role=dialog]")
     await page.keyboard.press("Escape")
-    await page.getByRole("button", { name: "Descartar" }).click()
+    await page.getByTestId("schedule-discard").click()
 
     await page.getByTestId("key-replace").click()
     const trocar = page.getByRole("dialog", { name: "Substituir a chave do backup" })
@@ -295,6 +296,19 @@ test.describe("1) contraste por pixel + axe — estados da tela (ADMIN)", () => 
     await axeZero(page, p, "dialogo-conectar", "[role=dialog]")
   })
 
+  test("todos os ⓘ abertos (cabeçalho, 5 cartões, Como acessar o Drive) e a seleção do destino Drive", async ({ page }, info) => {
+    const p = info.project.name
+    await entrar(page, "backup-drive-desconectado@innoelektron.com")
+    await abrir(page)
+    for (const id of ["page-help", "section-key-help", "section-verify-help", "section-schedule-help", "section-destination-help", "section-history-help", "drive-help"]) {
+      await page.getByTestId(id).click()
+      await expect(page.getByTestId(id)).toHaveAttribute("aria-expanded", "true")
+    }
+    await janelaAlta(page)
+    await medir(page, p, "drive-desconectado", "todos-os-i-abertos")
+    await axeZero(page, p, "todos-os-i-abertos")
+  })
+
   test("histórico: segunda página e linha com erro", async ({ page }, info) => {
     await entrar(page, "backup-s3@innoelektron.com")
     await abrir(page)
@@ -331,9 +345,11 @@ test.describe("2) geometria (ADMIN / OPERATOR)", () => {
     const medidas = () =>
       page.evaluate(() => {
         const main = document.querySelector("main")!
-        const bar = document.querySelector<HTMLElement>('[data-testid="save-bar"]')!
         main.scrollTo(0, 0)
-        const rb0 = bar.getBoundingClientRect()
+        const caixa = (id: string) => {
+          const r = document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
+          return { x: Math.round(r.x), y: Math.round(r.y + main.scrollTop), w: Math.round(r.width), h: Math.round(r.height) }
+        }
         const altura = (id: string) => Math.round(document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().height)
         const pequenos: string[] = []
         for (const el of main.querySelectorAll<HTMLElement>("button, a[href], input:not(.sr-only), select, textarea, [role=switch]")) {
@@ -349,21 +365,19 @@ test.describe("2) geometria (ADMIN / OPERATOR)", () => {
           if (h < 43.5) pequenos.push(`${el.tagName.toLowerCase()} "${(el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 30)}" h=${Math.round(h)}`)
         }
         return {
-          posicao: getComputedStyle(bar).position,
-          topoComScrollZero: Math.round(rb0.top),
+          caixas: { status: caixa("section-status"), chave: caixa("section-key"), conferir: caixa("section-verify"), agendamento: caixa("section-schedule"), destino: caixa("section-destination"), historico: caixa("section-history") },
           janela: window.innerHeight,
           rolagemLateral: { main: main.scrollWidth - main.clientWidth, doc: document.documentElement.scrollWidth - document.documentElement.clientWidth },
           h1: main.querySelectorAll("h1").length,
           secoes: [...main.querySelectorAll("h1, h2")].map((h) => `${h.tagName}:${h.textContent!.trim()}`),
           alturas: {
-            aviso: altura("secrets-key-notice"),
             estado: altura("section-status"),
-            acoes: altura("section-actions"),
             chave: altura("section-key"),
+            conferir: altura("section-verify"),
             agendamento: altura("section-schedule"),
             destino: altura("section-destination"),
-            barra: altura("save-bar"),
             historico: altura("section-history"),
+            aviso: altura("secrets-key-notice"),
             restaurar: altura("restore-notice"),
           },
           pequenos,
@@ -371,23 +385,34 @@ test.describe("2) geometria (ADMIN / OPERATOR)", () => {
       })
 
     const solta = await medidas()
-    expect(solta.posicao).toBe("static")
-    expect(solta.topoComScrollZero, "sem alteração a barra NÃO pode estar na dobra").toBeGreaterThan(solta.janela)
     expect(solta.rolagemLateral).toEqual({ main: 0, doc: 0 })
     expect(solta.h1).toBe(1)
-    expect(solta.secoes).toEqual(["H1:Backups", "H2:Estado geral", "H2:Ações", "H2:Chave de criptografia", "H2:Agendamento", "H2:Destino", "H2:Histórico"])
+    expect(solta.secoes).toEqual(["H1:Backup do banco", "H2:Estado geral", "H2:Chave do backup", "H2:Conferir backup", "H2:Agendamento", "H2:Destino", "H2:Histórico"])
     if (larg === "375") expect(solta.pequenos, `alvos < 44 px a 375: ${solta.pequenos.join(" | ")}`).toEqual([])
 
+    // Grade: 2 colunas x 2 linhas de `lg` (1024) para cima; uma coluna abaixo. O histórico é LARGO (a largura da faixa).
+    const c = solta.caixas
+    if (Number(larg) >= 1024) {
+      expect(c.chave.y).toBe(c.conferir.y)
+      expect(c.agendamento.y).toBe(c.destino.y)
+      expect(c.chave.x).toBeLessThan(c.conferir.x)
+      expect(c.agendamento.y).toBeGreaterThanOrEqual(c.chave.y + Math.max(c.chave.h, c.conferir.h))
+    } else {
+      expect(new Set([c.chave.x, c.conferir.x, c.agendamento.x, c.destino.x]).size).toBe(1)
+      expect(c.conferir.y).toBeGreaterThanOrEqual(c.chave.y + c.chave.h)
+      expect(c.destino.y).toBeGreaterThanOrEqual(c.agendamento.y + c.agendamento.h)
+    }
+    expect(c.historico.w).toBe(c.status.w)
+
+    // Editar um campo não gruda nada nem cria rolagem lateral (não há mais barra de salvar fixa).
     await tela(page).getByTestId("field-alert-after").fill("48")
-    await expect(page.getByTestId("save-bar-status")).toContainText("1 alteração não salva")
-    const grudada = await medidas()
-    expect(grudada.posicao).toBe("sticky")
-    expect(grudada.topoComScrollZero).toBeLessThan(grudada.janela)
-    expect(grudada.rolagemLateral).toEqual({ main: 0, doc: 0 })
+    await expect(page.getByTestId("schedule-save-status")).toContainText("1 alteração não salva")
+    const editando = await medidas()
+    expect(editando.rolagemLateral).toEqual({ main: 0, doc: 0 })
 
-    gravar(`${larg}__geometria`, { referencia, minha, solta, grudada })
+    gravar(`${larg}__geometria`, { referencia, minha, solta, editando })
 
-    await page.getByRole("button", { name: "Descartar" }).click()
+    await page.getByTestId("schedule-discard").click()
     const alto = await page.evaluate(() => document.querySelector("main")!.scrollHeight + 120)
     await page.setViewportSize({ width: Number(larg), height: Math.min(alto, 7000) })
     await aguardarEstavel(page)
@@ -403,7 +428,8 @@ test.describe("2) geometria (ADMIN / OPERATOR)", () => {
       () => {
         const el = document.querySelector('[aria-label="Carregando a configuração de backup"]')
         if (!el) return null
-        return [...el.children].map((c) => Math.round(c.getBoundingClientRect().height))
+        // achata a grade de cartões (um filho com filhos) para medir cada cartão
+        return [...el.children].flatMap((c) => (c.children.length > 0 ? [...c.children] : [c])).map((c) => Math.round(c.getBoundingClientRect().height))
       },
       undefined,
       { timeout: 30_000, polling: 20 },
