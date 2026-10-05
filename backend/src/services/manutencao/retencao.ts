@@ -1,5 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { logger } from '../../lib/logger'
+import { SYSTEM_ACTOR } from '../../core/auditoria/systemActor'
+import { writeAuditLog } from '../auditoria/writeAuditLog'
 import {
   definirLockTimeout,
   ehErroDeLockTimeout,
@@ -21,9 +23,12 @@ import {
  *    de eventos JÁ PROCESSADOS mais velhos que o prazo.
  *  - `NotificationLog` (L1.6, DL6 — log das notificações por e-mail ao motorista, sem PII): DELETE em lotes das linhas com mais de 12 meses (por `createdAt`).
  *
- * O QUE NUNCA PURGA (por desenho, sem opção de configuração): `AuditLog`, `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession` e o
- * restante do financeiro. `WalletEntry` e `AuditLog` têm trigger append-only (UPDATE/DELETE/TRUNCATE); a política e o procedimento
- * manual estão em docs/DEPLOY-EASYPANEL.md ("Partições e retenção").
+ *  - `AuditLog` (decisão do dono, 05/10/2026: 24 MESES — a política de privacidade promete o expurgo automático por idade): DELETE em lotes das linhas
+ *    com `occurredAt` mais antigo que o prazo. O trigger append-only NÃO foi alterado: ele já recusa UPDATE/TRUNCATE sempre e DELETE de linha mais nova que
+ *    `now() - interval '24 months'` (ver `retencaoAuditLog`).
+ *
+ * O QUE NUNCA PURGA (por desenho, sem opção de configuração): `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession` e o restante do financeiro.
+ * `WalletEntry` tem trigger append-only (UPDATE/DELETE/TRUNCATE); a política e o procedimento manual estão em docs/DEPLOY-EASYPANEL.md ("Partições e retenção").
  *
  * PROTEÇÃO DE REFERÊNCIAS: antes de apagar uma partição, confere se alguma sessão que se sobrepõe àquele mês (com margem de 2 dias para
  * relógio de carregador) ainda precisa do log/leituras: sessão ABERTA (não STOPPED — a reconciliação usa `MeterSample` e o
@@ -40,6 +45,10 @@ export interface ConfigRetencao {
   webhookEventDias: number
   /** L1.6/DL6: prazo do `NotificationLog` (12 meses por padrão). Ausente = 365. */
   notificationLogDias?: number
+  /** Prazo do `AuditLog` (24 meses por padrão). Ausente = 730. NUNCA vale menos que {@link DIAS_MINIMOS_AUDIT_LOG}: o trigger do banco recusa o resto. */
+  auditLogDias?: number
+  /** Teto de lotes (de 1000 linhas) do AuditLog por rodada. Ausente = 200 (200 mil linhas). Existe para o teste provar o teto sem inserir 200 mil linhas; não há env para isto. */
+  auditLogMaxLotes?: number
 }
 
 /** Piso duro em código (o env também valida): ninguém "limpa tudo" por engano com um 0 ou 1 digitado errado. */
@@ -50,6 +59,11 @@ const MAX_LOTES_WEBHOOK_POR_RODADA = 200
 const LOTE_NOTIFICATION_LOG = 1000
 const MAX_LOTES_NOTIFICATION_LOG_POR_RODADA = 200
 export const NOTIFICATION_LOG_DIAS_PADRAO = 365
+const LOTE_AUDIT_LOG = 1000
+const MAX_LOTES_AUDIT_LOG_POR_RODADA = 200
+/** 24 meses em dias (2 x 365). O trigger usa `interval '24 months'` (calendário: 730 ou 731 dias, conforme caia um 29/02 na janela) — o piso em dias é o MENOR dos dois e a consulta ainda se limita ao corte do banco (ver `retencaoAuditLog`). */
+export const DIAS_MINIMOS_AUDIT_LOG = 730
+export const AUDIT_LOG_DIAS_PADRAO = 730
 
 const REGEX_PARTICAO: Record<TabelaParticionada, RegExp> = {
   MeterSample: /^MeterSample_\d{4}_\d{2}$/,
@@ -58,7 +72,7 @@ const REGEX_PARTICAO: Record<TabelaParticionada, RegExp> = {
 
 export interface AcaoRetencao {
   tabela: string
-  acao: 'partition_dropped' | 'dry_run_partition' | 'partition_blocked' | 'partition_skipped' | 'webhook_deleted' | 'dry_run_webhook' | 'notification_log_deleted' | 'dry_run_notification_log'
+  acao: 'partition_dropped' | 'dry_run_partition' | 'partition_blocked' | 'partition_skipped' | 'webhook_deleted' | 'dry_run_webhook' | 'notification_log_deleted' | 'dry_run_notification_log' | 'audit_log_deleted' | 'dry_run_audit_log' | 'audit_log_skipped'
   particao?: string
   linhas?: number
   motivo?: string
@@ -76,6 +90,12 @@ type Db = PrismaClient | Tx
 
 function clamp(dias: number): number {
   return Math.max(DIAS_MINIMOS_RETENCAO, Math.trunc(dias))
+}
+
+/** Prazo efetivo do AuditLog: nunca abaixo de 730 dias; valor ausente/inválido (NaN, Infinity) cai no padrão — nunca em "0 dias". */
+export function prazoAuditLogEfetivo(dias: number | undefined): number {
+  if (dias === undefined || !Number.isFinite(dias)) return AUDIT_LOG_DIAS_PADRAO
+  return Math.max(DIAS_MINIMOS_AUDIT_LOG, Math.trunc(dias))
 }
 
 interface SessaoProtegida {
@@ -259,6 +279,122 @@ async function retencaoNotificationLog(db: PrismaClient, diasBrutos: number, cfg
   relatorio.acoes.push({ tabela: 'NotificationLog', acao: 'notification_log_deleted', linhas: total })
 }
 
+/**
+ * `AuditLog` (decisão do dono, 05/10/2026): expurgo AUTOMÁTICO por idade, 24 meses — a política de privacidade promete "expurgo automático por idade (24 meses)".
+ *
+ * O trigger `audit_log_restrict_delete` (migration 20260917150000_audit_log, NÃO alterado) recusa DELETE de linha com `occurredAt >= now() - interval '24 months'` — e UPDATE/TRUNCATE sempre.
+ * `interval '24 months'` é de CALENDÁRIO, no fuso da sessão: vale 730 ou 731 dias conforme caia um 29/02 na janela. Por isso o corte NUNCA é só `agora - N dias`: é
+ * `LEAST(agora - N dias, now() - interval '24 months')`, com a MESMA expressão e o mesmo `now()` (início da transação) que o trigger usa — uma linha que o corte
+ * escolhe nunca é uma que o trigger recusa (senão o lote inteiro falharia). `<` estrito aqui, `>=` lá: complementares, sem fresta na fronteira. O prazo configurável só pode
+ * ser MAIOR que 24 meses ({@link prazoAuditLogEfetivo}); menor, o banco recusaria.
+ *
+ * Tudo numa transação só (lock consultivo da manutenção + lotes de 1000, até 200 lotes por rodada; o resto fica para a próxima): a linha de auditoria DA PRÓPRIA purga
+ * (ator SYSTEM, `OTHER`, contagem + intervalo + corte, sem PII e sem o conteúdo apagado) entra na mesma transação — ou apagou E ficou registrado, ou nada aconteceu. Ela nasce com
+ * `occurredAt = now()`, então só será apagada daqui a 24 meses. Rodada que não apagou nada NÃO grava linha (seria uma linha por dia, para sempre, dizendo "0").
+ * O DELETE é IRREVERSÍVEL: backup antes de ligar (docs/DEPLOY-EASYPANEL.md, 7.4).
+ */
+async function retencaoAuditLog(db: PrismaClient, diasBrutos: number | undefined, cfg: ConfigRetencao, agora: Date, relatorio: RelatorioRetencao): Promise<void> {
+  const dias = prazoAuditLogEfetivo(diasBrutos)
+  const maxLotes = cfg.auditLogMaxLotes !== undefined && Number.isInteger(cfg.auditLogMaxLotes) && cfg.auditLogMaxLotes >= 1 ? cfg.auditLogMaxLotes : MAX_LOTES_AUDIT_LOG_POR_RODADA
+  const corteConfigurado = new Date(agora.getTime() - dias * 86_400_000)
+  const corteSql = Prisma.sql`LEAST(${corteConfigurado}::timestamptz, now() - interval '24 months')`
+
+  if (cfg.dryRun) {
+    const [r] = await db.$queryRaw<{ n: number; corte: Date }[]>(Prisma.sql`SELECT count(*)::float8 AS "n", ${corteSql} AS "corte" FROM "AuditLog" WHERE "occurredAt" < ${corteSql}`)
+    logger.info({ event: 'retention_dry_run', tabela: 'AuditLog', dias, corte: r.corte.toISOString(), linhas: Number(r.n) }, `[retencao] DRY-RUN: ${Number(r.n)} AuditLog com mais de ${dias} dias seriam removidos`)
+    relatorio.acoes.push({ tabela: 'AuditLog', acao: 'dry_run_audit_log', linhas: Number(r.n) })
+    return
+  }
+
+  const resultado = await db.$transaction(
+    async (tx) => {
+      await definirLockTimeout(tx, LOCK_TIMEOUT_MS)
+      if (!(await tentarLockManutencao(tx))) return null
+      const [c] = await tx.$queryRaw<{ corte: Date }[]>(Prisma.sql`SELECT ${corteSql} AS "corte"`)
+      let total = 0
+      let lotes = 0
+      let maisAntiga: Date | null = null
+      let maisNova: Date | null = null
+      let esgotou = false
+      while (lotes < maxLotes) {
+        const [r] = await tx.$queryRaw<{ n: number; minimo: Date | null; maximo: Date | null }[]>(Prisma.sql`
+          WITH alvo AS (
+            SELECT al.id FROM "AuditLog" al
+             WHERE al."occurredAt" < ${corteSql}
+             ORDER BY al."occurredAt"
+             LIMIT ${LOTE_AUDIT_LOG}
+          ),
+          apagadas AS (
+            DELETE FROM "AuditLog" a USING alvo WHERE a.id = alvo.id RETURNING a."occurredAt"
+          )
+          SELECT count(*)::int AS "n", min("occurredAt") AS "minimo", max("occurredAt") AS "maximo" FROM apagadas
+        `)
+        lotes++
+        const n = Number(r.n)
+        if (n === 0) {
+          esgotou = true
+          break
+        }
+        total += n
+        if (r.minimo && (maisAntiga === null || r.minimo < maisAntiga)) maisAntiga = r.minimo
+        if (r.maximo && (maisNova === null || r.maximo > maisNova)) maisNova = r.maximo
+        if (n < LOTE_AUDIT_LOG) {
+          esgotou = true
+          break
+        }
+      }
+      if (total > 0) {
+        // Fail-closed: se o registro da purga falhar, a transação inteira volta e nada foi apagado. Sem PII e sem conteúdo apagado: só contagem, intervalo e corte.
+        await writeAuditLog(
+          {
+            actorUserId: SYSTEM_ACTOR.userId,
+            actorRole: 'SYSTEM',
+            actorEmail: SYSTEM_ACTOR.email,
+            actorName: SYSTEM_ACTOR.name,
+            actorOperatorId: null,
+            action: 'OTHER',
+            actionDetail: 'retention:audit_log_purged',
+            outcome: 'SUCCESS',
+            entityType: 'AuditLog',
+            changes: {
+              deletedCount: { to: total },
+              oldestDeletedAt: { to: maisAntiga?.toISOString() ?? null },
+              newestDeletedAt: { to: maisNova?.toISOString() ?? null },
+              cutoff: { to: c.corte.toISOString() },
+              retentionDays: { to: dias },
+              batches: { to: lotes },
+            },
+          },
+          tx,
+        )
+      }
+      return { total, lotes, corte: c.corte, maisAntiga, maisNova, limitada: !esgotou }
+    },
+    { timeout: 300_000, maxWait: 15_000 },
+  )
+
+  if (resultado === null) {
+    logger.info({ event: 'retention_audit_log_skipped', tabela: 'AuditLog', motivo: 'sem_lock' }, '[retencao] AuditLog: outra execução segura o lock da manutenção — nada feito nesta rodada')
+    relatorio.acoes.push({ tabela: 'AuditLog', acao: 'audit_log_skipped', motivo: 'sem_lock' })
+    return
+  }
+  logger.info(
+    {
+      event: 'retention_audit_deleted',
+      tabela: 'AuditLog',
+      dias,
+      corte: resultado.corte.toISOString(),
+      linhas: resultado.total,
+      lotes: resultado.lotes,
+      de: resultado.maisAntiga?.toISOString() ?? null,
+      ate: resultado.maisNova?.toISOString() ?? null,
+      limitadaPorRodada: resultado.limitada,
+    },
+    `[retencao] ${resultado.total} AuditLog com mais de ${dias} dias removido(s)${resultado.limitada ? ' (teto de lotes da rodada atingido — o resto sai na próxima)' : ''}`,
+  )
+  relatorio.acoes.push({ tabela: 'AuditLog', acao: 'audit_log_deleted', linhas: resultado.total })
+}
+
 /** Ponto de entrada. Desligada => retorna sem tocar no banco (nem para ler). */
 export async function aplicarRetencao(db: PrismaClient, cfg: ConfigRetencao, agora: Date = new Date()): Promise<RelatorioRetencao> {
   const relatorio: RelatorioRetencao = { habilitada: cfg.habilitada, dryRun: cfg.dryRun, acoes: [], erros: [] }
@@ -272,6 +408,7 @@ export async function aplicarRetencao(db: PrismaClient, cfg: ConfigRetencao, ago
     { nome: 'MeterSample', rodar: () => retencaoParticionada(db, 'MeterSample', cfg.meterSampleDias, cfg, agora, relatorio) },
     { nome: 'WebhookEvent', rodar: () => retencaoWebhookEvent(db, cfg.webhookEventDias, cfg, agora, relatorio) },
     { nome: 'NotificationLog', rodar: () => retencaoNotificationLog(db, cfg.notificationLogDias ?? NOTIFICATION_LOG_DIAS_PADRAO, cfg, agora, relatorio) },
+    { nome: 'AuditLog', rodar: () => retencaoAuditLog(db, cfg.auditLogDias, cfg, agora, relatorio) },
   ]
   for (const passo of passos) {
     try {

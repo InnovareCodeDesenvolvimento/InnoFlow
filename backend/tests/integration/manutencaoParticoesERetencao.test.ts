@@ -497,7 +497,8 @@ describe('N-11 — retenção (DETACH + DROP de partição inteira)', () => {
     expect(await ondeEstaLinha('MeterSample', comIntent.amostra)).not.toBeNull() // ainda CAPTURE_PENDING
   }, 120_000)
 
-  it('AuditLog e WalletEntry (append-only) e as tabelas financeiras NUNCA são tocadas, por mais antigas que sejam e mesmo com a retenção ligada', async () => {
+  // MUDANÇA DELIBERADA (decisão do dono, 05/10/2026): o AuditLog passou a ser purgado aos 24 meses (era 'nunca tocado'). WalletEntry e as tabelas financeiras SEGUEM intocadas, por mais antigas que sejam.
+  it('AuditLog > 24 meses é purgado (e a purga deixa 1 linha SYSTEM); WalletEntry e as tabelas financeiras NUNCA são tocadas, por mais antigas que sejam e mesmo com a retenção ligada', async () => {
     await montar()
     const c = await sf.criarCenario(fx.uniqueSuffix(), 'n11audit')
     const s = await sf.criarSessao(c, { mode: 'WALLET', status: 'STOPPED', saldoCents: 1000, iniciouHaMin: 40 * 30 * 24 * 60 })
@@ -523,11 +524,18 @@ describe('N-11 — retenção (DETACH + DROP de partição inteira)', () => {
 
     await manut.executarManutencaoParticoes(db, { mesesAFrente: 6, retencao: { ...CFG, ocppMessageDias: 30, meterSampleDias: 30, webhookEventDias: 30 } })
 
-    expect(await contagens()).toEqual(antes)
+    const depois = await contagens()
+    // financeiro e extrato: byte a byte iguais, inclusive a linha de carteira de 40 meses
+    expect({ wallet: depois.wallet, sessions: depois.sessions, intents: depois.intents, debts: depois.debts, walletVelha: depois.walletVelha }).toEqual({ wallet: antes.wallet, sessions: antes.sessions, intents: antes.intents, debts: antes.debts, walletVelha: antes.walletVelha })
+    // auditoria: a linha de 40 meses saiu, nada velho sobrou, e entrou exatamente 1 linha da purga (SYSTEM, recente)
+    expect(depois.auditVelha).toBe(0)
+    expect(await db.auditLog.count({ where: { actorUserId: 'n11-audit' } })).toBe(0)
+    expect(await db.auditLog.count({ where: { actorRole: 'SYSTEM', actionDetail: 'retention:audit_log_purged' } })).toBeGreaterThanOrEqual(1)
+    expect(depois.audit).toBe(antes.audit - antes.auditVelha + 1)
     // Os triggers append-only continuam instalados e ativos (UPDATE em linha de AuditLog segue recusado):
     const triggers = await db.$queryRaw<{ tgname: string }[]>`SELECT tgname::text FROM pg_trigger WHERE tgname IN ('audit_log_no_update','audit_log_restrict_delete','audit_log_no_truncate','wallet_entry_no_update','wallet_entry_no_delete','wallet_entry_no_truncate') AND tgenabled = 'O'`
     expect(triggers.length).toBe(6)
-    await expect(db.$executeRawUnsafe(`UPDATE "AuditLog" SET "path" = '/y' WHERE "actorUserId" = 'n11-audit'`)).rejects.toThrow(/append-only/)
+    await expect(db.$executeRawUnsafe(`UPDATE "AuditLog" SET "path" = '/y' WHERE "actionDetail" = 'retention:audit_log_purged'`)).rejects.toThrow(/append-only/)
   }, 120_000)
 
   it('WebhookEvent: apaga em lote só os JÁ PROCESSADOS além do prazo; mantém os recentes, os não processados (e alerta) e os ligados a pagamento em andamento', async () => {

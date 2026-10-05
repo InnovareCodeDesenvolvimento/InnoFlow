@@ -1014,6 +1014,7 @@ Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITI
 | `RETENTION_METER_SAMPLE_DAYS` | `365` | Prazo das leituras de medidor (mín. 30). |
 | `RETENTION_WEBHOOK_EVENT_DAYS` | `180` | Prazo das notificações de webhook já processadas (mín. 30). |
 | `RETENTION_NOTIFICATION_LOG_DAYS` | `365` | Prazo do `NotificationLog` — o log dos e-mails ao motorista, sem dado pessoal (mín. 30). L1.6/DL6. |
+| `RETENTION_AUDIT_LOG_DAYS` | `730` | Prazo do `AuditLog` = **24 meses** (decisão do dono, 05/10/2026). **Mínimo 730** (valor menor faz o boot falhar, como os demais `RETENTION_*`); pode ser maior (ex.: `1095`). Ver 7.3. |
 
 ### 7.3 Política de retenção (decidida pelo dono em 05/10/2026, DL6)
 
@@ -1022,17 +1023,27 @@ Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITI
 | `OcppMessage`, `MeterSample` | **12 meses** | `DETACH` + `DROP` de partição **inteira**, só quando o mês inteiro já passou do prazo (prazo efetivo = 12 meses + até 1 mês). Nunca `DELETE` linha a linha; nunca a DEFAULT. |
 | `WebhookEvent` (não particionada) | **180 dias** | `DELETE` em lotes de 1000, só eventos **já processados**; os não processados ficam (e há alerta). |
 | `NotificationLog` (não particionada, sem dado pessoal) | **12 meses** | `DELETE` em lotes de 1000 por `createdAt`, de qualquer estado (um `PENDING` com mais de 12 meses é lixo). Mesmas guardas: só com `RETENTION_ENABLED`, respeita o `RETENTION_DRY_RUN` (só conta) e o piso de 30 dias. Evento de log: `retention_notification_log_deleted`. |
-| `AuditLog` | **5 anos** | **Sem purga automática.** Não é particionada e começou em 09/2026: nada vence antes de 09/2031. O trigger só permite `DELETE` de linha > 24 meses. Antes de 2031 é preciso decidir/migrar para partição mensal (para o expurgo ser por partição inteira). |
+| `AuditLog` (não particionada) | **24 meses** (decisão do dono, 05/10/2026 — é o que a política de privacidade promete: "expurgo automático por idade (24 meses)") | `DELETE` em lotes de 1000 por `occurredAt`, **os mais antigos primeiro**, até 200 lotes (200 mil linhas) por rodada — o que sobrar sai na rodada seguinte. Mesmas guardas: só com `RETENTION_ENABLED`, respeita o `RETENTION_DRY_RUN` (só conta) e o piso (`RETENTION_AUDIT_LOG_DAYS` ≥ 730). Roda sob o lock consultivo da manutenção (duas réplicas nunca purgam juntas). Evento de log: `retention_audit_deleted` (contagem, intervalo e corte — **nunca o conteúdo apagado**). Detalhes em 7.3.1. |
 | `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession`, financeiro | **sem purga** | Append-only por trigger (UPDATE/DELETE/TRUNCATE). Expurgar exige decisão contábil/LGPD e intervenção manual de superusuário — fora do job, de propósito. |
 
 **Proteção:** uma partição **não é apagada** se alguma sessão que toca aquele mês (±2 dias) ainda estiver **aberta** (não `STOPPED`, inclusive `STOP_UNCONFIRMED`/`FAULTED`), tiver **`Debt` em aberto** ou **`PaymentIntent` em andamento** (`CREATED`, `AUTHORIZED`, `CAPTURE_PENDING`, `PENDING`). Vira o alerta `retention_partition_blocked` e a próxima rodada tenta de novo. **Chargeback não protege:** o dossiê é um *snapshot* tirado ao registrar a disputa (L1.8) e não depende destas tabelas depois de salvo — **ligue `RETENTION_ENABLED` só depois que a L1.8 estiver em produção.**
 
+#### 7.3.1 `AuditLog`: como a purga de 24 meses funciona (e o que o banco garante)
+
+- **O trigger append-only não foi alterado.** `UPDATE` e `TRUNCATE` continuam bloqueados **sempre**; `DELETE` só passa para linha com `occurredAt < now() - interval '24 months'`. O job não "burla" nada: apaga só o que o próprio banco já permitiria. Se alguém configurar prazo menor que 24 meses, o **env recusa** (`RETENTION_AUDIT_LOG_DAYS` ≥ 730, o boot falha) e, mesmo que um prazo menor chegasse ao código, o corte é sempre o **mais antigo** entre "agora − prazo" e o limite exato do trigger; o banco recusa qualquer resto.
+- **730 ou 731 dias?** `interval '24 months'` é de calendário: vale 730 dias, ou 731 quando um 29/02 cai na janela (e acompanha o fuso da sessão). Por isso o job calcula o corte **no próprio SQL** com a mesma expressão do trigger (`LEAST(agora − N dias, now() − interval '24 months')`): uma linha escolhida pelo job nunca é uma que o trigger recusaria (senão o lote inteiro falharia). Na prática, nos períodos com 29/02 a linha mais velha sai com ~1 dia de atraso; na fronteira exata a linha fica (`<` estrito).
+- **A purga deixa rastro.** Cada rodada que apagou algo grava **1 linha** de auditoria (`actorRole=SYSTEM`, `action=OTHER`, `actionDetail=retention:audit_log_purged`) com `deletedCount`, `oldestDeletedAt`, `newestDeletedAt`, `cutoff`, `retentionDays` e `batches` em `changes` — sem e-mail, nome, IP nem qualquer conteúdo das linhas apagadas. Ela é gravada **na mesma transação** do `DELETE` (se a gravação falhar, nada é apagado) e nasce com `occurredAt = agora`, então só será purgada daqui a 24 meses. Rodada que não apagou nada **não** grava linha. Procure-as em Admin > Auditoria (ação "Outro", ator de papel SYSTEM) ou por SQL: `SELECT "occurredAt", changes FROM "AuditLog" WHERE "actionDetail" = 'retention:audit_log_purged' ORDER BY 1 DESC;`.
+- **Quando vai acontecer de verdade:** o log de auditoria começou em 09/2026, então **nada vence antes de 09/2028**. Até lá a etapa roda, não encontra nada e não grava linha.
+- **O dossiê de chargeback é *snapshot* e sobrevive.** O dossiê (L1.8) é um JSON salvo na própria linha do chargeback no momento do registro; ele não depende do `AuditLog` (nem do `OcppMessage`/`MeterSample`) depois de salvo. Purgar a auditoria, o log OCPP ou as leituras **não altera nem invalida** o dossiê, o estorno, a dívida ou o extrato.
+- **Nunca é tocado por esta rotina:** `WalletEntry` (extrato — também append-only por trigger), `PaymentIntent`, `Debt`, `ChargingSession`, `PaymentReversal`/dossiês e o restante do financeiro.
+- **O texto da política de privacidade fica verdadeiro só com a retenção LIGADA.** Ele promete expurgo automático em 24 meses; com `RETENTION_ENABLED=false` (o padrão) nada é apagado. Ligue antes de 09/2028 (ver 7.4).
+
 ### 7.4 Como ligar a retenção com segurança
 
-1. Confirme que há **backup recente e restauração testada** (o `DROP` é irreversível).
+1. Confirme que há **backup recente e restauração testada** (o `DROP` das partições e o `DELETE` da auditoria/webhooks/notificações são **irreversíveis**: a auditoria apagada só volta de backup). Para a auditoria isso importa também por outro motivo: ela é a prova do "quem fez o quê" — **exporte/arquive o que for preciso guardar além de 24 meses antes de ligar**.
 2. Defina `RETENTION_ENABLED=true` **e** `RETENTION_DRY_RUN=true` no worker; reinicie.
-3. No log do worker procure `retention_scan` e `retention_dry_run` (partição, intervalo, linhas estimadas, bytes). Confira que só aparecem meses com mais de 12 meses.
-4. Troque `RETENTION_DRY_RUN=false` e reinicie. Cada remoção sai como `retention_partition_dropped`.
+3. No log do worker procure `retention_scan` e `retention_dry_run` (partição, intervalo, linhas estimadas, bytes; para `AuditLog`/`NotificationLog`/`WebhookEvent`, `tabela` + `linhas`). Confira que só aparecem meses com mais de 12 meses (auditoria: mais de 24).
+4. Troque `RETENTION_DRY_RUN=false` e reinicie. Cada remoção sai como `retention_partition_dropped`; a da auditoria, `retention_audit_deleted` (e a linha `retention:audit_log_purged` na própria auditoria).
 5. Para desligar de novo: `RETENTION_ENABLED=false`.
 
 ### 7.5 Como validar (SQL no Postgres)
@@ -1046,7 +1057,13 @@ SELECT c.relname, pg_get_expr(c.relpartbound, c.oid)
 SELECT (SELECT count(*) FROM "MeterSample_default") AS meter, (SELECT count(*) FROM "OcppMessage_default") AS ocpp;
 ```
 
-No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_created`, `retention_disabled` (retenção desligada).
+No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_created`, `retention_disabled` (retenção desligada), `retention_audit_deleted` (auditoria purgada: `linhas`, `lotes`, `de`/`ate`, `corte`, `limitadaPorRodada`) e `retention_audit_log_skipped` (outra réplica segurava o lock; tenta de novo na próxima rodada). Na auditoria (SQL): contagem de linhas dentro/fora do prazo —
+
+```sql
+SELECT count(*) FILTER (WHERE "occurredAt" <  now() - interval '24 months') AS "vencidas",
+       count(*) FILTER (WHERE "occurredAt" >= now() - interval '24 months') AS "dentro_do_prazo"
+  FROM "AuditLog";   -- com a retenção ligada, "vencidas" tende a 0 (some em até 1 rodada de 24 h)
+```
 
 ### 7.6 Alertas (campo `alert` do log)
 

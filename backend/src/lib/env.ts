@@ -349,7 +349,7 @@ const envSchema = z.object({
   // Meses de partição a manter À FRENTE (o job cria o que faltar) e cadência do job (também roda 1x no boot do worker; idempotente, com lock consultivo).
   PARTITION_AHEAD_MONTHS: z.coerce.number().int().min(3).max(60).default(6),
   PARTITION_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).default(86_400_000),
-  // RETENÇÃO: DESLIGADA por padrão — ligada, purga por DETACH+DROP de partições INTEIRAS além do prazo (nunca AuditLog/financeiro). DRY_RUN só loga o que removeria (só vale com ENABLED=true).
+  // RETENÇÃO: DESLIGADA por padrão — ligada, purga por DETACH+DROP de partições INTEIRAS além do prazo (MeterSample/OcppMessage) e por DELETE em lotes (WebhookEvent/NotificationLog/AuditLog) — nunca o financeiro (WalletEntry etc.). DRY_RUN só loga o que removeria (só vale com ENABLED=true).
   // Prazos em dias (piso de 30) — DL6, decisão do dono (05/10/2026): MeterSample/OcppMessage 12 meses (365 d), WebhookEvent 180 d. Efetivo = prazo + até 1 mês (a partição só cai quando o mês INTEIRO passou do prazo).
   RETENTION_ENABLED: envBoolean(false),
   RETENTION_DRY_RUN: envBoolean(false),
@@ -358,6 +358,9 @@ const envSchema = z.object({
   RETENTION_WEBHOOK_EVENT_DAYS: z.coerce.number().int().min(30).default(180),
   // L1.6/DL6: log das notificações por e-mail ao motorista (NotificationLog) — 12 meses (365 d), DELETE em lotes por createdAt (a tabela não é particionada nem append-only). Mesmas guardas (ENABLED/DRY_RUN/piso 30).
   RETENTION_NOTIFICATION_LOG_DAYS: z.coerce.number().int().min(30).default(365),
+  // AuditLog — decisão do dono (05/10/2026): 24 MESES (730 d) com purga automática (DELETE em lotes por occurredAt). PISO 730: o trigger append-only do banco só deixa apagar linha com mais de `interval '24 months'`
+  // e a rotina ainda se limita a esse corte exato; valor menor que 730 é recusado AQUI (o boot falha, como nos demais RETENTION_*). Pode ser MAIOR (ex.: 1095 = 3 anos). Mesmas guardas: ENABLED/DRY_RUN.
+  RETENTION_AUDIT_LOG_DAYS: z.coerce.number().int().min(730).default(730),
 
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem

@@ -19,6 +19,7 @@ export function configManutencaoDoEnv(): ConfigManutencao {
       meterSampleDias: env.RETENTION_METER_SAMPLE_DAYS,
       webhookEventDias: env.RETENTION_WEBHOOK_EVENT_DAYS,
       notificationLogDias: env.RETENTION_NOTIFICATION_LOG_DAYS,
+      auditLogDias: env.RETENTION_AUDIT_LOG_DAYS,
     },
   }
 }

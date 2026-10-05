@@ -106,6 +106,7 @@ Snapshot **imutável**, montado no momento do registro, para você anexar à res
 - Escritas pedem a **sua senha** (mesmo mecanismo do gateway: 5 erradas trancam por um tempo; senha errada grava `DENIED`). **Exceção do contrato:** *registrar* o chargeback não pede senha (é reversível pelo desfecho `WON`, que pede).
 - Rate limit de escrita: 20/min por ADMIN.
 - Não coloque o nome do motorista no motivo: o texto fica gravado no registro (e na exportação LGPD do titular, se aplicável).
+- **Quanto tempo a trilha de auditoria fica:** as linhas `REFUND`/`CHARGEBACK` do log de auditoria são **purgadas automaticamente depois de 24 meses** (decisão do dono, 05/10/2026; a rotina de retenção só apaga com `RETENTION_ENABLED=true` — `docs/DEPLOY-EASYPANEL.md` §7.3.1). O que prova o chargeback **não** mora só nessa trilha: o **dossiê é um snapshot salvo na própria linha do chargeback** (`GET /api/admin/chargebacks/:id/dossier`) e **sobrevive** à purga da auditoria, do log OCPP e das leituras do medidor, assim como o registro do estorno, o extrato e a dívida (nada disso é purgado). Disputa que ainda possa estar em andamento perto dos 24 meses: baixe o dossiê e guarde-o junto da resposta à Cielo. **Antes de ligar a retenção em produção**, faça backup e restauração testada (a purga é irreversível).
 
 ## 4. Alertas (chegam ao dono por e-mail/WhatsApp, N-7)
 
