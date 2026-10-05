@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * então cada caso prepara o ambiente, zera o cache de módulos e importa de novo (mesma técnica de `envSessaoWatchdog.test.ts`).
  */
 
-const VARS = ['PARTITION_AHEAD_MONTHS', 'PARTITION_MAINTENANCE_INTERVAL_MS', 'RETENTION_ENABLED', 'RETENTION_DRY_RUN', 'RETENTION_OCPP_MESSAGE_DAYS', 'RETENTION_METER_SAMPLE_DAYS', 'RETENTION_WEBHOOK_EVENT_DAYS'] as const
+const VARS = ['PARTITION_AHEAD_MONTHS', 'PARTITION_MAINTENANCE_INTERVAL_MS', 'RETENTION_ENABLED', 'RETENTION_DRY_RUN', 'RETENTION_OCPP_MESSAGE_DAYS', 'RETENTION_METER_SAMPLE_DAYS', 'RETENTION_WEBHOOK_EVENT_DAYS', 'RETENTION_NOTIFICATION_LOG_DAYS'] as const
 const original = { ...process.env }
 
 beforeEach(() => {
@@ -41,6 +41,7 @@ describe('N-11 — env de partições e retenção', () => {
     expect(env.RETENTION_OCPP_MESSAGE_DAYS).toBe(365)
     expect(env.RETENTION_METER_SAMPLE_DAYS).toBe(365)
     expect(env.RETENTION_WEBHOOK_EVENT_DAYS).toBe(180)
+    expect(env.RETENTION_NOTIFICATION_LOG_DAYS).toBe(365) // L1.6/DL6: NotificationLog, 12 meses
   })
 
   it('"false"/"0" não ligam a retenção (envBoolean, não coerce.boolean); "true" liga', async () => {
@@ -55,6 +56,7 @@ describe('N-11 — env de partições e retenção', () => {
     ['RETENTION_OCPP_MESSAGE_DAYS', '7'],
     ['RETENTION_METER_SAMPLE_DAYS', '0'],
     ['RETENTION_WEBHOOK_EVENT_DAYS', '-1'],
+    ['RETENTION_NOTIFICATION_LOG_DAYS', '29'],
     ['PARTITION_AHEAD_MONTHS', '1'],
     ['RETENTION_ENABLED', 'talvez'],
   ])('%s=%s é recusado no boot (piso de 30 dias / mínimo de 3 meses; não adivinha booleano)', async (nome, valor) => {

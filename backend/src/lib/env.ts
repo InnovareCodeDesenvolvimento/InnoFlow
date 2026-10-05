@@ -355,6 +355,8 @@ const envSchema = z.object({
   RETENTION_OCPP_MESSAGE_DAYS: z.coerce.number().int().min(30).default(365),
   RETENTION_METER_SAMPLE_DAYS: z.coerce.number().int().min(30).default(365),
   RETENTION_WEBHOOK_EVENT_DAYS: z.coerce.number().int().min(30).default(180),
+  // L1.6/DL6: log das notificações por e-mail ao motorista (NotificationLog) — 12 meses (365 d), DELETE em lotes por createdAt (a tabela não é particionada nem append-only). Mesmas guardas (ENABLED/DRY_RUN/piso 30).
+  RETENTION_NOTIFICATION_LOG_DAYS: z.coerce.number().int().min(30).default(365),
 
   SSE_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(25),
   // Teto de streams SSE simultâneos (Órion A2). Por usuário EXPULSA o mais antigo (não tranca quem

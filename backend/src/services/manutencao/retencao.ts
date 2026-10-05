@@ -19,6 +19,7 @@ import {
  *    prazo (`fim <= agora - dias`). Nunca DELETE linha a linha, nunca a partição DEFAULT, nunca o mês corrente/futuro.
  *  - `WebhookEvent` (NÃO particionada, volume ínfimo — a conta Cielo é compartilhada e o InnoFlow não recebe webhook): DELETE em lotes
  *    de eventos JÁ PROCESSADOS mais velhos que o prazo.
+ *  - `NotificationLog` (L1.6, DL6 — log das notificações por e-mail ao motorista, sem PII): DELETE em lotes das linhas com mais de 12 meses (por `createdAt`).
  *
  * O QUE NUNCA PURGA (por desenho, sem opção de configuração): `AuditLog`, `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession` e o
  * restante do financeiro. `WalletEntry` e `AuditLog` têm trigger append-only (UPDATE/DELETE/TRUNCATE); a política e o procedimento
@@ -37,6 +38,8 @@ export interface ConfigRetencao {
   ocppMessageDias: number
   meterSampleDias: number
   webhookEventDias: number
+  /** L1.6/DL6: prazo do `NotificationLog` (12 meses por padrão). Ausente = 365. */
+  notificationLogDias?: number
 }
 
 /** Piso duro em código (o env também valida): ninguém "limpa tudo" por engano com um 0 ou 1 digitado errado. */
@@ -44,6 +47,9 @@ export const DIAS_MINIMOS_RETENCAO = 30
 const MARGEM_SESSAO_MS = 2 * 24 * 3_600_000
 const LOTE_WEBHOOK = 1000
 const MAX_LOTES_WEBHOOK_POR_RODADA = 200
+const LOTE_NOTIFICATION_LOG = 1000
+const MAX_LOTES_NOTIFICATION_LOG_POR_RODADA = 200
+export const NOTIFICATION_LOG_DIAS_PADRAO = 365
 
 const REGEX_PARTICAO: Record<TabelaParticionada, RegExp> = {
   MeterSample: /^MeterSample_\d{4}_\d{2}$/,
@@ -52,7 +58,7 @@ const REGEX_PARTICAO: Record<TabelaParticionada, RegExp> = {
 
 export interface AcaoRetencao {
   tabela: string
-  acao: 'partition_dropped' | 'dry_run_partition' | 'partition_blocked' | 'partition_skipped' | 'webhook_deleted' | 'dry_run_webhook'
+  acao: 'partition_dropped' | 'dry_run_partition' | 'partition_blocked' | 'partition_skipped' | 'webhook_deleted' | 'dry_run_webhook' | 'notification_log_deleted' | 'dry_run_notification_log'
   particao?: string
   linhas?: number
   motivo?: string
@@ -219,6 +225,40 @@ async function retencaoWebhookEvent(db: PrismaClient, diasBrutos: number, cfg: C
   relatorio.acoes.push({ tabela: 'WebhookEvent', acao: 'webhook_deleted', linhas: total })
 }
 
+/**
+ * `NotificationLog` (L1.6, DL6): log operacional SEM PII (só ids, tipo, estado e códigos) das notificações por e-mail — DELETE em lotes das linhas com mais de N dias (12 meses por padrão), por
+ * `createdAt` (índice próprio). NÃO é append-only e não é particionada, então o expurgo é por idade, não por DETACH. Mesmas guardas do resto: só roda com RETENTION_ENABLED, respeita o
+ * DRY_RUN e o piso de 30 dias (`clamp`). Apagar uma linha antiga libera a reserva do fato — irrelevante: o job de um fato com mais de 12 meses não existe mais na fila.
+ */
+async function retencaoNotificationLog(db: PrismaClient, diasBrutos: number, cfg: ConfigRetencao, agora: Date, relatorio: RelatorioRetencao): Promise<void> {
+  const dias = clamp(diasBrutos)
+  const corte = new Date(agora.getTime() - dias * 86_400_000)
+
+  if (cfg.dryRun) {
+    const [r] = await db.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::float8 AS "n" FROM "NotificationLog" WHERE "createdAt" < ${corte}`)
+    logger.info({ event: 'retention_dry_run', tabela: 'NotificationLog', dias, corte: corte.toISOString(), linhas: Number(r.n) }, `[retencao] DRY-RUN: ${Number(r.n)} NotificationLog com mais de ${dias} dias seriam removidos`)
+    relatorio.acoes.push({ tabela: 'NotificationLog', acao: 'dry_run_notification_log', linhas: Number(r.n) })
+    return
+  }
+
+  let total = 0
+  for (let lote = 0; lote < MAX_LOTES_NOTIFICATION_LOG_POR_RODADA; lote++) {
+    const apagadas = await db.$executeRaw(Prisma.sql`
+      WITH alvo AS (
+        SELECT nl.id FROM "NotificationLog" nl
+         WHERE nl."createdAt" < ${corte}
+         ORDER BY nl."createdAt"
+         LIMIT ${LOTE_NOTIFICATION_LOG}
+      )
+      DELETE FROM "NotificationLog" n USING alvo WHERE n.id = alvo.id
+    `)
+    total += apagadas
+    if (apagadas < LOTE_NOTIFICATION_LOG) break
+  }
+  logger.info({ event: 'retention_notification_log_deleted', tabela: 'NotificationLog', dias, corte: corte.toISOString(), linhas: total }, `[retencao] ${total} NotificationLog com mais de ${dias} dias removido(s)`)
+  relatorio.acoes.push({ tabela: 'NotificationLog', acao: 'notification_log_deleted', linhas: total })
+}
+
 /** Ponto de entrada. Desligada => retorna sem tocar no banco (nem para ler). */
 export async function aplicarRetencao(db: PrismaClient, cfg: ConfigRetencao, agora: Date = new Date()): Promise<RelatorioRetencao> {
   const relatorio: RelatorioRetencao = { habilitada: cfg.habilitada, dryRun: cfg.dryRun, acoes: [], erros: [] }
@@ -231,6 +271,7 @@ export async function aplicarRetencao(db: PrismaClient, cfg: ConfigRetencao, ago
     { nome: 'OcppMessage', rodar: () => retencaoParticionada(db, 'OcppMessage', cfg.ocppMessageDias, cfg, agora, relatorio) },
     { nome: 'MeterSample', rodar: () => retencaoParticionada(db, 'MeterSample', cfg.meterSampleDias, cfg, agora, relatorio) },
     { nome: 'WebhookEvent', rodar: () => retencaoWebhookEvent(db, cfg.webhookEventDias, cfg, agora, relatorio) },
+    { nome: 'NotificationLog', rodar: () => retencaoNotificationLog(db, cfg.notificationLogDias ?? NOTIFICATION_LOG_DIAS_PADRAO, cfg, agora, relatorio) },
   ]
   for (const passo of passos) {
     try {

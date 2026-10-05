@@ -18,6 +18,7 @@ export function configManutencaoDoEnv(): ConfigManutencao {
       ocppMessageDias: env.RETENTION_OCPP_MESSAGE_DAYS,
       meterSampleDias: env.RETENTION_METER_SAMPLE_DAYS,
       webhookEventDias: env.RETENTION_WEBHOOK_EVENT_DAYS,
+      notificationLogDias: env.RETENTION_NOTIFICATION_LOG_DAYS,
     },
   }
 }

@@ -963,6 +963,7 @@ Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITI
 | `RETENTION_OCPP_MESSAGE_DAYS` | `365` | Prazo do log OCPP (mín. 30). |
 | `RETENTION_METER_SAMPLE_DAYS` | `365` | Prazo das leituras de medidor (mín. 30). |
 | `RETENTION_WEBHOOK_EVENT_DAYS` | `180` | Prazo das notificações de webhook já processadas (mín. 30). |
+| `RETENTION_NOTIFICATION_LOG_DAYS` | `365` | Prazo do `NotificationLog` — o log dos e-mails ao motorista, sem dado pessoal (mín. 30). L1.6/DL6. |
 
 ### 7.3 Política de retenção (decidida pelo dono em 05/10/2026, DL6)
 
@@ -970,6 +971,7 @@ Para **mudar a severidade** de um alerta (ex.: tornar `ocpp_auth_ip_flood` CRITI
 |---|---|---|
 | `OcppMessage`, `MeterSample` | **12 meses** | `DETACH` + `DROP` de partição **inteira**, só quando o mês inteiro já passou do prazo (prazo efetivo = 12 meses + até 1 mês). Nunca `DELETE` linha a linha; nunca a DEFAULT. |
 | `WebhookEvent` (não particionada) | **180 dias** | `DELETE` em lotes de 1000, só eventos **já processados**; os não processados ficam (e há alerta). |
+| `NotificationLog` (não particionada, sem dado pessoal) | **12 meses** | `DELETE` em lotes de 1000 por `createdAt`, de qualquer estado (um `PENDING` com mais de 12 meses é lixo). Mesmas guardas: só com `RETENTION_ENABLED`, respeita o `RETENTION_DRY_RUN` (só conta) e o piso de 30 dias. Evento de log: `retention_notification_log_deleted`. |
 | `AuditLog` | **5 anos** | **Sem purga automática.** Não é particionada e começou em 09/2026: nada vence antes de 09/2031. O trigger só permite `DELETE` de linha > 24 meses. Antes de 2031 é preciso decidir/migrar para partição mensal (para o expurgo ser por partição inteira). |
 | `WalletEntry`, `PaymentIntent`, `Debt`, `ChargingSession`, financeiro | **sem purga** | Append-only por trigger (UPDATE/DELETE/TRUNCATE). Expurgar exige decisão contábil/LGPD e intervenção manual de superusuário — fora do job, de propósito. |
 
