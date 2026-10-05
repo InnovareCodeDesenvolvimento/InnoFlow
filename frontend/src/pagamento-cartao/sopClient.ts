@@ -58,8 +58,21 @@ export function isAllowedSopScriptUrl(rawUrl: string): boolean {
   }
 }
 
-/** O campo `scriptUrl` "óbvio" do `FakeAdapter` do backend e do mock MSW (`mock`/`fake`) cai no caminho local, sem rede nenhuma. */
-const MOCK_SCRIPT_URL_PATTERN = /mock|fake/i
+/**
+ * Caminho MOCK (sem rede nenhuma): só existe em DESENVOLVIMENTO/E2E (`import.meta.env.DEV`). Em produção o Vite troca a constante por `false` e o ramo inteiro — junto com
+ * `tokenizeCardMock` e o prefixo `mocktok.` — sai do bundle (conferido por grep no `dist/` e pelo CI). Mesmo em dev, a URL tem de ser EXATAMENTE um dos hosts fictícios
+ * (`mock.local`, `mock.invalid`, `fake.local`, sempre `https`): um `scriptUrl` qualquer que apenas CONTENHA "mock" (S-4 da auditoria do Órion) não pula a allowlist.
+ */
+const MOCK_SCRIPT_HOSTS = new Set(["mock.local", "mock.invalid", "fake.local"])
+
+function isMockSopScriptUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    return url.protocol === "https:" && MOCK_SCRIPT_HOSTS.has(url.hostname)
+  } catch {
+    return false
+  }
+}
 
 /** Erro tipado: a Cielo (via `onInvalid`) recusou o conteúdo dos campos — a mensagem já vem pronta, em português, dela. */
 export class SopInvalidFieldsError extends Error {}
@@ -100,6 +113,9 @@ interface WindowWithSop extends Window {
 /** Quanto esperar por um callback do script antes de desistir (a Braspag costuma responder em 1-3 s). */
 const SOP_CALLBACK_TIMEOUT_MS = 30_000
 
+/** Quanto esperar pelo DOWNLOAD do script do SOP (sem `onload` nem `onerror` — rede que pendura — a tela ficava em "Validando cartão…" para sempre; S-6 do Órion). */
+const SOP_SCRIPT_LOAD_TIMEOUT_MS = 15_000
+
 /** Uma promessa por endereço, não por chamada: duas tentativas seguidas não injetam duas tags. Falha de rede limpa a entrada para a próxima tentativa poder recarregar. */
 const scriptLoads = new Map<string, Promise<void>>()
 
@@ -112,8 +128,17 @@ function loadSopScript(url: string): Promise<void> {
     const script = document.createElement("script")
     script.src = url
     script.async = true
-    script.onload = () => resolve()
+    const timer = setTimeout(() => {
+      scriptLoads.delete(url)
+      script.remove()
+      reject(new Error("SOP_SCRIPT_LOAD_TIMEOUT"))
+    }, SOP_SCRIPT_LOAD_TIMEOUT_MS)
+    script.onload = () => {
+      clearTimeout(timer)
+      resolve()
+    }
     script.onerror = () => {
+      clearTimeout(timer)
       scriptLoads.delete(url)
       script.remove()
       reject(new Error("SOP_SCRIPT_LOAD_ERROR"))
@@ -163,16 +188,26 @@ function buildResult(cardToken: string, input: CardFormInput): TokenizeResult {
   return { cardToken, last4: input.cardNumber.replace(/\D/g, "").slice(-4), expiryMonth: Number(input.expiryMonth), expiryYear: Number(input.expiryYear) }
 }
 
+/** Sessão de tokenização vencida? Não adianta (nem convém) entregar um `accessToken` morto ao script: erro claro, sem rede. `expiresAt` ilegível = não bloqueia (o servidor decide). */
+function isSessionExpired(session: MeCardTokenizationSessionResponse): boolean {
+  const expiresAt = Date.parse(session.expiresAt)
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now()
+}
+
 export async function tokenizeCard(session: MeCardTokenizationSessionResponse, input: CardFormInput): Promise<TokenizeResult> {
-  if (MOCK_SCRIPT_URL_PATTERN.test(session.scriptUrl)) {
+  if (isSessionExpired(session)) throw new SopTokenizationError("SOP_SESSAO_EXPIRADA")
+
+  // O ramo mock só existe em dev; em produção a URL crua vai DIRETO para a allowlist. `import.meta.env.DEV &&` NA CONDIÇÃO (e não dentro da função) para o minificador
+  // enxergar a constante `false` e descartar o ramo e o `tokenizeCardMock` (um `return false` dentro da função NÃO bastou: `mocktok.` continuou no bundle).
+  if (import.meta.env.DEV && isMockSopScriptUrl(session.scriptUrl)) {
     return tokenizeCardMock(input)
   }
 
   if (!isAllowedSopScriptUrl(session.scriptUrl)) throw new SopTokenizationError("SOP_SCRIPT_URL_NAO_PERMITIDA")
   try {
     await loadSopScript(session.scriptUrl)
-  } catch {
-    throw new SopTokenizationError("SOP_SCRIPT_LOAD_ERROR")
+  } catch (err) {
+    throw new SopTokenizationError(err instanceof Error && err.message === "SOP_SCRIPT_LOAD_TIMEOUT" ? "SOP_SCRIPT_LOAD_TIMEOUT" : "SOP_SCRIPT_LOAD_ERROR")
   }
   const sop = (window as WindowWithSop).bpSop_silentOrderPost
   if (!sop) throw new SopTokenizationError("SOP_SCRIPT_SEM_FUNCAO_GLOBAL")

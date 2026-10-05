@@ -1030,7 +1030,6 @@ export function createMockTokenizationSession(driverId?: string): MeCardTokeniza
   if (driverId === "user_driver_sop_real") {
     return {
       accessToken: `mock_sop_access_${Date.now()}`,
-      merchantId: "mock_merchant",
       environment: "sandbox",
       scriptUrl: REAL_SOP_SANDBOX_SCRIPT_URL,
       expiresAt: new Date(Date.now() + 20 * 60_000).toISOString(),
@@ -1038,7 +1037,6 @@ export function createMockTokenizationSession(driverId?: string): MeCardTokeniza
   }
   return {
     accessToken: `mock_access_${Date.now()}`,
-    merchantId: "mock_merchant",
     environment: "sandbox",
     // Contém "mock" de propósito — é o marcador que `pagamento-cartao/sopClient.ts` reconhece para nunca tentar uma chamada de rede real.
     scriptUrl: "https://mock.local/sop/script.js",

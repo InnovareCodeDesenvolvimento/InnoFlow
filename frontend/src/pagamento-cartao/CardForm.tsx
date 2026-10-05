@@ -96,6 +96,9 @@ export function CardForm({
           id={`${idPrefix}-number`}
           className={SOP_FIELD_CLASSES.number}
           inputMode="numeric"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="none"
           autoComplete="cc-number"
           maxLength={23} // 19 dígitos + 4 espaços de agrupamento
           value={groupCardNumber(values.cardNumber)}
@@ -117,6 +120,9 @@ export function CardForm({
         <input
           id={`${idPrefix}-holder`}
           className={SOP_FIELD_CLASSES.holder}
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="characters"
           autoComplete="cc-name"
           value={values.holderName}
           onChange={(e) => setValues((v) => ({ ...v, holderName: e.target.value.toUpperCase().slice(0, 60) }))}
@@ -138,6 +144,9 @@ export function CardForm({
           <input
             id={`${idPrefix}-month`}
             inputMode="numeric"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="none"
             autoComplete="cc-exp-month"
             maxLength={2}
             value={values.expiryMonth}
@@ -158,6 +167,9 @@ export function CardForm({
           <input
             id={`${idPrefix}-year`}
             inputMode="numeric"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="none"
             autoComplete="cc-exp-year"
             maxLength={4}
             value={values.expiryYear}
@@ -180,6 +192,9 @@ export function CardForm({
             // O manual da Cielo se contradiz (cardcvv x cardcvvc): marcar as duas é inofensivo e evita gastar um ciclo de sandbox descobrindo qual o script lê.
             className={`${SOP_FIELD_CLASSES.cvv} bp-sop-cardcvvc`}
             inputMode="numeric"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="none"
             autoComplete="cc-csc"
             maxLength={4}
             value={values.cvv}

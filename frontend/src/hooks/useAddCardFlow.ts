@@ -103,6 +103,9 @@ export function useAddCardFlow() {
     // carregar/rodar JS antes desta linha terminar, então não existe corrida
     // em que o "ready" dela chegue antes de estarmos escutando (ver
     // `types/cardTokenizationChannel.ts`).
+    // S-5 (auditoria do Órion): um `token` só vale UMA vez e só enquanto o fluxo está "aguardando" (o `status` do hook não serve aqui: este handler captura o do 1º render).
+    // Depois do primeiro `token` (estado "saving") qualquer outro `token`/`cancelled` é ignorado — nada de dois POSTs por duas mensagens, nem de limpar a tela no meio do salvar.
+    let saving = false
     function handleMessage(event: MessageEvent) {
       if (event.origin !== window.location.origin) return
       if (event.source !== childRef.current) return
@@ -117,6 +120,8 @@ export function useAddCardFlow() {
       }
 
       if (data.type === "token") {
+        if (saving) return
+        saving = true
         setStatus("saving")
         addPaymentMethod
           .mutateAsync(toCreateRequest(data.payload))
@@ -140,6 +145,7 @@ export function useAddCardFlow() {
       }
 
       if (data.type === "cancelled") {
+        if (saving) return
         window.removeEventListener("message", handleMessage)
         cleanup()
         setStatus("idle")

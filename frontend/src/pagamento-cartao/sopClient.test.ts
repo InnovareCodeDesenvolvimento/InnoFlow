@@ -3,7 +3,6 @@ import { SopInvalidFieldsError, SopTokenizationError, isAllowedSopScriptUrl, tok
 
 const mockSession = {
   accessToken: "access_mock",
-  merchantId: "merchant_mock",
   environment: "sandbox" as const,
   scriptUrl: "https://mock.invalid/mock-sop.js",
   expiresAt: new Date(Date.now() + 300_000).toISOString(),
@@ -11,7 +10,6 @@ const mockSession = {
 
 const realSession = {
   accessToken: "sop-access-token-do-passo-2",
-  merchantId: "merchant",
   environment: "sandbox" as const,
   scriptUrl: "https://transactionsandbox.pagador.com.br/post/scripts/silentorderpost-1.0.min.js",
   expiresAt: new Date(Date.now() + 1_200_000).toISOString(),
@@ -172,5 +170,34 @@ describe("tokenizeCard — caminho REAL (função global bpSop_silentOrderPost)"
     document.body.innerHTML = ""
     await expect(tokenizeCard(realSession, card)).rejects.toThrow("SOP_CAMPO_AUSENTE")
     expect(received).toBeNull()
+  })
+})
+
+describe("tokenizeCard — portas de segurança (auditoria do Órion: S-4, S-6)", () => {
+  afterEach(() => {
+    delete (window as unknown as { bpSop_silentOrderPost?: unknown }).bpSop_silentOrderPost
+    document.head.querySelectorAll("script").forEach((s) => s.remove())
+    vi.useRealTimers()
+  })
+
+  it("sessão vencida: erro claro, sem carregar script nem entregar o accessToken", async () => {
+    const vencida = { ...realSession, expiresAt: new Date(Date.now() - 1000).toISOString() }
+    await expect(tokenizeCard(vencida, card)).rejects.toMatchObject({ message: "SOP_SESSAO_EXPIRADA" })
+    expect(document.head.querySelectorAll("script").length).toBe(0)
+  })
+
+  it("scriptUrl que só CONTÉM 'mock' num host de terceiro NÃO usa o caminho mock: cai na allowlist e é recusado", async () => {
+    for (const scriptUrl of ["https://evil.example/mock-sop.js", "https://mock.local.evil.example/x.js", "http://mock.local/x.js"]) {
+      await expect(tokenizeCard({ ...realSession, scriptUrl }, card)).rejects.toMatchObject({ message: "SOP_SCRIPT_URL_NAO_PERMITIDA" })
+    }
+  })
+
+  it("script que nunca dispara onload/onerror: depois de 15 s falha com SOP_SCRIPT_LOAD_TIMEOUT (a tela não fica presa em 'Validando cartão…')", async () => {
+    vi.useFakeTimers()
+    const pending = tokenizeCard(realSession, card)
+    const assertion = expect(pending).rejects.toMatchObject({ message: "SOP_SCRIPT_LOAD_TIMEOUT" })
+    await vi.advanceTimersByTimeAsync(15_001)
+    await assertion
+    expect(document.head.querySelectorAll("script").length).toBe(0) // a tag pendurada é removida e a próxima tentativa pode recarregar
   })
 })

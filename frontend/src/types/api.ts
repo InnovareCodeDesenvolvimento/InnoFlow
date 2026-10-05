@@ -1276,7 +1276,8 @@ export interface MePaymentMethodsResponse {
  */
 export interface MeCardTokenizationSessionResponse {
   accessToken: string
-  merchantId: string
+  /** Opcional: o front NÃO usa (só o `accessToken` e o `scriptUrl` valem para o SOP). O backend deixa de devolvê-lo (S-9 da auditoria do Órion). */
+  merchantId?: string
   environment: "sandbox" | "production"
   scriptUrl: string
   expiresAt: string

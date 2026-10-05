@@ -105,6 +105,8 @@ export function CardTokenizationApp() {
     } catch (err) {
       // A Cielo valida os campos e devolve a mensagem pronta, em português (`onInvalid`): mostrar como veio. Qualquer outra falha: texto genérico + código curto (sem dado de cartão) para o suporte.
       if (err instanceof SopInvalidFieldsError) setFormError(err.message)
+      else if (err instanceof SopTokenizationError && err.message === "SOP_SESSAO_EXPIRADA")
+        setFormError('A sessão de cadastro expirou. Feche esta aba e toque em "Adicionar cartão" novamente no aplicativo.')
       else if (err instanceof SopTokenizationError) setFormError(`Não foi possível validar o cartão agora. Tente novamente em instantes. (código ${err.message})`)
       else setFormError("Não foi possível validar o cartão. Confira os dados e tente novamente.")
       setStatus("ready")
