@@ -1817,7 +1817,7 @@ export interface UpdateMeProfileRequest {
 }
 export type MeProfileErrorCode = "VALIDATION_ERROR" | "CPF_IN_USE" | "RATE_LIMITED_PROFILE" | "UNAUTHORIZED" | "FORBIDDEN"
 
-// ---- L1.3 — Esqueci / redefinição de senha — planejado (L1.3) ----------------------------------------------------------------------------------------
+// ---- L1.3 — Esqueci / redefinição de senha — entregue (backend 1996aad) ----------------------------------------------------------------------------------------
 
 /**
  * `POST /api/auth/password/forgot` (sem auth) -> **SEMPRE 202 `{ ok: true }`** — exista ou não a conta, ativa ou não, de qualquer papel (não vira oráculo de
@@ -1842,7 +1842,12 @@ export interface ResetPasswordRequest {
   token: string
   newPassword: string
 }
-export type ResetPasswordErrorCode = "VALIDATION_ERROR" | "RESET_TOKEN_INVALID" | "RATE_LIMITED_AUTH"
+/**
+ * 429 `RATE_LIMITED_AUTH` traz `Retry-After` (segundos) — mas o CORS do backend não expõe esse header (sem `exposedHeaders`): só é legível com o mesmo domínio (nginx na frente).
+ * 503 `SERVICE_UNAVAILABLE`: o serviço de redefinição está sem o Redis/estado que precisa (fail-closed) — o token NÃO é gasto; tentar de novo vale.
+ * 400 `VALIDATION_ERROR` com `details[].path="newPassword"` (10 a 72 bytes): o token NÃO é gasto — a tela mantém o formulário.
+ */
+export type ResetPasswordErrorCode = "VALIDATION_ERROR" | "RESET_TOKEN_INVALID" | "RATE_LIMITED_AUTH" | "SERVICE_UNAVAILABLE"
 
 // ---- L1.4 — LGPD: exportação e exclusão de conta — planejado (L1.4) ----------------------------------------------------------------------------------
 

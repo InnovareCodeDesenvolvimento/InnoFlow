@@ -62,7 +62,8 @@ export function AuthShell({ children, below }: { children: ReactNode; /** Linha 
         </div>
       </aside>
 
-      <div className="flex flex-col bg-background">
+      {/* `main`: o miolo do acesso é a região principal da página (sem landmark, o axe reprova `landmark-one-main` em Login, Cadastro e na recuperação de senha). Mesmo box de antes: só a tag mudou. */}
+      <main className="flex flex-col bg-background">
         {/* Faixa de marca — só mobile/tablet (< lg). */}
         <div className="surface-dark surface-dark-rich relative shrink-0 overflow-hidden px-4 pb-16 pt-8 text-center lg:hidden">
           <BrandBackdrop />
@@ -81,7 +82,7 @@ export function AuthShell({ children, below }: { children: ReactNode; /** Linha 
           {children}
           {below}
         </div>
-      </div>
+      </main>
     </div>
   )
 }

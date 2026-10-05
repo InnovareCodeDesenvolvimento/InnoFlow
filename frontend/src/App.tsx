@@ -23,6 +23,9 @@ const Home = lazy(() => import("@/pages/Public/Home").then((m) => ({ default: m.
 const Eletropostos = lazy(() => import("@/pages/Public/Eletropostos").then((m) => ({ default: m.Eletropostos })))
 const Login = lazy(() => import("@/pages/Auth/Login").then((m) => ({ default: m.Login })))
 const Register = lazy(() => import("@/pages/Auth/Register").then((m) => ({ default: m.Register })))
+// Recuperação de senha (L1.3): públicas, sem layout. A rota de redefinição lê o token do FRAGMENTO da URL (`#t=`) e o apaga na montagem.
+const ForgotPassword = lazy(() => import("@/pages/Auth/ForgotPassword").then((m) => ({ default: m.ForgotPassword })))
+const ResetPassword = lazy(() => import("@/pages/Auth/ResetPassword").then((m) => ({ default: m.ResetPassword })))
 const AdminLayout = lazy(() => import("@/pages/Admin/Layout").then((m) => ({ default: m.AdminLayout })))
 const AdminSites = lazy(() => import("@/pages/Admin/Sites"))
 const AdminChargePoints = lazy(() => import("@/pages/Admin/ChargePoints"))
@@ -131,6 +134,8 @@ export default function App() {
             {/* Auth (sem layout público) */}
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />
+            <Route path="/esqueci-senha" element={<ForgotPassword />} />
+            <Route path="/redefinir-senha" element={<ResetPassword />} />
 
             {/* PWA do motorista — landing pública pós-QR + área autenticada DRIVER-only */}
             <Route path="/c/:ocppIdentity" element={<ChargePointLanding />} />

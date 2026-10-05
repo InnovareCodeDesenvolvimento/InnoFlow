@@ -24,6 +24,9 @@ export const ROTAS: Rota[] = [
   { id: "pub-eletropostos", path: "/eletropostos", persona: "anon", pronto: { heading: "Eletropostos" } },
   { id: "auth-login", path: "/login", persona: "anon" },
   { id: "auth-cadastro", path: "/cadastro", persona: "anon" },
+  // L1.3 - recuperação de senha. O formulário de redefinir (com `#t=`) e os estados de sucesso/erro saem de `estados.visual.ts`.
+  { id: "auth-esqueci-senha", path: "/esqueci-senha", persona: "anon", pronto: { heading: "Esqueceu a senha?" } },
+  { id: "auth-redefinir-senha-sem-token", path: "/redefinir-senha", persona: "anon", pronto: { heading: "Link inválido" } },
   { id: "pub-qr-carregador", path: "/c/CP-VILA-NORTE-01", persona: "anon" },
   { id: "pub-qr-conector", path: "/c/CP-VILA-NORTE-01/1", persona: "anon" },
   // Documento isolado do cartão aberto direto na URL: estado "sem janela de origem" (o formulário pronto sai de `estados.visual.ts`).

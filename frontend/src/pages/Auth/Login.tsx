@@ -1,15 +1,17 @@
-import { useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { LogIn } from "lucide-react"
+import { CheckCircle2, LogIn } from "lucide-react"
 import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
+import { AuthAlert } from "@/components/auth/AuthAlert"
 import { AuthShell } from "@/components/auth/AuthShell"
 import { GoogleAuthSection } from "@/components/auth/GoogleAuthSection"
 import { Card } from "@/components/ui/Card"
 import { useAuthStore } from "@/store/authStore"
 import { authErrorMessage } from "@/lib/authErrors"
+import { isPasswordResetFlash, PASSWORD_RESET_NOTICE } from "@/lib/passwordReset"
 import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
 import { loginSchema, type LoginFormValues } from "@/schemas/auth.schema"
 import type { User } from "@/types/api"
@@ -19,6 +21,14 @@ export function Login() {
   const [params] = useSearchParams()
   const login = useAuthStore((s) => s.login)
   const [formError, setFormError] = useState<string | null>(null)
+  const location = useLocation()
+
+  // Aviso de "senha alterada" (L1.3): chega no ESTADO DA ROTA vindo de /redefinir-senha, vai para estado local e o estado da rota é apagado já na chegada (`history.state`
+  // sobrevive ao F5; sem a limpeza o aviso voltaria a cada recarga). Não há auto-login: a pessoa entra com a senha nova.
+  const [passwordResetNotice] = useState(() => isPasswordResetFlash(location.state))
+  useEffect(() => {
+    if (isPasswordResetFlash(location.state)) navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+  }, [location.state, location.pathname, location.search, navigate])
 
   const {
     register,
@@ -65,11 +75,25 @@ export function Login() {
         <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-ink">Bem-vindo de volta</h1>
         <p className="mt-1.5 text-sm text-ink-softer">Entre com seu e-mail e senha para continuar.</p>
 
+        {passwordResetNotice && (
+          <AuthAlert tone="success" icon={CheckCircle2} role="status" className="mt-4">
+            {PASSWORD_RESET_NOTICE}
+          </AuthAlert>
+        )}
+
         <GoogleAuthSection onSuccess={goAfterAuth} />
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
           <Input type="email" label="E-mail" autoComplete="email" required error={errors.email?.message} {...register("email")} />
-          <Input type="password" label="Senha" autoComplete="current-password" required error={errors.password?.message} {...register("password")} />
+          <div>
+            <Input type="password" label="Senha" autoComplete="current-password" required error={errors.password?.message} {...register("password")} />
+            {/* Alvo de 44 px (min-h-11) sem mudar o espaçamento do formulário além da própria linha. */}
+            <div className="flex justify-end">
+              <Link to="/esqueci-senha" className="inline-flex min-h-11 items-center px-1 text-sm font-semibold text-primary hover:underline">
+                Esqueci minha senha
+              </Link>
+            </div>
+          </div>
 
           {formError && (
             <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700">

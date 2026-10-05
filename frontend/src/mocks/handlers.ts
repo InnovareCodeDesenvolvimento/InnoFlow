@@ -272,6 +272,9 @@ function invalidBasicAuthSecret(secret: string | undefined, required: boolean) {
   return ok ? null : HttpResponse.json(errorBody("basicAuthSecret: de 16 a 40 caracteres (até 72 bytes).", "VALIDATION_ERROR"), { status: 400 })
 }
 
+/** Tokens de redefinição já consumidos (uso único), por vida da página. */
+const usedResetTokens = new Set<string>()
+
 export const handlers = [
   // ---- Auth -----------------------------------------------------------------
   // Limites de tentativa (contrato: 429 com `code`, ver `lib/authErrors.ts`).
@@ -458,6 +461,65 @@ export const handlers = [
     user.hasPassword = true
     bumpSessionEpoch(user.id)
     return HttpResponse.json({ token: fakeToken(user), user: toUserDTO(user) })
+  }),
+
+  // ---- Esqueci / redefinir senha (L1.3) -----------------------------------------------------------------------------------------------------------------
+  // `POST /api/auth/password/forgot` (pública): SEMPRE 202 `{ ok: true }` para e-mail bem formado - existindo a conta ou não, ADMIN ou não (o backend real não envia nada para ADMIN, e
+  // a resposta é a mesma). Gatilhos por e-mail para provar a tela sem esperar o limite de verdade:
+  //  - "ip-bloqueado@..."   -> 429 RATE_LIMITED_AUTH com Retry-After: 300 (o mesmo gatilho do login)
+  //  - "erro-servidor@..."  -> 500
+  //  - "sem-rede@..."       -> falha de rede (sem resposta)
+  //  - e-mail malformado    -> 400 VALIDATION_ERROR com details[].path = "email"
+  http.post("/api/auth/password/forgot", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { email?: unknown }
+    const email = typeof body.email === "string" ? body.email.trim() : ""
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 180) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "email", message: "Invalid email" }] }, { status: 400 })
+    }
+    if (email.startsWith("sem-rede@")) return HttpResponse.error()
+    if (email.startsWith("erro-servidor@")) return HttpResponse.json(errorBody("Erro interno.", "INTERNAL_ERROR"), { status: 500 })
+    if (email.startsWith("ip-bloqueado@")) {
+      return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429, headers: { "Retry-After": "300" } })
+    }
+    return HttpResponse.json({ ok: true }, { status: 202 })
+  }),
+
+  // `POST /api/auth/password/reset` (pública): 204 sem corpo e SEM sessão. Ordem do backend: corpo (VALIDATION_ERROR - o token NÃO é gasto) -> estado do token. O token é de 43 caracteres base64url; os
+  // gatilhos são pelo COMEÇO dele (o E2E completa com "A" até 43):
+  //  - "invalido..."     -> 400 RESET_TOKEN_INVALID (expirado/usado/inexistente: um código só)
+  //  - "limite..."      -> 429 RATE_LIMITED_AUTH com Retry-After: 300
+  //  - "indisponivel..." -> 503 SERVICE_UNAVAILABLE
+  //  - "quebrado..."    -> 500
+  //  - "semrede..."     -> falha de rede
+  //  - "motorista..."   -> OK e troca DE VERDADE a senha de motorista@ (para o E2E entrar com a nova no login) e derruba as sessões (`bumpSessionEpoch`)
+  //  - qualquer outro   -> OK sem tocar em conta nenhuma
+  // `localStorage["mock:reset-weak"]="1"` -> 400 VALIDATION_ERROR (newPassword) mesmo para senha que o cliente aceita.
+  // Uso único: o mesmo token duas vezes -> 400 RESET_TOKEN_INVALID na segunda (estado vive na página, como o resto dos mocks).
+  http.post("/api/auth/password/reset", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { token?: unknown; newPassword?: unknown }
+    // `mock:reset-weak=1` (localStorage): o servidor recusa a senha por um critério que o cliente não conhece (política mais dura que 10-72 bytes) - prova que a tela mantém o formulário.
+    if (!isValidNewPassword(body.newPassword) || localStorage.getItem("mock:reset-weak") === "1") {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "newPassword", message: "Senha inválida." }] }, { status: 400 })
+    }
+    const token = typeof body.token === "string" ? body.token : ""
+    if (token.startsWith("semrede")) return HttpResponse.error()
+    if (token.startsWith("quebrado")) return HttpResponse.json(errorBody("Erro interno.", "INTERNAL_ERROR"), { status: 500 })
+    if (token.startsWith("indisponivel")) return HttpResponse.json(errorBody("Serviço temporariamente indisponível. Tente novamente em instantes.", "SERVICE_UNAVAILABLE"), { status: 503 })
+    if (token.startsWith("limite")) {
+      return HttpResponse.json(errorBody("Muitas tentativas com link inválido. Tente novamente mais tarde.", "RATE_LIMITED_AUTH"), { status: 429, headers: { "Retry-After": "300" } })
+    }
+    if (token.startsWith("invalido") || usedResetTokens.has(token)) {
+      return HttpResponse.json(errorBody("Este link de redefinição é inválido ou expirou. Peça um novo.", "RESET_TOKEN_INVALID"), { status: 400 })
+    }
+    usedResetTokens.add(token)
+    if (token.startsWith("motorista")) {
+      const driver = mockUsers.find((u) => u.email === "motorista@innoelektron.com")
+      if (driver) {
+        driver.password = body.newPassword
+        bumpSessionEpoch(driver.id)
+      }
+    }
+    return new HttpResponse(null, { status: 204 })
   }),
 
   // ---- Sites públicos ---------------------------------------------------------
