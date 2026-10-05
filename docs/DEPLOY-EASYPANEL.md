@@ -65,7 +65,7 @@ valida o schema inteiro em qualquer entrypoint, mesmo o que não usa direto):
 NODE_ENV=production
 DATABASE_URL=<a do Postgres do EasyPanel>
 REDIS_URL=<a do Redis do EasyPanel>
-JWT_SECRET=<gerar forte — openssl rand -base64 32 — NUNCA reusar o valor de dev do docker-compose.yml>
+JWT_SECRET=<gerar forte — openssl rand -base64 48 — NUNCA reusar o valor de dev do docker-compose.yml; em produção < 32 caracteres FAZ O BOOT FALHAR>
 JWT_EXPIRES_IN=12h
 PORT=3000
 OCPP_PORT=9000
