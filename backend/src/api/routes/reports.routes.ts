@@ -180,7 +180,7 @@ router.get(
     const tz = await resolveReportingTimezone(query.tz, scope, env.REPORTING_TIMEZONE)
     const window = resolvePeriodWindow({ period: resolveEffectivePeriod(query.period, query.from, query.to), from: query.from, to: query.to, tz })
     const isAdmin = req.user!.role === 'ADMIN'
-    const filters = { provider: query.provider, status: query.status }
+    const filters = { provider: query.provider, status: query.status, tid: query.tid, authorizationCode: query.authorizationCode, proofOfSale: query.proofOfSale }
 
     const [reconciliation, page] = await Promise.all([
       getPaymentsReconciliation(scope, window, isAdmin),
