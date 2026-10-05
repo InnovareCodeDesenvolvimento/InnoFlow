@@ -9,6 +9,8 @@ export interface Rota {
   pronto?: { heading?: string; text?: string }
   /** Telas com bottom nav `fixed` e altura própria (PWA): a foto cresce até o fim do documento (ver `fotografar`). */
   crescerAteODocumento?: boolean
+  /** Telas com o card escuro "brand" + rosto do mascote: ruído de rasterização NÃO determinístico (ver `playwright.visual.config.ts`). Tolera 0,4% de pixels (a sonda de geometria é a régua precisa). */
+  ruidoRaster?: boolean
 }
 
 /**
@@ -31,12 +33,12 @@ export const ROTAS: Rota[] = [
 
   // ---- PWA do motorista (motorista@) ----
   { id: "pwa-inicio", path: "/app", persona: "driver", crescerAteODocumento: true },
-  { id: "pwa-sessao-vazia", path: "/app/sessao", persona: "driver", crescerAteODocumento: true },
-  { id: "pwa-historico-vazio", path: "/app/sessoes", persona: "driver", crescerAteODocumento: true },
+  { id: "pwa-sessao-vazia", path: "/app/sessao", persona: "driver", crescerAteODocumento: true, ruidoRaster: true },
+  { id: "pwa-historico-vazio", path: "/app/sessoes", persona: "driver", crescerAteODocumento: true, ruidoRaster: true },
   { id: "pwa-mapa", path: "/app/mapa", persona: "driver" },
   { id: "pwa-carteira", path: "/app/carteira", persona: "driver", crescerAteODocumento: true },
-  { id: "pwa-carteira-adicionar", path: "/app/carteira/adicionar", persona: "driver", crescerAteODocumento: true },
-  { id: "pwa-cartoes", path: "/app/carteira/cartoes", persona: "driver", crescerAteODocumento: true },
+  { id: "pwa-carteira-adicionar", path: "/app/carteira/adicionar", persona: "driver", crescerAteODocumento: true, ruidoRaster: true },
+  { id: "pwa-cartoes", path: "/app/carteira/cartoes", persona: "driver", crescerAteODocumento: true, ruidoRaster: true },
 
   // ---- PWA do motorista com histórico e sessão travada (travado@) ----
   { id: "pwa-travado-historico", path: "/app/sessoes", persona: "travado", crescerAteODocumento: true },

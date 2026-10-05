@@ -23,7 +23,7 @@ for (const persona of personas) {
         await aguardarEstavel(page, rota.pronto)
         const foto = await fotografar(page, { crescerAteODocumento: rota.crescerAteODocumento, nome: rota.id })
         // Modo SONDA (VISUAL_GEO_DIR): só coleta DOM+imagem para `scripts/comparar-geometria.mjs`; não compara com a baseline (senão o 1º diff aborta o fluxo de várias telas).
-        if (!process.env.VISUAL_GEO_DIR) expect(foto).toMatchSnapshot(`${rota.id}.jpg`)
+        if (!process.env.VISUAL_GEO_DIR) expect(foto).toMatchSnapshot(`${rota.id}.jpg`, rota.ruidoRaster ? { maxDiffPixelRatio: 0.004 } : {})
       })
     }
   })
