@@ -17,6 +17,7 @@ import { TariffCoverageBadge } from "@/components/tariffAssignments/TariffCovera
 import { getChargePointCoverage } from "@/lib/tariffAssignments"
 import { getApiErrorMessage } from "@/services/api"
 import { ChargePointFormDialog } from "./ChargePointFormDialog"
+import { OfflineMark } from "./OfflineMark"
 import type { ChargePoint } from "@/types/api"
 
 const PAGE_SIZE = 20
@@ -131,7 +132,10 @@ export default function ChargePointsPage() {
                     <TariffCoverageBadge coverage={coverageOf(cp)} loading={cp.active && assignmentsQuery.isLoading} />
                   </TableCell>
                   <TableCell>
-                    <Badge variant={cp.active ? "success" : "neutral"}>{cp.active ? "Ativo" : "Inativo"}</Badge>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <Badge variant={cp.active ? "success" : "neutral"}>{cp.active ? "Ativo" : "Inativo"}</Badge>
+                      <OfflineMark online={cp.online} active={cp.active} />
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
