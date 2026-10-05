@@ -267,6 +267,36 @@ Estados comparados pela sonda (`--ids-react --margem 32`): F-D (`eabd99a`, o `sr
 
 Regravadas **15 imagens** (`pub-cartao-isolado-*` ×6, `pub-eletropostos` ×3, `pub-qr-conector` ×3, `pwa-mapa` ×3) num worktree limpo de `2b1ad88` com `VISUAL_MAX_DIFF_RATIO=0 VISUAL_THRESHOLD=0`. Cada imagem regravada confere com 0 px contra a captura da sonda.
 
+### 12. Classificação do acabamento pós-F-D — folga de contraste, drawer do Admin e `/app/sessao` (05/10/2026)
+
+Estados comparados pela sonda (`--ids-react --margem 32`): `2b1ad88` x `87d0343`, 2 execuções de cada lado, sem concorrência, 123 pares: **64 IDENTICA, 50 ACEITA, 9 REPORTAR**. As 9: 7 de recolor de FUNDO (abaixo) e 2 de ruído de raster do mascote. `test:visual` em `87d0343` falhava em 32 (as listadas pela Lyra); a sonda vê **48** imagens mudarem de pixel (as outras 16 ficam abaixo da tolerância do `test:visual`).
+
+**Tudo o que mudou de cor/estilo computado, sem exceção** (diferença entre todos os nós dos 123 DOMs, todas as propriedades de cor e de geometria; `scripts` da sonda + tabela de transições):
+
+| Transição | Nós | Páginas |
+|---|---:|---:|
+| `color`/`-webkit-text-fill-color`/`text-decoration-color`/`outline-color` `rgb(180,83,9)` → `rgb(167,76,8)` (`warning-700` #B45309 → #A74C08) | 339 | 54 |
+| `stroke` do mesmo `warning-700` | 213 | 27 |
+| `background-color` `rgb(36,136,41)` → `rgb(31,123,37)` (`accent`/`success` #248829 → #1F7B25) | 30 | 7 |
+| `background-color` `rgba(36,136,41,.4)` → `rgba(31,123,37,.4)` (landing) e `stroke` do mesmo verde (arco do medidor do `adm-dashboard`) | 3 + 3 | 3 + 3 |
+| `background-color` do `warning-700` (marcadores do mapa) | 5 | 1 |
+
+Nenhuma outra propriedade mudou: **0 retângulo, 0 propriedade de geometria, 0 texto**. O fundo recolorido (os 7 REPORTAR) fica em `adm-dashboard` ×3 (o arco do medidor e o ponto da legenda), `pub-landing` ×3 (6 selos do mock do celular) e `pwa-mapa` a 1440 (marcadores): **todo pixel alterado cai dentro de um elemento de texto/ícone/fundo recolorido** (0 fora, com margem de 32 px para o espalhamento do JPEG — a 16 px sobravam 31–562 px em volta dos mesmos elementos, diferença ≤ 34 níveis). Aceitos como recolor de fundo do mesmo token, como na F-A.
+
+- **Drawer do Admin (Radix Dialog) e `/app/sessao` com esqueleto**: nenhuma das 123 fotos muda por causa deles. O drawer fechado está **fora do DOM** e o esqueleto some antes da foto; o que o Radix muda no DOM são os ids `useId` (`_r_N_`, `radix-_r_N_`) de `adm-dialogo-novo-site` (12 ids), `adm-dialogo-detalhe-sessao` (1) e `adm-gateway-pagamento` (4) × 3 larguras: **bijeção 1:1 conferida em todas** (`--ids-react`), nenhum `for`/`aria-*` perdeu o par. `buttonVariants.ts` só mudou comentário.
+- **Ruído, não mudança** — o que a Lyra viu como REPORTAR "sem causa" em `pwa-historico-vazio` (205 px a 375) e `pwa-carteira-adicionar`: DOM, retângulos e estilos idênticos; 4 blocos 16×16 no mascote e na borda da faixa, ≤ 32 níveis. Repetindo a tela 6× em cada uma das duas árvores, **os mesmos hashes de imagem aparecem nas duas** (§11): é o modo de captura, não o código. O mesmo vale para `pwa-sessao-vazia` a 768 (170 px, caixa 32×8) e `pwa-cartoes` a 1440 (4.682 px, o rosto do mascote).
+
+Contraste, depois do recolor (a Lyra pediu 0 reprovados; **confere**):
+- **Por pixel, independente** (`contraste-pixel.ts`, `verificacoes-fc`/`verificacoes-fd`): PWA **1.875 textos, 0 reprovados, menor razão 4,76:1** ("Saldo disponível" no card petróleo); Admin (ADMIN 42 telas × larguras + OPERATOR 42 + 2 diálogos × 3 larguras) **8.540 textos, 0 reprovados, menor razão 4,79:1** (`info-700` sobre `info-100`, "Em recarga"). Antes: 4,51:1. Os 3 casos abaixo de 5 que a Lyra declarou como não tratados (4,76 / 4,79 / branco sobre `danger` 4,83) são exatamente os piores medidos: passam AA, sem folga de 0,5.
+- **axe** (`test:contraste`): **0 reprovados, 3.257 aprovados, 937 incompletos**, catraca verde; `CONTRASTE-ESTADO-ATUAL.md` regerado por mim é **idêntico** ao que a Lyra deixou na árvore.
+- Folga fora da foto: `criterios-pos-fd.visual.ts` (drawer como diálogo acessível: `role=dialog`, foco entra e fica preso, resto `aria-hidden`, Esc fecha e devolve o foco, crescer a janela fecha; `/app/sessao` com consulta tardia: altura do esqueleto = a do bloco real e CLS ~0) e `criterios-fe.visual.ts`: **26 verdes, 4 saltados por viewport**.
+
+Regravadas **48 imagens** com tolerância zero, só as classificadas (adm-charge-points, -connectors, -dashboard, -dialogo-detalhe-sessao, -financeiro, -gateway-pagamento, -sessoes, -tariffs; pub-eletropostos, -landing, -qr-carregador, -qr-conector; pwa-mapa, -recibo-stop-nao-confirmado-cartao/-carteira, -sessao-ao-vivo, -sessao-parar-dialogo, -travado-historico — as larguras em que a sonda viu pixel mudar); cada uma confere 0 px com a captura da sonda (exceto `adm-charge-points` a 768: 54 px, ≤ 2 níveis, o ruído já medido). **As 4 telas de mascote ruidosas NÃO foram regravadas** (passam dentro da tolerância e das tentativas).
+
+Fechamento: `test:visual` **114/114 em 3 execuções seguidas** (2 com a configuração padrão — 0 "flaky" — e 1 com `VISUAL_RETRIES=0`, 2,7–2,8 min cada).
+
+**Armadilha do harness que apareceu nesta rodada:** 3 execuções simultâneas (3 workers cada) do `test:visual`/da sonda **mudam as métricas de fonte** (`pub-eletropostos` a 375: altura 3.497 em vez de 3.509; `auth-cadastro` a 375 com 14 retângulos 0,4–0,9 px mais estreitos). Classificar com a CPU livre ou repetir.
+
 ### Registro por fase (continuação)
 
 | Fase | Data | Diferenças esperadas (rota · o que mudou) | Regressões achadas | Baseline regravada por |
@@ -276,3 +306,5 @@ Regravadas **15 imagens** (`pub-cartao-isolado-*` ×6, `pub-eletropostos` ×3, `
 | F-B | 04/10/2026 | **18 imagens regravadas** (REDESENHO deliberado, §8): `auth-login`, `auth-cadastro`, `pub-eletropostos`, `pub-qr-carregador`, `pub-qr-conector`, `pub-rota-inexistente` × 375/768/1440. `pub-rota-inexistente` mudou de comportamento (D5: landing → 404). | nenhuma na F-B. Achado baixo anterior: `?redirect=/\host` (§8). `/eletropostos` ainda fala "por operador". | Lyra/Atlas (pedido do Atlas), classificado e gravado pela Íris |
 | F-C | 05/10/2026 | **54 imagens regravadas**: as 16 rotas/estados `pwa-*` × 3 larguras (48, REDESENHO; inclui os 4 estados do fluxo de recarga: conectando, ao vivo, diálogo de parar, recibo concluído), `pub-eletropostos` ×3 (subtítulo novo + raio 14 do CTA) e `pub-qr-conector` ×3 (raio 14 do CTA lima). | nenhuma regressão. Achado: CLS intermitente 0,187 em `/app/sessao` (FAULTED) a 1440. Ruído de raster em 4 telas (tolerância + retries). | Lyra/Atlas (pedido do Atlas), classificado e gravado pela Íris |
 | F-D | 05/10/2026 | **60 imagens regravadas** (§10): Admin — as 14 rotas `adm-*` + `adm-dialogo-novo-site` + `adm-dialogo-detalhe-sessao` × 3 larguras (48, REDESENHO); promoção dos defaults de raio 12→14 px em `auth-login` e `auth-cadastro` × 3 (campos) e `pub-eletropostos` × 3 (botões "Como chegar"); `pwa-mapa` × 3 (anel de 1 px dos cards de estação some, em commit separado). | nenhuma no Admin. Achados: `pwa-mapa` perdeu o anel dos cards (não declarado, imperceptível); drawer mobile sem `role=dialog`, sem Esc e sem foco para dentro (anterior à F-D). Falsos positivos meus na ferramenta de contraste corrigidos (degradê, recorte). | Lyra/Atlas (pedido do Atlas), classificado e gravado pela Íris |
+| F-E/F-F | 05/10/2026 | **15 imagens regravadas** (§11): documento isolado do cartão ×6 (F-E, redesenho), `pub-eletropostos` ×3 e `pwa-mapa` ×3 (F-F: card de estação passa a `card-elevated`, anel de 1 px; `pwa-mapa` volta byte a byte ao da F-C) e `pub-qr-conector` ×3 (preço sem gradiente). | nenhuma regressão. Achado: a regravação de `pwa-mapa` "sem o anel" (`2b1ad88`) foi invalidada pela F-F; `/eletropostos` ganha o anel que nunca teve. | Lyra/Atlas (pedido do Atlas), classificado e gravado pela Íris |
+| Acabamento pós-F-D | 05/10/2026 | **48 imagens regravadas** (§12): só recolor — `warning-700` #B45309→#A74C08 (texto/ícone, 339 nós) e `accent`/`success` #248829→#1F7B25 (fundo de 30 nós: arco/ponto do `adm-dashboard`, selos do mock da landing, marcadores do mapa). 0 retângulo, 0 propriedade de layout, 0 texto; drawer Radix e esqueleto de `/app/sessao` não aparecem em nenhuma foto (só o deslocamento dos ids `useId`, bijeção conferida). | nenhuma. Contraste por pixel 0 reprovados (PWA 1.875 textos, menor 4,76; Admin 8.540, menor 4,79) e axe 0/3.257/937. | Lyra/Atlas (pedido do Atlas), classificado e gravado pela Íris |
