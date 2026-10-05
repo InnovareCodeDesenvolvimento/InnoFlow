@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import { criarBancoProprio } from './helpers/bancoProprio'
-import { binarioDoPg, ferramentasDoPgDisponiveis, prepararAmbienteDoPg } from './helpers/backupAmbiente'
+import { binarioDoPg, ferramentasDoPgDisponiveis, prepararAmbienteDoPg, restaurarDumpPeloRoteiro } from './helpers/backupAmbiente'
 import { iniciarS3Falso, type S3Falso } from '../helpers/s3Falso'
 
 const ACCESS = 'AKIAMARCADORUNICO7QX'
@@ -197,7 +197,8 @@ describe.skipIf(!temPg)('backup automático — serviço contra Postgres, Redis 
         await expect(verificaVazio.operator.count()).rejects.toThrow() // a tabela sumiu
         await verificaVazio.$disconnect()
 
-        const restore = spawnSync(binarioDoPg('pg_restore'), ['--no-owner', '--no-privileges', `--dbname=${u.pathname.slice(1)}`, join(pasta, 'x.dump')], { env: envPg, encoding: 'utf8' })
+        // Restaura pelo MESMO caminho do restore-db.sh (roteiro sem o SET transaction_timeout + psql em transação): o pg_restore direto quebra com cliente 18 x servidor 16 (a CI).
+        const restore = restaurarDumpPeloRoteiro(join(pasta, 'x.dump'), envPg, pasta)
         expect(restore.status, restore.stderr).toBe(0)
 
         const depois = new PrismaClient({ datasources: { db: { url: urlDoBanco } } })
