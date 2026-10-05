@@ -35,6 +35,7 @@ import adminEventsRoutes from './routes/events.routes'
 import adminPaymentGatewayRoutes from './routes/paymentGateway.routes'
 import adminCommunicationSettingsRoutes from './routes/communicationSettings.routes'
 import adminCommandsRoutes from './routes/adminCommands.routes'
+import { refundsRouter, sessionRefundsRouter } from './routes/paymentReversals.routes'
 
 /**
  * Monta o app Express da API — auth JWT, isolamento multi-tenant e os CRUDs
@@ -128,6 +129,9 @@ export function createApp(): Express {
   app.use('/api/admin/operators', adminRateLimit, adminOperatorsRoutes)
   app.use('/api/admin/sessions', adminRateLimit, adminSessionsRoutes)
   app.use('/api/admin/drivers', adminRateLimit, adminDriversRoutes)
+  // Estorno de sessão (L1.8) — ADMIN-only por rota, step-up de senha nas escritas. `/sessions` é compartilhado com o router de parar sessão (OPERATOR+ADMIN): o que não casa lá cai aqui.
+  app.use('/api/admin/sessions', adminRateLimit, sessionRefundsRouter)
+  app.use('/api/admin/refunds', adminRateLimit, refundsRouter)
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
   app.use('/api/admin/payment-gateway', adminRateLimit, adminPaymentGatewayRoutes) // ADMIN-only (F5.5) — config da conta Cielo
   app.use('/api/admin/communication-settings', adminRateLimit, adminCommunicationSettingsRoutes) // ADMIN-only (N-7) — e-mail (SMTP) e WhatsApp (Evolution API) dos avisos ao dono

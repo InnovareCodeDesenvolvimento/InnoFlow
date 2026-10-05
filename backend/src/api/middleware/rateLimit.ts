@@ -158,3 +158,9 @@ export const communicationSettingsWriteRateLimit = buildLimiter(60 * 1000, 10, '
  * 5/min por ADMIN (anti-abuso do servidor de e-mail do dono como relé, e anti-varredura de portas por quem tiver um token).
  */
 export const communicationSettingsTestRateLimit = buildLimiter(60 * 1000, 5, 'RATE_LIMITED_COMMUNICATION_SETTINGS', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
+ * Escritas de estorno e chargeback (L1.8) — mexem em dinheiro de terceiros, são raras e feitas por um humano: 20/min por ADMIN (por USUÁRIO, não por IP). Roda DEPOIS de
+ * `authenticate`/`requireRole('ADMIN')`. Além disso a rota exige a senha do ADMIN (step-up, com throttle próprio) e o trigger do banco impõe o teto do estorno.
+ */
+export const paymentReversalWriteRateLimit = buildLimiter(60 * 1000, 20, 'RATE_LIMITED', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
