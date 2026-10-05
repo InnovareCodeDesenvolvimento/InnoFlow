@@ -38,6 +38,8 @@ export const ROTAS: Rota[] = [
   { id: "pwa-mapa", path: "/app/mapa", persona: "driver" },
   { id: "pwa-carteira", path: "/app/carteira", persona: "driver", crescerAteODocumento: true },
   { id: "pwa-carteira-adicionar", path: "/app/carteira/adicionar", persona: "driver", crescerAteODocumento: true, ruidoRaster: true },
+  // L1.2 - Meu perfil (dados + troca de senha). Persona `driver` (motorista@: sem telefone/CPF salvos, com senha).
+  { id: "pwa-perfil", path: "/app/perfil", persona: "driver", crescerAteODocumento: true },
   { id: "pwa-cartoes", path: "/app/carteira/cartoes", persona: "driver", crescerAteODocumento: true, ruidoRaster: true },
 
   // ---- PWA do motorista com histórico e sessão travada (travado@) ----

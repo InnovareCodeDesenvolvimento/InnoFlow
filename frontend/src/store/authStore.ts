@@ -29,6 +29,13 @@ interface AuthState {
   /** Login/cadastro com Google (ID token do GIS) — mesmo destino do login normal: token no localStorage + estado de auth. */
   googleLogin: (credential: string) => Promise<User>
   logout: () => void
+  /**
+   * Troca a sessão INTEIRA (token + usuário) sem passar pelo login — usado depois de `POST /api/auth/password`, que revoga todos os tokens anteriores (inclusive
+   * o desta aba) e devolve um novo. O token vai para o `localStorage` ANTES de qualquer outra coisa: o interceptor e o SSE leem de lá.
+   */
+  replaceSession: (token: string, user: User) => void
+  /** Atualiza campos do usuário logado (ex.: o nome depois de salvar o perfil) sem relogar — o cabeçalho lê daqui. */
+  patchUser: (patch: Partial<Pick<User, "name" | "hasPassword">>) => void
 }
 
 /**
@@ -89,6 +96,13 @@ export const useAuthStore = create<AuthState>()(
         localStorage.removeItem(TOKEN_STORAGE_KEY)
         set({ user: null, token: null, isAuthenticated: false })
       },
+
+      replaceSession: (token, user) => {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token)
+        set({ user, token, isAuthenticated: true })
+      },
+
+      patchUser: (patch) => set((s) => (s.user ? { user: { ...s.user, ...patch } } : s)),
     }),
     {
       name: "innoelektron-auth",

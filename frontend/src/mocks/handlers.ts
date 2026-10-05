@@ -1,4 +1,4 @@
-import { http, HttpResponse } from "msw"
+import { delay, http, HttpResponse } from "msw"
 import {
   mockAuthTokens,
   mockChargePoints,
@@ -44,6 +44,17 @@ import {
   startMockSession,
   stopMockSession,
 } from "./meData"
+import {
+  applyProfilePatch,
+  bumpSessionEpoch,
+  CPF_EM_USO_MOCK,
+  getMockProfile,
+  isValidNewPassword,
+  mockHasPassword,
+  registerPasswordAttempt,
+  sessionEpochOf,
+  validateProfilePatch,
+} from "./profileData"
 import { filterAuditLogs, listAuditLogActors, mockAuditLogDetails } from "./auditLogData"
 import { buildPublicSites } from "./stationsData"
 import { adjustDriverWallet, getDriverWallet, listDrivers } from "./driversData"
@@ -79,15 +90,19 @@ import type {
 
 const AUTH_HEADER = (req: Request) => req.headers.get("authorization")?.split(" ")[1]
 
+/** `v` = época da sessão do usuário quando o token foi emitido (a troca de senha a incrementa e invalida os tokens anteriores - ver `profileData.ts`). */
 function fakeToken(user: MockUser) {
-  return btoa(JSON.stringify({ userId: user.id, role: user.role, operatorId: user.operatorId }))
+  return btoa(JSON.stringify({ userId: user.id, role: user.role, operatorId: user.operatorId, v: sessionEpochOf(user.id) }))
 }
 
 function currentUser(req: Request): { userId: string; role: Role; operatorId: string | null } | null {
   const token = AUTH_HEADER(req)
   if (!token) return null
   try {
-    return JSON.parse(atob(token))
+    const payload = JSON.parse(atob(token)) as { userId: string; role: Role; operatorId: string | null; v?: number }
+    // Token de uma época anterior à atual = revogado pela troca de senha (o backend real faz o mesmo com `sessionsValidAfter`).
+    if (typeof payload.v === "number" && payload.v < sessionEpochOf(payload.userId)) return null
+    return payload
   } catch {
     return null
   }
@@ -106,6 +121,7 @@ function toUserDTO(user: MockUser) {
     role: user.role,
     operatorId: user.operatorId,
     operatorName: user.operatorName,
+    hasPassword: mockHasPassword(user),
   }
 }
 
@@ -272,7 +288,7 @@ export const handlers = [
       return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_AUTH"), { status: 429 })
     }
     const user = mockUsers.find((u) => u.email === body.email)
-    if (!user || user.password !== body.password) {
+    if (!user || !mockHasPassword(user) || user.password !== body.password) {
       return HttpResponse.json(errorBody("E-mail ou senha inválidos.", "INVALID_CREDENTIALS"), { status: 401 })
     }
     return HttpResponse.json({ token: fakeToken(user), user: toUserDTO(user) })
@@ -378,9 +394,68 @@ export const handlers = [
       mockUsers.push(created)
       return HttpResponse.json({ token: fakeToken(created), user: toUserDTO(created) }, { status: 201 })
     }
-    const driver = mockUsers.find((u) => u.role === "DRIVER" && u.id === "user_driver")
+    // L1.2: `localStorage["mock:google-as"]` = id do motorista em que o "Google (mock)" entra (ex.: a conta só-Google, sem senha).
+    const driver = mockUsers.find((u) => u.role === "DRIVER" && u.id === (localStorage.getItem("mock:google-as") ?? "user_driver"))
     if (!driver) return HttpResponse.json(errorBody("Token do Google inválido.", "INVALID_GOOGLE_TOKEN"), { status: 401 })
     return HttpResponse.json({ token: fakeToken(driver), user: toUserDTO(driver) })
+  }),
+
+  // ---- Perfil do motorista e troca de senha (L1.2) --------------------------------------------------------------------------------------------------------
+  // Contrato: `MeProfile`/`UpdateMeProfileRequest`/`ChangePasswordRequest` em `types/api.ts`; regras e gatilhos de falha em `mocks/profileData.ts`.
+  http.get("/api/me/profile", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:profile-get")
+    if (forced === "slow") await delay(4000) // deixa o ESQUELETO na tela tempo bastante para medir a forma dele (régua do perfil)
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "empty") return HttpResponse.json(null)
+    const user = mockUsers.find((u) => u.id === scope.user.userId)
+    if (!user) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    return HttpResponse.json(getMockProfile(user))
+  }),
+
+  http.patch("/api/me/profile", async ({ request }) => {
+    const scope = requireDriver(request)
+    if ("error" in scope) return scope.error
+    const forced = localStorage.getItem("mock:profile-patch")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429") return HttpResponse.json(errorBody("Muitas requisições. Tente novamente em instantes.", "RATE_LIMITED_PROFILE"), { status: 429 })
+    const user = mockUsers.find((u) => u.id === scope.user.userId)
+    if (!user) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const { issues, patch } = validateProfilePatch(await request.json().catch(() => null))
+    if (issues.length > 0) return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: issues }, { status: 400 })
+    if (patch.cpf === CPF_EM_USO_MOCK) return HttpResponse.json(errorBody("Este CPF já está cadastrado em outra conta.", "CPF_IN_USE"), { status: 409 })
+    return HttpResponse.json(applyProfilePatch(user, patch))
+  }),
+
+  // `POST /api/auth/password` (qualquer papel autenticado). Conta com senha exige a atual (403 `INVALID_CURRENT_PASSWORD` - 403 e NÃO 401, para não deslogar); conta só-Google define a
+  // primeira sem ela. Sucesso: token NOVO e todos os anteriores revogados. Limite real: 8 por 15 min por usuário (`RATE_LIMITED_PASSWORD`).
+  http.post("/api/auth/password", async ({ request }) => {
+    const current = currentUser(request)
+    if (!current) return HttpResponse.json(errorBody("Não autenticado.", "UNAUTHORIZED"), { status: 401 })
+    const forced = localStorage.getItem("mock:password-fail")
+    if (forced === "network") return HttpResponse.error()
+    if (forced === "500") return HttpResponse.json(errorBody("Falha simulada.", "INTERNAL_ERROR"), { status: 500 })
+    if (forced === "429" || !registerPasswordAttempt(current.userId)) {
+      return HttpResponse.json(errorBody("Muitas tentativas. Tente novamente em instantes.", "RATE_LIMITED_PASSWORD"), { status: 429, headers: { "Retry-After": "300" } })
+    }
+    const body = (await request.json().catch(() => ({}))) as { currentPassword?: string; newPassword?: unknown }
+    if (!isValidNewPassword(body.newPassword)) {
+      return HttpResponse.json({ error: "Dados inválidos.", code: "VALIDATION_ERROR", details: [{ path: "newPassword", message: "Senha inválida." }] }, { status: 400 })
+    }
+    const user = mockUsers.find((u) => u.id === current.userId)
+    if (!user) return HttpResponse.json(errorBody("Token inválido ou expirado.", "UNAUTHORIZED"), { status: 401 })
+    if (mockHasPassword(user)) {
+      if (!body.currentPassword) return HttpResponse.json(errorBody("Informe a senha atual.", "CURRENT_PASSWORD_REQUIRED"), { status: 400 })
+      if (body.currentPassword !== user.password) return HttpResponse.json(errorBody("Senha atual incorreta.", "INVALID_CURRENT_PASSWORD"), { status: 403 })
+      if (body.currentPassword === body.newPassword) return HttpResponse.json(errorBody("A nova senha precisa ser diferente da atual.", "PASSWORD_UNCHANGED"), { status: 400 })
+    }
+    user.password = body.newPassword
+    user.hasPassword = true
+    bumpSessionEpoch(user.id)
+    return HttpResponse.json({ token: fakeToken(user), user: toUserDTO(user) })
   }),
 
   // ---- Sites públicos ---------------------------------------------------------

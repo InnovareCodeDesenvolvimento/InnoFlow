@@ -56,6 +56,7 @@ const AppSessaoDetalhe = lazy(() => import("@/pages/App/SessaoDetalhe").then((m)
 const AppCarteira = lazy(() => import("@/pages/App/Carteira").then((m) => ({ default: m.Carteira })))
 const AppCarteiraAdicionar = lazy(() => import("@/pages/App/CarteiraAdicionar").then((m) => ({ default: m.CarteiraAdicionar })))
 const AppCartoes = lazy(() => import("@/pages/App/Cartoes").then((m) => ({ default: m.Cartoes })))
+const AppPerfil = lazy(() => import("@/pages/App/Perfil").then((m) => ({ default: m.Perfil })))
 const AppMapa = lazy(() => import("@/pages/App/Mapa").then((m) => ({ default: m.Mapa })))
 
 /**
@@ -139,6 +140,7 @@ export default function App() {
               <Route path="sessoes" element={<AppSessoes />} />
               <Route path="sessoes/:id" element={<AppSessaoDetalhe />} />
               <Route path="mapa" element={<AppMapa />} />
+              <Route path="perfil" element={<AppPerfil />} />
               <Route path="carteira" element={<AppCarteira />} />
               <Route path="carteira/adicionar" element={<AppCarteiraAdicionar />} />
               {/* Cartão salvo (F5.3) — formulário de cartão em si NÃO mora aqui, vive isolado em pagamento-cartao.html (ver useAddCardFlow). */}

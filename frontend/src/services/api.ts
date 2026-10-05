@@ -47,7 +47,12 @@ api.interceptors.response.use(
     // isto, estando em `/cadastro` o interceptor daria hard-redirect pro login
     // e engoliria a mensagem de erro (mesma lógica da senha errada no login).
     const isAuthRoute = url.includes("/api/auth/login") || url.includes("/api/auth/register") || url.includes("/api/auth/google")
-    if (error?.response?.status === 401 && !isAuthRoute) {
+    // 401 de um pedido que saiu com um token que JÁ FOI TROCADO (o do `POST /api/auth/password` revoga todos e devolve um novo; um polling em voo pode ter
+    // saído com o antigo) não é "sessão expirada": a sessão atual é outra e está válida. Sem esta guarda, a troca de senha deslogaria quem acabou de trocá-la.
+    const sentToken = String(error?.config?.headers?.Authorization ?? "").replace(/^Bearer /, "")
+    const currentToken = localStorage.getItem(TOKEN_STORAGE_KEY)
+    const isStaleToken = sentToken !== "" && currentToken !== null && sentToken !== currentToken
+    if (error?.response?.status === 401 && !isAuthRoute && !isStaleToken) {
       localStorage.removeItem(TOKEN_STORAGE_KEY)
       if (!window.location.pathname.startsWith("/login")) {
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)

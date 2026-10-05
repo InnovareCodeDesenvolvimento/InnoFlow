@@ -82,6 +82,11 @@ export const mockUsers: MockUser[] = [
   // I-7 (cartão exige identidade verificada): conta só com SENHA (nunca entrou pelo Google) - `cardEligibility` volta GOOGLE_LOGIN_REQUIRED até vincular o Google
   // (o mock vincula ao clicar em "Continuar com o Google (mock)" ESTANDO logada nesta conta). Nasce com 2 cartões, que a tela mostra desabilitados.
   { id: "user_driver_so_senha", name: "Sofia Só-Senha", email: "so-senha@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  // L1.2 (perfil): conta com telefone e CPF JÁ salvos (o CPF volta mascarado: "***.982.247-**") - exercita "Alterar CPF" e a edição do telefone. Conta separada de propósito,
+  // como as outras: o estado do mock vive na página e os E2E de perfil mudam nome/senha.
+  { id: "user_driver_perfil", name: "Paula Perfil", email: "perfil@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234", hasPassword: true },
+  // L1.2: conta SÓ-GOOGLE (sem senha: `hasPassword: false`) - a tela mostra "Definir senha", sem o campo de senha atual. Só entra pelo Google (mock: `localStorage["mock:google-as"]="user_driver_so_google"`).
+  { id: "user_driver_so_google", name: "Gael Google", email: "so-google@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "", hasPassword: false },
   // I-7: bloqueio TEMPORÁRIO por recusas em excesso (`TEMPORARILY_BLOCKED`, `blockedUntil` = ~47 min depois de a página carregar). Nasce com 1 cartão.
   { id: "user_driver_bloqueado", name: "Bruno Bloqueado", email: "bloqueado-cartao@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },
   { id: "user_driver_travado", name: "Tiago Travado", email: "travado@innoelektron.com", role: "DRIVER", operatorId: null, operatorName: null, password: "senha1234" },

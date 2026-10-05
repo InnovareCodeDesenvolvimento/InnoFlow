@@ -60,6 +60,19 @@ describe("interceptor de resposta do api", () => {
     expect(hrefSetter).toHaveBeenCalledWith("/login?redirect=%2Fapp%2Fcarteira")
   })
 
+  it("401 de um pedido que saiu com token JÁ TROCADO (troca de senha em voo) não desloga a sessão nova", async () => {
+    // O pedido sai com "token-de-sessao-valida"; antes da resposta chegar, a troca de senha grava o token novo.
+    const adapter: AxiosAdapter = (config: InternalAxiosRequestConfig) => {
+      localStorage.setItem(TOKEN_STORAGE_KEY, "token-novo-da-troca-de-senha")
+      const response = { status: 401, statusText: "", data: { error: "x", code: "UNAUTHORIZED" }, headers: {}, config } as AxiosResponse
+      return Promise.reject(new AxiosError("HTTP 401", "ERR_BAD_REQUEST", config, undefined, response))
+    }
+    api.defaults.adapter = adapter
+    await expect(api.get("/api/me/sessions/active")).rejects.toBeDefined()
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe("token-novo-da-troca-de-senha")
+    expect(hrefSetter).not.toHaveBeenCalled()
+  })
+
   it("401 das rotas de acesso (senha errada no login) não expulsa ninguém", async () => {
     failNextWith(401, { error: "E-mail ou senha inválidos.", code: "INVALID_CREDENTIALS" })
     await expect(api.post("/api/auth/login", {})).rejects.toBeDefined()

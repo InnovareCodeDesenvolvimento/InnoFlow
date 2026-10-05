@@ -5,6 +5,7 @@ import type {
   MeCommandStatusResponse,
   MeCreatePaymentMethodRequest,
   MeCreateTopupRequest,
+  MeProfile,
   MePaymentMethodDTO,
   MePaymentMethodsResponse,
   MeSessionDetail,
@@ -16,6 +17,7 @@ import type {
   MeTopupDTO,
   MeWalletQuery,
   MeWalletResponse,
+  UpdateMeProfileRequest,
 } from "@/types/api"
 
 /**
@@ -25,6 +27,18 @@ import type {
  * PROGRESSO.md §PWA do motorista.
  */
 export const meService = {
+  /** `GET /api/me/profile` (L1.2) - `cpfMasked` sempre mascarado; o e-mail não é editável. */
+  async getProfile(): Promise<MeProfile> {
+    const { data } = await api.get<MeProfile>("/api/me/profile")
+    return data
+  },
+
+  /** `PATCH /api/me/profile` (L1.2) - corpo estrito, ao menos um campo; devolve o DTO já atualizado. `null` em `phone`/`cpf` apaga. */
+  async updateProfile(payload: UpdateMeProfileRequest): Promise<MeProfile> {
+    const { data } = await api.patch<MeProfile>("/api/me/profile", payload)
+    return data
+  },
+
   /** 202 — fire-and-forget, confirma só o enfileiramento do comando OCPP. */
   async startSession(payload: MeStartSessionRequest): Promise<MeStartSessionResponse> {
     const { data } = await api.post<MeStartSessionResponse>("/api/me/sessions/start", payload)

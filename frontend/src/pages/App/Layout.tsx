@@ -6,6 +6,8 @@ import { useAuthStore } from "@/store/authStore"
 import { useActiveSession } from "@/hooks/useMeSessions"
 import { Logo } from "@/components/brand/Logo"
 import { MascotFace } from "@/components/brand/Mascot"
+import { ProfileAvatar } from "@/components/perfil/ProfileAvatar"
+import { firstName } from "@/lib/profileDisplay"
 import { LoadingScreen } from "@/components/feedback/LoadingScreen"
 
 /**
@@ -51,7 +53,16 @@ function AppShell() {
         <Link to="/app" className="flex items-center rounded-md">
           <Logo tone="dark" size={28} />
         </Link>
-        <span className="ml-1 truncate text-xs text-ink-softer">{user?.name?.split(" ")[0]}</span>
+        {/* Acesso ao perfil (L1.2): avatar + primeiro nome, alvo de 44 px. Não é o 6º item da barra (ela fica com 5 destinos). */}
+        <Link
+          to="/app/perfil"
+          aria-label={`Meu perfil${firstName(user?.name) ? `, ${firstName(user?.name)}` : ""}`}
+          aria-current={location.pathname === "/app/perfil" ? "page" : undefined}
+          className="ml-1 flex h-11 min-w-0 items-center gap-2 rounded-full pl-1.5 pr-3 text-xs text-ink-softer hover:bg-white/10 hover:text-white"
+        >
+          <ProfileAvatar name={user?.name} size="sm" />
+          <span className="truncate">{firstName(user?.name)}</span>
+        </Link>
         <button
           type="button"
           onClick={handleLogout}

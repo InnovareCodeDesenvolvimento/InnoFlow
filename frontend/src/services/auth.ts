@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { AuthResponse, GoogleAuthRequest, LinkGoogleResponse } from "@/types/api"
+import type { AuthResponse, ChangePasswordRequest, GoogleAuthRequest, LinkGoogleResponse } from "@/types/api"
 
 export interface LoginPayload {
   email: string
@@ -45,6 +45,15 @@ export const authService = {
    */
   async linkGoogle(payload: GoogleAuthRequest): Promise<LinkGoogleResponse> {
     const { data } = await api.post<LinkGoogleResponse>("/api/auth/google/link", payload)
+    return data
+  },
+
+  /**
+   * `POST /api/auth/password` (AUTENTICADO) - troca (ou, em conta só-Google, DEFINE) a PRÓPRIA senha. A resposta traz um token NOVO e o servidor revoga TODOS os
+   * anteriores, inclusive o desta aba: quem chama precisa trocar o token guardado (`authStore.replaceSession`). Erros: ver `ChangePasswordErrorCode`.
+   */
+  async changePassword(payload: ChangePasswordRequest): Promise<AuthResponse> {
+    const { data } = await api.post<AuthResponse>("/api/auth/password", payload)
     return data
   },
 }
