@@ -55,6 +55,14 @@ RUN npx prisma generate
 # ---- Estágio 3: runner — não-root, sem devDependencies ----
 FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl
+# Cliente do PostgreSQL (pg_dump, pg_restore, psql) para o backup (job do worker e scripts/backup-db.sh, restore-db.sh,
+# ver docs/RUNBOOK-BACKUP-RESTAURACAO.md). REGRA: o cliente tem de ser da MESMA versão do servidor ou mais nova; cliente
+# mais velho que o banco se RECUSA a copiar. O 18 copia servidores 16, 17 e 18; se a Alpine desta imagem não o tiver, cai
+# no 17 (copia servidores 16 e 17, mas não o 18: se o banco for 18, o backup falha dizendo exatamente o que atualizar). Na Alpine 3.22+ os
+# binários moram em /usr/libexec/postgresqlNN e os atalhos em /usr/bin vêm do gatilho do pacote postgresql-common; o
+# `pg_dump --version` abaixo (e o do estágio não-root, depois do USER) é a prova de que o atalho existe e roda.
+RUN (apk add --no-cache postgresql18-client || apk add --no-cache postgresql17-client) \
+  && pg_dump --version && pg_restore --version && psql --version
 WORKDIR /app
 ENV NODE_ENV=production
 # `--chown=node:node` só no node_modules: o Prisma CLI/engines podem precisar escrever ali
@@ -77,6 +85,9 @@ COPY --from=builder /app/scripts ./scripts
 
 # Daqui em diante, não-root. Portas 3000 (api) e 9000 (ocpp) são > 1024: não precisam de root.
 USER node
+
+# O backup roda como `node`: confirma que o cliente executa sem root e que há onde gravar o dump temporário (/tmp).
+RUN pg_dump --version && pg_restore --version && psql --version && tmp="$(mktemp -d)" && test -w "$tmp" && rm -rf "$tmp"
 
 # Sobrescrito por `command:` em cada serviço do docker-compose.yml
 # (start:api / start:ocpp / start:worker).

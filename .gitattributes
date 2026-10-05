@@ -1,0 +1,2 @@
+# Scripts de shell rodam em container Linux: nunca CRLF (um  no shebang/no set -eu quebra o script).
+backend/scripts/*.sh text eol=lf

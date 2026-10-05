@@ -328,3 +328,184 @@ jobs:
           grep -qi "^content-security-policy: default-src 'none'" headers-cartao.txt || { echo "::error::CSP do cartao ausente"; exit 1; }
           curl -sI http://127.0.0.1:8080/ | grep -qi '^content-security-policy:' || { echo "::error::CSP da raiz ausente"; exit 1; }
           echo "ok: frontend sobe e serve"
+
+  # Backup: o dump VOLTA mesmo (ciclo completo em Postgres real, com as migrations de verdade).
+  # Backup que nunca foi restaurado é uma suposição, e testar uma vez à mão não basta: o schema muda toda semana e a restauração
+  # precisa continuar funcionando DEPOIS de cada migration. Por isso o ciclo roda a cada push: semear -> backup-db.sh CIFRADO ->
+  # (chave errada / adulterado / sem chave / banco em uso: recusam e NADA muda) -> DROP SCHEMA -> restore-db.sh -> conferir
+  # dados e contagens. Matriz de servidor 16 (o do EasyPanel hoje) e 18, sempre com o cliente 18 (o mesmo das imagens), o que
+  # cobre também o caso "cliente 18 contra servidor 16" (SET transaction_timeout). Os scripts rodam no `sh` do Ubuntu (dash),
+  # o mesmo tipo de shell POSIX do container Alpine (ash). Job independente: não segura os demais e roda em paralelo.
+  backup-restore:
+    name: Backup — o dump volta mesmo (Postgres ${{ matrix.pg }}, cifrado, ciclo completo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["16", "18"]
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: innoelektron_backup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d innoelektron_backup"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/innoelektron_backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+
+      # O cliente do runner precisa ser >= o servidor (senão o pg_dump recusa). Fixamos o 18, como nas imagens
+      # (postgresql18-client), e o colocamos na frente do PATH: o Ubuntu já traz um cliente mais antigo.
+      - name: Instala o cliente do Postgres 18
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version
+
+      - name: Os 3 Dockerfiles do backend trazem o mesmo cliente do Postgres
+        working-directory: .
+        run: |
+          for f in backend/Dockerfile backend/Dockerfile.ocpp backend/Dockerfile.worker; do
+            grep -q 'apk add --no-cache postgresql18-client || apk add --no-cache postgresql17-client' "$f" || { echo "::error::$f sem o cliente do Postgres (18 com queda para 17)"; exit 1; }
+          done
+          echo "ok"
+
+      - name: Cria o schema (as migrations de verdade) e confirma a versão do servidor
+        run: |
+          npx prisma migrate deploy
+          v="$(psql "$DATABASE_URL" -tAc 'SHOW server_version_num')"
+          case "$v" in ${{ matrix.pg }}*) echo "servidor $v" ;; *) echo "::error::servidor nao e ${{ matrix.pg }}.x ($v)"; exit 1 ;; esac
+          pg_dump --version
+
+      - name: Semeia dados conhecidos e tira o retrato do banco
+        run: |
+          node scripts/backup-smoke.mjs semear
+          node scripts/backup-smoke.mjs contagens > "$RUNNER_TEMP/contagens-antes.txt"
+          wc -l "$RUNNER_TEMP/contagens-antes.txt"
+
+      # O formato do arquivo é um contrato (docs/BACKUP-FORMATO.md): o vetor fixo do documento tem que abrir com o script, que
+      # não depende do projeto. O teste cruzado com o módulo do backend roda na suíte do job `backend`.
+      - name: O decifrador abre o vetor fixo do formato (docs/BACKUP-FORMATO.md)
+        run: |
+          printf 'CHAVE: 00010203-04050607-08090a0b-0c0d0e0f-10111213-14151617-18191a1b-1c1d1e1f\n' > "$RUNNER_TEMP/chave-vetor.txt"
+          node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from("494e4e4f424b5001630dcd29f807afc63f469e11d7319de26c83d30b7549b1767cb152053bf76f40d8972e6c8c365ccae02ed6a01ffe57701f4fb85a1ad88af5d8818c36d1d9b530ff06f45ed54619b1de9bfc0dcebca48622ad1288", "hex"))' "$RUNNER_TEMP/vetor.dump.enc"
+          node scripts/decrypt-backup.mjs "$RUNNER_TEMP/vetor.dump.enc" --info | grep -q 630dcd29
+          node scripts/decrypt-backup.mjs "$RUNNER_TEMP/vetor.dump.enc" --chave "$RUNNER_TEMP/chave-vetor.txt" --saida "$RUNNER_TEMP/vetor.dump"
+          test "$(cat "$RUNNER_TEMP/vetor.dump")" = "PGDMP-vetor-fixo-InnoFlow: dados de teste 0123456789"
+
+      # A chave é gerada na hora e nunca sai do runner.
+      - name: Gera a chave do backup (e uma chave errada)
+        run: |
+          printf 'CHAVE: %s\n' "$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')" > "$RUNNER_TEMP/chave.txt"
+          printf 'CHAVE: %s\n' "$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')" > "$RUNNER_TEMP/chave-errada.txt"
+          chmod 600 "$RUNNER_TEMP/chave.txt"
+
+      - name: Sem chave o backup RECUSA (cópia em claro é decisão explícita)
+        run: |
+          if sh scripts/backup-db.sh ./backups-sem-chave; then echo "::error::backup sem chave foi aceito"; exit 1; fi
+          if ls ./backups-sem-chave/* >/dev/null 2>&1; then echo "::error::o backup recusado deixou arquivo"; exit 1; fi
+
+      - name: Faz o backup cifrado
+        run: |
+          BACKUP_KEY_FILE="$RUNNER_TEMP/chave.txt" sh scripts/backup-db.sh ./backups
+          ls -l ./backups
+
+      - name: O arquivo saiu cifrado (sem dump em claro, ilegível sem a chave, sem texto da semente)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          if ls ./backups/*.dump >/dev/null 2>&1; then echo "::error::sobrou dump em claro"; exit 1; fi
+          if pg_restore --list "$ENC" >/dev/null 2>&1; then echo "::error::o arquivo cifrado é lido como dump"; exit 1; fi
+          if grep -aq "Eletroposto da Ação" "$ENC"; then echo "::error::texto da semente aparece no arquivo cifrado"; exit 1; fi
+          node scripts/decrypt-backup.mjs "$ENC" --info
+          node scripts/decrypt-backup.mjs "$ENC" --chave "$RUNNER_TEMP/chave.txt" --verificar
+          # nada do trabalho ficou para trás na pasta temporária
+          if ls "${TMPDIR:-/tmp}"/innoflow-backup.* >/dev/null 2>&1; then echo "::error::sobrou pasta temporária do backup"; exit 1; fi
+
+      # Recusas ANTES de destruir: com o banco ainda cheio, nada disto pode alterá-lo.
+      - name: Recusas com o banco ainda cheio (sem confirmar, banco em uso, chave errada, sem chave, adulterado, cortado, forjado)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          antes() { psql "$DATABASE_URL" -tAc 'SELECT count(*) FROM "Operator"'; }
+          N0="$(antes)"; test "$N0" -ge 1
+          expect_fail() { if "$@"; then echo "::error::deveria ter recusado: $*"; exit 1; fi; }
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --chave "$RUNNER_TEMP/chave.txt"
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt"
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave-errada.txt" --permitir-banco-em-uso
+          expect_fail sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --permitir-banco-em-uso
+          node -e 'const fs=require("fs");const b=fs.readFileSync(process.argv[1]);b[b.length>>1]^=1;fs.writeFileSync(process.argv[2],b)' "$ENC" ./backups/adulterado.dump.enc
+          expect_fail sh scripts/restore-db.sh ./backups/adulterado.dump.enc "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt" --permitir-banco-em-uso
+          head -c 5000 "$ENC" > ./backups/cortado.dump.enc
+          expect_fail sh scripts/restore-db.sh ./backups/cortado.dump.enc "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt" --permitir-banco-em-uso
+          # arquivo sem a marca de cifra (dump forjado) sem a flag --aceitar-sem-cifra
+          printf 'PGDMP-falso' > ./backups/forjado.dump
+          expect_fail sh scripts/restore-db.sh ./backups/forjado.dump "$DATABASE_URL" --confirmar --permitir-banco-em-uso
+          expect_fail node scripts/decrypt-backup.mjs "$ENC" --chave "$RUNNER_TEMP/chave-errada.txt" --saida "$RUNNER_TEMP/errada.dump"
+          test ! -e "$RUNNER_TEMP/errada.dump"
+          rm -f ./backups/adulterado.dump.enc ./backups/cortado.dump.enc ./backups/forjado.dump
+          test "$(antes)" = "$N0"
+          if ls "${TMPDIR:-/tmp}"/innoflow-restore.* >/dev/null 2>&1; then echo "::error::sobrou pasta temporária da restauração"; exit 1; fi
+          echo "ok: todas as recusas deixaram o banco intacto"
+
+      # Caminho do ensaio de DR (o normal): restaura num banco NOVO, sem flag nenhuma, e compara com o original.
+      - name: Ensaio de DR — restaura num banco novo (não precisa de --permitir-banco-em-uso)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          psql "$DATABASE_URL" -c 'CREATE DATABASE innoelektron_restaurado'
+          NOVO="postgresql://postgres:postgres@127.0.0.1:5432/innoelektron_restaurado"
+          sh scripts/restore-db.sh "$ENC" "$NOVO" --confirmar --chave "$RUNNER_TEMP/chave.txt"
+          DATABASE_URL="$NOVO" node scripts/backup-smoke.mjs conferir
+          DATABASE_URL="$NOVO" node scripts/backup-smoke.mjs contagens > "$RUNNER_TEMP/contagens-novo.txt"
+          diff "$RUNNER_TEMP/contagens-antes.txt" "$RUNNER_TEMP/contagens-novo.txt"
+          # restaurar DE NOVO por cima de um banco já cheio também tem que funcionar (tabelas particionadas incluídas)
+          sh scripts/restore-db.sh "$ENC" "$NOVO" --confirmar --chave "$RUNNER_TEMP/chave.txt"
+          DATABASE_URL="$NOVO" node scripts/backup-smoke.mjs conferir
+
+      # O DESASTRE, simulado: o banco some por completo. É contra isto que o backup existe, então é exatamente isto que o
+      # teste precisa provocar.
+      - name: Destrói o banco (DROP SCHEMA)
+        run: |
+          psql "$DATABASE_URL" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+          N="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
+          test "$N" = "0"
+
+      - name: Decifra e restaura em cima do banco destruído (--permitir-banco-em-uso)
+        run: |
+          ENC="$(ls -1 ./backups/backup-innoflow-*.dump.enc | head -1)"
+          sh scripts/restore-db.sh "$ENC" "$DATABASE_URL" --confirmar --chave "$RUNNER_TEMP/chave.txt" --permitir-banco-em-uso
+
+      - name: Confere se os dados e as contagens voltaram idênticos
+        run: |
+          node scripts/backup-smoke.mjs conferir
+          node scripts/backup-smoke.mjs contagens > "$RUNNER_TEMP/contagens-depois.txt"
+          diff "$RUNNER_TEMP/contagens-antes.txt" "$RUNNER_TEMP/contagens-depois.txt"
+          echo "ok: $(wc -l < "$RUNNER_TEMP/contagens-depois.txt") itens idênticos antes e depois"
+
+      # As migrations ainda batem com o banco restaurado (o boot das 3 apps roda isto): tem que ser um no-op.
+      - name: prisma migrate deploy no banco restaurado não tem nada a aplicar
+        run: |
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/migrate.log" | tail -3
+          grep -q "No pending migrations" "$RUNNER_TEMP/migrate.log"

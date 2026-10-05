@@ -26,6 +26,9 @@ RUN npx prisma generate
 
 FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl
+# Cliente do PostgreSQL para o backup — ver o comentário completo no `Dockerfile`. Idêntico nos 3 arquivos.
+RUN (apk add --no-cache postgresql18-client || apk add --no-cache postgresql17-client) \
+  && pg_dump --version && pg_restore --version && psql --version
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
@@ -36,6 +39,9 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/scripts ./scripts
 
 USER node
+
+# O backup roda como `node`: confirma que o cliente executa sem root e que há onde gravar o dump temporário (/tmp).
+RUN pg_dump --version && pg_restore --version && psql --version && tmp="$(mktemp -d)" && test -w "$tmp" && rm -rf "$tmp"
 
 # `prisma migrate deploy &&` — ver explicação completa no `Dockerfile`
 # principal (achado real de produção, 17/09/2026). Seguro rodar concorrente

@@ -1022,3 +1022,16 @@ No log do worker: `partition_horizon` (por tabela, a cada rodada), `partition_cr
 - **Anti-SSRF:** em produção, host SMTP/URL da Evolution apontando para a rede interna, loopback ou metadados de nuvem são recusados (na gravação e de novo na hora de conectar, no IP já validado — um DNS que muda entre a checagem e a conexão não passa). **Resíduo documentado:** o bloqueio vale para o que o painel configura; as envs `ALERT_*` são confiáveis (definidas por quem faz o deploy) e podem apontar para a rede interna. Redirecionamentos HTTP nunca são seguidos.
 - **Auditoria:** cada salvar gera uma linha em "Auditoria" (`UPDATE` / `NotificationChannelConfig`) com antes/depois dos campos não secretos (segredo só como "alterado", destinatários só como contagem) e dispara o alerta `communication_config_changed` (IMPORTANTE) **pela configuração antiga** — se alguém trocar os destinatários, o aviso ainda chega ao dono de antes. Se não foi você: troque a senha do admin e a `PAYMENT_SECRETS_KEY`.
 - **Migration:** `20261005140000_notification_channel_config` (tabela nova `NotificationChannelConfig`, singleton, aditiva) roda sozinha no boot dos 3 serviços (`prisma migrate deploy`).
+
+---
+
+## 8. Backups e restauração (resumo operacional)
+
+O passo a passo completo (o que é salvo e o que não é, RPO/RTO, restauração total no EasyPanel, restauração parcial, ensaio trimestral e checklist) está em **`docs/RUNBOOK-BACKUP-RESTAURACAO.md`**. O formato do arquivo cifrado, em `docs/BACKUP-FORMATO.md`. Aqui só o que pertence a este checklist de deploy:
+
+- **O agendador roda no `worker`**; a API só enfileira "fazer backup agora" / "conferir backup". As 3 imagens do backend (`Dockerfile`, `Dockerfile.ocpp`, `Dockerfile.worker`) trazem o cliente do Postgres (`postgresql18-client`, com queda para o 17: `pg_dump`, `pg_restore`, `psql`), que precisa ser da versão do Postgres do EasyPanel ou mais nova. Se você subir a versão do Postgres do serviço, confira que o cliente da imagem acompanha. Atualize os **3** Dockerfiles juntos.
+- O backup grava o dump em `/tmp` do container (gravável pelo usuário `node`; o diretório da aplicação não é). Precisa de espaço livre de ~2x o tamanho do dump por alguns instantes.
+- **Nenhuma variável de ambiente nova é obrigatória** para o backup: destino (S3/Drive), horário e retenção são configurados em Admin > Backup e ficam cifrados no banco. Opcionais: `BACKUP_PG_BIN_DIR` (pasta dos binários do Postgres, só para desenvolvimento) e `BACKUP_ALLOW_PRIVATE_HOSTS`.
+- **Guarde fora do EasyPanel:** a chave do backup (o `.txt` baixado em Admin > Backup) e a **`PAYMENT_SECRETS_KEY`**. Sem a segunda, restaurar o banco não devolve as credenciais da Cielo, o SMTP, a Evolution nem os cartões salvos. Detalhes na seção 4 do runbook.
+- Faça o **ensaio de restauração a cada trimestre** (runbook, seção 9) e depois de trocar de servidor/versão do Postgres.
+- **CI:** o job `backup-restore` (Postgres 16 e 18) prova o ciclo completo a cada push; é ele que avisa se uma migration nova quebrar a restauração.
