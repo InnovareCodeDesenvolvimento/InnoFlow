@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 import path from "node:path"
 import { PASTA_AUTH, PERSONAS, type Persona } from "./constantes"
-import { aguardarEstavel, fotografar, prepararPagina } from "./estabilizar"
+import { aguardarEstavel, fotografar, medirContrasteSeSolicitado, prepararPagina } from "./estabilizar"
 import { ROTAS } from "./rotas"
 
 /**
@@ -17,13 +17,15 @@ for (const persona of personas) {
     })
 
     for (const rota of ROTAS.filter((r) => r.persona === persona)) {
-      test(`${rota.id} (${rota.path})`, async ({ page }) => {
+      test(`${rota.id} (${rota.path})`, async ({ page }, info) => {
+        test.fixme(!!rota.pendente?.larguras.includes(info.project.name), rota.pendente?.motivo)
         await prepararPagina(page)
         await page.goto(rota.path, { waitUntil: "load" })
         await aguardarEstavel(page, rota.pronto)
         const foto = await fotografar(page, { crescerAteODocumento: rota.crescerAteODocumento, nome: rota.id })
         // Modo SONDA (VISUAL_GEO_DIR): só coleta DOM+imagem para `scripts/comparar-geometria.mjs`; não compara com a baseline (senão o 1º diff aborta o fluxo de várias telas).
         if (!process.env.VISUAL_GEO_DIR) expect(foto).toMatchSnapshot(`${rota.id}.jpg`, rota.ruidoRaster ? { maxDiffPixelRatio: 0.004 } : {})
+        await medirContrasteSeSolicitado(page, rota.id)
       })
     }
   })

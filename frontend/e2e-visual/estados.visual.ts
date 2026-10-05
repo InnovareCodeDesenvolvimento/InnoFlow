@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import path from "node:path"
-import { PASTA_AUTH, PERSONAS, T0 } from "./constantes"
-import { aguardarEstavel, fotografar, prepararPagina } from "./estabilizar"
+import { PASTA_AUTH, PERSONAS, SENHA, T0 } from "./constantes"
+import { aguardarEstavel, fotografar, medirContrasteSeSolicitado, prepararPagina } from "./estabilizar"
 
 /**
  * Estados que não são "abrir uma URL": sessão ao vivo, recibo de recarga concluída, diálogos do admin e o formulário do cartão.
@@ -14,10 +14,11 @@ import { aguardarEstavel, fotografar, prepararPagina } from "./estabilizar"
 const SALTO_AO_VIVO_MS = 125_000 // 2 min 05 s de recarga => 243 Wh => 0,24 kWh
 const SALTO_FIM_MS = 10_000 // depois do Stop, > 4 s para o mock fechar a sessão
 
-async function foto(page: Page, nome: string, opts: { crescerAteODocumento?: boolean; spinnerEhConteudo?: boolean } = {}) {
+async function foto(page: Page, nome: string, opts: { crescerAteODocumento?: boolean; spinnerEhConteudo?: boolean; soJanela?: boolean } = {}) {
   await aguardarEstavel(page, { spinnerEhConteudo: opts.spinnerEhConteudo })
   const imagem = await fotografar(page, { ...opts, nome })
   if (!process.env.VISUAL_GEO_DIR) expect(imagem).toMatchSnapshot(`${nome}.jpg`) // modo SONDA: ver rotas.visual.ts
+  await medirContrasteSeSolicitado(page, nome, { soJanela: opts.soJanela })
 }
 
 test.describe("fluxo de recarga (uma página só) — conectando, ao vivo, parar, recibo", () => {
@@ -145,5 +146,198 @@ test.describe("recuperação de senha (L1.3) - estados que não são só abrir a
     await page.getByRole("button", { name: "Redefinir senha" }).click()
     await expect(page.getByText("Senha alterada. Entre com a nova senha.")).toBeVisible()
     await foto(page, "auth-login-aviso-senha-alterada")
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Lote 1 (05/10/2026): tour do Inno, Primeiros passos, Backups (conta populada), recarga remota, estorno/chargeback/devolução. Receitas copiadas das réguas da Lyra
+// (`criterios-recarga-remota`, `verificacoes-estorno`, `verificacoes-onboarding`, `verificacoes-backup`), trocando medir por fotografar.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+async function entrarPelaUI(page: Page, email: string, depoisDe: RegExp = /^\/(admin|app)/) {
+  await page.goto("/login", { waitUntil: "load" })
+  await page.getByLabel("E-mail").fill(email)
+  await page.getByLabel("Senha").fill(SENHA)
+  await page.getByRole("button", { name: "Entrar" }).click()
+  await page.waitForURL((u) => depoisDe.test(u.pathname), { timeout: 30_000 })
+}
+
+async function esperarBalao(page: Page) {
+  await expect(page.locator("[data-tour-balloon][data-ready]")).toBeVisible({ timeout: 20_000 })
+  await page.waitForTimeout(500)
+}
+
+test.describe("tour do Inno (1ª visita; interruptor de aparelho DESLIGADO de propósito: login pela UI com storageState vazio)", () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test("onb-motorista-boas-vindas, onb-motorista-mapa e onb-motorista-qr", async ({ page }) => {
+    await prepararPagina(page)
+    await entrarPelaUI(page, PERSONAS.driver.email)
+    await esperarBalao(page)
+    await foto(page, "onb-motorista-boas-vindas", { soJanela: true })
+    await page.getByRole("button", { name: "Vamos lá" }).click()
+    await page.waitForTimeout(400)
+    await esperarBalao(page)
+    await foto(page, "onb-motorista-mapa", { soJanela: true })
+    await page.getByRole("button", { name: "Próximo" }).click() // QR: está na Home
+    await page.waitForTimeout(400)
+    await esperarBalao(page)
+    await foto(page, "onb-motorista-qr", { soJanela: true })
+  })
+
+  test("onb-painel-boas-vindas, onb-painel-menu e onb-painel-passo3 (dashboard a partir de 1024 px; atalhos abaixo disso)", async ({ page }) => {
+    await prepararPagina(page)
+    await entrarPelaUI(page, PERSONAS.admin.email)
+    await esperarBalao(page)
+    await foto(page, "onb-painel-boas-vindas", { soJanela: true })
+    await page.getByRole("button", { name: "Vamos lá" }).click()
+    await page.waitForTimeout(400)
+    await esperarBalao(page)
+    await foto(page, "onb-painel-menu", { soJanela: true })
+    await page.getByRole("button", { name: "Próximo" }).click()
+    await page.waitForTimeout(400)
+    await esperarBalao(page)
+    await foto(page, "onb-painel-passo3", { soJanela: true })
+  })
+})
+
+test.describe("Primeiros passos (card do Dashboard do ADMIN, depois do tour)", () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test("adm-dashboard-primeiros-passos", async ({ page }) => {
+    await prepararPagina(page)
+    // 1ª visita já concluída (só o tour; o interruptor do aparelho segue desligado=ausente): sem o tour por cima, o card aparece.
+    await page.addInitScript(() => localStorage.setItem("innoflow:tour:v1:user_admin:admin", JSON.stringify({ version: 1, status: "completed", at: "2026-10-04T00:00:00.000Z" })))
+    await entrarPelaUI(page, PERSONAS.admin.email, /^\/admin/)
+    await expect(page.getByRole("region", { name: "Primeiros passos" })).toBeVisible({ timeout: 20_000 })
+    await foto(page, "adm-dashboard-primeiros-passos")
+  })
+})
+
+test.describe("Backups com a conta já configurada (S3 pronto)", () => {
+  // storageState PADRÃO do projeto (só o interruptor do onboarding ligado a "off"): senão o tour da 1ª visita abre por cima da tela.
+
+  test("adm-backups-s3-pronto", async ({ page }) => {
+    await prepararPagina(page)
+    await entrarPelaUI(page, "backup-s3@innoelektron.com", /^\/admin/)
+    await page.goto("/admin/backups", { waitUntil: "load" })
+    await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+    await expect(page.getByTestId("section-history")).toBeVisible()
+    await foto(page, "adm-backups-s3-pronto")
+  })
+})
+
+test.describe("Iniciar recarga (Admin > Pontos de recarga) — diálogo em seus estados", () => {
+  test.use({ storageState: path.join(PASTA_AUTH, `${PERSONAS.admin.arquivo}.json`) })
+  const CP = "CP-VILA-NORTE-01"
+  const MOTIVO = "Motorista sem bateria no celular, recarga iniciada pelo suporte por telefone a pedido do cliente que está no local"
+  const dialogo = (page: Page) => page.getByRole("dialog", { name: "Iniciar recarga" })
+
+  async function abrir(page: Page, cp = CP, cenario?: string) {
+    await page.goto("/admin/charge-points", { waitUntil: "load" })
+    await aguardarEstavel(page)
+    if (cenario) await page.evaluate((c) => localStorage.setItem("mock:remote-start", c), cenario)
+    await page.getByRole("button", { name: `Comandos de ${cp}` }).click()
+    await page.getByRole("menuitem", { name: /Iniciar recarga/ }).click()
+    await expect(dialogo(page)).toBeVisible()
+    await page.waitForTimeout(500)
+  }
+  async function preencher(page: Page) {
+    const d = dialogo(page)
+    await d.getByRole("searchbox", { name: "Buscar motorista" }).fill("carla")
+    await d.getByText("Carla Motorista", { exact: true }).first().click()
+    await d.getByLabel(/Motivo/).fill(MOTIVO)
+    return d
+  }
+
+  test("adm-dialogo-recarga-remota-form, -confirmacao, -aguardando e -aceito (um fluxo só: o mock mora na página)", async ({ page }) => {
+    await prepararPagina(page)
+    await abrir(page)
+    await foto(page, "adm-dialogo-recarga-remota-form")
+    const d = await preencher(page)
+    await d.getByRole("button", { name: /Revisar recarga/ }).click()
+    await expect(page.getByTestId("remote-start-summary")).toBeVisible()
+    await foto(page, "adm-dialogo-recarga-remota-confirmacao")
+    await d.getByRole("button", { name: "Iniciar recarga" }).click()
+    await expect(page.getByTestId("remote-start-status")).toHaveAttribute("data-phase", "POLLING")
+    await foto(page, "adm-dialogo-recarga-remota-aguardando", { spinnerEhConteudo: true }) // o estado É "aguardando": o spinner é o conteúdo
+    await page.clock.setFixedTime(new Date(T0.getTime() + 5_000)) // o mock passa dos 3 s e o próximo ciclo traz ACCEPTED
+    await expect(page.getByTestId("remote-start-status")).toHaveAttribute("data-phase", "ACCEPTED", { timeout: 20_000 })
+    await expect(dialogo(page).getByRole("link", { name: "Ver sessão", exact: true })).toBeVisible()
+    await foto(page, "adm-dialogo-recarga-remota-aceito")
+  })
+
+  test("adm-dialogo-recarga-remota-recusado (cenário 'rejected' do mock)", async ({ page }) => {
+    await prepararPagina(page)
+    await abrir(page, CP, "rejected")
+    const d = await preencher(page)
+    await d.getByRole("button", { name: /Revisar recarga/ }).click()
+    await d.getByRole("button", { name: "Iniciar recarga" }).click()
+    await page.clock.setFixedTime(new Date(T0.getTime() + 5_000))
+    await expect(page.getByTestId("remote-start-status")).toHaveAttribute("data-phase", "REJECTED", { timeout: 15_000 })
+    await foto(page, "adm-dialogo-recarga-remota-recusado")
+  })
+
+  test("adm-dialogo-recarga-remota-offline (carregador sem conexão: conectores bloqueados)", async ({ page }) => {
+    await prepararPagina(page)
+    await abrir(page, "CP-OUTLET-CAMPINAS-01")
+    await expect(dialogo(page).getByTestId("remote-start-offline")).toBeVisible()
+    await foto(page, "adm-dialogo-recarga-remota-offline")
+  })
+})
+
+test.describe("estorno, chargeback e devolução de conta excluída (Admin) — diálogos", () => {
+  test.use({ storageState: path.join(PASTA_AUTH, `${PERSONAS.admin.arquivo}.json`) })
+
+  test("adm-dialogo-estorno-form e adm-dialogo-estorno-confirmacao (detalhe da sessão > Devoluções > Estornar)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto("/admin/sessoes", { waitUntil: "load" })
+    await aguardarEstavel(page)
+    await page.getByRole("row").filter({ hasText: "Tiago Travado" }).filter({ hasText: "Encerrada" }).click()
+    const detalhe = page.getByRole("dialog", { name: /Detalhe da sessão/ })
+    await expect(detalhe.getByTestId("admin-refunds").getByTestId("refund-item").first()).toBeVisible()
+    await detalhe.getByTestId("admin-refunds").getByRole("button", { name: "Estornar" }).click()
+    const form = page.getByRole("dialog", { name: /Estornar sessão/ })
+    await expect(form).toBeVisible()
+    await foto(page, "adm-dialogo-estorno-form")
+    await form.getByLabel(/Valor \(R\$\)/).fill("8,00")
+    await form.getByLabel(/Motivo/).fill("Estorno parcial por energia não entregue")
+    await form.getByRole("button", { name: /Revisar estorno/ }).click()
+    await expect(page.getByRole("dialog", { name: "Confirmar estorno" })).toBeVisible()
+    await foto(page, "adm-dialogo-estorno-confirmacao")
+  })
+
+  test("adm-dialogo-chargeback-registrar (Pagamentos > busca Cielo > Registrar chargeback)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto("/admin/pagamentos", { waitUntil: "load" })
+    await expect(page.getByRole("heading", { name: "Pagamentos", level: 1 })).toBeVisible()
+    await aguardarEstavel(page)
+    await page.getByRole("button", { name: "Buscar venda da Cielo" }).click()
+    await page.locator("#acquirer-filters").getByLabel("Tid").fill("10069930690000999001")
+    await page.locator("#acquirer-filters").getByRole("button", { name: "Buscar" }).click()
+    await expect(page.getByRole("row")).toHaveCount(2)
+    await page.getByRole("button", { name: /Registrar chargeback/ }).click()
+    await expect(page.getByRole("dialog", { name: "Registrar chargeback" })).toBeVisible()
+    await foto(page, "adm-dialogo-chargeback-registrar")
+  })
+
+  test("adm-dialogo-chargeback-detalhe (caso aberto com prazo vencido)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto("/admin/chargebacks", { waitUntil: "load" })
+    await expect(page.getByTestId("chargebacks-urgent")).toBeVisible()
+    await aguardarEstavel(page)
+    await page.getByRole("button", { name: "Ver chargeback do caso CASO-2026-0166" }).click()
+    await expect(page.getByRole("dialog", { name: /CASO-2026-0166/ })).toBeVisible()
+    await foto(page, "adm-dialogo-chargeback-detalhe")
+  })
+
+  test("adm-dialogo-devolver-saldo-form (fila de devoluções de contas excluídas > Devolver)", async ({ page }) => {
+    await prepararPagina(page)
+    await page.goto("/admin/devolucoes-contas-excluidas", { waitUntil: "load" })
+    await expect(page.getByTestId("deletion-row")).toHaveCount(3)
+    await aguardarEstavel(page)
+    await page.getByTestId("deletion-row").nth(2).getByRole("button", { name: /Devolver/ }).click()
+    await expect(page.getByRole("dialog", { name: "Devolver saldo" })).toBeVisible()
+    await foto(page, "adm-dialogo-devolver-saldo-form")
   })
 })

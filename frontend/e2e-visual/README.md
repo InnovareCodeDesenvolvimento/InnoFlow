@@ -14,6 +14,10 @@ Este diretório **não faz parte** da suíte E2E de 185 testes (`frontend/e2e/`,
 
 `verificacoes-gateway.visual.ts` (`npx playwright test --config playwright.visual.config.ts verificacoes-gateway`): contraste por pixel em ~24 estados da tela do gateway (contas do mock, diálogos, erros de salvar, resultado do teste de conexão) e a geometria que a foto não mostra (barra de salvar solta × grudada, alvo do interruptor, alvos de 44 px a 375).
 
+`verificacoes-lote1.visual.ts`: verificações que a foto não prova no lote 1 (hoje: o título do card de Configurações não pode ser espremido pelos selos a 375 px; `test.fail` até a Lyra corrigir).
+`VISUAL_CONTRASTE=1` (com `rotas estados`): depois de cada foto mede o contraste de TEXTO por pixel (`contraste-pixel.ts`) e REPROVA texto abaixo do AA; grava `e2e-visual/.resultados/contraste-lote1/<largura>__<id>.json`. Custa uma captura extra por foto: não vale no `test:visual` normal.
+`Rota.pendente` (`rotas.ts`): largura em que a foto mostraria um defeito conhecido e por isso não tem baseline; o teste vira `fixme` (skipped, com o motivo) até a correção. `fotografar(..., { soJanela: true })`: foto só da janela, sem crescer a viewport (tour do mascote, balão ancorado na janela).
+
 Filtros úteis: `npx playwright test --config playwright.visual.config.ts rotas --project 375 -g "adm-sessoes"`.
 
 ## O que é fotografado

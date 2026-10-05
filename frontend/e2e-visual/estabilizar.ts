@@ -1,9 +1,10 @@
 import { deflateSync, crc32 } from "node:zlib"
-import { test, type Page } from "@playwright/test"
-import { writeFileSync } from "node:fs"
+import { expect, test, type Page } from "@playwright/test"
+import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { gravarGeometria } from "./geometria"
 import { T0 } from "./constantes"
+import { medirContrastePixel } from "./contraste-pixel"
 
 function chunk(tipo: string, dados: Buffer): Buffer {
   const len = Buffer.alloc(4)
@@ -164,9 +165,11 @@ const ALTURA_MAXIMA = 14_000
  * `crescerAteODocumento`: telas do PWA têm bottom nav `fixed`; sem crescer, o `fullPage` a desenha no meio da imagem, por cima do conteúdo
  * (a posição "na dobra" da viewport original). NÃO use onde a altura depende de `vh` (landing, login): a viewport gigante esticaria o hero.
  */
-export async function fotografar(page: Page, opts: { crescerAteODocumento?: boolean; nome?: string } = {}): Promise<Buffer> {
+export async function fotografar(page: Page, opts: { crescerAteODocumento?: boolean; nome?: string; soJanela?: boolean } = {}): Promise<Buffer> {
   const original = page.viewportSize()!
-  const extra = await page.evaluate((doc) => {
+  // `soJanela`: o estado É o que se vê na janela (tour do mascote: balão ancorado em elementos FIXOS da janela). Sem crescer a viewport e sem `fullPage`.
+  const opcoes = opts.soJanela ? { ...OPCOES_FOTO, fullPage: false } : OPCOES_FOTO
+  const extra = opts.soJanela ? 0 : await page.evaluate((doc) => {
     let melhor = doc ? Math.max(0, document.documentElement.scrollHeight - window.innerHeight) : 0
     let clientMelhor = 0
     for (const el of Array.from(document.querySelectorAll<HTMLElement>("body *"))) {
@@ -189,16 +192,16 @@ export async function fotografar(page: Page, opts: { crescerAteODocumento?: bool
     // fullPage de uma página saía em ~60% das vezes com outra quebra de linha/altura (texto na métrica da fonte de reserva), e a SEGUNDA, no
     // mesmo instante, era sempre igual à baseline. DOM e `document.fonts` eram idênticos antes das duas (as faces "Inter Fallback" só ficam
     // `loaded` DEPOIS da 1ª captura). Causa raiz não identificada no Chromium; o contorno é fotografar duas vezes e guardar a segunda.
-    await page.screenshot({ ...OPCOES_FOTO, quality: 20 })
+    await page.screenshot({ ...opcoes, quality: 20 })
     // Sonda de geometria (F-A): só com VISUAL_GEO_DIR. Grava o DOM+retângulos+estilos e a imagem da MESMA captura (ver geometria.ts / scripts/comparar-geometria.mjs).
     if (process.env.VISUAL_GEO_DIR && opts.nome) {
       const vp = test.info().project.name
       await gravarGeometria(page, opts.nome, vp)
-      const foto = await page.screenshot(OPCOES_FOTO)
+      const foto = await page.screenshot(opcoes)
       writeFileSync(path.join(process.env.VISUAL_GEO_DIR, `${vp}__${opts.nome}.jpg`), foto)
       return foto
     }
-    return await page.screenshot(OPCOES_FOTO)
+    return await page.screenshot(opcoes)
   } finally {
     if (extra > 0) await page.setViewportSize(original)
   }
@@ -207,4 +210,28 @@ export async function fotografar(page: Page, opts: { crescerAteODocumento?: bool
 async function aguardarLayout(page: Page) {
   await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
   await page.evaluate(() => document.fonts.ready)
+}
+
+/**
+ * Contraste de TEXTO por PIXEL (`contraste-pixel.ts`) do estado que acabou de ser fotografado, quando `VISUAL_CONTRASTE=1` (nunca no `test:visual` normal: custa 1 captura extra por foto).
+ * Grava `e2e-visual/.resultados/contraste-lote1/<largura>__<id>.json` e REPROVA se houver texto abaixo do AA. `soJanela`: mede a janela como está (tour: balão ancorado), sem crescer.
+ */
+export async function medirContrasteSeSolicitado(page: Page, nome: string, opts: { soJanela?: boolean } = {}) {
+  if (!process.env.VISUAL_CONTRASTE) return
+  const vp = test.info().project.name
+  const original = page.viewportSize()!
+  const crescer = !opts.soJanela
+  if (crescer) {
+    await page.setViewportSize({ width: original.width, height: Math.max(original.height, 2600) })
+    await aguardarLayout(page)
+  }
+  try {
+    const r = await medirContrastePixel(page)
+    mkdirSync("e2e-visual/.resultados/contraste-lote1", { recursive: true })
+    writeFileSync(`e2e-visual/.resultados/contraste-lote1/${vp}__${nome}.json`, JSON.stringify({ nome, vp, textos: r.textos, menor: r.menor, reprovados: r.reprovados, piores: r.piores.slice(0, 3) }, null, 1))
+    expect(r.textos, `nenhum texto medido em ${nome}@${vp}`).toBeGreaterThan(3)
+    expect(r.reprovados.map((t) => `${t.texto} ${t.pior.toFixed(2)}:1 (< ${t.limiar})`), `contraste por pixel em ${nome}@${vp}`).toEqual([])
+  } finally {
+    if (crescer) await page.setViewportSize(original)
+  }
 }
