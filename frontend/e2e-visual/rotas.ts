@@ -79,7 +79,7 @@ export const ROTAS: Rota[] = [
   { id: "adm-configuracoes-email", path: "/admin/configuracoes/email", persona: "admin", pronto: { heading: "Configurações · E-mail" }, pendente: { larguras: ["375"], motivo: PENDENTE_CARD_375 } },
   { id: "adm-configuracoes-whatsapp", path: "/admin/configuracoes/whatsapp", persona: "admin", pronto: { heading: "Configurações · WhatsApp" }, pendente: { larguras: ["375"], motivo: PENDENTE_CARD_375 } },
   { id: "adm-configuracoes-alertas", path: "/admin/configuracoes/alertas", persona: "admin", pronto: { heading: "Configurações · Alertas" } },
-  { id: "adm-backups", path: "/admin/backups", persona: "admin", pronto: { heading: "Backups" } },
+  { id: "adm-backups", path: "/admin/backups", persona: "admin", pronto: { heading: "Backup do banco" } },
   { id: "adm-chargebacks", path: "/admin/chargebacks", persona: "admin", pronto: { heading: "Chargebacks" } },
   { id: "adm-devolucoes-contas-excluidas", path: "/admin/devolucoes-contas-excluidas", persona: "admin", pronto: { heading: "Devoluções de contas excluídas" } },
 ]

@@ -221,7 +221,7 @@ test.describe("Backups com a conta já configurada (S3 pronto)", () => {
     await prepararPagina(page)
     await entrarPelaUI(page, "backup-s3@innoelektron.com", /^\/admin/)
     await page.goto("/admin/backups", { waitUntil: "load" })
-    await expect(page.getByRole("heading", { name: "Backups", level: 1 })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Backup do banco", level: 1 })).toBeVisible()
     await expect(page.getByTestId("section-history")).toBeVisible()
     await foto(page, "adm-backups-s3-pronto")
   })
