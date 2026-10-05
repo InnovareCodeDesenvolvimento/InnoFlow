@@ -95,6 +95,9 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   ocpp_trust_proxy_hops_zero_in_production: 'IMPORTANTE',
   google_link_repeated_failures: 'IMPORTANTE',
   login_account_locked: 'INFO',
+  login_deletion_stepup_failed: 'INFO', // motorista errou a senha ao excluir a própria conta (ruído do titular, não do ADMIN)
+  login_deletion_stepup_locked: 'INFO',
+  login_deletion_stepup_unavailable: 'INFO',
 
   // --- operação ----------------------------------------------------------------------------------------------------------------------
   session_watchdog_redis_unstable: 'IMPORTANTE',

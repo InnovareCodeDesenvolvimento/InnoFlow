@@ -21,6 +21,7 @@ import webhooksCieloRoutes from './routes/webhooksCielo.routes'
 import meRoutes from './routes/me.routes'
 import meProfileRoutes from './routes/meProfile.routes'
 import meDataExportRoutes from './routes/meDataExport.routes'
+import meAccountRoutes from './routes/meAccount.routes'
 import adminSitesRoutes from './routes/sites.routes'
 import adminChargePointsRoutes from './routes/chargePoints.routes'
 import adminConnectorsRoutes from './routes/connectors.routes'
@@ -114,6 +115,7 @@ export function createApp(): Express {
   app.use('/api/webhooks/cielo', webhookCieloRateLimit, webhookJsonParser(), webhooksCieloRoutes) // público, SEM JWT (a Cielo não manda Bearer) — segredo próprio (pathToken + header estático), ver F5.2
   app.use('/api/me/profile', adminRateLimit, meProfileRoutes) // DRIVER only (L1.2) — ANTES de /api/me: o router do perfil responde por si; mesmo teto geral das demais /api/me/*
   app.use('/api/me/data-export', adminRateLimit, meDataExportRoutes) // DRIVER only (L1.4) — exportação dos dados do titular (3/dia)
+  app.use('/api/me/account', adminRateLimit, meAccountRoutes) // DRIVER only (L1.4) — exclusão/anonimização da conta
   app.use('/api/me', adminRateLimit, meRoutes) // DRIVER only — PWA do motorista (F6); rate limit específico de /sessions/start e /wallet/topups é mais apertado, aplicado na própria rota
 
   // Log de auditoria (Nova, 2026-09-17) — montado ANTES de todo router

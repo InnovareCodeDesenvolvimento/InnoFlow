@@ -95,4 +95,14 @@ export const REDACT_PATHS = [
   '*.QrCodeString',
   'pixQrCode',
   '*.pixQrCode',
+  // L1.4 (exclusão de conta/devolução do saldo) — a CHAVE PIX do titular (CPF, telefone, e-mail ou chave aleatória: dado pessoal) no corpo do POST /api/me/account/deletion e na
+  // resposta do ADMIN, o ciphertext dela, e o ID token do Google usado na reautenticação (um JWT). As rotas nunca os logam; rede de segurança como as demais.
+  'refundPixKey',
+  '*.refundPixKey',
+  'refundPixKeyCiphertext',
+  '*.refundPixKeyCiphertext',
+  'googleCredential',
+  '*.googleCredential',
+  'credential',
+  '*.credential',
 ]
