@@ -98,6 +98,7 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   login_deletion_stepup_failed: 'INFO', // motorista errou a senha ao excluir a própria conta (ruído do titular, não do ADMIN)
   login_deletion_stepup_locked: 'INFO',
   login_deletion_stepup_unavailable: 'INFO',
+  payment_refund_pending_overdue: 'IMPORTANTE', // devolução de saldo de conta excluída pendente há mais de 30 dias (guarda a chave Pix cifrada de uma conta já anonimizada)
 
   // --- operação ----------------------------------------------------------------------------------------------------------------------
   session_watchdog_redis_unstable: 'IMPORTANTE',
@@ -161,6 +162,7 @@ export const ORIENTACAO_DOS_ALERTAS: Readonly<Record<string, string>> = {
   payment_refund_portal_status_mismatch: 'A Cielo mostra a venda totalmente estornada mas o registro no InnoFlow e parcial: conferir o portal e ajustar o registro. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
   ocpp_auth_ip_flood: 'IP bloqueado por excesso de falhas de autenticacao OCPP: se for um carregador seu, confira a senha dele; senao, ignore ou bloqueie no firewall.',
   ocpp_foreign_transaction: 'Carregador usou o transactionId de outro: firmware com defeito ou tentativa de fraude; conferir o carregador.',
+  payment_refund_pending_overdue: 'Ha devolucao de saldo de conta excluida pendente ha mais de 30 dias: fazer o Pix para a chave informada e registrar a devolucao no painel (Contas excluidas).',
 }
 
 export const ORIENTACAO_PADRAO = 'Ver docs/GO-LIVE-PAGAMENTOS.md secao 6 (Alertas de Log) e os logs do EasyPanel (procure o campo alert).'

@@ -22,6 +22,7 @@ import meRoutes from './routes/me.routes'
 import meProfileRoutes from './routes/meProfile.routes'
 import meDataExportRoutes from './routes/meDataExport.routes'
 import meAccountRoutes from './routes/meAccount.routes'
+import adminAccountDeletionsRoutes from './routes/adminAccountDeletions.routes'
 import adminSitesRoutes from './routes/sites.routes'
 import adminChargePointsRoutes from './routes/chargePoints.routes'
 import adminConnectorsRoutes from './routes/connectors.routes'
@@ -141,6 +142,7 @@ export function createApp(): Express {
   app.use('/api/admin/refunds', adminRateLimit, refundsRouter)
   app.use('/api/admin/payments', adminRateLimit, paymentChargebacksRouter)
   app.use('/api/admin/chargebacks', adminRateLimit, chargebacksRouter)
+  app.use('/api/admin/account-deletions', adminRateLimit, adminAccountDeletionsRoutes) // ADMIN-only (L1.4/DL2) — devolução manual do saldo de conta excluída
   app.use('/api/admin/audit-logs', adminRateLimit, adminAuditLogsRoutes)
   app.use('/api/admin/payment-gateway', adminRateLimit, adminPaymentGatewayRoutes) // ADMIN-only (F5.5) — config da conta Cielo
   app.use('/api/admin/communication-settings', adminRateLimit, adminCommunicationSettingsRoutes) // ADMIN-only (N-7) — e-mail (SMTP) e WhatsApp (Evolution API) dos avisos ao dono
