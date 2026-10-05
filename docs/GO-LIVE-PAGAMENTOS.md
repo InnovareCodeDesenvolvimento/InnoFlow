@@ -140,7 +140,7 @@ Toda venda do InnoFlow com `MerchantOrderId = IF-…` gera um alerta falso no si
 | `CIELO_API_QUERY_BASE_URL` | ❌ Não | Todos 3 | Deixar derivar | Público (URL) | Valor padrão sandbox: `https://apiquerysandbox.cieloecommerce.cielo.com.br` |
 | **Cielo — Webhook (NÃO SE APLICA À CONTA COMPARTILHADA)** |
 | `CIELO_WEBHOOK_PATH_TOKEN` | ❌ Deixe vazio | Todos 3 | Deixe vazio (rota com token aleatório, inacessível) | 🟡 Não aplicável | **Conta compartilhada: sem webhook do InnoFlow.** Se houver valor, a rota fica exposta mas inútil |
-| `CIELO_WEBHOOK_HEADER_SECRET` | ❌ Deixe vazio | Todos 3 | Deixe vazio | 🔴 Não aplicável | **Conta compartilhada: sem webhook do InnoFlow.** Segredos vão para o Parque (via webhook dele) |
+| `CIELO_WEBHOOK_HEADER_SECRET` | ❌ Deixe vazio | Todos 3 | Deixe vazio | 🔴 Não aplicável | **Conta compartilhada: sem webhook do InnoFlow.** O webhook que existe na conta é o do Parque; o InnoFlow não recebe nem valida notificação |
 | **Cielo — Silent Order Post (cartão salvo)** |
 | `CIELO_SOP_SCRIPT_URL` | ❌ Não (C1.1: terá default) | api | Sandbox: `https://transactionsandbox.pagador.com.br/post/scripts/silentorderpost-1.0.min.js` (F9 [PROD]); Produção: `https://transaction.cieloecommerce.cielo.com.br/post/scripts/silentorderpost-1.0.min.js` | Público (URL) | **Após C1.1** terá default. **Agora:** sem ela o cadastro de cartão responde 503 |
 | `CIELO_SOP_CLIENT_ID` | ❌ Não (banco > env) | api | Ticket Cielo: OAuth client ID | Público (ID) | Env é reserva; tela prevalece; para `client_credentials` |
