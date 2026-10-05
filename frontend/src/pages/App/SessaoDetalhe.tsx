@@ -57,9 +57,10 @@ export function SessaoDetalhe() {
 
   return (
     <div>
-      <AppBand back={{ to: "/app/sessoes", label: "Histórico" }} className="pb-10">
+      <AppBand back={{ to: "/app/sessoes", label: "Histórico" }} className="pb-6">
         {isLoading && (
-          <div className="space-y-3" aria-hidden="true">
+          // min-h = a altura do bloco real (título + identificador + forma de pagamento): o miolo não se desloca quando o recibo chega (CLS).
+          <div className="min-h-[6.75rem] space-y-3" aria-hidden="true">
             <Skeleton className="h-6 w-1/2 rounded-md bg-white/10" />
             <Skeleton className="h-4 w-2/3 rounded-md bg-white/10" />
           </div>
@@ -80,18 +81,16 @@ export function SessaoDetalhe() {
               </div>
             )}
 
-            {/* `flex-wrap` + base mínima no bloco do texto: o badge "Encerramento em confirmação" (F5.9) é longo — ao lado do título ele espremia o nome do eletroposto e quebrava o identificador do carregador em 375px (medido). Se não cabe ao lado, cai para a linha de baixo. */}
-            <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-              <div className="min-w-[14rem] flex-1">
-                <h1 className="truncate text-lg font-black tracking-tight text-ink">{session.site.name}</h1>
-                <p className="text-sm text-ink-softer">
-                  {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
-                </p>
-                <div className="mt-1">
-                  <SessionPaymentMethodBadge paymentMode={session.paymentMode} payment={session.payment} />
-                </div>
+            {/* O selo de status fica SEMPRE numa linha própria, abaixo do título: o badge "Encerramento em confirmação" (F5.9) é longo e ao lado do título espremia o nome do eletroposto e quebrava o identificador do carregador em 375px (medido). Altura fixa também mantém o CLS em zero quando o recibo chega. */}
+            <div>
+              <h1 className="truncate text-lg font-black tracking-tight text-ink">{session.site.name}</h1>
+              <p className="text-sm text-ink-softer">
+                {session.chargePoint.ocppIdentity} · Conector {session.connector.connectorId}
+              </p>
+              <div className="mt-1">
+                <SessionPaymentMethodBadge paymentMode={session.paymentMode} payment={session.payment} />
               </div>
-              <Badge variant={sessionStatusBadgeVariant(session.status)} className="shrink-0 whitespace-nowrap">
+              <Badge variant={sessionStatusBadgeVariant(session.status)} className="mt-2.5 whitespace-nowrap">
                 {CHARGING_SESSION_STATUS_LABELS[session.status]}
               </Badge>
             </div>
@@ -110,7 +109,12 @@ export function SessaoDetalhe() {
           />
         )}
 
-        {isLoading && <Skeleton className="-mt-5 h-40 rounded-2xl" aria-hidden="true" />}
+        {isLoading && (
+          <div className="mt-4 space-y-4" aria-hidden="true">
+            <Skeleton className="h-32 rounded-2xl" />
+            <Skeleton className="h-60 rounded-2xl" />
+          </div>
+        )}
 
         {!isLoading && !isError && session && (
           <>
@@ -128,7 +132,7 @@ export function SessaoDetalhe() {
               </Link>
             )}
 
-            <Card className={`animate-fade-in-up ${closureNotice || isReanimated ? "mt-4" : "-mt-5"}`}>
+            <Card className="animate-fade-in-up mt-4">
               <CardContent className="grid grid-cols-2 gap-4 p-5 sm:p-5">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wide text-ink-softer">Início</p>
