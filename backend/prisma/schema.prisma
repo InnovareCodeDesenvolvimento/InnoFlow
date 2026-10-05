@@ -1224,6 +1224,110 @@ model NotificationChannelConfig {
 }
 
 // ------------------------------------------------------------
+// Backup automático do banco (porte do InnoChat) — configuração SINGLETON + histórico de execuções
+// ------------------------------------------------------------
+//
+// Formato do arquivo cifrado: docs/BACKUP-FORMATO.md. Contrato das rotas ADMIN: docs/CONTRATO-BACKUP-ADMIN.md.
+// BackupConfig é SINGLETON (id = 1, CHECK na migration). SEGREDOS (access/secret key do S3, client secret e refresh token do Google, cópia da chave do backup) ficam
+// CIFRADOS com a MESMA chave/formato dos segredos de pagamento (`PAYMENT_SECRETS_KEY`, `v1:<kid>:<base64>`) — nunca em claro, nunca em resposta/log/auditoria.
+// `encryptionKeyCiphertext` é a CÓPIA da chave do backup guardada só para o agendador cifrar de madrugada; a chave que vale (a do dono) é mostrada UMA vez na tela.
+// `runningSince` é a TRAVA (UPDATE condicional): quem consegue mudar a linha de null/expirada para agora é o dono da execução.
+enum BackupTrigger {
+  SCHEDULED
+  MANUAL
+  VERIFY // conferência da cópia mais recente (baixa, decifra, lê o índice) — NÃO é backup: não mexe em lastSuccessAt
+}
+
+enum BackupRunStatus {
+  QUEUED // pedido (botão "fazer agora"/"conferir") enfileirado para o worker, ainda não começou
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum BackupDestination {
+  S3
+  DRIVE
+}
+
+model BackupConfig {
+  id Int @id @default(1)
+
+  enabled        Boolean @default(false)
+  hourLocal      Int     @default(3) // hora cheia em Brasília (UTC-3 fixo), 0..23
+  frequencyDays  Int     @default(1) // 1, 2 ou 7 (CHECK)
+  retentionCount Int     @default(7) // quantas cópias manter no destino (>= 1); nunca apaga a única/última
+  alertAfterHours Int    @default(36) // sem sucesso há mais que isto, com o automático ligado => alerta backup_stale
+
+  destination BackupDestination?
+
+  // S3-compatível (AWS, Cloudflare R2, Backblaze B2, MinIO...). Access key e secret key CIFRADAS.
+  s3Endpoint             String?
+  s3Region               String?
+  s3Bucket               String?
+  s3Prefix               String?
+  s3AccessKeyCiphertext  String?
+  s3SecretKeyCiphertext  String?
+
+  // Google Drive por OAuth (escopo drive.file: o app só enxerga o que ele mesmo criou; a pasta é criada pelo código).
+  driveOauthClientId               String?
+  driveOauthClientSecretCiphertext String?
+  driveOauthRefreshTokenCiphertext String?
+  driveOauthEmail                  String?
+  driveOauthFolderId               String?
+  driveOauthConnectedAt            DateTime? @db.Timestamptz(3)
+  driveOauthConnectedById          String? // id do ADMIN que conectou (snapshot, sem FK)
+  // `state` do fluxo OAuth em andamento (1 por vez): nonce de USO ÚNICO consumido por UPDATE condicional no callback.
+  oauthStateNonce      String?
+  oauthStateExpiresAt  DateTime? @db.Timestamptz(3)
+  oauthStateAdminId    String?
+
+  // Chave do backup (32 bytes, própria): só a impressão digital (8 hex) é pública; a cópia é cifrada.
+  encryptionKeyFingerprint String?
+  encryptionKeyCiphertext  String?
+  encryptionKeyCreatedAt   DateTime? @db.Timestamptz(3)
+  encryptionKeyShownAt     DateTime? @db.Timestamptz(3)
+
+  lastSuccessAt   DateTime? @db.Timestamptz(3) // último backup que SAIU do servidor (alimenta backup_stale)
+  lastAttemptAt   DateTime? @db.Timestamptz(3)
+  runningSince    DateTime? @db.Timestamptz(3) // trava; mais velha que 2 h = abandonada (processo morreu no meio)
+  lastStaleAlertAt DateTime? @db.Timestamptz(3) // reserva atômica do alerta backup_stale (1 a cada 12 h entre réplicas)
+
+  updatedById String? // snapshot do ADMIN que gravou por último
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// Uma linha por pedido/execução (backup agendado, manual ou conferência), SEMPRE gravada — o histórico existe para mostrar o que falhou, não só o que deu certo.
+// `errorCode` é um CÓDIGO (KEY, DUMP, NETWORK...), nunca texto livre: o detalhe técnico fica só no log do servidor (pg_dump/SDK podem citar host/usuário).
+model BackupRun {
+  id String @id @default(cuid())
+
+  trigger     BackupTrigger
+  status      BackupRunStatus   @default(QUEUED)
+  destination BackupDestination?
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3) // pedido (para QUEUED) ou início
+  startedAt  DateTime? @db.Timestamptz(3)
+  finishedAt DateTime? @db.Timestamptz(3)
+  durationMs Int?
+
+  fileName       String? // backup-innoflow-AAAA-MM-DD-HHhMMmSSs.dump.enc
+  objectKey      String? // chave no S3 / "drive:<id>/<nome>" no Drive
+  sizeBytes      BigInt? // tamanho do arquivo CIFRADO que subiu
+  checksumSha256 String? // SHA-256 (hex) do arquivo cifrado que subiu — a conferência semanal reconfere
+  tablesWithData Int?
+  encryptionKeyFingerprint String? // impressão digital da chave que cifrou (nulo = sem cifra)
+
+  errorCode String?
+  createdById String? // ADMIN que pediu (MANUAL/VERIFY manual); nulo no agendado
+
+  @@index([createdAt(sort: Desc)], map: "BackupRun_createdAt_idx")
+  @@index([trigger, createdAt(sort: Desc)], map: "BackupRun_trigger_createdAt_idx")
+  @@index([status])
+}
+
+// ------------------------------------------------------------
 // Auditoria (ADMIN-only)
 // ------------------------------------------------------------
 //
