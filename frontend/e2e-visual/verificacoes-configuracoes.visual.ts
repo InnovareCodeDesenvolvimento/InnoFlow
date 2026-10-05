@@ -284,6 +284,30 @@ test.describe("1) contraste por pixel + axe — estados das abas (ADMIN)", () =>
   })
 })
 
+/** Largura mínima (px) do título (h2) de um cartão. A 375 px o cartão tem 303 px; o selo vai para a linha de baixo e o título fica com a linha toda. */
+const H2_LARGURA_MIN = 160
+
+test.describe("2b) título do cartão com largura útil — cada conta do mock × cada aba (selos e avisos variam por estado)", () => {
+  const CONTAS: [string, string][] = [
+    ["admin@innoelektron.com", "env"],
+    ["comunicacao-pronta@innoelektron.com", "pronta"],
+    ["comunicacao-vazia@innoelektron.com", "vazia"],
+    ["comunicacao-sem-chave@innoelektron.com", "sem-chave"],
+    ["comunicacao-ilegivel@innoelektron.com", "ilegivel"],
+  ]
+  for (const [email, estado] of CONTAS) {
+    for (const aba of ["geral", "email", "whatsapp", "alertas"] as const) {
+      test(`${estado} / ${aba}: todo h2 de cartão >= ${H2_LARGURA_MIN} px`, async ({ page }, info) => {
+        await entrar(page, email)
+        await abrir(page, aba)
+        const h2s = await page.evaluate(() => [...document.querySelectorAll("main h2")].map((h) => ({ t: (h.textContent ?? "").trim(), w: Math.round(h.getBoundingClientRect().width * 10) / 10 })))
+        expect(h2s.length).toBeGreaterThan(0)
+        for (const h of h2s) expect(h.w, `h2 "${h.t}" mede ${h.w} px (${estado}/${aba}) a ${info.project.name}`).toBeGreaterThanOrEqual(H2_LARGURA_MIN)
+      })
+    }
+  }
+})
+
 test.describe("2) geometria (ADMIN / OPERATOR)", () => {
   for (const aba of ["geral", "email", "whatsapp", "alertas"] as const) {
     test(`${aba}: coluna e largura iguais às de Tarifas; sem rolagem lateral; 1 h1 + h2; alvos >= 44 a 375; rodapé estático; alturas dos cartões`, async ({ page }, info) => {
@@ -336,6 +360,7 @@ test.describe("2) geometria (ADMIN / OPERATOR)", () => {
             posicao: getComputedStyle(barra).position,
             rolagemLateral: { main: main.scrollWidth - main.clientWidth, doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, abas: abas.scrollWidth - abas.clientWidth },
             h1: main.querySelectorAll("h1").length,
+            h2Largura: Object.fromEntries([...main.querySelectorAll("h2")].map((h) => [h.textContent!.trim(), Math.round(h.getBoundingClientRect().width * 10) / 10])),
             secoes: [...main.querySelectorAll("h1, h2")].map((h) => `${h.tagName}:${h.textContent!.trim()}`),
             cartoes,
             pequenos,
@@ -346,6 +371,8 @@ test.describe("2) geometria (ADMIN / OPERATOR)", () => {
       expect(m.posicao).toBe("static")
       expect(m.rolagemLateral).toEqual({ main: 0, doc: 0, abas: 0 })
       expect(m.h1).toBe(1)
+      // REGRESSÃO (05/10, Íris-B): a 375 px os selos do cabeçalho do cartão não quebravam linha e espremiam o h2 para 0-109 px. Largura útil mínima do título de TODO cartão, em toda aba.
+      for (const [titulo, largura] of Object.entries(m.h2Largura)) expect(largura, `h2 "${titulo}" mede ${largura} px a ${larg}`).toBeGreaterThanOrEqual(H2_LARGURA_MIN)
       expect(m.secoes[0]).toBe(`H1:Configurações · ${ROTULO[aba]}`)
       expect(m.secoes.length).toBeGreaterThan(1)
       if (larg === "375") expect(m.pequenos, `alvos < 44 px a 375: ${m.pequenos.join(" | ")}`).toEqual([])

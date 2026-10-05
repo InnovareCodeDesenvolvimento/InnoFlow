@@ -9,10 +9,13 @@ type ChannelState = { enabled: boolean; active: boolean; source: "database" | "e
 
 const SOURCE_LABEL = { database: "Configurado no painel", env: "Vem do servidor (env)", none: "Não configurado" } as const
 
-/** Cabeçalho do cartão de um canal: ícone + título (h2) + estado (funcionando / com problema / desligado) e de onde vale a configuração. */
+/**
+ * Cabeçalho do cartão de um canal: ícone + título (h2) + estado (funcionando / com problema / desligado) e de onde vale a configuração. Abaixo de `sm` os selos vão para uma linha PRÓPRIA
+ * (coluna): em linha com o título, a 375 px eles espremiam o h2 para 0-109 px num cartão de 303 (medido); a partir de `sm` voltam para a direita.
+ */
 export function ChannelHeader({ icon, title, description, testId, state }: { icon: LucideIcon; title: string; description?: string; testId: string; state: ChannelState }) {
   return (
-    <CardHeader className="flex flex-row items-start justify-between gap-3">
+    <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <IconBadge icon={icon} size="md" tinted />
         <div className="min-w-0">
@@ -20,7 +23,7 @@ export function ChannelHeader({ icon, title, description, testId, state }: { ico
           {description && <CardDescription>{description}</CardDescription>}
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
         <Badge variant="neutral" data-testid={`${testId}-source`}>
           {SOURCE_LABEL[state.source]}
         </Badge>

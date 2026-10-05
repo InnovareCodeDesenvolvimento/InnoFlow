@@ -140,7 +140,7 @@ function GeralEditor({ dto }: { dto: CompanyProfileDTO }) {
       )}
 
       <Card data-testid="section-company">
-        <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <IconBadge icon={Building2} size="md" tinted />
             <div className="min-w-0">

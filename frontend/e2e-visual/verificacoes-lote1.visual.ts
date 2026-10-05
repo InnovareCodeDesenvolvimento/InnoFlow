@@ -12,10 +12,8 @@ test.describe("Configurações: o título do cabeçalho de cada card não pode s
   test.use({ storageState: path.join(PASTA_AUTH, `${PERSONAS.admin.arquivo}.json`) })
 
   for (const aba of ["geral", "email", "whatsapp"] as const) {
-    test(`aba ${aba}: o h2 do 1º card tem largura útil (>= 160 px)`, async ({ page }, info) => {
-      // DEFEITO MEDIDO (05/10/2026, 46cd153): a 375 px o selo "VEM DO SERVIDOR ..." / "NÃO CONFIGURADO" não quebra linha e empurra o título para uma coluna de 0 a 109 px
-      // (Geral: h2 "Dados da empresa" com 0 px de largura; E-mail 80 px; WhatsApp 109 px, num card de 303 px). A 768 e 1440 fica tudo bem. Remova o `fail` quando a Lyra corrigir.
-      test.fail(info.project.name === "375", "título do card espremido pelos selos a 375 px (Lyra)")
+    test(`aba ${aba}: o h2 do 1º card tem largura útil (>= 160 px)`, async ({ page }) => {
+      // Corrigido pela Lyra (05/10/2026): abaixo de `sm` os selos vão para uma linha própria. Regressão travada também em `verificacoes-configuracoes.visual.ts` (2b e 2).
       await prepararPagina(page)
       await page.goto(`/admin/configuracoes/${aba}`, { waitUntil: "load" })
       await aguardarEstavel(page)
