@@ -248,6 +248,25 @@ Critérios medidos (`criterios-fd.visual.ts` da Lyra: **87 verdes**; `contraste.
 
 Regravadas **60 imagens**: as 48 do Admin + 9 (auth ×6, `pub-eletropostos` ×3) em um commit, `pwa-mapa` ×3 em outro. Num worktree limpo do `eabd99a`: `test:visual` **114/114 em 2 rodadas, 0 flaky**.
 
+### 11. Classificação da F-E / F-F — documento isolado do cartão e fim do vocabulário deprecado (05/10/2026)
+
+Estados comparados pela sonda (`--ids-react --margem 32`): F-D (`eabd99a`, o `src` com que a baseline F-D foi gravada) x F-F (`2b1ad88`), 2 execuções de cada lado, 123 pares, **servidor/CPU sem concorrência** (3 execuções simultâneas de 3 workers mudam as métricas de fonte do `pub-eletropostos` a 375 de 3.509 para 3.497 px de altura; sozinho, 24 de 24 execuções deram 3.509 nas três árvores — a baseline é o modo 3.509). Das 123: **98 IDENTICA**, 7 ACEITA só por ruído de raster, **18 REPORTAR**, todas explicadas abaixo (nenhuma fora desta lista). `test:visual` em `2b1ad88` falhava em exatamente 15; as 3 restantes (`pwa-sessao-vazia`) só existem na sonda.
+
+| Causa | Páginas | O que a sonda mostra | Veredito |
+|---|---|---|---|
+| **F-E** — documento isolado do cartão, moldura escura de marca, card claro sobreposto, campos 14 px, botão lima, mascote | `pub-cartao-isolado-formulario` ×3, `pub-cartao-isolado-sem-opener` ×3 | 29→31 e 10→14 elementos; `body`/`div` deixam de esticar (760→601 px e 900/1024/812→386 px, o resto é o mesmo cinza do fundo); troca `img`→`header`+`span`. Todos os pixels mudam. Texto e `aria-label` preservados. | REDESENHO deliberado; régua `criterios-fe.visual.ts` (isolamento SAQ A-EP, 1 CTA lima, campos 14 px, mascote só na moldura, foco ≥ 3:1): **15 verdes** (5 testes × 3 larguras) |
+| **F-F** — `PublicSiteCard` passa de `.card-premium` para a variante `surface` do `Card` (`card-elevated`) | `pub-eletropostos` ×3, `pwa-mapa` ×3 | só `position relative→static` (+ offsets) e `box-shadow` ganha o **anel de 1 px** `rgb(241,243,245)` em 12 (eletropostos) / 16–17 (mapa) cards. O único descendente posicionado é o `sr-only` de 1×1 px (mesmo retângulo). **Todo pixel alterado cai na faixa ±48 px da borda de um card; 0 pixel no interior.** | ESPERADO (ver "pwa-mapa" abaixo) |
+| **F-F** — `text-gradient-brand` → cor sólida `#1B506F` | `pub-qr-conector` ×3 | só `background-image` do `<p>` do preço (gradiente `#1B506F→#248829` some) e a cor do texto; 0 pixel fora do retângulo do preço. | ESPERADO |
+| F-F — card vazio da sessão vira `cardVariants({variant:"inverse"})` | `pwa-sessao-vazia` ×3 | `position relative` + `overflow hidden` num `div`, nenhum retângulo muda; pixels 0 (1440) ou os do ruído de raster do mascote (375/768). Aceito como estilo latente. | ESPERADO (não falha o `test:visual`) |
+
+**`pwa-mapa`: por que seguia falhando depois da regravação sem o anel (`2b1ad88`).** A F-F **devolveu** o anel: a captura de `2b1ad88` é **idêntica pixel a pixel (0 px)** à baseline da F-C (`61e2230`) nos 3 viewports, e as imagens regravadas agora são **byte a byte iguais** às de `b87f37b`. A regravação "sem o anel" de `2b1ad88` ficou obsoleta no instante em que a F-F migrou o card; reverter o desvio da F-D (que o Atlas já tinha aceitado) não era necessário. Efeito novo: `/eletropostos` ganha o anel de 1 px que nunca teve (era `.card-premium`, sem anel) — imperceptível a olho, listado aqui para constar.
+
+**Ruído que a sonda e o harness continuam vendo (não são mudança):**
+- Telas "card escuro de marca + mascote" (`pwa-sessao-vazia`, `pwa-historico-vazio`, `pwa-cartoes`, `pwa-carteira-adicionar`): captura bimodal/multimodal. Repetindo só estas telas 6× em duas árvores diferentes (`2b1ad88` e `87d0343`), **os mesmos hashes de imagem aparecem nas duas** (ex.: `pwa-historico-vazio` a 375: `c0eb6a` e `b598d7` em ambas; `pwa-sessao-vazia` a 768: `fb0051` e `635ee9` em ambas) — logo a diferença de 205/170 px entre as árvores NÃO vem do código. É o que a Lyra viu como "REPORTAR sem causa" em `pwa-historico-vazio` e `pwa-carteira-adicionar`.
+- `pwa-mapa` a 1440: **o stream SSE do mock (timer real de 15 s) troca "1 de 4" por "2 de 4 conectores livres" quando a captura cruza o tick** (7.757 px em `224,3344..511,3439`; texto muda, não é raster). Aconteceu numa regravação em lote (captura de 8,7 s sob carga) e foi refeita até igualar a baseline da F-C (4 de 4 execuções seguintes iguais). É a limitação já descrita em §1.1; `test:visual` a absorve com `retries`.
+
+Regravadas **15 imagens** (`pub-cartao-isolado-*` ×6, `pub-eletropostos` ×3, `pub-qr-conector` ×3, `pwa-mapa` ×3) num worktree limpo de `2b1ad88` com `VISUAL_MAX_DIFF_RATIO=0 VISUAL_THRESHOLD=0`. Cada imagem regravada confere com 0 px contra a captura da sonda.
+
 ### Registro por fase (continuação)
 
 | Fase | Data | Diferenças esperadas (rota · o que mudou) | Regressões achadas | Baseline regravada por |
