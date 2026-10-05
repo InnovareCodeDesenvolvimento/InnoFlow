@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
 import { AxiosError, type AxiosResponse } from "axios"
-import { blockedMessage, formatBlockedUntil, issueErrorMessage, issueFromEligibility, issueFromError } from "./cardEligibility"
+import {
+  CHARGEBACK_BLOCKED_MESSAGE,
+  blockedMessage,
+  disabledCardReason,
+  formatBlockedUntil,
+  isChargebackIssue,
+  issueErrorMessage,
+  issueFromEligibility,
+  issueFromError,
+} from "./cardEligibility"
 
 const apiError = (status: number, body: unknown) => new AxiosError("x", "ERR", undefined, undefined, { status, data: body } as AxiosResponse)
 
@@ -25,6 +34,41 @@ describe("issueFromEligibility", () => {
 
   it("horário de bloqueio de outro motivo é descartado", () => {
     expect(issueFromEligibility({ eligible: false, reason: "GOOGLE_LOGIN_REQUIRED", blockedUntil: "2026-10-04T18:00:00.000Z" })?.blockedUntil).toBeNull()
+  })
+})
+
+describe("chargeback (L1.8)", () => {
+  it("CHARGEBACK_BLOCKED do GET NÃO vira 'entre com o Google' (regressão: o mapa mandava todo motivo desconhecido ao Google)", () => {
+    const issue = issueFromEligibility({ eligible: false, reason: "CHARGEBACK_BLOCKED", blockedUntil: null })
+    expect(issue).toEqual({ reason: "CHARGEBACK_BLOCKED", blockedUntil: null })
+    expect(isChargebackIssue(issue)).toBe(true)
+  })
+
+  it("horário que viesse junto é descartado (chargeback não tem prazo)", () => {
+    expect(issueFromEligibility({ eligible: false, reason: "CHARGEBACK_BLOCKED", blockedUntil: "2026-10-05T18:00:00.000Z" })?.blockedUntil).toBeNull()
+  })
+
+  it("403 CARD_CHARGEBACK_BLOCKED (decide pelo code, não pelo texto)", () => {
+    expect(issueFromError(apiError(403, { error: "qualquer texto", code: "CARD_CHARGEBACK_BLOCKED" }))).toEqual({ reason: "CHARGEBACK_BLOCKED", blockedUntil: null })
+    // mesmo status 403 com outro code continua sendo o do Google; texto parecido sem o code não conta
+    expect(issueFromError(apiError(403, { error: "x", code: "CARD_REQUIRES_VERIFIED_IDENTITY" }))?.reason).toBe("GOOGLE_LOGIN_REQUIRED")
+    expect(issueFromError(apiError(403, { error: "O pagamento com cartão está indisponível para a sua conta." }))).toBeNull()
+  })
+
+  it("só chargeback é chargeback", () => {
+    expect(isChargebackIssue({ reason: "TEMPORARILY_BLOCKED", blockedUntil: null })).toBe(false)
+    expect(isChargebackIssue({ reason: "GOOGLE_LOGIN_REQUIRED", blockedUntil: null })).toBe(false)
+    expect(isChargebackIssue(null)).toBe(false)
+  })
+
+  it("textos: o da API, sem culpar o motorista e com a alternativa", () => {
+    const issue = { reason: "CHARGEBACK_BLOCKED", blockedUntil: null } as const
+    expect(CHARGEBACK_BLOCKED_MESSAGE).toBe(
+      "O pagamento com cartão está indisponível para a sua conta. O Pix e a carteira continuam disponíveis. Em caso de dúvida, fale com o suporte.",
+    )
+    expect(issueErrorMessage(issue)).toBe(CHARGEBACK_BLOCKED_MESSAGE)
+    expect(disabledCardReason(issue)).toBe("Não pode ser usado para novas recargas.")
+    expect(`${issueErrorMessage(issue)} ${disabledCardReason(issue)}`).not.toMatch(/Google|fraude|golpe|culp|contest/i)
   })
 })
 

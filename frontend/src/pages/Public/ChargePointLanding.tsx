@@ -121,10 +121,11 @@ export function ChargePointLanding() {
       const code = getApiErrorCode(err)
       const issue = issueFromError(err)
       if (issue) {
-        // 403 CARD_REQUIRES_VERIFIED_IDENTITY / 429 CARD_TEMPORARILY_BLOCKED: o seletor some, o card explica e a carteira fica selecionada.
+        // 403 CARD_REQUIRES_VERIFIED_IDENTITY / 403 CARD_CHARGEBACK_BLOCKED / 429 CARD_TEMPORARILY_BLOCKED: o seletor some, o card explica e a carteira fica selecionada.
         setServerCardIssue(issue)
         queryClient.invalidateQueries({ queryKey: paymentMethodsKeys.list })
-        setStartError(issueErrorMessage(issue))
+        // Chargeback (403 CARD_CHARGEBACK_BLOCKED): o card explicativo já traz o texto da API inteiro - repeti-lo num alerta ao lado seria o mesmo parágrafo duas vezes.
+        setStartError(issue.reason === "CHARGEBACK_BLOCKED" ? null : issueErrorMessage(issue))
         return
       }
       if (code === "PAYMENT_METHOD_NOT_FOUND") {

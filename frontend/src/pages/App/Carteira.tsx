@@ -10,6 +10,8 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { Pagination } from "@/components/ui/Pagination"
 import { WalletEntryIcon } from "@/components/carteira/WalletEntryIcon"
 import { useMeWallet } from "@/hooks/useMeSessions"
+import { useMePaymentMethods } from "@/hooks/useMePaymentMethods"
+import { isChargebackIssue, issueFromEligibility } from "@/lib/cardEligibility"
 import { getApiErrorMessage } from "@/services/api"
 import { formatCents, formatDateTime, WALLET_ENTRY_TYPE_LABELS } from "@/lib/utils"
 
@@ -24,6 +26,10 @@ const PAGE_SIZE = 20
 export function Carteira() {
   const [page, setPage] = useState(1)
   const { data, isLoading, isError, error, refetch, isFetching } = useMeWallet({ page, pageSize: PAGE_SIZE })
+
+  // L1.8: com chargeback o cartão fica indisponível (Pix e carteira seguem). A linha "Meus cartões" diz isso; falha ou demora desta consulta NUNCA atrapalha a carteira (só some o aviso).
+  const paymentMethods = useMePaymentMethods()
+  const cardBlockedByChargeback = isChargebackIssue(issueFromEligibility(paymentMethods.data?.cardEligibility))
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
@@ -100,7 +106,13 @@ export function Carteira() {
               <IconBadge icon={CreditCard} size="lg" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-ink">Meus cartões</p>
-                <p className="text-xs text-ink-softer">Cadastre um cartão para pagar a recarga sem digitar toda vez.</p>
+                {cardBlockedByChargeback ? (
+                  <p className="text-xs text-ink-softer" data-testid="cartoes-indisponivel">
+                    Cartão indisponível para a sua conta. O Pix e a carteira seguem normais.
+                  </p>
+                ) : (
+                  <p className="text-xs text-ink-softer">Cadastre um cartão para pagar a recarga sem digitar toda vez.</p>
+                )}
               </div>
               <ChevronRight className="h-5 w-5 shrink-0 text-ink-subtle" aria-hidden="true" />
             </Link>

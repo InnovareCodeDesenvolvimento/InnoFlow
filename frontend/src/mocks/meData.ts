@@ -916,16 +916,20 @@ export function gatewayDisabledBody(driverId: string, method: "CARD" | "PIX") {
 /**
  * I-7 - `cardEligibility` (contrato em `types/api.ts`). Todo motorista nasce ELEGÍVEL (os E2E de cartão existentes dependem disso); só as duas contas de cenário não:
  *  - `user_driver_so_senha`: GOOGLE_LOGIN_REQUIRED até o Google ser vinculado (`linkGoogleToMockDriver`);
- *  - `user_driver_bloqueado`: TEMPORARILY_BLOCKED até `BLOCKED_UNTIL`.
+ *  - `user_driver_bloqueado`: TEMPORARILY_BLOCKED até `BLOCKED_UNTIL`;
+ *  - `user_driver_chargeback` (L1.8): CHARGEBACK_BLOCKED (o ADMIN registrou um chargeback; sem prazo - só o suporte desfaz). Nasce com 2 cartões, que a tela mostra desabilitados. Pix e carteira seguem.
  * Override para exercitar o servidor RECUSANDO depois de o GET ter dito "elegível" (bloqueio que começou no meio): `localStorage["mock:card-refusal"]` =
- * `GOOGLE_LOGIN_REQUIRED` | `TEMPORARILY_BLOCKED` (os handlers do MSW rodam na página, então enxergam o localStorage).
+ * `GOOGLE_LOGIN_REQUIRED` | `TEMPORARILY_BLOCKED` | `CHARGEBACK_BLOCKED` (os handlers do MSW rodam na página, então enxergam o localStorage).
  */
 const SO_SENHA_DRIVER_ID = "user_driver_so_senha"
 const BLOCKED_DRIVER_ID = "user_driver_bloqueado"
+const CHARGEBACK_DRIVER_ID = "user_driver_chargeback"
 const BLOCKED_UNTIL = new Date(Date.now() + 47 * 60_000).toISOString()
 const googleLinkedDrivers = new Set<string>()
 
 export function cardEligibilityFor(driverId: string): CardEligibility {
+  // Chargeback vem ANTES de "entre com o Google" (contrato do servidor): quem tem chargeback nunca é mandado ao Google.
+  if (driverId === CHARGEBACK_DRIVER_ID) return { eligible: false, reason: "CHARGEBACK_BLOCKED", blockedUntil: null }
   if (driverId === SO_SENHA_DRIVER_ID && !googleLinkedDrivers.has(driverId)) return { eligible: false, reason: "GOOGLE_LOGIN_REQUIRED", blockedUntil: null }
   if (driverId === BLOCKED_DRIVER_ID) return { eligible: false, reason: "TEMPORARILY_BLOCKED", blockedUntil: BLOCKED_UNTIL }
   return { eligible: true, reason: null, blockedUntil: null }
@@ -947,12 +951,22 @@ export function linkGoogleToMockDriver(driverId: string): void {
 /** Resposta de recusa das rotas de cartão (cadastro, sessão de tokenização, iniciar com CARD) - `null` quando o cartão está liberado. 403 sem Retry-After; 429 com `Retry-After` e `details.blockedUntil`. */
 export function cardRefusalFor(driverId: string, override: string | null): { status: 403 | 429; headers: Record<string, string>; body: Record<string, unknown> } | null {
   const eligibility: CardEligibility =
-    override === "GOOGLE_LOGIN_REQUIRED"
-      ? { eligible: false, reason: "GOOGLE_LOGIN_REQUIRED", blockedUntil: null }
-      : override === "TEMPORARILY_BLOCKED"
-        ? { eligible: false, reason: "TEMPORARILY_BLOCKED", blockedUntil: BLOCKED_UNTIL }
-        : cardEligibilityFor(driverId)
+    override === "CHARGEBACK_BLOCKED"
+      ? { eligible: false, reason: "CHARGEBACK_BLOCKED", blockedUntil: null }
+      : override === "GOOGLE_LOGIN_REQUIRED"
+        ? { eligible: false, reason: "GOOGLE_LOGIN_REQUIRED", blockedUntil: null }
+        : override === "TEMPORARILY_BLOCKED"
+          ? { eligible: false, reason: "TEMPORARILY_BLOCKED", blockedUntil: BLOCKED_UNTIL }
+          : cardEligibilityFor(driverId)
   if (eligibility.eligible) return null
+  if (eligibility.reason === "CHARGEBACK_BLOCKED") {
+    // Contrato (L1.8): 403 `CARD_CHARGEBACK_BLOCKED`, sem Retry-After. Texto = o da API (a tela decide pelo `code`).
+    return {
+      status: 403,
+      headers: {},
+      body: { error: "O pagamento com cartão está indisponível para a sua conta. O Pix e a carteira continuam disponíveis. Em caso de dúvida, fale com o suporte.", code: "CARD_CHARGEBACK_BLOCKED" },
+    }
+  }
   if (eligibility.reason === "TEMPORARILY_BLOCKED") {
     const retryAfter = Math.max(1, Math.ceil((Date.parse(eligibility.blockedUntil ?? BLOCKED_UNTIL) - Date.now()) / 1000))
     return {
@@ -985,7 +999,7 @@ function seedEligibilityDriver(driverId: string): MockPaymentMethod[] {
   const cards: MockPaymentMethod[] = [
     { id: `pm_seed_${driverId}_1`, driverId, brand: "Visa", last4: "1234", holderName: "Motorista Aprovado", expiryMonth: 8, expiryYear: 2030, isDefault: true, createdAt: now },
   ]
-  if (driverId === SO_SENHA_DRIVER_ID) cards.push({ id: `pm_seed_${driverId}_2`, driverId, brand: "Master", last4: "4444", holderName: "Motorista Aprovado", expiryMonth: 9, expiryYear: 2029, isDefault: false, createdAt: now })
+  if (driverId === SO_SENHA_DRIVER_ID || driverId === CHARGEBACK_DRIVER_ID) cards.push({ id: `pm_seed_${driverId}_2`, driverId, brand: "Master", last4: "4444", holderName: "Motorista Aprovado", expiryMonth: 9, expiryYear: 2029, isDefault: false, createdAt: now })
   return cards
 }
 
@@ -995,7 +1009,7 @@ function getPaymentMethods(driverId: string): MockPaymentMethod[] {
       driverId,
       driverId === CARD_DEMO_DRIVER_ID
         ? seedCardDemoDriver()
-        : driverId === SO_SENHA_DRIVER_ID || driverId === BLOCKED_DRIVER_ID
+        : driverId === SO_SENHA_DRIVER_ID || driverId === BLOCKED_DRIVER_ID || driverId === CHARGEBACK_DRIVER_ID
           ? seedEligibilityDriver(driverId)
           : isGatewayDisabledFor(driverId)
             ? seedGatewayOffDriver(driverId)

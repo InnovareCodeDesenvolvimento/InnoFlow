@@ -1302,7 +1302,7 @@ export interface MePaymentMethodDTO {
 export type CardEligibilityReason =
   | "GOOGLE_LOGIN_REQUIRED"
   | "TEMPORARILY_BLOCKED"
-  /** planejado (L1.8, DL7): o ADMIN registrou um chargeback deste motorista -> modo cartão bloqueado (Pix e carteira seguem). Ainda NÃO é enviado pelo backend. */
+  /** L1.8, DL7: o ADMIN registrou um chargeback deste motorista -> cartão bloqueado (Pix e carteira seguem; cartões salvos continuam na lista, sem uso). Vem ANTES de `GOOGLE_LOGIN_REQUIRED`; sem `blockedUntil`. O servidor também recusa com 403 `CARD_CHARGEBACK_BLOCKED` (cadastro, tokenização, iniciar sessão com CARD). */
   | "CHARGEBACK_BLOCKED"
 export interface CardEligibility {
   eligible: boolean
