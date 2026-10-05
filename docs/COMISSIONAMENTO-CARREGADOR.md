@@ -289,7 +289,7 @@ via `StatusNotification`. Eles aparecem automaticamente no painel.
 
 3. **Vincule a tarifa ao carregador (ou ao site/conector).** No painel: **Admin → Tarifas**,
    coluna "Vínculos" da tarifa, com escopo CONNECTOR, CHARGE_POINT, SITE ou OPERATOR (a tela
-   existe desde a F5; antes disso só havia a API `POST /api/admin/tariff-assignments`).
+   já existe; antes só havia a API `POST /api/admin/tariff-assignments`).
    **Não insira direto no banco.** **Sem tarifa vinculada o QR do carregador não consegue
    iniciar a recarga**: confirme este passo antes dos testes.
 
