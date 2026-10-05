@@ -1098,3 +1098,16 @@ Regra permanente: 100% das telas seguem o padrão premium da landing (plano em `
 - Baselines visuais (win32) regravadas e classificadas pela Iris; `test:visual` 114/114 (3 rodadas), catalogo `/__ds` 68 imagens 45/45; contraste por pixel 0 reprovados (menor 4,76:1), axe 0/3.257/937. Guia: frontend/DESIGN-SYSTEM.md; politica de baseline: frontend/e2e-visual/BASELINE.md (§10-13).
 - Nao coberto: Admin com dado real, Lighthouse do Admin logado, leitor de tela real, Linux/Safari. Contrastes 4,76-4,83 (info-700, branco/danger, "Saldo disponivel") passam AA e ficaram como estao.
 - Decisao aberta do dono: I-2 (pagina de cartao em subdominio dedicado vs aceitar risco de origem compartilhada).
+
+## Decisões do dono sobre o lote 1 da F6 (05/10/2026) — CONFIRMADAS ("aceito todas")
+Plano: docs/PLANO-FUNCIONALIDADES.md (Nova, 46efc03). Todas = recomendação da Nova:
+- DL1: redefinição de senha por e-mail para DRIVER e OPERATOR; ADMIN só pelo script `user:set-password`.
+- DL2: exclusão de conta com saldo positivo → excluir e devolver por Pix manual (ADMIN registra `TOPUP_REFUND`).
+- DL3: exclusão com dívida aberta → bloqueada até quitar.
+- DL4: recarga remota pela tela/API admin só ADMIN no lote 1; OPERATOR volta depois do aviso por e-mail ao motorista (L1.6).
+- DL5: segurança e cobrança sempre ligadas; recibo e saldo baixo ligados por padrão, limiar R$ 20.
+- DL6: retenção — MeterSample/OcppMessage 12 meses, AuditLog 5 anos (só por partição inteira), WebhookEvent 180 dias; retenção desligada por padrão até o dono ligar.
+- DL7: chargeback perdido → plataforma absorve; motorista perde o modo cartão; dívida só caso a caso.
+- DL8: estorno de cartão pelo portal da Cielo + registro assistido no InnoFlow; por API só depois do sandbox.
+- LGPD = anonimização, nunca DELETE. Pendente do dono: CNPJ, razão social, e-mail de suporte e encarregado (DPO) — bloqueiam L1.9 (termos/privacidade) e o rodapé dos e-mails; SPF/DKIM/DMARC do domínio remetente (Vulcano + dono).
+- Estado: L1.1 entregue (5b75272); L1.7/N-11 (Cronos), L1.2/L1.5 backend + contrato (Vega-B), notificador de alertas e e-mail (Vega-A) em andamento.
