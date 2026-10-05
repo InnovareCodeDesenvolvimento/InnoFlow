@@ -82,6 +82,8 @@ export const SEVERIDADE_DOS_ALERTAS: Readonly<Record<string, ClassificacaoAlerta
   payment_card_testing_suspected: 'IMPORTANTE', // carding: o bloqueio automático já agiu
   payment_refund_portal_pending_overdue: 'IMPORTANTE', // devolução registrada como feita no portal da Cielo e a consulta ainda não a mostra (ou a venda saiu da janela de consulta)
   payment_refund_portal_status_mismatch: 'IMPORTANTE', // a Cielo mostra a venda totalmente estornada, mas o registro no InnoFlow é parcial
+  chargeback_response_deadline_near: 'CRITICO', // chargeback em aberto com o prazo de resposta em até 3 dias: perder o prazo = perder a disputa (L1.8)
+  chargeback_response_deadline_overdue: 'CRITICO', // o prazo de resposta já venceu e o chargeback segue em aberto (avisa todo dia até o desfecho)
   payment_gateway_stepup_failed: 'IMPORTANTE', // senha de admin errada na confirmação da config do gateway
   payment_gateway_stepup_locked: 'IMPORTANTE',
   payment_gateway_stepup_unavailable: 'IMPORTANTE',
@@ -165,7 +167,9 @@ export const ORIENTACAO_DOS_ALERTAS: Readonly<Record<string, string>> = {
   payment_fake_adapter_in_production: 'Adaptador FAKE ativo em producao (aprova qualquer cartao, nao cobra nada): remover PAYMENT_ALLOW_FAKE_ADAPTER.',
   payment_config_changed: 'Alguem alterou a config do gateway. Se NAO foi voce, trocar a senha do admin e a chave de cifragem.',
   payment_card_testing_suspected: 'Padrao de teste de cartoes (carding): o bloqueio automatico ja agiu; conferir os IPs/usuarios e considerar bloquear no firewall.',
-  payment_refund_portal_pending_overdue: 'Devolucao no portal da Cielo registrada e ainda nao confirmada: conferir o extrato da Cielo; se foi feita (estorno parcial a consulta nao le), anotar a referencia e cancelar o registro no painel. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
+  payment_refund_portal_pending_overdue: 'Devolucao no portal da Cielo registrada e ainda nao confirmada: conferir o extrato da Cielo; se o estorno foi feito (parcial ou venda antiga a consulta nao le), CONFIRMAR A MAO no painel com a referencia do comprovante; se nao foi, cancelar o registro. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
+  chargeback_response_deadline_near: 'Chargeback em aberto com o prazo de resposta chegando (campos chargebackId e diasRestantes): baixar o dossie (Admin > Pagamentos > chargeback) e responder no portal da Cielo antes do prazo. Depois, registrar o desfecho. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
+  chargeback_response_deadline_overdue: 'O prazo de resposta de um chargeback JA VENCEU e ele segue em aberto (campos chargebackId e diasDeAtraso): confirmar na Cielo se ainda aceita contestacao; se nao, registrar o desfecho (perdido/aceito) no painel para parar este aviso. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
   payment_refund_portal_status_mismatch: 'A Cielo mostra a venda totalmente estornada mas o registro no InnoFlow e parcial: conferir o portal e ajustar o registro. Ver docs/RUNBOOK-ESTORNO-CHARGEBACK.md.',
   ocpp_auth_ip_flood: 'IP bloqueado por excesso de falhas de autenticacao OCPP: se for um carregador seu, confira a senha dele; senao, ignore ou bloqueie no firewall.',
   ocpp_foreign_transaction: 'Carregador usou o transactionId de outro: firmware com defeito ou tentativa de fraude; conferir o carregador.',

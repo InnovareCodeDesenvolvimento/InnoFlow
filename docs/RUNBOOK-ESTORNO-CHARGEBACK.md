@@ -43,8 +43,8 @@ Não funciona se a conta do motorista foi **excluída** (LGPD) → `DRIVER_ACCOU
 1. **No portal da Cielo**, faça o estorno da venda (localize pelo Tid/NSU: **Relatórios → Pagamentos** do InnoFlow aceita filtrar por `tid`, `authorizationCode` e `proofOfSale`).
 2. No InnoFlow, registre: valor, motivo, `portalReference` (a referência do estorno no portal, se houver) e a senha. O registro fica **`PENDING_CONFIRMATION`**. O InnoFlow **não** falou com a Cielo para isso.
 3. Um job do worker (a cada 30 min, só leitura) **reconsulta a venda** na Cielo e marca `CONFIRMED` **apenas** quando a consulta mostra a venda como **estornada (Status 11)** e o seu registro cobre **o valor capturado inteiro**. Ao confirmar, `PaymentIntent.amountRefundedCents` sobe (informativo).
-4. **Estorno PARCIAL no cartão: o job NÃO confirma.** Não sabemos como a consulta da Cielo mostra um estorno parcial (nunca foi visto em sandbox) e o InnoFlow trata o desconhecido como "não confirmado", nunca como confirmado. O registro fica `PENDING_CONFIRMATION` e, passado `REFUND_PORTAL_PENDING_ALERT_HOURS` (72 h), dispara o alerta `payment_refund_portal_pending_overdue`. Conferir no extrato da Cielo; se o estorno parcial foi feito, anote a referência (a confirmação é humana) e, para **liberar o teto**, cancele o registro (§1.3). *(Pendência de decisão: uma rota de "confirmar manualmente" não faz parte deste lote.)*
-5. **A consulta da Cielo só alcança ~3 meses.** Venda com mais de `REFUND_PORTAL_RECONSULT_WINDOW_DAYS` (85 dias, contados da captura) não é mais reconsultada: o job para e alerta (mesmo alerta, `motivo = JANELA_DE_CONSULTA_EXPIRADA`). Por isso o `Tid`/`AuthorizationCode`/NSU são gravados na hora e o dossiê (§2) guarda a prova.
+4. **Estorno PARCIAL no cartão: o job NÃO confirma.** Não sabemos como a consulta da Cielo mostra um estorno parcial (nunca foi visto em sandbox) e o InnoFlow trata o desconhecido como "não confirmado", nunca como confirmado. O registro fica `PENDING_CONFIRMATION` e, passado `REFUND_PORTAL_PENDING_ALERT_HOURS` (72 h), dispara o alerta `payment_refund_portal_pending_overdue`. Conferir no extrato da Cielo; se o estorno parcial foi feito, **confirme à mão** com a referência do comprovante (§1.4). Se ele **não** foi feito (digitou errado, desistiu), cancele o registro (§1.3) para liberar o teto.
+5. **A consulta da Cielo só alcança ~3 meses.** Venda com mais de `REFUND_PORTAL_RECONSULT_WINDOW_DAYS` (85 dias, contados da captura) não é mais reconsultada: o job para e alerta (mesmo alerta, `motivo = JANELA_DE_CONSULTA_EXPIRADA`). Por isso o `Tid`/`AuthorizationCode`/NSU são gravados na hora e o dossiê (§2) guarda a prova. Nesse caso a saída é a **confirmação manual** (§1.4).
 6. Se a Cielo mostrar a venda **totalmente** estornada mas o seu registro for parcial → alerta `payment_refund_portal_status_mismatch`; **não** confirma. Corrija o registro (cancele e registre de novo com o valor certo).
 
 Sem credencial Cielo (ou no ambiente de teste com o adaptador falso) o job fica **inerte**: pula a rodada sem ler nem escrever nada. Venda de **outro ambiente** que o do gateway atual (sandbox x produção) não é consultada.
@@ -52,6 +52,19 @@ Sem credencial Cielo (ou no ambiente de teste com o adaptador falso) o job fica 
 ### 1.3 Cancelar o registro
 
 `POST /api/admin/refunds/:id/cancel` (senha). Só uma devolução no cartão ainda `PENDING_CONFIRMATION` (digitou errado, desistiu, estorno nunca feito no portal). Libera o teto. Nunca mexe na Cielo. Estorno já confirmado ou na carteira não se cancela (`REFUND_NOT_CANCELLABLE`).
+
+### 1.4 Confirmar à mão (estorno parcial ou venda antiga)
+
+`POST /api/admin/refunds/:id/confirm` — corpo `{ proofReference, currentPassword }`. Só **ADMIN**, com a **sua senha** (step-up).
+
+**Quando usar:** a devolução no cartão ficou `PENDING_CONFIRMATION` e o job **não** consegue confirmar: (a) **estorno parcial** (a consulta da Cielo não é lida para parcial) ou (b) **venda com mais de ~3 meses** (fora da janela de reconsulta). Você viu o estorno no **portal/extrato da Cielo**: confirme aqui com a referência do comprovante, em vez de cancelar o registro (cancelar perderia a confirmação e libera o teto indevidamente). Se o estorno **não** foi feito, cancele (§1.3).
+
+- `proofReference`: a referência/código do comprovante no portal da Cielo, **5 a 120 caracteres**: só letras, números e `. _ - / # :` (sem espaço, sem e-mail). **Não** cole nome, CPF nem número de cartão: o código recusa CPF com máscara e sequência de 13 a 19 dígitos que seja número de cartão válido. A referência vai para o registro (`portalReference`, substituindo a do cadastro, que continua na auditoria) e para a auditoria.
+- Efeitos: o registro vira `CONFIRMED` (guarda **quem** confirmou), a venda ganha o valor em `amountRefundedCents` (informativo) e a **conciliação não muda** (provado em teste: a identidade `faturamento = capturas + débitos + dívida` fecha igual antes e depois; só o campo informativo `cardRefundedCents` sobe). O valor **não** muda e o teto já estava seguro desde o registro.
+- Distinguir manual de automática: o DTO de `GET /api/admin/sessions/:id/refunds` traz `confirmedManually` (`true` = confirmada por um ADMIN; `false` = o job confirmou sozinho, está pendente/cancelada ou é carteira).
+- Só uma confirmação por registro: dois ADMINs ao mesmo tempo, **um vence**; o outro recebe `409 REFUND_NOT_CONFIRMABLE`. O mesmo 409 vale para devolução já confirmada, cancelada ou na carteira. Se o job confirmar no meio, quem chegar depois não sobrescreve.
+- Auditoria `REFUND` / `refund:manually_confirmed` na mesma transação (se a auditoria falhar, nada é confirmado). Rate limit de escrita de estorno (20/min por ADMIN).
+- O InnoFlow **não** conversa com a Cielo para isso: a confirmação é um ato humano baseado no que você viu no portal.
 
 ---
 
@@ -98,8 +111,12 @@ Snapshot **imutável**, montado no momento do registro, para você anexar à res
 
 | Alerta | Severidade | O que fazer |
 |---|---|---|
-| `payment_refund_portal_pending_overdue` | IMPORTANTE | Devolução no portal ainda não confirmada: conferir o extrato da Cielo (§1.2 itens 4 e 5). |
+| `payment_refund_portal_pending_overdue` | IMPORTANTE | Devolução no portal ainda não confirmada: conferir o extrato da Cielo; se foi feita, **confirmar à mão** (§1.4); se não, cancelar (§1.3). |
 | `payment_refund_portal_status_mismatch` | IMPORTANTE | A Cielo mostra estorno total e o registro é parcial: ajustar o registro (§1.2 item 6). |
+| `chargeback_response_deadline_near` | **CRÍTICO** | Chargeback em aberto com o prazo de resposta em até **3 dias** (`chargebackId`, `diasRestantes`): baixar o dossiê (§2.2), responder no portal da Cielo e registrar o desfecho (§2.3). |
+| `chargeback_response_deadline_overdue` | **CRÍTICO** | O prazo de resposta **já venceu** e o chargeback segue em aberto (`chargebackId`, `diasDeAtraso`): confirmar na Cielo se ainda aceita contestação; senão registre o desfecho (perdido/aceito). **Avisa todo dia até o desfecho.** |
+
+**Vigia do prazo dos chargebacks:** um job do worker roda **1 vez por dia** e avisa, **por chargeback**, os que estão `OPEN` com `responseDeadline` nos próximos 3 dias (ou já vencido). Só chargeback com **prazo cadastrado** é vigiado: ao registrar, preencha sempre o prazo que a Cielo informou. O desfecho (`WON`/`LOST`/`ACCEPTED`) é o que para o aviso. Teto de 50 avisos por rodada (os de prazo mais antigo primeiro). Sem nome do motorista no aviso: só ids e dias.
 
 ## 5. Rotas (resumo para quem integra)
 
@@ -108,6 +125,7 @@ Snapshot **imutável**, montado no momento do registro, para você anexar à res
 | `POST /api/admin/sessions/:id/refunds` | ADMIN + senha | Contrato. `201 { refundId, status }` |
 | `GET /api/admin/sessions/:id/refunds` | ADMIN | **Aditiva.** `{ billedCents, refundedCents, refundableCents, items[] }` |
 | `POST /api/admin/refunds/:id/cancel` | ADMIN + senha | **Aditiva.** `{ refundId, status: "CANCELLED" }` |
+| `POST /api/admin/refunds/:id/confirm` | ADMIN + senha | **Aditiva** (§1.4). Corpo `{ proofReference, currentPassword }` → `{ refundId, status: "CONFIRMED", confirmedManually: true, proofReference }`. 409 `REFUND_NOT_CONFIRMABLE` |
 | `POST /api/admin/payments/:intentId/chargebacks` | ADMIN | Contrato. `201 { chargebackId, dossierId }` |
 | `PATCH /api/admin/chargebacks/:id` | ADMIN + senha | Contrato. `200 ChargebackDTO` |
 | `GET /api/admin/chargebacks` · `/:id` | ADMIN | **Aditivas.** Lista paginada (`outcome`, `paymentIntentId`) e detalhe |

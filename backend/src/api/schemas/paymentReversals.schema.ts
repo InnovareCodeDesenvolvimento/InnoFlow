@@ -38,6 +38,48 @@ export type CreateSessionRefundInput = z.infer<typeof createSessionRefundSchema>
 export const cancelRefundSchema = z.object({ currentPassword: senhaAtual }).strict()
 export type CancelRefundInput = z.infer<typeof cancelRefundSchema>
 
+/**
+ * Referência do COMPROVANTE do estorno no portal da Cielo (confirmação manual). Vai para a linha do estorno e para a auditoria, então é validada como CÓDIGO, não como texto livre:
+ * só letras, dígitos e . _ - / # : (sem espaço nem @ — barra nome e e-mail de quem escreve uma frase em vez do código), 5 a 120. Recusa também o que parece dado pessoal/de cartão colado
+ * por engano: CPF com máscara e sequência numérica de 13 a 19 dígitos que passa no Luhn (número de cartão).
+ */
+const REFERENCIA_COMPROVANTE = /^[A-Za-z0-9][A-Za-z0-9._:/#-]*$/
+const CPF_COM_MASCARA = /\d{3}\.\d{3}\.\d{3}-\d{2}/
+const NUMERO_LONGO = /^\d{13,19}$/
+
+function passaNoLuhn(digitos: string): boolean {
+  let soma = 0
+  for (let i = 0; i < digitos.length; i += 1) {
+    let d = Number(digitos[digitos.length - 1 - i])
+    if (i % 2 === 1) {
+      d *= 2
+      if (d > 9) d -= 9
+    }
+    soma += d
+  }
+  return soma % 10 === 0
+}
+
+/** Exportada para o teste do formato (a regra mora num lugar só). */
+export function referenciaParecePessoalOuCartao(v: string): boolean {
+  if (CPF_COM_MASCARA.test(v)) return true
+  return NUMERO_LONGO.test(v) && passaNoLuhn(v)
+}
+
+export const confirmRefundSchema = z
+  .object({
+    proofReference: z
+      .string({ required_error: 'Informe a referência do comprovante do portal da Cielo.', invalid_type_error: 'A referência do comprovante deve ser um texto.' })
+      .trim()
+      .min(5, 'A referência do comprovante precisa ter ao menos 5 caracteres.')
+      .max(120, 'A referência do comprovante pode ter no máximo 120 caracteres.')
+      .regex(REFERENCIA_COMPROVANTE, 'Use só o código do comprovante (letras, números e . _ - / # :), sem espaços nem e-mail.')
+      .refine((v) => !referenciaParecePessoalOuCartao(v), { message: 'Isto parece um CPF ou número de cartão: informe só a referência do comprovante.' }),
+    currentPassword: senhaAtual,
+  })
+  .strict()
+export type ConfirmRefundInput = z.infer<typeof confirmRefundSchema>
+
 export const createChargebackSchema = z
   .object({
     amountCents,

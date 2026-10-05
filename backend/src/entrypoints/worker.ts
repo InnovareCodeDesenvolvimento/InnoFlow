@@ -11,6 +11,7 @@ import { startManterParticoesWorker, scheduleManterParticoes, manterParticoesNoB
 import { startConfirmarEstornosPortalWorker, scheduleConfirmarEstornosPortal } from '../worker/jobs/confirmarEstornosPortalJob'
 import { startVigiarDevolucoesAtrasadasWorker, scheduleVigiarDevolucoesAtrasadas } from '../worker/jobs/vigiarDevolucoesAtrasadasJob'
 import { startBackupWorker, scheduleBackupTick } from '../worker/jobs/backupJob'
+import { startVigiarPrazoChargebacksWorker, scheduleVigiarPrazoChargebacks } from '../worker/jobs/vigiarPrazoChargebacksJob'
 
 // F4 (Vega, 2026-09-17): primeira fila de negócio real — retry de liquidação
 // financeira do StopTransaction (ver services/carteira/liquidarSessao.ts).
@@ -63,6 +64,12 @@ scheduleVigiarDevolucoesAtrasadas().catch((err) =>
 startConfirmarEstornosPortalWorker()
 scheduleConfirmarEstornosPortal().catch((err) =>
   logger.error({ err }, '[worker] falha ao agendar a confirmação das devoluções no portal — o worker segue de pé, mas sem confirmação automática até reiniciar'),
+)
+
+// L1.8 (Vega-H, 2026-10-06): vigia diaria do PRAZO DE RESPOSTA dos chargebacks em aberto (alertas `chargeback_response_deadline_near`/`_overdue`, CRITICO). Falhar ao agendar nao derruba o worker.
+startVigiarPrazoChargebacksWorker()
+scheduleVigiarPrazoChargebacks().catch((err) =>
+  logger.error({ err }, '[worker] falha ao agendar a vigia do prazo dos chargebacks — o worker segue de pe, mas sem o aviso automatico ate reiniciar'),
 )
 
 // Backup automatico do banco (Vega-F, 2026-10-06): tick a cada 10 min (roda o dump se for a hora, confere a copia 1x por semana, avisa se atrasou) + pedidos manuais da tela Admin > Backup.

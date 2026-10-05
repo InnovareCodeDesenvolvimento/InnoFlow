@@ -22,7 +22,7 @@ function arquivosTs(dir: string): string[] {
 }
 
 /** Prefixos de domínio que os alertas usam (convenção do projeto). Uma string com um destes prefixos entre aspas é tratada como nome de alerta. */
-const NOME_DE_ALERTA = /(?<!\b(?:event|actionDetail):\s{0,3})['"`]((?:payment|session|ocpp|google|login|card|communication|partition|retention|backup)_[a-z0-9_]+)['"`]/g
+const NOME_DE_ALERTA = /(?<!\b(?:event|actionDetail):\s{0,3})['"`]((?:payment|session|ocpp|google|login|card|communication|partition|retention|backup|chargeback)_[a-z0-9_]+)['"`]/g
 
 /** Strings com o prefixo de alerta que NÃO são alertas (ex.: nome de coluna/enum/rota). Só entra aqui com justificativa. */
 const NAO_SAO_ALERTAS = new Set<string>([
@@ -62,6 +62,7 @@ describe('classificação de severidade dos alertas (N-7)', () => {
       expect(achados.has(nome), `a varredura não achou ${nome}`).toBe(true)
     }
     for (const nome of ['backup_failed', 'backup_verify_failed', 'backup_stale']) expect(achados.has(nome), `a varredura não achou ${nome}`).toBe(true)
+    for (const nome of ['chargeback_response_deadline_near', 'chargeback_response_deadline_overdue']) expect(achados.has(nome), `a varredura não achou ${nome}`).toBe(true)
     expect(achados.size).toBeGreaterThan(40)
   })
 

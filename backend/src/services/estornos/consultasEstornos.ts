@@ -13,7 +13,10 @@ export interface SessionRefundDTO {
   status: 'PENDING_CONFIRMATION' | 'CONFIRMED' | 'CANCELLED'
   amountCents: number
   reason: string
+  /** No cartão confirmado à mão (L1.8): a referência do COMPROVANTE do portal da Cielo; antes disso, a referência do registro (se houve). */
   portalReference: string | null
+  /** `true` = o ADMIN confirmou à mão (`POST /api/admin/refunds/:id/confirm`); `false` = o job confirmou sozinho, está pendente/cancelado ou é estorno na carteira. */
+  confirmedManually: boolean
   walletEntryId: string | null
   createdAt: string
   resolvedAt: string | null
@@ -54,6 +57,7 @@ export async function listarEstornosDaSessao(sessionId: string): Promise<Session
       amountCents: r.amountCents,
       reason: r.reason ?? '',
       portalReference: r.portalReference,
+      confirmedManually: r.destination === 'CARD_VIA_PORTAL' && r.status === 'CONFIRMED' && r.resolvedByUserId !== null,
       walletEntryId: r.walletEntryId,
       createdAt: r.createdAt.toISOString(),
       resolvedAt: r.resolvedAt?.toISOString() ?? null,
