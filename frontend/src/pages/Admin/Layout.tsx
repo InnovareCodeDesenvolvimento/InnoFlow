@@ -1,10 +1,13 @@
-import { Suspense, useEffect, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { Building2, ChevronRight, ExternalLink, LogOut, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
 import { SidebarNav } from "@/components/admin/SidebarNav"
 import { AdminDrawer } from "@/components/admin/AdminDrawer"
+import { AdminUserMenu } from "@/components/admin/AdminUserMenu"
+import { TourProvider } from "@/components/onboarding/TourProvider"
+import { useTour } from "@/components/onboarding/tourContext"
 import { useMediaQuery } from "@/hooks/useMediaQuery"
 import { QuickActionsBar, QuickActionsDropdown } from "@/components/admin/QuickActionsBar"
 import { matchNavItem } from "@/components/painel/navegacao"
@@ -22,6 +25,10 @@ import { LoadingScreen } from "@/components/feedback/LoadingScreen"
  * `getAdminNav`) — o filtro de DADOS (só os próprios sites/charge-points) é
  * feito pelo backend (`operatorScopeWhere`), aqui só escondemos/mostramos
  * navegação.
+ *
+ * Onboarding (tour do painel): `AdminLayout` envolve o shell no `TourProvider` (abre sozinho na 1ª visita de cada usuário). Os `data-tour` (`admin-sidebar`, `admin-menu-button`,
+ * `admin-user`, `admin-quick-actions` e `nav-*` em `SidebarNav`) são os alvos do roteiro em `components/onboarding/tourScripts.ts`. "Rever tour": menu do nome (rodapé da sidebar) e
+ * item no drawer. Com o tour aberto, todos os grupos do menu ficam abertos (senão os itens-alvo estariam recolhidos e o balão cairia no centro).
  */
 
 const SIDEBAR_COLLAPSED_KEY = "innoelektron-admin-sidebar-collapsed"
@@ -56,7 +63,8 @@ function AdminShell() {
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsedPref)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readOpenGroupsPref)
 
-  const nav = getAdminNav(user?.role)
+  const tour = useTour()
+  const nav = useMemo(() => getAdminNav(user?.role), [user?.role])
   const current = matchNavItem(nav, location.pathname)
   const contextLabel = operatorContextLabel(user)
 
@@ -80,13 +88,22 @@ function AdminShell() {
   // expandido enquanto for a rota atual; o clique no título continua
   // gravando a preferência em `localStorage`, só não fecha visualmente
   // enquanto o admin está dentro dele.
-  const isGroupOpen = (title: string): boolean => title === activeGroupTitle || (openGroups[title] ?? true)
+  const isGroupOpen = (title: string): boolean => tour.active || title === activeGroupTitle || (openGroups[title] ?? true)
   const toggleGroup = (title: string) => setOpenGroups((prev) => ({ ...prev, [title]: !(prev[title] ?? true) }))
 
   const handleLogout = () => {
     logout()
     navigate("/")
   }
+
+  // Abre o tour depois que o menu/drawer de onde o pedido veio terminou de fechar e devolveu o foco (o tour guarda o elemento focado para devolver ao fechar).
+  const replayTour = tour.available ? () => window.setTimeout(tour.restart, 200) : undefined
+  const replayTourFromDrawer = replayTour
+    ? () => {
+        setDrawerOpen(false)
+        replayTour()
+      }
+    : undefined
 
   return (
     // `h-screen overflow-hidden`: o shell inteiro tem a altura da viewport e não
@@ -106,6 +123,7 @@ function AdminShell() {
           (só ícones, 80px); a preferência persiste em localStorage (por
           navegador, não vai pro backend — pedido do dono). */}
       <aside
+        data-tour="admin-sidebar"
         className={cn(
           "surface-dark fixed inset-y-0 left-0 z-20 hidden flex-col transition-[width] duration-200 lg:flex",
           collapsed ? "w-20" : "w-64",
@@ -147,20 +165,8 @@ function AdminShell() {
         </nav>
 
         <div className={cn("border-t border-white/10", collapsed ? "p-2" : "p-4")}>
-          <div className={cn("flex items-center rounded-xl bg-white/10", collapsed ? "flex-col gap-2 p-2" : "gap-3 p-3")}>
-            <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 text-sm font-black text-white"
-              aria-hidden="true"
-              title={collapsed ? user?.name : undefined}
-            >
-              {(user?.name ?? "A").charAt(0).toUpperCase()}
-            </div>
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-white">{user?.name}</p>
-                <p className="truncate text-[11px] text-white/70">{user ? ROLE_LABELS[user.role] : ""}</p>
-              </div>
-            )}
+          <div className={cn("flex items-center rounded-xl bg-white/10", collapsed ? "flex-col gap-2 p-2" : "gap-3 p-3")} data-tour="admin-user">
+            <AdminUserMenu name={user?.name} subtitle={user ? ROLE_LABELS[user.role] : ""} collapsed={collapsed} onReplayTour={replayTour} />
             <button
               type="button"
               onClick={handleLogout}
@@ -185,6 +191,7 @@ function AdminShell() {
         isGroupOpen={isGroupOpen}
         onToggleGroup={toggleGroup}
         onLogout={handleLogout}
+        onReplayTour={replayTourFromDrawer}
       />
 
       {/* Conteúdo — coluna de altura fixa (viewport inteira): header e footer
@@ -221,6 +228,7 @@ function AdminShell() {
             <button
               type="button"
               ref={menuButtonRef}
+              data-tour="admin-menu-button"
               onClick={() => setDrawerOpen(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-ink-soft lg:hidden"
               aria-label="Abrir menu"
@@ -259,6 +267,8 @@ function AdminShell() {
 export function AdminLayout() {
   const { user, isAuthenticated } = useAuthStore()
   const location = useLocation()
+  // Menu efetivo do papel, estável entre renders: o tour decide quais passos existem a partir dele (OPERATOR não tem os passos só-ADMIN).
+  const tourNav = useMemo(() => getAdminNav(user?.role), [user?.role])
 
   if (!isAuthenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />
@@ -268,5 +278,9 @@ export function AdminLayout() {
     return <AccessDenied description="Esta área é exclusiva para administradores e operadores." />
   }
 
-  return <AdminShell />
+  return (
+    <TourProvider userId={user.id} role={user.role} nav={tourNav}>
+      <AdminShell />
+    </TourProvider>
+  )
 }

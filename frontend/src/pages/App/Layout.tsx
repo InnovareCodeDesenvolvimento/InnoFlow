@@ -9,6 +9,7 @@ import { MascotFace } from "@/components/brand/Mascot"
 import { ProfileAvatar } from "@/components/perfil/ProfileAvatar"
 import { firstName } from "@/lib/profileDisplay"
 import { LoadingScreen } from "@/components/feedback/LoadingScreen"
+import { TourProvider } from "@/components/onboarding/TourProvider"
 
 /**
  * Casca do PWA do motorista — barra de navegação FIXA embaixo (padrão de
@@ -22,6 +23,9 @@ import { LoadingScreen } from "@/components/feedback/LoadingScreen"
  * branco sob uma barra escura). A navegação vira um trilho lateral a partir de `lg` (o app aberto no desktop deixa de parecer um site com barra de
  * celular). A aba ativa tem ícone/rótulo brancos, pílula `white/10` e traço lima; o pingo de "sessão ativa" é lima ESTÁTICO (loop em navegação é
  * proibido pelo guia de motion).
+ *
+ * Onboarding (tour do motorista): `AppLayout` envolve o shell no `TourProvider` (abre sozinho na 1ª visita; "Rever tour" mora em Meu perfil). Os `data-tour` abaixo
+ * (`app-nav-*`, `app-profile`) são os alvos do roteiro em `components/onboarding/tourScripts.ts`.
  */
 const NAV_ITEMS = [
   { href: "/app", label: "Início", icon: Home, exact: true },
@@ -58,6 +62,7 @@ function AppShell() {
           to="/app/perfil"
           aria-label={`Meu perfil${firstName(user?.name) ? `, ${firstName(user?.name)}` : ""}`}
           aria-current={location.pathname === "/app/perfil" ? "page" : undefined}
+          data-tour="app-profile"
           className="ml-1 flex h-11 min-w-0 items-center gap-2 rounded-full pl-1.5 pr-3 text-xs text-ink-softer hover:bg-white/10 hover:text-white"
         >
           <ProfileAvatar name={user?.name} size="sm" />
@@ -92,6 +97,7 @@ function AppShell() {
                 key={item.href}
                 to={item.href}
                 aria-current={active ? "page" : undefined}
+                data-tour={`app-nav-${item.href === "/app" ? "inicio" : item.href.replace("/app/", "")}`}
                 className={cn(
                   "relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold transition-colors active:scale-[0.97] lg:flex-none lg:py-3",
                   active ? "text-white" : "text-white/70 hover:text-white",
@@ -144,5 +150,9 @@ export function AppLayout() {
     )
   }
 
-  return <AppShell />
+  return (
+    <TourProvider userId={user.id} role={user.role}>
+      <AppShell />
+    </TourProvider>
+  )
 }

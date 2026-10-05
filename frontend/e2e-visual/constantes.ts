@@ -27,3 +27,10 @@ export type PersonaComLogin = keyof typeof PERSONAS
 export type Persona = PersonaComLogin | "anon"
 
 export const PASTA_AUTH = "e2e-visual/.auth"
+
+/**
+ * Interruptor do APARELHO que desliga o tour automático do mascote e o card "Primeiros passos" (`ONBOARDING_OFF_KEY` em `src/components/onboarding/onboardingStorage.ts`). Todo login de mock é uma 1ª visita,
+ * então sem esta chave o tour abriria por cima de CADA captura. O `global-setup` o grava no `storageState` de cada persona e o `playwright.visual.config.ts` o usa como padrão dos contextos novos
+ * (specs que fazem login pela UI). As capturas do próprio onboarding (`onboarding.visual.ts`) o desligam de propósito.
+ */
+export const ONBOARDING_OFF = { name: "innoflow:onboarding:off", value: "1" } as const

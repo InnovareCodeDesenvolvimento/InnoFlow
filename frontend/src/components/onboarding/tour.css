@@ -1,0 +1,466 @@
+/*
+ * CSS do onboarding (tour + checklist + mascote animado). Arquivo PRÓPRIO, importado só por `TourMascot.tsx`/`OnboardingTour.tsx`: vai para o chunk lazy do tour (e para o chunk do Dashboard,
+ * por causa do checklist), NÃO para o CSS global — orçamento de CSS global +2500 B gzip. Por isso é CSS escrito à mão com os tokens do design system (`rgb(var(--color-*))`), não utilitário Tailwind.
+ * Fora de `@layer` (como `landing.css`): vence os utilitários de mesma especificidade, então cada seletor tem prefixo próprio (`tour-`, `tm-`, `ob-`).
+ * Todo movimento só existe sob `prefers-reduced-motion: no-preference` — com `reduce` fica a versão estática.
+ */
+
+/* ---------------------------------------------------------------- mascote ---- */
+.tm {
+  --tm-h: 104px;
+  position: relative;
+  flex: none;
+  height: var(--tm-h);
+  aspect-ratio: 1006 / 1358;
+}
+.tm[data-size="lg"] {
+  --tm-h: 176px;
+}
+/* O brilho de fundo (`.brand-backlight`, global) sai 18% além da caixa do mascote: no balão isso invadia a coluna de texto (o axe nao consegue avaliar texto sobre gradiente). Aqui ele fica rente (8%, menor que o vão de 16 px até o texto). */
+.tm .brand-backlight {
+  inset: 6% -8% 4% -8%;
+}
+.tm-look,
+.tm-wave,
+.tm-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.tm-body {
+  transform-origin: 50% 100%;
+}
+.tm-look {
+  transform-origin: 50% 100%;
+}
+.tm-body img {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  filter: drop-shadow(0 10px 12px rgb(0 0 0 / 0.45));
+}
+
+/* Pálpebras: CENTRO do olho em % do recorte 1006x1358 (as mesmas medidas da landing). Só aparecem no piscar. */
+.tm-eye {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 45%, #04243a 0 66%, rgb(2 26 43 / 0) 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+.tm-eye[data-eye="l"] {
+  left: 39.2%;
+  top: 28.9%;
+  width: 14.6%;
+  height: 10.6%;
+}
+.tm-eye[data-eye="r"] {
+  left: 61.4%;
+  top: 31.9%;
+  width: 12.4%;
+  height: 10%;
+}
+.tm-eye::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: 52%;
+  height: 22%;
+  border-bottom: 2px solid rgb(var(--color-accent-glow));
+  border-radius: 0 0 60% 60%;
+}
+
+/* LEDs: o raio lima do fone e o do conector. Brilho estático por padrão; pulsa sob `no-preference`. */
+.tm-led {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(var(--color-lime) / 0.85), rgb(var(--color-lime) / 0.25) 55%, transparent);
+  mix-blend-mode: screen;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.tm-led[data-led="ear"] {
+  left: 17.9%;
+  top: 28%;
+  width: 17%;
+  aspect-ratio: 1;
+}
+.tm-led[data-led="plug"] {
+  left: 79.4%;
+  top: 40.4%;
+  width: 15%;
+  aspect-ratio: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tm-look {
+    transition: transform 320ms var(--ease-brand);
+  }
+  .tm-look[data-look="left"] {
+    transform: rotate(-4deg) translateX(-3%);
+  }
+  .tm-look[data-look="right"] {
+    transform: rotate(4deg) translateX(3%);
+  }
+  .tm-look[data-look="up"] {
+    transform: rotate(2deg) scale(1.02) translateY(-2%);
+  }
+  .tm-look[data-look="down"] {
+    transform: rotate(-2deg) translateY(1.5%);
+  }
+  .tm-body {
+    animation: tm-breathe 4.2s ease-in-out infinite;
+  }
+  .tm-wave {
+    transform-origin: 50% 100%;
+    animation: tm-wave 1.1s var(--ease-brand) both;
+  }
+  .tm[data-mood="happy"] .tm-wave {
+    animation-name: tm-hop;
+    animation-duration: 0.9s;
+  }
+  .tm-led {
+    animation: tm-led 2.6s ease-in-out infinite;
+  }
+  .tm-led[data-led="plug"] {
+    animation-delay: -1.3s;
+  }
+  .tm[data-mood="happy"] .tm-led {
+    animation-duration: 1.2s;
+  }
+  .tm-eye {
+    animation: tm-blink 5.6s ease-in-out infinite;
+  }
+  .tm-eye[data-eye="r"] {
+    animation-delay: 0.04s;
+  }
+}
+@keyframes tm-breathe {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.012, 1.024);
+  }
+}
+@keyframes tm-wave {
+  0% {
+    transform: rotate(0) translateY(0);
+  }
+  18% {
+    transform: rotate(-7deg) translateY(-3%);
+  }
+  36% {
+    transform: rotate(6deg) translateY(0);
+  }
+  54% {
+    transform: rotate(-5deg) translateY(-2%);
+  }
+  72% {
+    transform: rotate(3deg) translateY(0);
+  }
+  100% {
+    transform: rotate(0) translateY(0);
+  }
+}
+@keyframes tm-hop {
+  0% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-9%) rotate(-3deg);
+  }
+  55% {
+    transform: translateY(0) rotate(2deg);
+  }
+  72% {
+    transform: translateY(-3.5%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+@keyframes tm-led {
+  0%,
+  100% {
+    opacity: 0.18;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+@keyframes tm-blink {
+  0%,
+  92%,
+  100% {
+    opacity: 0;
+  }
+  94%,
+  97% {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------- tour ---- */
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.tour-blocker {
+  position: absolute;
+  inset: 0;
+}
+.tour-dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(var(--color-night) / 0.62);
+}
+/* Destaque do alvo: o próprio retângulo é "furo" (sombra gigante escurece o resto) com um aro lima. */
+.tour-spot {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 2px rgb(var(--color-lime)),
+    0 0 0 100vmax rgb(var(--color-night) / 0.62);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tour-spot {
+    transition:
+      top 220ms var(--ease-brand),
+      left 220ms var(--ease-brand),
+      width 220ms var(--ease-brand),
+      height 220ms var(--ease-brand);
+  }
+}
+
+.tour-balloon {
+  position: fixed;
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  width: min(23rem, calc(100vw - 1.5rem));
+  max-height: calc(100dvh - 1.5rem);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: var(--radius-feature);
+  background-color: rgb(var(--color-surface));
+  background-image: none;
+  box-shadow: 0 28px 64px -18px rgb(0 0 0 / 0.7);
+  visibility: hidden;
+}
+.tour-balloon[data-ready] {
+  visibility: visible;
+}
+.tour-balloon[data-layout="center"] {
+  /* Centralizado SEM transform (`inset:0` + `margin:auto` + altura do conteúdo): o axe não consegue avaliar contraste de texto sob `translate`. */
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  width: min(32rem, calc(100vw - 1.5rem));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tour-balloon[data-ready]:not([data-layout="center"]) {
+    transition:
+      left 220ms var(--ease-brand),
+      top 220ms var(--ease-brand);
+  }
+  .tour-balloon[data-ready] {
+    animation: tour-in 200ms var(--ease-brand) both;
+  }
+}
+@keyframes tour-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Ponta do balão: quadrado girado, duas bordas voltadas ao alvo. O balão fica fora do overflow do miolo, então a ponta nunca é cortada. */
+.tour-tail {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  rotate: 45deg;
+  background-color: rgb(var(--color-surface));
+  border: 0 solid rgb(255 255 255 / 0.16);
+}
+.tour-tail[data-side="right"] {
+  left: -7px;
+  border-width: 0 0 1px 1px;
+}
+.tour-tail[data-side="left"] {
+  right: -7px;
+  border-width: 1px 1px 0 0;
+}
+.tour-tail[data-side="bottom"] {
+  top: -7px;
+  border-width: 1px 0 0 1px;
+}
+.tour-tail[data-side="top"] {
+  bottom: -7px;
+  border-width: 0 1px 1px 0;
+}
+
+.tour-body {
+  display: flex;
+  gap: 1rem;
+  min-height: 0;
+  padding: 1.25rem 1.25rem 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tour-balloon[data-big] .tour-body {
+  align-items: center;
+  padding-top: 1.5rem;
+}
+.tour-copy {
+  position: relative; /* pinta DEPOIS do brilho do mascote (elemento posicionado pinta acima de conteúdo comum): o texto nunca fica sob o gradiente */
+  flex: 1;
+  min-width: 0;
+}
+.tour-progress {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgb(var(--color-ink-softer));
+}
+.tour-title {
+  margin-top: 0.125rem;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: rgb(var(--color-ink));
+}
+.tour-balloon[data-big] .tour-title {
+  font-size: 1.25rem;
+}
+.tour-text {
+  margin-top: 0.4rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: rgb(var(--color-ink-soft));
+}
+.tour-dots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.25rem 1.25rem 0.75rem;
+}
+.tour-dots > span {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: rgb(var(--color-border-strong));
+}
+.tour-dots > span[data-state="done"] {
+  background: rgb(var(--color-ink-subtle));
+}
+.tour-dots > span[data-state="current"] {
+  width: 1.25rem;
+  background: rgb(var(--color-lime));
+}
+.tour-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem 0.75rem;
+  border-top: 1px solid rgb(var(--color-border));
+}
+.tour-footer-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------- checklist (Dashboard) ---- */
+.ob-card {
+  display: grid;
+  gap: 1rem 1.5rem;
+  padding: 1.25rem;
+}
+@media (min-width: 640px) {
+  .ob-card {
+    padding: 1.5rem;
+  }
+}
+.ob-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+.ob-stage {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgb(var(--color-night));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+}
+.ob-progress {
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgb(var(--color-border));
+}
+.ob-progress > div {
+  height: 100%;
+  border-radius: 9999px;
+  background: rgb(var(--color-accent));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ob-progress > div {
+    transition: width 300ms var(--ease-brand);
+  }
+}
+.ob-list {
+  margin-top: 1rem;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.ob-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+}
+.ob-item + .ob-item {
+  border-top: 1px solid rgb(var(--color-border));
+}
+.ob-bullet {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid rgb(var(--color-border-strong));
+  color: rgb(var(--color-ink-softer));
+}
+.ob-bullet[data-done] {
+  border-color: transparent;
+  background: rgb(var(--color-accent));
+  color: rgb(255 255 255);
+}

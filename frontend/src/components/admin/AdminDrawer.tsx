@@ -1,6 +1,6 @@
 import type { RefObject } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { Building2, LogOut, X } from "lucide-react"
+import { Building2, LogOut, Route, X } from "lucide-react"
 import { SidebarNav } from "./SidebarNav"
 import type { AdminNavGroup, AdminNavItem } from "./adminNav"
 
@@ -22,6 +22,7 @@ export function AdminDrawer({
   isGroupOpen,
   onToggleGroup,
   onLogout,
+  onReplayTour,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -32,6 +33,8 @@ export function AdminDrawer({
   isGroupOpen: (title: string) => boolean
   onToggleGroup: (title: string) => void
   onLogout: () => void
+  /** "Rever tour" (onboarding). Ausente = sem o item (usuário sem tour). O chamador fecha o drawer e abre o tour. */
+  onReplayTour?: () => void
 }) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -78,6 +81,16 @@ export function AdminDrawer({
             />
           </nav>
           <div className="border-t border-white/10 p-4">
+            {onReplayTour && (
+              <button
+                type="button"
+                onClick={onReplayTour}
+                className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white"
+              >
+                <Route className="h-4 w-4" aria-hidden="true" />
+                Rever tour
+              </button>
+            )}
             <button
               type="button"
               onClick={onLogout}

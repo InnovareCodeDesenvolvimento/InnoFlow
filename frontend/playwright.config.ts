@@ -15,6 +15,13 @@ import { defineConfig, devices } from "@playwright/test"
 const PORT = 5173
 const baseURL = process.env.E2E_BASE_URL || `http://localhost:${PORT}`
 
+/**
+ * ONBOARDING DESLIGADO por padrão em TODA spec: o tour do mascote abre sozinho na 1ª visita de cada usuário (aqui, todo login de mock é uma 1ª visita) e cobriria a tela que a spec quer
+ * clicar. A chave é o interruptor do APARELHO (`ONBOARDING_OFF_KEY` em `src/components/onboarding/onboardingStorage.ts`): sem tour automático e sem o card "Primeiros passos" do Dashboard.
+ * As specs do próprio onboarding (`e2e/onboarding-*.spec.ts`) LIGAM de volta com `test.use({ storageState: { cookies: [], origins: [] } })`.
+ */
+const ONBOARDING_OFF_STATE = { cookies: [], origins: [{ origin: new URL(baseURL).origin, localStorage: [{ name: "innoflow:onboarding:off", value: "1" }] }] }
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -24,6 +31,7 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
+    storageState: ONBOARDING_OFF_STATE,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: process.env.E2E_BASE_URL

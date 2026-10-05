@@ -1,7 +1,7 @@
 import { chromium, type FullConfig, type Page } from "@playwright/test"
 import { mkdirSync } from "node:fs"
 import path from "node:path"
-import { LOCALE, PASTA_AUTH, PERSONAS, SENHA, TIMEZONE } from "./constantes"
+import { LOCALE, ONBOARDING_OFF, PASTA_AUTH, PERSONAS, SENHA, TIMEZONE } from "./constantes"
 import { ROTAS } from "./rotas"
 
 /**
@@ -23,6 +23,8 @@ export default async function globalSetup(config: FullConfig) {
     await page.getByLabel("Senha").fill(SENHA)
     await page.getByRole("button", { name: "Entrar" }).click()
     await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 })
+    // Tour/checklist do mascote desligados neste aparelho (senão o 1º acesso de cada persona abriria o tour sobre as capturas): ver `ONBOARDING_OFF`.
+    await page.evaluate(({ name, value }) => localStorage.setItem(name, value), ONBOARDING_OFF)
     await context.storageState({ path: path.join(PASTA_AUTH, `${arquivo}.json`) })
 
     // Aquecimento das rotas desta persona.

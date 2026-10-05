@@ -83,6 +83,9 @@ export async function novoContexto(browser, { celular = false } = {}) {
     hasTouch: celular,
     isMobile: celular,
     serviceWorkers: "allow", // o MSW É um service worker
+    // Onboarding desligado neste aparelho: todo login de mock é uma 1ª visita e o tour do mascote abriria por cima de cada captura (e o card "Primeiros passos" apareceria no Dashboard).
+    // Mesmo interruptor do harness (`ONBOARDING_OFF_KEY` em src/components/onboarding/onboardingStorage.ts).
+    storageState: { cookies: [], origins: [{ origin: new URL(BASE).origin, localStorage: [{ name: "innoflow:onboarding:off", value: "1" }] }] },
   })
 }
 
