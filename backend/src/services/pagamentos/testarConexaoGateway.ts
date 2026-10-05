@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { env } from '../../lib/env'
 import { logger } from '../../lib/logger'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
-import { resolverUrlsCielo, resolverUrlsSop, verificarCoerenciaUrls } from '../../core/pagamentos/configGateway'
+import { resolverUrlsCielo, resolverUrlsSop, verificarCoerenciaUrls, verificarCoerenciaUrlsSop } from '../../core/pagamentos/configGateway'
 import { mensagemDeFalhaCielo } from '../../core/pagamentos/classificarFalhaCielo'
 import { CieloHttpClient, CieloHttpError } from './cieloHttpClient'
 import { CieloSopOAuthError, emitirAccessTokenDoNavegadorSop, obterTokenOAuthSop, type CieloSopConfig } from './cieloSopOAuth'
@@ -154,6 +154,13 @@ async function testarSop(config: ConfigEfetiva): Promise<ResultadoPassoTesteCone
   const urlsSop = resolverUrlsSop(estado.environment, { oauthToken: env.CIELO_SOP_OAUTH_TOKEN_URL, accessToken: env.CIELO_SOP_ACCESS_TOKEN_URL, script: env.CIELO_SOP_SCRIPT_URL })
   const hostOauth = hostDe(urlsSop.oauthToken)
   const hostAccess = hostDe(urlsSop.accessToken)
+
+  // S-3: override de URL do SOP fora da allowlist em produção => o teste NÃO chama (o ClientSecret iria ao host errado).
+  const incoerencia = verificarCoerenciaUrlsSop(estado.environment, urlsSop)
+  if (incoerencia) {
+    const msg = `Configuração incoerente: ${incoerencia}. Corrija o ambiente ou as URLs do servidor.`
+    return [semChamada('SOP_OAUTH', 'MISCONFIGURED', msg, hostOauth), semChamada('SOP_ACCESS_TOKEN', 'SKIPPED', 'Depende do passo anterior.', hostAccess)]
+  }
 
   if (!estado.sopClientId || !estado.temSopClientSecret) {
     const msg = 'ClientId/ClientSecret do Silent Order Post (Braspag) não configurados: o cadastro de cartão não funciona sem eles.'

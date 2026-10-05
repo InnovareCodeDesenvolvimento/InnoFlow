@@ -197,6 +197,20 @@ sem nada salvo, vale a env (comportamento anterior). Detalhes que evitam susto:
   payment_gateway_environment_url_mismatch`. Em geral **não defina essas duas envs**: deixe derivar.
   ⚠️ Hosts de produção (`https://api.cieloecommerce.cielo.com.br` / `https://apiquery.cieloecommerce.cielo.com.br`)
   **a confirmar na doc da Cielo antes do go-live** — não foram testados contra a conta real.
+- **Allowlist de domínios em PRODUÇÃO (S-3, 05/10/2026).** Com o gateway em `production`, TODA URL de
+  override — `CIELO_API_BASE_URL`, `CIELO_API_QUERY_BASE_URL`, `CIELO_SOP_OAUTH_TOKEN_URL`,
+  `CIELO_SOP_ACCESS_TOKEN_URL` e `CIELO_SOP_SCRIPT_URL` — precisa ser `https://` (porta 443, sem
+  usuário/senha na URL) e o host precisa ser um destes domínios **ou subdomínio** deles:
+  `cieloecommerce.cielo.com.br` (API de vendas e script do SOP no Parque), `pagador.com.br` (AccessToken
+  do SOP; `www.pagador.com.br` é o script que a doc oficial cita, P5) e `braspag.com.br` (OAuth do SOP).
+  Fora disso o servidor **recusa construir o adaptador** (503 nas rotas, `alert:
+  payment_gateway_environment_url_mismatch`) e o "Testar conexão" devolve `MISCONFIGURED` sem chamar a
+  rede — a `MerchantKey` (header de toda chamada) e o `ClientSecret` (OAuth) nunca vão a um host fora
+  da lista. Os **defaults** de sandbox e produção já estão dentro da lista; só quem define override é
+  afetado (em geral: ninguém — não defina). Em **sandbox** o override continua livre (servidor falso/proxy
+  em teste), mas o host oficial de produção segue recusado. Única exceção em produção: **loopback**
+  (`localhost`, `127.x.x.x`, `::1`), que existe só para a suíte de integração rodar contra uma Cielo falsa.
+  A lista mora em `DOMINIOS_CIELO_PERMITIDOS_EM_PRODUCAO` (`backend/src/core/pagamentos/configGateway.ts`).
 - **Virar produção** na tela exige confirmação digitada e que todo meio habilitado esteja pronto
   (`readiness`); senão 409 `GATEWAY_NOT_READY` com a lista do que falta.
 - **Qualquer mudança de ambiente (sandbox ↔ produção, F5.8, M4c)** é SERIALIZADA com criações de pagamentos — 

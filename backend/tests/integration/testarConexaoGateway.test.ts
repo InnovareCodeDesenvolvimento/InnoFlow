@@ -284,6 +284,37 @@ describe('POST /api/admin/payment-gateway/test-connection (C2.1)', () => {
     expect(res.body.ok).toBe(false)
   })
 
+  it('S-3: em PRODUÇÃO, URL de override fora da allowlist Cielo/Braspag (API ou SOP) => MISCONFIGURED e NENHUMA chamada sai (MerchantKey/ClientSecret não vão a host estranho); loopback segue valendo (os servidores falsos)', async () => {
+    configurarTudo()
+    ;(env as Record<string, unknown>).CIELO_SANDBOX = false // ambiente efetivo = production (sem linha no banco, vale o env)
+
+    // controle: tudo em loopback (os servidores falsos) continua funcionando em produção
+    const controle = await testar()
+    expect(controle.body.environment).toBe('production')
+    expect(controle.body.ok, JSON.stringify(controle.body)).toBe(true)
+    chamadasCielo = []
+    chamadasBraspag = []
+
+    // API de vendas num host qualquer
+    process.env.CIELO_API_QUERY_BASE_URL = 'https://cielo.exemplo-malicioso.com'
+    const api = await testar()
+    const credencial = passo(api.body, 'MERCHANT_CREDENTIALS')
+    expect(credencial.status).toBe('MISCONFIGURED')
+    expect(credencial.message).toMatch(/allowlist/)
+    expect(chamadasCielo).toHaveLength(0)
+    expect(api.body.ok).toBe(false)
+    process.env.CIELO_API_QUERY_BASE_URL = cieloUrl
+    chamadasBraspag = [] // o passo do SOP desta rodada (URLs válidas) falou com a Braspag falsa; o que se prova abaixo é a rodada seguinte
+
+    // OAuth do SOP num host qualquer (o ClientSecret iria junto)
+    ;(env as Record<string, unknown>).CIELO_SOP_OAUTH_TOKEN_URL = 'https://auth.braspag.com.br.exemplo-malicioso.com/oauth2/token'
+    const sop = await testar()
+    expect(passo(sop.body, 'SOP_OAUTH').status).toBe('MISCONFIGURED')
+    expect(passo(sop.body, 'SOP_ACCESS_TOKEN').status).toBe('SKIPPED')
+    expect(chamadasBraspag).toHaveLength(0)
+    semSegredos(sop.body)
+  })
+
   it('só ADMIN: sem token 401; OPERATOR e DRIVER 403', async () => {
     expect((await request(app).post('/api/admin/payment-gateway/test-connection')).status).toBe(401)
     const driver = await createUser({ role: 'DRIVER', label: 'driver-testconn', suffix })

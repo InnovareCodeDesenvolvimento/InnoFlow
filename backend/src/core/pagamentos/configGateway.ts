@@ -342,18 +342,95 @@ function hostDe(url: string): string | null {
 }
 
 /**
- * Detecta URL incompatível com o ambiente — devolve a descrição do problema (sem URL completa, só host) ou
- * `null` se coerente. Só acusa o que é inequívoco: produção apontando para host com "sandbox", ou sandbox
- * apontando para um host OFICIAL de produção da Cielo (cobraria de verdade achando que é teste). Host
- * customizado (mock local, proxy) em sandbox passa.
+ * ALLOWLIST DE DOMÍNIOS (S-3 da auditoria Cielo, fechado em 05/10/2026): em PRODUÇÃO toda URL do gateway — as duas da API de vendas (`CIELO_API_BASE_URL`,
+ * `CIELO_API_QUERY_BASE_URL`) e as três do Silent Order Post (`CIELO_SOP_OAUTH_TOKEN_URL`, `CIELO_SOP_ACCESS_TOKEN_URL`, `CIELO_SOP_SCRIPT_URL`) — precisa ser
+ * `https://` (porta 443, sem usuário/senha na URL) e o HOST precisa ser um destes domínios OU subdomínio deles (fronteira de rótulo: `evilpagador.com.br` e
+ * `pagador.com.br.evil.com` NÃO passam):
+ *  - `cieloecommerce.cielo.com.br` — API de vendas (`api.`/`apiquery.`) e script do SOP no Parque (`transaction.`);
+ *  - `pagador.com.br`              — emissão do AccessToken do SOP (`transaction.`), e o `www.` que a doc oficial cita para o script (P5, ainda a confirmar com a Cielo);
+ *  - `braspag.com.br`              — OAuth2 do SOP (`auth.`).
+ * São os mesmos domínios da CSP da página do cartão e os usados pelo Parque das Feiras em produção. Por que existe: a `MerchantKey` vai num header de TODA chamada
+ * à API e o `ClientSecret` no OAuth do SOP — uma env de override errada (ou adulterada) mandaria esses segredos a um host qualquer. O override continua possível em
+ * produção (ex.: nova URL canônica da Cielo), mas só dentro destes domínios (ou LOOPBACK, ver `hostEhLoopback`). Em SANDBOX o override segue livre (servidor falso/proxy em teste; só se recusa
+ * apontar para o host oficial de PRODUÇÃO). Ao incluir um domínio novo aqui, acrescente-o também ao teste e a `docs/DEPLOY-EASYPANEL.md`.
  */
-export function verificarCoerenciaUrls(ambiente: AmbienteGateway, urls: Pick<UrlsCielo, 'api' | 'query'>): string | null {
-  const hostsProducaoOficiais = new Set([hostDe(URLS_CIELO.production.api), hostDe(URLS_CIELO.production.query)])
-  for (const [nome, url] of [['CIELO_API_BASE_URL', urls.api], ['CIELO_API_QUERY_BASE_URL', urls.query]] as const) {
+export const DOMINIOS_CIELO_PERMITIDOS_EM_PRODUCAO: readonly string[] = ['cieloecommerce.cielo.com.br', 'pagador.com.br', 'braspag.com.br']
+
+/** Host (sem porta) é um dos domínios da allowlist ou um subdomínio dele — fronteira de rótulo, nunca "termina com". */
+export function hostEhDominioCieloPermitido(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return DOMINIOS_CIELO_PERMITIDOS_EM_PRODUCAO.some((dominio) => h === dominio || h.endsWith(`.${dominio}`))
+}
+
+/**
+ * EXCEÇÃO ÚNICA à allowlist: LOOPBACK (`localhost`, `127.0.0.0/8`, `::1`) — qualquer porta, http ou https. Existe porque a suíte de integração roda o servidor de
+ * verdade (`NODE_ENV=production`, gateway `production`) contra Cielo/Braspag FALSAS em `127.0.0.1` (impossível ter TLS + domínio Cielo ali). Não abre
+ * exfiltração: o tráfego de loopback não sai da máquina (quem consegue ouvir ali já tem a máquina), e `0.0.0.0`, IPs de rede/metadata (169.254.x) e nomes
+ * como `localhost.evil.com` NÃO são loopback. Se um dia a suíte passar a usar TLS/DNS próprios, esta exceção pode ser apagada sem mexer no resto.
+ */
+export function hostEhLoopback(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return h === 'localhost' || h === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
+}
+
+/** Motivo (sem a URL completa — só o host — e nunca credencial) de a URL não servir em PRODUÇÃO; `null` se serve. */
+function motivoUrlForaDaAllowlistEmProducao(nome: string, url: string): string | null {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return `${nome} não é uma URL válida`
+  }
+  if (u.username || u.password) return `ambiente "production" mas ${nome} traz usuário/senha na URL`
+  if (hostEhLoopback(u.hostname)) return null
+  if (u.protocol !== 'https:') return `ambiente "production" mas ${nome} não usa https:`
+  if (u.port !== '' && u.port !== '443') return `ambiente "production" mas ${nome} usa a porta ${u.port} (só 443)`
+  if (!hostEhDominioCieloPermitido(u.hostname)) return `ambiente "production" mas ${nome} aponta para um host fora da allowlist Cielo/Braspag (${u.host}) — permitidos: ${DOMINIOS_CIELO_PERMITIDOS_EM_PRODUCAO.join(', ')}`
+  return null
+}
+
+/**
+ * Detecta URL incompatível com o ambiente — devolve a descrição do problema (sem URL completa, só host) ou
+ * `null` se coerente. Acusa o inequívoco: produção apontando para host com "sandbox", ou sandbox
+ * apontando para um host OFICIAL de produção da Cielo/Braspag (cobraria de verdade achando que é teste); e, em PRODUÇÃO, qualquer URL
+ * fora da allowlist de domínios (`DOMINIOS_CIELO_PERMITIDOS_EM_PRODUCAO`, https, porta 443). Host customizado (mock local, proxy) em sandbox passa.
+ * `sop` (opcional): as 3 URLs do Silent Order Post JÁ resolvidas (`resolverUrlsSop`) — checadas pelas mesmas regras.
+ */
+export function verificarCoerenciaUrls(ambiente: AmbienteGateway, urls: Pick<UrlsCielo, 'api' | 'query'>, sop?: UrlsSop): string | null {
+  const pares: Array<readonly [string, string]> = [
+    ['CIELO_API_BASE_URL', urls.api],
+    ['CIELO_API_QUERY_BASE_URL', urls.query],
+    ...(sop ? paresDeUrlsSop(sop) : []),
+  ]
+  return verificarPares(ambiente, pares)
+}
+
+/** Só as 3 URLs do Silent Order Post (passos de OAuth/AccessToken e script) — usado onde a API de vendas não entra (teste de conexão do SOP). */
+export function verificarCoerenciaUrlsSop(ambiente: AmbienteGateway, sop: UrlsSop): string | null {
+  return verificarPares(ambiente, paresDeUrlsSop(sop))
+}
+
+function paresDeUrlsSop(sop: UrlsSop): Array<readonly [string, string]> {
+  return [
+    ['CIELO_SOP_OAUTH_TOKEN_URL', sop.oauthToken],
+    ['CIELO_SOP_ACCESS_TOKEN_URL', sop.accessToken],
+    ['CIELO_SOP_SCRIPT_URL', sop.script],
+  ]
+}
+
+function verificarPares(ambiente: AmbienteGateway, pares: ReadonlyArray<readonly [string, string]>): string | null {
+  const hostsProducaoOficiais = new Set(
+    [URLS_CIELO.production.api, URLS_CIELO.production.query, URLS_SOP.production.oauthToken, URLS_SOP.production.accessToken, URLS_SOP.production.script].map(hostDe),
+  )
+  for (const [nome, url] of pares) {
     const host = hostDe(url)
     if (!host) return `${nome} não é uma URL válida`
     if (ambiente === 'production' && host.includes('sandbox')) return `ambiente "production" mas ${nome} aponta para o host de sandbox (${host})`
     if (ambiente === 'sandbox' && hostsProducaoOficiais.has(host)) return `ambiente "sandbox" mas ${nome} aponta para o host de PRODUÇÃO da Cielo (${host})`
+    if (ambiente === 'production') {
+      const motivo = motivoUrlForaDaAllowlistEmProducao(nome, url)
+      if (motivo) return motivo
+    }
   }
   return null
 }

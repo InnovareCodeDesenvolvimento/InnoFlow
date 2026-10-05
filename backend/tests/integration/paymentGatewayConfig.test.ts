@@ -551,6 +551,9 @@ describe('Configuração do gateway Cielo (F5.5) — Postgres + Redis reais, ban
       expect(sandbox.body).not.toHaveProperty('merchantId')
       expect(Object.keys(sandbox.body).sort()).toEqual(['accessToken', 'environment', 'expiresAt', 'scriptUrl'])
 
+      // MUDANÇA DELIBERADA (S-3, 05/10/2026): em PRODUÇÃO a URL do script do SOP precisa estar na allowlist Cielo/Braspag (https, domínio da Cielo) — o `https://sop.example/script.js`
+      // de antes agora seria recusado (503). Troca para a URL real de produção do script (só é devolvida ao navegador, nunca buscada pelo servidor); o OAuth/AccessToken seguem no servidor falso (loopback).
+      m.env.CIELO_SOP_SCRIPT_URL = 'https://transaction.cieloecommerce.cielo.com.br/post/scripts/silentorderpost-1.0.min.js'
       expect((await put(admin, { environment: 'production', confirmProduction: true })).status).toBe(200)
       const producao = await request(app).post('/api/me/payment-methods/tokenization-session').set(auth(motorista))
       expect(producao.status).toBe(200)

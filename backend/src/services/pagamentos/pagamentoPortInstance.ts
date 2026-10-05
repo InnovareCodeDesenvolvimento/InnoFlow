@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { PagamentoPort } from '../../core/pagamentos/porta'
 import { decidirAdaptadorPagamento, type DecisaoAdaptadorPagamento } from '../../core/pagamentos/decidirAdaptador'
 import { ConfiguracaoGatewayIncoerenteError, ConfiguracaoGatewayIndisponivelError, GatewayPagamentoNaoConfiguradoError } from '../../core/pagamentos/erros'
-import { resolverUrlsCielo, temCredenciaisCielo, verificarCoerenciaUrls, type EstadoEfetivo, type LinhaConfigGateway } from '../../core/pagamentos/configGateway'
+import { resolverUrlsCielo, resolverUrlsSop, temCredenciaisCielo, verificarCoerenciaUrls, type EstadoEfetivo, type LinhaConfigGateway } from '../../core/pagamentos/configGateway'
 import { decryptPaymentSecret } from '../../lib/crypto/paymentSecrets'
 import { criarCieloAdapterFromEnv } from './cieloAdapter'
 import { FakeAdapter } from './fakeAdapter'
@@ -57,7 +57,9 @@ function construirAdaptadorCielo(config: ConfigEfetiva): PagamentoPort {
   // URL explícita do SERVIDOR (process.env cru: o `env.ts` tem default sandbox e esconderia "não definida") ganha;
   // senão deriva do ambiente efetivo.
   const urls = resolverUrlsCielo(estado.environment, { api: process.env.CIELO_API_BASE_URL, query: process.env.CIELO_API_QUERY_BASE_URL })
-  const incoerencia = verificarCoerenciaUrls(estado.environment, urls)
+  // S-3: as 3 URLs do SOP (override por env) entram na mesma verificação — em produção, fora da allowlist Cielo/Braspag => recusa (a MerchantKey/ClientSecret não vão a host estranho).
+  const urlsSop = resolverUrlsSop(estado.environment, { oauthToken: config.envGateway.sopOauthTokenUrl, accessToken: env.CIELO_SOP_ACCESS_TOKEN_URL, script: config.envGateway.sopScriptUrl })
+  const incoerencia = verificarCoerenciaUrls(estado.environment, urls, urlsSop)
   if (incoerencia) {
     logger.error({ alert: 'payment_gateway_environment_url_mismatch', environment: estado.environment }, `[pagamentos] ${incoerencia} — adaptador NÃO construído (fail-closed)`)
     throw new ConfiguracaoGatewayIncoerenteError(incoerencia)
