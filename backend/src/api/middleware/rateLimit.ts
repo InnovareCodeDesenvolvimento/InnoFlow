@@ -63,6 +63,12 @@ export const publicRateLimit = buildLimiter(60 * 1000, 300, 'RATE_LIMITED')
 export const changePasswordRateLimit = buildLimiter(15 * 60 * 1000, 8, 'RATE_LIMITED_PASSWORD', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
 
 /**
+ * `PATCH /api/me/profile` (L1.2) — 20 escritas / 15 min por USUÁRIO (um perfil legítimo muda poucas vezes; o teto barra loop de cliente quebrado e tentativa de varrer CPFs de
+ * outras contas pelo 409 `CPF_IN_USE`). Roda DEPOIS de `authenticate`.
+ */
+export const meProfileWriteRateLimit = buildLimiter(15 * 60 * 1000, 20, 'RATE_LIMITED_PROFILE', (req) => req.user?.userId ?? (req.ip ? ipKeyGenerator(req.ip) : 'unknown'))
+
+/**
  * ABERTURA de stream SSE (`/api/admin/events`, `/api/me/events`): 20 aberturas/min por USUÁRIO
  * (loop de reconexão de cliente quebrado / abuso). O teto de streams SIMULTÂNEOS é outro mecanismo
  * (`core/realtime/streamLimiter.ts`) — este limita a TAXA de abrir. Roda DEPOIS de `authenticate`.
