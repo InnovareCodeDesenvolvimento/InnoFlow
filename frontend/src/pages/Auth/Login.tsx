@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -14,13 +14,13 @@ import { useAuthStore } from "@/store/authStore"
 import { accountDeletedNotice, readAccountDeletedFlash } from "@/lib/accountDeletion"
 import { authErrorMessage } from "@/lib/authErrors"
 import { isPasswordResetFlash, PASSWORD_RESET_NOTICE } from "@/lib/passwordReset"
-import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
+import { clearReturnTo, consumeReturnTo, resolvePostAuthPath } from "@/lib/authRedirect"
+import { useAbsorbLegacyRedirect } from "@/hooks/useAbsorbLegacyRedirect"
 import { loginSchema, type LoginFormValues } from "@/schemas/auth.schema"
 import type { User } from "@/types/api"
 
 export function Login() {
   const navigate = useNavigate()
-  const [params] = useSearchParams()
   const login = useAuthStore((s) => s.login)
   const [formError, setFormError] = useState<string | null>(null)
   const location = useLocation()
@@ -32,12 +32,15 @@ export function Login() {
   const [accountDeleted] = useState(() => readAccountDeletedFlash(location.state))
   const queryClient = useQueryClient()
   const logout = useAuthStore((s) => s.logout)
-  // Conta excluída: o token já não vale. Quem excluiu NÃO limpa a sessão antes de navegar (o `AppLayout` a mandaria para um `/login?redirect=` sem o aviso); a limpeza do estado
-  // da sessão e do cache acontece aqui, já fora do app do motorista.
+  // Link antigo `/login?redirect=/x`: o destino vai para o `sessionStorage` e a barra passa a mostrar `/login` limpo.
+  useAbsorbLegacyRedirect()
+  // Conta excluída: o token já não vale. Quem excluiu NÃO limpa a sessão antes de navegar (o `AppLayout` a mandaria para o `/login` SEM o aviso, que vive no estado da rota); a limpeza
+  // do estado da sessão e do cache acontece aqui, já fora do app do motorista. A conta não volta: o destino de retorno que sobrou (de outra sessão) não deve levar o próximo login a lugar nenhum.
   useEffect(() => {
     if (accountDeleted) {
       logout()
       queryClient.clear()
+      clearReturnTo()
     }
   }, [accountDeleted, logout, queryClient])
   useEffect(() => {
@@ -50,12 +53,12 @@ export function Login() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema) })
 
-  // `?redirect=` (fluxo do QR: escaneia → cai aqui → volta pro carregador) tem
+  // O destino de retorno (fluxo do QR: escaneia → cai aqui → volta pro carregador;
+  // ou a rota protegida que mandou pra cá), guardado em `sessionStorage`, tem
   // prioridade; sem ele, cada papel vai pra própria casa — DRIVER pro app do
   // motorista (`/app`), o site público (`/`) é para visitante anônimo. Mesma
-  // regra pro login normal e pro Google (`lib/authRedirect.ts`).
-  const redirect = params.get("redirect")
-  const goAfterAuth = (user: User) => navigate(resolvePostAuthPath(user, redirect), { replace: true })
+  // regra pro login normal e pro Google (`lib/authRedirect.ts`). Só é lido DEPOIS de autenticar.
+  const goAfterAuth = (user: User) => navigate(resolvePostAuthPath(user, consumeReturnTo()), { replace: true })
 
   const onSubmit = async (values: LoginFormValues) => {
     setFormError(null)
@@ -71,11 +74,8 @@ export function Login() {
       below={
         <p className="mt-6 text-center text-sm text-ink-softer">
           Ainda não tem conta?{" "}
-          {/* Leva o `?redirect=` junto: senão o QR escaneado por quem ainda não tem conta se perde ao passar pelo cadastro. */}
-          <Link
-            to={safeRedirect(redirect) ? `/cadastro?redirect=${encodeURIComponent(redirect as string)}` : "/cadastro"}
-            className="font-semibold text-primary hover:underline"
-          >
+          {/* Sem querystring: o destino de retorno está no `sessionStorage` e sobrevive à passagem pelo cadastro (QR de quem ainda não tem conta). */}
+          <Link to="/cadastro" className="font-semibold text-primary hover:underline">
             Cadastre-se
           </Link>
         </p>

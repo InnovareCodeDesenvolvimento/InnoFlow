@@ -133,7 +133,7 @@ function DeleteAccountFlow({ profile, onClose, onSubmittingChange }: { profile: 
 
   const finish = (status: "DELETED" | "DELETED_PENDING_REFUND") => {
     // O token já não vale: nada de chamar a API de novo. Para o que está em voo, limpa o estado da sessão e do cache e vai direto ao login com o aviso.
-    // NÃO chama `logout()` aqui: o `AppLayout` redireciona quem fica sem sessão para `/login?redirect=...` e ganharia a corrida contra esta navegação (o React Router a aplica em
+    // NÃO chama `logout()` aqui: o `AppLayout` redireciona quem fica sem sessão para `/login` (guardando o destino de retorno) e ganharia a corrida contra esta navegação (o React Router a aplica em
     // transição), perdendo o aviso do estado da rota. Em vez disso: o token sai do storage já (nenhuma chamada em voo sai com ele), vai-se ao login com o aviso, e é o PRÓPRIO Login
     // que limpa o estado da sessão e o cache ao montar (ver `pages/Auth/Login.tsx`), quando o `AppLayout` já foi desmontado.
     void queryClient.cancelQueries()

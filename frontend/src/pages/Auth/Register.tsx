@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Input } from "@/components/ui/Input"
@@ -11,7 +11,8 @@ import { Card } from "@/components/ui/Card"
 import { usePublicLegal } from "@/hooks/useLegal"
 import { useAuthStore } from "@/store/authStore"
 import { authErrorMessage } from "@/lib/authErrors"
-import { resolvePostAuthPath, safeRedirect } from "@/lib/authRedirect"
+import { consumeReturnTo, resolvePostAuthPath } from "@/lib/authRedirect"
+import { useAbsorbLegacyRedirect } from "@/hooks/useAbsorbLegacyRedirect"
 import { isTermsOutdatedError, isTermsRequiredError, TERMS_LOAD_ERROR_MESSAGE, TERMS_OUTDATED_MESSAGE } from "@/lib/termsAcceptance"
 import { registerSchema, type RegisterFormValues } from "@/schemas/auth.schema"
 
@@ -30,16 +31,14 @@ import { registerSchema, type RegisterFormValues } from "@/schemas/auth.schema"
  */
 export function Register() {
   const navigate = useNavigate()
-  const [params] = useSearchParams()
   const register_ = useAuthStore((s) => s.register)
   const [formError, setFormError] = useState<string | null>(null)
 
-  // Mesmo `?redirect=` do Login (fluxo do QR): quem se cadastra — por e-mail
+  // Mesmo destino de retorno do Login (fluxo do QR, guardado em `sessionStorage`): quem se cadastra — por e-mail
   // ou pelo Google — volta pro carregador que escaneou. Sem ele, o cadastro
   // por e-mail segue indo pra `/` (como sempre) e o Google segue a regra de
-  // sempre do login (`resolvePostAuthPath`: motorista → `/app`).
-  const redirect = params.get("redirect")
-  const redirectQuery = safeRedirect(redirect) ? `?redirect=${encodeURIComponent(redirect as string)}` : ""
+  // sempre do login (`resolvePostAuthPath`: motorista → `/app`). Link antigo `/cadastro?redirect=/x` é absorvido e some da barra.
+  useAbsorbLegacyRedirect()
 
   // L1.9: versão vigente dos Termos (o servidor a exige no cadastro). Falha ao carregar NÃO trava o login de ninguém (esta tela só cria conta): mostra o erro com "Tentar de novo".
   const legal = usePublicLegal()
@@ -71,7 +70,7 @@ export function Register() {
     }
     try {
       await register_({ name: values.name, email: values.email, password: values.password, phone: values.phone || undefined, acceptedTermsVersion: legal.data.termsVersion })
-      navigate(safeRedirect(redirect) ?? "/", { replace: true })
+      navigate(consumeReturnTo() ?? "/", { replace: true })
     } catch (err) {
       if (isTermsOutdatedError(err) || isTermsRequiredError(err)) {
         // A versão mudou entre o carregamento e o envio (409), ou o servidor não viu o aceite (400): recarrega a vigente e pede o aceite de novo, com a caixa desmarcada.
@@ -90,7 +89,7 @@ export function Register() {
       below={
         <p className="mt-6 text-center text-sm text-ink-softer">
           Já tem conta?{" "}
-          <Link to={`/login${redirectQuery}`} className="font-semibold text-primary hover:underline">
+          <Link to="/login" className="font-semibold text-primary hover:underline">
             Entrar
           </Link>
         </p>
@@ -101,7 +100,7 @@ export function Register() {
         <p className="mt-1 text-sm text-ink-softer">Cadastre-se como motorista para acompanhar sua recarga.</p>
 
         {/* Quem entra pelo Google não passa por senha nenhuma: o backend cria a conta direto. */}
-        <GoogleAuthSection termsVersion={accepted ? (legal.data?.termsVersion ?? null) : null} onSuccess={(user) => navigate(resolvePostAuthPath(user, redirect), { replace: true })} />
+        <GoogleAuthSection termsVersion={accepted ? (legal.data?.termsVersion ?? null) : null} onSuccess={(user) => navigate(resolvePostAuthPath(user, consumeReturnTo()), { replace: true })} />
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
           <Input label="Nome" autoComplete="name" required error={errors.name?.message} {...register("name")} />

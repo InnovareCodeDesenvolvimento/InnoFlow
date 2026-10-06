@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 import { api, TOKEN_STORAGE_KEY } from "./api"
+import { peekReturnTo, RETURN_TO_STORAGE_KEY } from "@/lib/authRedirect"
 
 /**
  * Contrato do interceptor de resposta: SÓ o 401 (fora das rotas de acesso)
@@ -23,6 +24,7 @@ const hrefSetter = vi.fn()
 beforeEach(() => {
   localStorage.setItem(TOKEN_STORAGE_KEY, "token-de-sessao-valida")
   hrefSetter.mockReset()
+  sessionStorage.clear()
   // jsdom não navega; observamos a tentativa de hard-redirect pelo setter de `href`.
   vi.stubGlobal("location", {
     pathname: "/app/carteira",
@@ -36,6 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   localStorage.clear()
+  sessionStorage.clear()
   api.defaults.adapter = undefined
 })
 
@@ -53,11 +56,39 @@ describe("interceptor de resposta do api", () => {
     expect(hrefSetter).not.toHaveBeenCalled()
   })
 
-  it("401 em rota comum continua sendo sessão expirada: limpa o token e manda pro login com ?redirect=", async () => {
+  it("401 em rota comum continua sendo sessão expirada: limpa o token, guarda o destino e manda pro /login LIMPO (sem ?redirect=)", async () => {
     failNextWith(401, { error: "Sessão expirada.", code: "UNAUTHORIZED" })
     await expect(api.get("/api/me/wallet")).rejects.toBeDefined()
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
-    expect(hrefSetter).toHaveBeenCalledWith("/login?redirect=%2Fapp%2Fcarteira")
+    expect(hrefSetter).toHaveBeenCalledOnce()
+    expect(hrefSetter).toHaveBeenCalledWith("/login")
+    expect(peekReturnTo()).toBe("/app/carteira")
+  })
+
+  it("401 guarda também a querystring da página onde a pessoa estava", async () => {
+    vi.stubGlobal("location", { pathname: "/admin/relatorios", search: "?periodo=7d", set href(value: string) { hrefSetter(value) } })
+    failNextWith(401, { error: "Sessão expirada.", code: "UNAUTHORIZED" })
+    await expect(api.get("/api/admin/reports")).rejects.toBeDefined()
+    expect(hrefSetter).toHaveBeenCalledWith("/login")
+    expect(peekReturnTo()).toBe("/admin/relatorios?periodo=7d")
+  })
+
+  it("401 estando em /login (ou /cadastro) não redireciona nem grava destino (a guarda de sempre)", async () => {
+    vi.stubGlobal("location", { pathname: "/login", search: "", set href(value: string) { hrefSetter(value) } })
+    failNextWith(401, { error: "Sessão expirada.", code: "UNAUTHORIZED" })
+    await expect(api.get("/api/me/wallet")).rejects.toBeDefined()
+    expect(hrefSetter).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(RETURN_TO_STORAGE_KEY)).toBeNull()
+  })
+
+  it("401 com sessionStorage bloqueado: o redirecionamento ao /login acontece mesmo assim (só se perde o retorno)", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation((chave: string) => {
+      if (chave === RETURN_TO_STORAGE_KEY) throw new DOMException("bloqueado", "SecurityError")
+    })
+    failNextWith(401, { error: "Sessão expirada.", code: "UNAUTHORIZED" })
+    await expect(api.get("/api/me/wallet")).rejects.toBeDefined()
+    expect(hrefSetter).toHaveBeenCalledWith("/login")
+    vi.restoreAllMocks()
   })
 
   it("401 de um pedido que saiu com token JÁ TROCADO (troca de senha em voo) não desloga a sessão nova", async () => {

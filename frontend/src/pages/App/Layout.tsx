@@ -1,5 +1,6 @@
 import { Suspense } from "react"
-import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { RedirectToLogin } from "@/components/layout/RedirectToLogin"
 import { History, Home, LogOut, MapPin, ShieldAlert, Wallet, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/authStore"
@@ -131,10 +132,9 @@ function AppShell() {
 
 export function AppLayout() {
   const { user, isAuthenticated } = useAuthStore()
-  const location = useLocation()
 
   if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />
+    return <RedirectToLogin />
   }
 
   if (user?.role !== "DRIVER") {

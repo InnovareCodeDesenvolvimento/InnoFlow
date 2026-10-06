@@ -13,7 +13,7 @@ import { aguardarEstavel, prepararPagina } from "./estabilizar"
  *  B) Teclado: percorre TODO o Tab da tela e prova que cada elemento focável MUDA de aparência ao receber foco, com contraste >= 3:1 entre o pixel com e sem foco (WCAG 1.4.11/2.4.7),
  *     que o foco não prende (cicla) e que a ordem de Tab segue a ordem visual de cima para baixo (sem saltos grandes para trás).
  *  C) CLS de /eletropostos <= 0,02 em 3 cargas.
- *  D) Fluxos: error boundary, QR -> login -> cadastro -> volta ao QR (?redirect=), redirect aberto recusado, Google (mock).
+ *  D) Fluxos: error boundary, QR -> login -> cadastro -> volta ao QR (destino em sessionStorage, URLs limpas; links antigos ?redirect= absorvidos), redirect aberto recusado, Google (mock).
  */
 
 const TELAS = [
@@ -224,25 +224,28 @@ test.describe("D) fluxos", () => {
     await expect(page).toHaveURL(/\/$/)
   })
 
-  test("QR anônimo -> login -> cadastro preserva ?redirect e, criada a conta, volta ao carregador", async ({ page }) => {
+  test("QR anônimo -> login -> cadastro (URLs limpas, destino em sessionStorage) e, criada a conta, volta ao carregador", async ({ page }) => {
     const QR = "/c/CP-VILA-NORTE-01/1"
     await page.goto(QR)
     await page.getByRole("link", { name: "Entrar para carregar" }).click()
-    await expect(page).toHaveURL(new RegExp(`/login\\?redirect=${encodeURIComponent(QR).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
+    await expect(page).toHaveURL(/[/]login$/)
     await page.getByRole("link", { name: "Cadastre-se" }).click()
-    await expect(page).toHaveURL(new RegExp(`/cadastro\\?redirect=${encodeURIComponent(QR).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
+    await expect(page).toHaveURL(/[/]cadastro$/)
     const email = `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`
     await page.getByLabel("Nome").fill("Motorista FB")
     await page.getByLabel("E-mail").fill(email)
     await page.getByLabel("Senha").fill("senha1234")
+    // Aceite dos Termos (L1.9) é obrigatório no cadastro por e-mail; este teste nasceu antes dele e já falhava aqui (sem relação com o destino de retorno).
+    await page.getByRole("checkbox", { name: /Li e aceito os Termos de Uso.*Política de Privacidade/ }).check()
     await page.getByRole("button", { name: "Criar conta" }).click()
     await expect(page).toHaveURL(new RegExp(`${QR.replace(/\//g, "\\/")}$`))
     await expect(page.getByRole("button", { name: "Iniciar recarga" })).toBeVisible()
   })
 
-  test("login com ?redirect volta ao carregador; redirect aberto (//host e https://host) é recusado e cai em /app", async ({ page }) => {
+  test("link antigo com ?redirect é absorvido (barra limpa) e volta ao carregador; redirect aberto (//host e https://host) é recusado e cai em /app", async ({ page }) => {
     const QR = "/c/CP-VILA-NORTE-01/1"
     await page.goto(`/login?redirect=${encodeURIComponent(QR)}`)
+    await expect(page).toHaveURL(/\/login$/)
     await page.getByLabel("E-mail").fill("motorista@innoelektron.com")
     await page.getByLabel("Senha").fill("senha1234")
     await page.getByRole("button", { name: "Entrar" }).click()
@@ -251,6 +254,7 @@ test.describe("D) fluxos", () => {
     for (const malvado of ["//evil.example/x", "https://evil.example/x", "javascript:alert(1)"]) {
       await page.evaluate(() => localStorage.clear())
       await page.goto(`/login?redirect=${encodeURIComponent(malvado)}`)
+      await expect(page, `barra com ${malvado}`).toHaveURL(/\/login$/)
       await page.getByLabel("E-mail").fill("motorista@innoelektron.com")
       await page.getByLabel("Senha").fill("senha1234")
       await page.getByRole("button", { name: "Entrar" }).click()
@@ -269,7 +273,7 @@ test.describe("D) fluxos", () => {
     await expect(page).toHaveURL(/localhost:\d+\/app/, { timeout: 4000 })
   })
 
-  test("Google (mock): em /login e em /cadastro entra e respeita o ?redirect", async ({ page }) => {
+  test("Google (mock): em /login e em /cadastro entra e respeita o link antigo com ?redirect", async ({ page }) => {
     const QR = "/c/CP-VILA-NORTE-01/1"
     for (const rota of ["/login", "/cadastro"]) {
       await page.evaluate(() => localStorage.clear()).catch(() => undefined)

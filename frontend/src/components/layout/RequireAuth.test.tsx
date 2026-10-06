@@ -1,14 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
-import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { RequireAuth } from "./RequireAuth"
+import { peekReturnTo } from "@/lib/authRedirect"
 import { useAuthStore } from "@/store/authStore"
+
+function LoginProbe() {
+  const l = useLocation()
+  return <p data-testid="login-url">{`Tela de login em ${l.pathname}${l.search}`}</p>
+}
 
 function renderWithAuth(initialPath = "/admin") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
-        <Route path="/login" element={<p>Tela de login</p>} />
+        <Route path="/login" element={<LoginProbe />} />
         <Route
           path="/admin"
           element={
@@ -29,7 +35,16 @@ describe("RequireAuth", () => {
 
   it("manda para o login quando não autenticado", () => {
     renderWithAuth()
-    expect(screen.getByText("Tela de login")).toBeInTheDocument()
+    expect(screen.getByText(/Tela de login/)).toBeInTheDocument()
+  })
+
+  it("vai para /login LIMPO (sem querystring) e guarda pathname + search para depois do login", () => {
+    sessionStorage.clear()
+    renderWithAuth("/admin?aba=geral")
+    expect(screen.getByTestId("login-url")).toHaveTextContent("Tela de login em /login")
+    expect(screen.getByTestId("login-url").textContent).not.toContain("?")
+    expect(peekReturnTo()).toBe("/admin?aba=geral")
+    sessionStorage.clear()
   })
 
   it("mostra acesso restrito quando o papel não bate", () => {

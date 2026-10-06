@@ -48,17 +48,20 @@ test.describe("login com Google ligado (config com Client ID)", () => {
     await expect(page).toHaveURL(/\/app$/)
   })
 
-  test("fluxo do QR: escaneia → login → Google → volta pro carregador", async ({ page }) => {
-    await page.goto(`/login?redirect=${encodeURIComponent(CHARGE_POINT_URL)}`)
+  test("fluxo do QR: escaneia → login (URL limpa) → Google → volta pro carregador", async ({ page }) => {
+    await page.goto(CHARGE_POINT_URL)
+    await page.getByRole("link", { name: "Entrar para carregar" }).click()
+    await expect(page).toHaveURL(/\/login$/)
     await page.getByRole("button", { name: MOCK_GOOGLE_BUTTON }).click()
     await expect(page).toHaveURL(new RegExp(CHARGE_POINT_URL.replace(/\//g, "\\/")))
     await expect(page.getByText("Seu saldo")).toBeVisible()
   })
 
-  test("o ?redirect= sobrevive à ida e volta Login ↔ Cadastro (QR de quem ainda não tem conta)", async ({ page }) => {
-    await page.goto(`/login?redirect=${encodeURIComponent(CHARGE_POINT_URL)}`)
+  test("o destino de retorno sobrevive à passagem Login ↔ Cadastro (QR de quem ainda não tem conta), sem querystring", async ({ page }) => {
+    await page.goto(CHARGE_POINT_URL)
+    await page.getByRole("link", { name: "Entrar para carregar" }).click()
     await page.getByRole("link", { name: "Cadastre-se" }).click()
-    await expect(page).toHaveURL(/\/cadastro\?redirect=/)
+    await expect(page).toHaveURL(/\/cadastro$/)
     await page.getByRole("button", { name: MOCK_GOOGLE_BUTTON }).click()
     await expect(page).toHaveURL(new RegExp(CHARGE_POINT_URL.replace(/\//g, "\\/")))
   })

@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
-import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { RedirectToLogin } from "@/components/layout/RedirectToLogin"
 import { Building2, ChevronRight, ExternalLink, LogOut, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
 import { getAdminNav, type AdminNavItem } from "@/components/admin/adminNav"
@@ -266,12 +267,11 @@ function AdminShell() {
 
 export function AdminLayout() {
   const { user, isAuthenticated } = useAuthStore()
-  const location = useLocation()
   // Menu efetivo do papel, estável entre renders: o tour decide quais passos existem a partir dele (OPERATOR não tem os passos só-ADMIN).
   const tourNav = useMemo(() => getAdminNav(user?.role), [user?.role])
 
   if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />
+    return <RedirectToLogin />
   }
 
   if (user?.role !== "ADMIN" && user?.role !== "OPERATOR") {

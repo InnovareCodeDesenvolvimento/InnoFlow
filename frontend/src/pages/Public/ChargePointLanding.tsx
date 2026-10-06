@@ -21,6 +21,7 @@ import { getApiErrorCode, getApiErrorMessage } from "@/services/api"
 import { CARD_GATEWAY_DISABLED_START_MESSAGE, isGatewayDisabledError } from "@/lib/paymentMethodDisabled"
 import { CardEligibilityNotice } from "@/components/carteira/CardEligibilityNotice"
 import { issueErrorMessage, issueFromEligibility, issueFromError, type CardEligibilityIssue } from "@/lib/cardEligibility"
+import { rememberReturnTo } from "@/lib/authRedirect"
 import { UNREADABLE_CARD_START_MESSAGE, isUnreadableCardError, usableMethods } from "@/lib/cardUnreadable"
 import { CONNECTOR_TYPE_LABELS, formatCents, formatPowerKw, formatTariffHeadlinePrice, landingConnectorStatus, ROLE_LABELS } from "@/lib/utils"
 
@@ -173,10 +174,11 @@ export function ChargePointLanding() {
   // Estado "logado, mas não é motorista" (ex.: admin/operador testando o QR)
   // ficava travado sem saída óbvia — só um parágrafo cinza. Agora oferece a
   // ação de verdade: sair da conta atual e ir pro login já com o redirect de
-  // volta pra ESTE carregador, pra não perder o contexto do QR escaneado.
+  // volta pra ESTE carregador (destino guardado em `sessionStorage`; o `/login` fica limpo), pra não perder o contexto do QR escaneado.
   const handleSwitchAccount = () => {
     logout()
-    navigate(`/login?redirect=${encodeURIComponent(redirectTarget)}`)
+    rememberReturnTo(redirectTarget)
+    navigate("/login")
   }
 
   return (
@@ -315,7 +317,8 @@ export function ChargePointLanding() {
                   <div className="mt-5 space-y-3">
                     {!isAuthenticated && (
                       <Link
-                        to={`/login?redirect=${encodeURIComponent(redirectTarget)}`}
+                        to="/login"
+                        onClick={() => rememberReturnTo(redirectTarget)}
                         className={buttonVariants({ variant: "lime", size: "lg", className: "w-full" })}
                       >
                         <LogIn className="h-4 w-4" aria-hidden="true" />

@@ -1,6 +1,7 @@
 import axios from "axios"
 import type { ApiErrorBody } from "@/types/api"
 import { TOKEN_STORAGE_KEY } from "@/lib/storageKeys"
+import { rememberReturnTo } from "@/lib/authRedirect"
 
 /**
  * Base da API:
@@ -58,8 +59,9 @@ api.interceptors.response.use(
     if (error?.response?.status === 401 && !isAuthRoute && !isStaleToken && !isGoogleCredentialRejected) {
       localStorage.removeItem(TOKEN_STORAGE_KEY)
       if (!window.location.pathname.startsWith("/login")) {
-        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-        window.location.href = `/login?redirect=${redirect}`
+        // Hard redirect (perde o estado da SPA): o destino de retorno vai para o `sessionStorage` e o `/login` fica limpo.
+        rememberReturnTo(window.location.pathname + window.location.search)
+        window.location.href = "/login"
       }
     }
     return Promise.reject(error)

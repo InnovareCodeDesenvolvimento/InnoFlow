@@ -80,7 +80,7 @@ atributo diferente, ou pixel alterado fora dos elementos recoloridos). Opções 
 
 Quando a fase muda a tela de propósito, "só cor" deixa de ser o critério. `npx playwright test --config playwright.visual.config.ts criterios-fb` mede, por tela e viewport: moldura escura + miolo claro
 (pixels), CTA lima, mascote, ausência de texto de operador, rolagem horizontal, foco por teclado (cada focável muda de aparência com contraste >= 3:1, o foco cicla, a ordem não volta), CLS de `/eletropostos`
-e os fluxos (error boundary, `?redirect=`, redirect aberto recusado, Google mock). A lista de telas está no topo do arquivo: copie e ajuste para a fase seguinte.
+e os fluxos (error boundary, destino de retorno (URL limpa, link antigo `?redirect=` absorvido), redirect aberto recusado, Google mock). A lista de telas está no topo do arquivo: copie e ajuste para a fase seguinte.
 
 ## Política de atualização da baseline
 
