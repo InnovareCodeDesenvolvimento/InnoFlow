@@ -6,6 +6,8 @@ import { criarBancoProprio } from './helpers/bancoProprio'
  * L1.4 + rotação de `PAYMENT_SECRETS_KEY` (F5.7): a chave Pix de devolução (`AccountDeletionRequest.refundPixKeyCiphertext`) é cifrada com a MESMA chave dos pagamentos, então a re-cifragem
  * TEM de cobri-la; e o cartão de conta excluída (token = marcador `DESTROYED`, que NÃO é ciphertext) NÃO pode contar como "ilegível" — senão a rotação nunca chegaria a "ilegíveis: 0".
  * Banco próprio (a re-cifragem varre tabelas inteiras e o singleton do gateway).
+ *
+ * SEQUENCIAL DE PROPÓSITO (o DRY-RUN assume rodar ANTES do APPLY no mesmo banco): NÃO rode com `--sequence.shuffle` (quebra por desenho, não é bug). A ordem de declaração dos `it` é o roteiro.
  */
 const CHAVE_A = randomBytes(32) // antiga
 const CHAVE_B = randomBytes(32) // atual

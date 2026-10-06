@@ -3,6 +3,9 @@
  * (`upsertJobScheduler`), o pedido manual enfileirado pela "API" é executado pelo worker, falha de pedido não vira job falho/retentado, o tick roda o backup agendado, e DOIS workers
  * (2 réplicas) disputando pedidos simultâneos executam UM backup só (trava `runningSince`).
  * Banco próprio; fila `backup` própria (esvaziada ao final).
+ *
+ * SEQUENCIAL DE PROPÓSITO (os `it` encadeiam o estado do banco/fila: o resultado esperado de um depende do anterior, ex. FAILED depois SUCCESS): NÃO rode com `--sequence.shuffle`
+ * (quebra por desenho, não é bug; visto na seed 11). A ordem de declaração dos `it` é o roteiro.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

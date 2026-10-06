@@ -6,6 +6,8 @@ import { criarBancoProprio } from './helpers/bancoProprio'
  * Rotação de `PAYMENT_SECRETS_KEY` (F5.7) COBRE a `BackupConfig`: credenciais do S3, segredo/refresh token do Google e a CÓPIA CIFRADA da chave do backup usam a MESMA chave dos
  * pagamentos. Sem isto, depois de rotacionar e remover `PAYMENT_SECRETS_KEY_PREVIOUS`, o agendador não decifraria nada de madrugada (backup parado, sem erro na rotação).
  * Banco próprio (singleton global + a re-cifragem varre tabelas inteiras).
+ *
+ * SEQUENCIAL DE PROPÓSITO (dry-run -> apply no mesmo banco): NÃO rode com `--sequence.shuffle` (quebra por desenho, não é bug). A ordem de declaração dos `it` é o roteiro.
  */
 const CHAVE_A = randomBytes(32) // antiga
 const CHAVE_B = randomBytes(32) // atual

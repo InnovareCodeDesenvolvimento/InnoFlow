@@ -10,6 +10,8 @@ import { criarBancoProprio } from './helpers/bancoProprio'
  * contagens na saída, ilegível nunca é apagado, auditoria sem segredo.
  *
  * Cenário: chave ANTIGA (A) gravou segredos nos dois formatos (legado sem prefixo e `v1`); a chave NOVA (B) é a atual e A é a anterior.
+ *
+ * SEQUENCIAL DE PROPÓSITO (dry-run -> apply -> idempotência, mesmo banco): NÃO rode com `--sequence.shuffle` (quebra por desenho, não é bug). A ordem de declaração dos `it` é o roteiro.
  */
 
 const CHAVE_A = randomBytes(32)

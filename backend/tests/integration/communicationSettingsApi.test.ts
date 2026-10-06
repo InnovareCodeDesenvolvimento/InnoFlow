@@ -67,6 +67,11 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
     evolution = await iniciarHttpFalso()
     outro = await iniciarHttpFalso()
     banco = await criarBancoProprio('cms')
+    // Notificador GLOBAL do processo DESLIGADO no arquivo inteiro. Todo PUT da API faz o serviço emitir "communication_config_changed" pelo logger e, com o global ligado, o e-mail desse
+    // aviso chegaria ao SMTP falso em instante aleatório (corrida contra o `Notificador` PRÓPRIO dos testes e contra as contagens de `smtp.recebidos`). O teto de 20 avisos/h no Redis
+    // só calava o global quando o Redis estava "sujo" por execuções anteriores (mascarava o flake; com Redis limpo — a CI — falhava ~15-37%). Os testes de notificador usam instância própria.
+    // Precisa vir ANTES de qualquer PUT e de qualquer import que dispare `iniciarAlertas()`.
+    ;(await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(null)
     for (const k of Object.keys(process.env)) if (k.startsWith('ALERT_') || k.startsWith('COMMUNICATION_')) delete process.env[k]
     const [appMod, prismaMod, redisMod, envMod, loggerMod, jwtMod, cfgMod, secMod, thMod, recMod, instMod, notifMod, dedMod] = await Promise.all([
       import('../../src/api/app'),
@@ -113,6 +118,7 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
 
   afterAll(async () => {
     vi.restoreAllMocks()
+    ;(await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(undefined)
     await m?.prisma.$disconnect()
     m?.redis.disconnect()
     await banco?.descartar()
@@ -696,10 +702,7 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
   })
 
   describe('teste de CONEXÃO SMTP (só o handshake)', () => {
-    // Os PUTs destes testes emitem "communication_config_changed" pelo logger; com o notificador GLOBAL ligado os e-mails desses avisos chegariam ao SMTP falso em instantes
-    // aleatórios e contaminariam os testes seguintes. Aqui ele fica desligado (e volta ao padrão preguiçoso ao final).
-    beforeAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(null))
-    afterAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(undefined))
+    // (o notificador GLOBAL já está desligado para o arquivo inteiro: ver o beforeAll do describe externo)
     const postConexao = (u: { token: string }, body: Record<string, unknown> = {}) => request(app).post('/api/admin/communication-settings/test-smtp-connection').set(auth(u)).send(body)
 
     it('só ADMIN (401/403) e corpo estrito (campo desconhecido = 400)', async () => {
@@ -800,10 +803,7 @@ describe('comunicação pelo painel admin (N-7) — Postgres + Redis reais, SMTP
   })
 
   describe('verificador de DNS do domínio remetente (GET /domain-check)', () => {
-    // Os PUTs destes testes emitem "communication_config_changed" pelo logger; com o notificador GLOBAL ligado os e-mails desses avisos chegariam ao SMTP falso em instantes
-    // aleatórios e contaminariam os testes seguintes. Aqui ele fica desligado (e volta ao padrão preguiçoso ao final).
-    beforeAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(null))
-    afterAll(async () => (await import('../../src/lib/alertas/hookLogger')).definirNotificadorParaTeste(undefined))
+    // (o notificador GLOBAL já está desligado para o arquivo inteiro: ver o beforeAll do describe externo)
     const consultar = (u: { token: string }, qs = '') => request(app).get(`/api/admin/communication-settings/domain-check${qs}`).set(auth(u))
 
     it('só ADMIN; query desconhecida (tentar passar o domínio) e seletor inválido são 400 — o domínio NUNCA vem do cliente', async () => {
